@@ -1,3 +1,4 @@
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import {
   Injectable,
   NotFoundException,
@@ -86,7 +87,7 @@ export class AddressesService {
     } = query;
 
     const skip = (page - 1) * limit;
-    const where: Prisma.addressesWhereInput = {};
+  const where: Prisma.addressesWhereInput = {};
 
     if (search) {
       where.OR = [
@@ -181,7 +182,7 @@ export class AddressesService {
   }
 
   async getDefaultAddress(customerId?: number, storeId?: number, user?: any) {
-    const where: Prisma.addressesWhereInput = {
+  const where: Prisma.addressesWhereInput = {
       is_primary: true,
     };
 
@@ -353,7 +354,7 @@ export class AddressesService {
     criteria: { customer_id?: number; store_id?: number },
     excludeId?: number,
   ) {
-    const where: Prisma.addressesWhereInput = {
+  const where: Prisma.addressesWhereInput = {
       is_primary: true,
     };
 

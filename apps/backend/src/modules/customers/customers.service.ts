@@ -12,6 +12,7 @@ import {
   CustomerQueryDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 @Injectable()
 export class CustomersService {
@@ -47,7 +48,7 @@ export class CustomersService {
         },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+  if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           throw new ConflictException('Customer with this email already exists');
         }
@@ -68,7 +69,7 @@ export class CustomersService {
       await this.validateStoreAccess(store_id, user);
     }
 
-    const where: Prisma.customersWhereInput = {
+  const where: Prisma.customersWhereInput = {
       ...(store_id && { store_id }),
       ...(search && {
         OR: [
@@ -221,7 +222,7 @@ export class CustomersService {
         },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+  if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           throw new ConflictException('Email already exists');
         }
@@ -262,7 +263,7 @@ export class CustomersService {
       await this.prisma.customers.delete({ where: { id } });
       return { message: 'Customer deleted successfully' };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+  if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
             'Cannot delete customer due to related data constraints'
@@ -347,7 +348,7 @@ export class CustomersService {
 
     const skip = (page - 1) * limit;
 
-    const where: Prisma.customersWhereInput = {
+  const where: Prisma.customersWhereInput = {
       store_id: storeId,
       ...(search && {
         OR: [

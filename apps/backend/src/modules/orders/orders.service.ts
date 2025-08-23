@@ -477,9 +477,9 @@ export class OrdersService {
       };
 
       // Agregar timestamps automáticos según el estado
-      if (status === order_state_enum.shipped) {
+  if (status === order_state_enum.shipped) {
         updateData.shipped_at = new Date();
-      } else if (status === order_state_enum.delivered) {
+  } else if (status === order_state_enum.delivered) {
         updateData.delivered_at = new Date();
       }
 

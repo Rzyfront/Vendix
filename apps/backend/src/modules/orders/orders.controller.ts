@@ -83,7 +83,7 @@ export class OrdersController {
   @RequirePermissions('orders.update')
   async updateStatus(
     @Param('id', ParseIntPipe) id: number,
-    @Body() body: { status: order_state_enum },
+  @Body() body: { status: order_state_enum },
     @CurrentUser() user: any,
   ) {
     return this.ordersService.updateStatus(id, body.status);
