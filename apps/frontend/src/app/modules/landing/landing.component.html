@@ -1,0 +1,211 @@
+<div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+  <!-- Navigation Header -->
+  <nav class="bg-white shadow-sm sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex justify-between items-center h-16">
+        <div class="flex items-center">
+          <h1 class="text-2xl font-bold text-indigo-600">Vendix</h1>
+        </div>        <div class="flex items-center space-x-4">
+          <button (click)="scrollToFeatures()" class="text-gray-600 hover:text-indigo-600 transition-colors">
+            Características
+          </button>
+          <button (click)="scrollToPlans()" class="text-gray-600 hover:text-indigo-600 transition-colors">
+            Precios
+          </button>
+          <app-button variant="outline" routerLink="/auth/login">
+            Iniciar Sesión
+          </app-button>
+          <app-button variant="primary" (clicked)="scrollToPlans()">
+            Comenzar Gratis
+          </app-button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="relative py-20 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto text-center">
+      <h1 class="text-5xl sm:text-6xl font-bold text-gray-900 mb-6">
+        La Plataforma <span class="text-indigo-600">Todo-en-Uno</span> para tu Negocio
+      </h1>
+      <p class="text-xl text-gray-600 mb-8 max-w-3xl mx-auto">
+        Combina POS, E-commerce y gestión de inventario en una sola plataforma. 
+        Potencia tu negocio con tecnología de vanguardia y aumenta tus ventas.
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <app-button variant="primary" size="lg" (clicked)="scrollToPlans()" class="text-lg px-8 py-4">
+          Prueba Gratis por 14 Días
+        </app-button>
+        <app-button variant="outline" size="lg" (clicked)="scrollToFeatures()" class="text-lg px-8 py-4">
+          Ver Características
+        </app-button>
+      </div>
+      
+      <!-- Hero Image/Demo -->
+      <div class="mt-16">
+        <app-card class="max-w-4xl mx-auto p-8">
+          <div class="bg-gray-100 rounded-lg h-96 flex items-center justify-center">
+            <div class="text-center">
+              <div class="text-6xl mb-4">🖥️</div>
+              <h3 class="text-2xl font-semibold text-gray-700">Dashboard de Vendix</h3>
+              <p class="text-gray-500 mt-2">Vista previa de tu centro de control</p>
+            </div>
+          </div>
+        </app-card>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section id="features" class="py-20 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-gray-900 mb-4">
+          Todo lo que necesitas para hacer crecer tu negocio
+        </h2>
+        <p class="text-xl text-gray-600 max-w-2xl mx-auto">
+          Desde pequeñas tiendas hasta grandes cadenas, Vendix se adapta a tus necesidades
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <app-card *ngFor="let feature of features" class="p-6 hover:shadow-lg transition-shadow">
+          <div class="text-center">
+            <div class="text-4xl mb-4">{{ feature.icon }}</div>
+            <h3 class="text-xl font-semibold text-gray-900 mb-3">{{ feature.title }}</h3>
+            <p class="text-gray-600">{{ feature.description }}</p>
+          </div>
+        </app-card>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing Section -->
+  <section id="plans" class="py-20 bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-4xl font-bold text-gray-900 mb-4">
+          Planes que se adaptan a tu negocio
+        </h2>
+        <p class="text-xl text-gray-600">
+          Elige el plan perfecto para tu tamaño de negocio. Siempre puedes cambiar más tarde.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <app-card 
+          *ngFor="let plan of plans" 
+          [class]="'relative p-8 ' + (plan.highlighted ? 'ring-2 ring-indigo-600 scale-105' : '')"
+        >
+          <!-- Popular Badge -->
+          <div *ngIf="plan.highlighted" class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+            <span class="bg-indigo-600 text-white px-4 py-1 rounded-full text-sm font-medium">
+              Más Popular
+            </span>
+          </div>
+
+          <div class="text-center">
+            <h3 class="text-2xl font-bold text-gray-900 mb-2">{{ plan.name }}</h3>
+            <p class="text-gray-600 mb-6">{{ plan.description }}</p>
+            
+            <div class="mb-8">
+              <span class="text-4xl font-bold text-gray-900">{{ plan.price }}</span>
+              <span class="text-gray-600">{{ plan.period }}</span>
+            </div>
+
+            <ul class="space-y-3 mb-8 text-left">
+              <li *ngFor="let feature of plan.features" class="flex items-center">
+                <span class="text-green-500 mr-3">✓</span>
+                <span class="text-gray-700">{{ feature }}</span>
+              </li>
+            </ul>
+
+            <app-button 
+              [variant]="plan.highlighted ? 'primary' : 'outline'"
+              class="w-full"
+              size="lg"
+            >
+              {{ plan.ctaText }}
+            </app-button>
+          </div>
+        </app-card>
+      </div>
+
+      <div class="text-center mt-12">
+        <p class="text-gray-600 mb-4">¿Necesitas algo más personalizado?</p>
+        <app-button variant="outline">
+          Contactar a Ventas
+        </app-button>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA Section -->
+  <section class="py-20 bg-indigo-600">
+    <div class="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
+      <h2 class="text-4xl font-bold text-white mb-4">
+        ¿Listo para transformar tu negocio?
+      </h2>
+      <p class="text-xl text-indigo-100 mb-8">
+        Únete a miles de empresas que ya confían en Vendix para gestionar sus ventas
+      </p>
+      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <app-button variant="secondary" size="lg" class="bg-white text-indigo-600 hover:bg-gray-50">
+          Comenzar Prueba Gratuita
+        </app-button>
+        <app-button variant="outline" size="lg" class="border-white text-white hover:bg-white hover:text-indigo-600">
+          Agendar Demo
+        </app-button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="bg-gray-900 text-white py-12">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div>
+          <h3 class="text-2xl font-bold mb-4">Vendix</h3>
+          <p class="text-gray-400">
+            La plataforma todo-en-uno para modernizar tu negocio
+          </p>
+        </div>
+        
+        <div>
+          <h4 class="font-semibold mb-4">Producto</h4>
+          <ul class="space-y-2 text-gray-400">
+            <li><a href="#" class="hover:text-white transition-colors">POS</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">E-commerce</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Inventario</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Reportes</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="font-semibold mb-4">Soporte</h4>
+          <ul class="space-y-2 text-gray-400">
+            <li><a href="#" class="hover:text-white transition-colors">Centro de Ayuda</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Documentación</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Contacto</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Estado del Sistema</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4 class="font-semibold mb-4">Empresa</h4>
+          <ul class="space-y-2 text-gray-400">
+            <li><a href="#" class="hover:text-white transition-colors">Acerca de</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Blog</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Carreras</a></li>
+            <li><a href="#" class="hover:text-white transition-colors">Prensa</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
+        <p>&copy; 2025 Vendix. Todos los derechos reservados.</p>
+      </div>
+    </div>
+  </footer>
+</div>

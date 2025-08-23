@@ -1,0 +1,78 @@
+import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { Observable, BehaviorSubject } from 'rxjs';
+import { Store } from '../models/business.model';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class StoreService {
+  private currentStore = new BehaviorSubject<Store | null>(null);
+  public currentStore$ = this.currentStore.asObservable();
+
+  constructor(
+    private http: HttpClient,
+    @Inject(PLATFORM_ID) private platformId: Object
+  ) {}
+
+  /**
+   * Get store by subdomain or custom domain
+   */
+  getStoreByDomain(domain: string): Observable<Store> {
+    return this.http.get<Store>(`/api/stores/by-domain?domain=${domain}`);
+  }
+
+  /**
+   * Get store by slug
+   */
+  getStoreBySlug(slug: string): Observable<Store> {
+    return this.http.get<Store>(`/api/stores/by-slug/${slug}`);
+  }
+  /**
+   * Set current store
+   */
+  setCurrentStore(store: Store): void {
+    this.currentStore.next(store);
+    if (isPlatformBrowser(this.platformId)) {
+      localStorage.setItem('vendix_current_store', JSON.stringify(store));
+    }
+  }
+
+  /**
+   * Get current store
+   */
+  getCurrentStore(): Store | null {
+    return this.currentStore.value;
+  }
+  /**
+   * Load stored store from localStorage
+   */
+  loadStoredStore(): Store | null {
+    if (!isPlatformBrowser(this.platformId)) {
+      return null; // Skip localStorage access on server
+    }
+
+    const stored = localStorage.getItem('vendix_current_store');
+    if (stored) {
+      try {
+        const store = JSON.parse(stored) as Store;
+        this.currentStore.next(store);
+        return store;
+      } catch (error) {
+        console.error('Error loading stored store:', error);
+        localStorage.removeItem('vendix_current_store');
+      }
+    }
+    return null;
+  }
+  /**
+   * Clear current store
+   */
+  clearCurrentStore(): void {
+    this.currentStore.next(null);
+    if (isPlatformBrowser(this.platformId)) {
+      localStorage.removeItem('vendix_current_store');
+    }
+  }
+}

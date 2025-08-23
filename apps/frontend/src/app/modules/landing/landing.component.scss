@@ -1,0 +1,53 @@
+// Estilos específicos para el componente de landing
+.hero-gradient {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.feature-card {
+  transition: all 0.3s ease;
+  
+  &:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  }
+}
+
+.plan-card {
+  transition: all 0.3s ease;
+  
+  &.highlighted {
+    transform: scale(1.05);
+    border: 2px solid #4f46e5;
+  }
+}
+
+.smooth-scroll {
+  scroll-behavior: smooth;
+}
+
+// Animaciones para elementos que aparecen al hacer scroll
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.6s ease-out;
+}
+
+// Responsive design improvements
+@media (max-width: 768px) {
+  .hero-title {
+    font-size: 2.5rem;
+  }
+  
+  .plan-card.highlighted {
+    transform: none;
+  }
+}

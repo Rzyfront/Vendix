@@ -1,0 +1,14 @@
+/* App Component Styles */
+
+.retry-btn {
+  @apply bg-primary text-white px-6 py-3 rounded-lg hover:bg-opacity-90 transition-colors font-medium;
+}
+
+.app-container {
+  @apply min-h-screen bg-background text-text-primary;
+}
+
+/* Ensure Tailwind utilities work with CSS variables */
+:host {
+  color-scheme: light;
+}

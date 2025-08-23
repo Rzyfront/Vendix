@@ -1,0 +1,76 @@
+/* Admin Layout Styles */
+.sidebar-transition {
+  transition: all 0.3s ease-in-out;
+}
+
+.content-transition {
+  transition: margin-left 0.3s ease-in-out;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .main-content {
+    margin-left: 0 !important;
+  }
+}
+
+/* Custom scrollbar for sidebar */
+nav::-webkit-scrollbar {
+  width: 4px;
+}
+
+nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+nav::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 2px;
+}
+
+nav::-webkit-scrollbar-thumb:hover {
+  background: #d1d5db;
+}
+
+/* Smooth hover effects */
+.nav-item {
+  transition: all 0.2s ease-in-out;
+}
+
+.nav-item:hover {
+  transform: translateX(2px);
+}
+
+/* Active state styles */
+.nav-item.active {
+  background: linear-gradient(90deg, #eef2ff 0%, #e0e7ff 100%);
+  color: #4f46e5;
+  border-right: 3px solid #4f46e5;
+}
+
+/* Header shadow */
+header {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Notification badge animation */
+.notification-badge {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

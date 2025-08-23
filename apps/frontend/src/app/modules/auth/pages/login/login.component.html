@@ -1,0 +1,195 @@
+<div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <!-- Header -->
+    <div class="text-center">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">Vendix</h1>
+      <h2 class="text-xl text-gray-600">Iniciar Sesión</h2>
+      <p class="mt-2 text-sm text-gray-500">
+        Accede a tu cuenta para gestionar tu negocio
+      </p>
+    </div>
+
+    <!-- Login Form -->
+    <app-card class="p-8">
+      <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-6">
+        
+        <!-- Email Field -->
+        <div>
+          <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
+            Email
+          </label>          <app-input
+            id="email"
+            type="email"
+            formControlName="email"
+            placeholder="tu@email.com"
+            [error]="getFieldError('email')"
+            class="w-full"
+          ></app-input>
+        </div>
+
+        <!-- Password Field -->
+        <div>
+          <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
+            Contraseña
+          </label>          <app-input
+            id="password"
+            type="password"
+            formControlName="password"
+            placeholder="Tu contraseña"
+            [error]="getFieldError('password')"
+            class="w-full"
+          ></app-input>
+        </div>
+
+        <!-- Error Message -->
+        <div *ngIf="errorMessage" class="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <span class="text-red-400">⚠️</span>
+            </div>
+            <div class="ml-3">
+              <p class="text-sm text-red-700">{{ errorMessage }}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div>
+          <app-button
+            type="submit"
+            variant="primary"
+            size="lg"
+            [loading]="isLoading"
+            class="w-full"
+          >
+            {{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}
+          </app-button>
+        </div>
+
+        <!-- Additional Links -->
+        <div class="text-center space-y-2">
+          <p class="text-sm text-gray-600">
+            <a href="#" class="text-indigo-600 hover:text-indigo-500 transition-colors">
+              ¿Olvidaste tu contraseña?
+            </a>
+          </p>
+          <p class="text-sm text-gray-600">
+            ¿No tienes cuenta? 
+            <a routerLink="/auth/register" class="text-indigo-600 hover:text-indigo-500 transition-colors font-medium">
+              Regístrate aquí
+            </a>
+          </p>
+        </div>
+      </form>
+    </app-card>    <!-- Demo Credentials -->
+    <app-card class="p-6 bg-blue-50 border-blue-200">
+      <div class="text-center">
+        <h3 class="text-sm font-medium text-blue-800 mb-4">🔑 Credenciales de Prueba</h3>
+        <div class="space-y-3 text-xs">
+          <!-- Super Admin -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-purple-700">Super Admin</span>
+              <button (click)="fillCredentials('sa@vx.com', 'super1')" 
+                      class="px-2 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 transition-colors">
+                Usar
+              </button>
+            </div>            <p class="text-gray-600">Email: <strong>sa&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>super1</strong></p>
+          </div>
+
+          <!-- Owner -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-green-700">Owner</span>
+              <button (click)="fillCredentials('owner@vx.com', 'owner1')" 
+                      class="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>owner&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>owner1</strong></p>
+          </div>
+          
+          <!-- Admin -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-blue-700">Admin</span>
+              <button (click)="fillCredentials('admin@vx.com', 'admin1')" 
+                      class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>admin&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>admin1</strong></p>
+          </div>
+
+          <!-- Manager -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-yellow-700">Manager</span>
+              <button (click)="fillCredentials('mgr@vx.com', 'mgr123')" 
+                      class="px-2 py-1 bg-yellow-600 text-white rounded text-xs hover:bg-yellow-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>mgr&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>mgr123</strong></p>
+          </div>
+
+          <!-- Supervisor -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-indigo-700">Supervisor</span>
+              <button (click)="fillCredentials('sup@vx.com', 'sup123')" 
+                      class="px-2 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>sup&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>sup123</strong></p>
+          </div>
+
+          <!-- Employee -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-orange-700">Employee</span>
+              <button (click)="fillCredentials('emp@vx.com', 'emp123')" 
+                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs hover:bg-orange-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>emp&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>emp123</strong></p>
+          </div>
+
+          <!-- Customer -->
+          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-semibold text-gray-700">Customer</span>
+              <button (click)="fillCredentials('cust@vx.com', 'cust12')" 
+                      class="px-2 py-1 bg-gray-600 text-white rounded text-xs hover:bg-gray-700 transition-colors">
+                Usar
+              </button>
+            </div>
+            <p class="text-gray-600">Email: <strong>cust&#64;vx.com</strong></p>
+            <p class="text-gray-600">Contraseña: <strong>cust12</strong></p>
+          </div>
+        </div>
+        <p class="text-xs text-blue-600 mt-3">
+          💡 Haz clic en "Usar" para autocompletar las credenciales
+        </p>
+        <p class="text-xs text-gray-500 mt-2">
+          ⚠️ Todos los usuarios pueden acceder al dashboard administrativo
+        </p>
+      </div>
+    </app-card>
+
+    <!-- Back to Home -->
+    <div class="text-center">
+      <a routerLink="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">
+        ← Volver al inicio
+      </a>
+    </div>
+  </div>
+</div>
