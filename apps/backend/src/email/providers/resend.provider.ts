@@ -3,16 +3,11 @@ import {
   EmailProvider,
   EmailResult,
   EmailConfig,
-  EmailAttachment,
 } from '../interfaces/email.interface';
 import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
-import {
-  WelcomeEmailOptions,
-  PasswordResetEmailOptions,
-} from '../interfaces/branding.interface';
 
 @Injectable()
 export class ResendProvider implements EmailProvider {
@@ -43,7 +38,7 @@ export class ResendProvider implements EmailProvider {
   ): Promise<EmailResult> {
     try {
       const result = await this.resend.emails.send({
-        from: this.config.fromEmail,
+        from: `${this.config.fromName} <${this.config.fromEmail}>`,
         to: [to],
         subject,
         html,
@@ -74,65 +69,15 @@ export class ResendProvider implements EmailProvider {
     }
   }
 
-  async sendEmailWithAttachments(
-    to: string,
-    subject: string,
-    html: string,
-    attachments: EmailAttachment[],
-    text?: string,
-  ): Promise<EmailResult> {
-    try {
-      const result = await this.resend.emails.send({
-        from: this.config.fromEmail,
-        to: [to],
-        subject,
-        html,
-        text,
-        attachments: attachments.map((a) => ({
-          filename: a.filename,
-          content: a.content,
-        })),
-      });
-
-      if (result.error) {
-        this.logger.error(
-          'Resend email error (with attachments):',
-          result.error,
-        );
-        return {
-          success: false,
-          error:
-            result.error.message || 'Failed to send email with attachments',
-        };
-      }
-
-      this.logger.log(
-        `Email with ${attachments.length} attachment(s) sent to ${to}, ID: ${result.data?.id}`,
-      );
-      return {
-        success: true,
-        messageId: result.data?.id,
-      };
-    } catch (error) {
-      this.logger.error('Resend send error (with attachments):', error);
-      return {
-        success: false,
-        error: error.message || 'Failed to send email with attachments',
-      };
-    }
-  }
-
   async sendVerificationEmail(
     to: string,
     token: string,
     username: string,
-    organizationSlug?: string,
   ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
-      vlink: organizationSlug, // vlink is just the organization slug
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
@@ -146,16 +91,11 @@ export class ResendProvider implements EmailProvider {
     to: string,
     token: string,
     username: string,
-    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
-      resetUrl: options?.resetUrl,
-      branding: options?.branding,
-      storeName: options?.storeName,
-      vlink: options?.organizationSlug,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
@@ -165,20 +105,11 @@ export class ResendProvider implements EmailProvider {
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendWelcomeEmail(
-    to: string,
-    username: string,
-    options?: WelcomeEmailOptions,
-  ): Promise<EmailResult> {
+  async sendWelcomeEmail(to: string, username: string): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
-      companyName: options?.organizationName || 'Vendix',
-      storeName: options?.storeName,
-      organizationName: options?.organizationName,
-      branding: options?.branding,
-      userType: options?.userType || 'owner',
-      vlink: options?.organizationSlug,
+      companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
     };
@@ -202,27 +133,6 @@ export class ResendProvider implements EmailProvider {
     };
 
     const template = EmailTemplates.getOnboardingTemplate(templateData);
-    return this.sendEmail(to, template.subject, template.html, template.text);
-  }
-
-  async sendInvitationEmail(
-    to: string,
-    token: string,
-    username: string,
-    organizationSlug?: string,
-    app?: string,
-  ): Promise<EmailResult> {
-    const templateData: EmailTemplateData = {
-      username,
-      email: to,
-      token,
-      vlink: organizationSlug,
-      companyName: 'Vendix',
-      supportEmail: this.config.fromEmail,
-      year: new Date().getFullYear(),
-    };
-
-    const template = EmailTemplates.getInvitationTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 }

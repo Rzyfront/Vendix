@@ -4,6 +4,8 @@ import {
   IsInt,
   Min,
   IsEnum,
+  IsBoolean,
+  IsDateString,
 } from 'class-validator';
 import { user_state_enum } from '@prisma/client';
 import { Transform } from 'class-transformer';
@@ -30,7 +32,21 @@ export class UserQueryDto {
   state?: user_state_enum;
 
   @IsOptional()
-  @Transform(({ value }) => parseInt(value))
-  @IsInt()
-  organization_id?: number;
+  @IsString()
+  sort?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true')
+  include_inactive?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true')
+  email_verified?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === 'true')
+  two_factor_enabled?: boolean;
 }

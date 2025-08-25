@@ -4,8 +4,8 @@ import {
   IsOptional,
   IsEmail,
   IsUrl,
+  IsEnum,
   MinLength,
-  IsIn,
 } from 'class-validator';
 
 export enum OnboardingStep {
@@ -18,13 +18,13 @@ export enum OnboardingStep {
 }
 
 export class OnboardingStatusDto {
-  email_verified: boolean;
-  can_create_organization: boolean;
-  has_organization: boolean;
-  organization_id?: number;
-  current_step: OnboardingStep;
-  completed_steps: OnboardingStep[];
-  next_step_url?: string;
+  emailVerified: boolean;
+  canCreateOrganization: boolean;
+  hasOrganization: boolean;
+  organizationId?: number;
+  currentStep: OnboardingStep;
+  completedSteps: OnboardingStep[];
+  nextStepUrl?: string;
 }
 
 export class CreateOrganizationOnboardingDto {
@@ -127,7 +127,7 @@ export class CreateStoreOnboardingDto {
   @IsOptional()
   description?: string;
 
-  @IsIn(['physical', 'online', 'hybrid'], {
+  @IsEnum(['physical', 'online', 'hybrid'], {
     message: 'Tipo de tienda debe ser: physical, online o hybrid',
   })
   @IsOptional()
