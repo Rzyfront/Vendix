@@ -31,7 +31,10 @@ export class TaxesController {
 
   @Post()
   @Permissions('taxes:create')
-  async create(@Body() createTaxCategoryDto: CreateTaxCategoryDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createTaxCategoryDto: CreateTaxCategoryDto,
+    @CurrentUser() user: any,
+  ) {
     return this.taxesService.create(createTaxCategoryDto, user);
   }
 
@@ -79,21 +82,30 @@ export class TaxesController {
 
   @Patch(':id/activate')
   @Permissions('taxes:update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.taxesService.activate(id, user);
   }
 
   @Patch(':id/deactivate')
   @Permissions('taxes:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.taxesService.deactivate(id, user);
   }
 
   @Delete(':id')
   @Permissions('taxes:admin_delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.taxesService.remove(id, user);
   }
 }

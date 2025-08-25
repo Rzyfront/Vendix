@@ -179,5 +179,3 @@ export class UpdateGPSCoordinatesDto {
   @IsLatLong()
   longitude: string;
 }
-
-

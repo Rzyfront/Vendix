@@ -50,9 +50,7 @@ export class ProductsController {
 
   @Get('store/:storeId')
   @Permissions('products:read')
-  async findByStore(
-    @Param('storeId', ParseIntPipe) storeId: number,
-  ) {
+  async findByStore(@Param('storeId', ParseIntPipe) storeId: number) {
     return this.productsService.getProductsByStore(storeId);
   }
 
@@ -111,9 +109,7 @@ export class ProductsController {
   @Delete('variants/:variantId')
   @Permissions('products:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeVariant(
-    @Param('variantId', ParseIntPipe) variantId: number,
-  ) {
+  async removeVariant(@Param('variantId', ParseIntPipe) variantId: number) {
     return this.productsService.removeVariant(variantId);
   }
 
@@ -130,8 +126,7 @@ export class ProductsController {
   @Delete('images/:imageId')
   @Permissions('products:update')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removeImage(
-    @Param('imageId', ParseIntPipe) imageId: number,
-  ) {    return this.productsService.removeImage(imageId);
+  async removeImage(@Param('imageId', ParseIntPipe) imageId: number) {
+    return this.productsService.removeImage(imageId);
   }
 }

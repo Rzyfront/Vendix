@@ -183,5 +183,3 @@ export class TaxCalculationResultDto {
     tax_amount: number;
   }[];
 }
-
-

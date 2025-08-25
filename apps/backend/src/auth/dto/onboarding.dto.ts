@@ -1,4 +1,12 @@
-import { IsString, IsNotEmpty, IsOptional, IsEmail, IsUrl, IsEnum, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsEmail,
+  IsUrl,
+  IsEnum,
+  MinLength,
+} from 'class-validator';
 
 export enum OnboardingStep {
   VERIFY_EMAIL = 'verify_email',
@@ -6,7 +14,7 @@ export enum OnboardingStep {
   SETUP_ORGANIZATION = 'setup_organization',
   CREATE_STORE = 'create_store',
   SETUP_STORE = 'setup_store',
-  COMPLETE = 'complete'
+  COMPLETE = 'complete',
 }
 
 export class OnboardingStatusDto {
@@ -120,7 +128,7 @@ export class CreateStoreOnboardingDto {
   description?: string;
 
   @IsEnum(['physical', 'online', 'hybrid'], {
-    message: 'Tipo de tienda debe ser: physical, online o hybrid'
+    message: 'Tipo de tienda debe ser: physical, online o hybrid',
   })
   @IsOptional()
   store_type?: 'physical' | 'online' | 'hybrid';

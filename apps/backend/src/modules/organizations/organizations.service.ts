@@ -1,6 +1,15 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateOrganizationDto, UpdateOrganizationDto, OrganizationQueryDto } from './dto';
+import {
+  CreateOrganizationDto,
+  UpdateOrganizationDto,
+  OrganizationQueryDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '../../common/utils/slug.util';
 
@@ -12,12 +21,14 @@ export class OrganizationsService {
     try {
       // Generar slug si no se proporciona
       if (!createOrganizationDto.slug) {
-        createOrganizationDto.slug = this.generateSlug(createOrganizationDto.name);
+        createOrganizationDto.slug = this.generateSlug(
+          createOrganizationDto.name,
+        );
       }
 
       // Verificar que el slug sea único
       const existingOrg = await this.prisma.organizations.findUnique({
-        where: { slug: createOrganizationDto.slug }
+        where: { slug: createOrganizationDto.slug },
       });
 
       if (existingOrg) {
@@ -27,16 +38,19 @@ export class OrganizationsService {
       // Verificar que el tax_id sea único si se proporciona
       if (createOrganizationDto.tax_id) {
         const existingTaxId = await this.prisma.organizations.findUnique({
-          where: { tax_id: createOrganizationDto.tax_id }
+          where: { tax_id: createOrganizationDto.tax_id },
         });
 
         if (existingTaxId) {
           throw new ConflictException('El ID fiscal ya está registrado');
         }
-      }      return await this.prisma.organizations.create({
+      }
+      return await this.prisma.organizations.create({
         data: {
           ...createOrganizationDto,
-          slug: createOrganizationDto.slug || generateSlug(createOrganizationDto.name),
+          slug:
+            createOrganizationDto.slug ||
+            generateSlug(createOrganizationDto.name),
           updated_at: new Date(),
         },
         include: {
@@ -51,12 +65,12 @@ export class OrganizationsService {
                   last_name: true,
                   email: true,
                   username: true,
-                }
+                },
               },
               roles: true,
-            }
-          }
-        }
+            },
+          },
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -78,7 +92,7 @@ export class OrganizationsService {
           { name: { contains: search, mode: 'insensitive' } },
           { legal_name: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
-        ]
+        ],
       }),
       ...(state && { state }),
     };
@@ -96,7 +110,7 @@ export class OrganizationsService {
               store_code: true,
               store_type: true,
               is_active: true,
-            }
+            },
           },
           addresses: {
             where: { is_primary: true },
@@ -107,14 +121,14 @@ export class OrganizationsService {
               state_province: true,
               country_code: true,
               type: true,
-            }
+            },
           },
           _count: {
             select: {
               stores: true,
               organization_users: true,
-            }
-          }
+            },
+          },
         },
         orderBy: { created_at: 'desc' },
       }),
@@ -143,9 +157,9 @@ export class OrganizationsService {
                 products: true,
                 orders: true,
                 customers: true,
-              }
-            }
-          }
+              },
+            },
+          },
         },
         addresses: true,
         organization_users: {
@@ -158,17 +172,17 @@ export class OrganizationsService {
                 email: true,
                 username: true,
                 state: true,
-              }
+              },
             },
             roles: true,
-          }
+          },
         },
         _count: {
           select: {
             stores: true,
             organization_users: true,
-          }
-        }
+          },
+        },
       },
     });
 
@@ -206,7 +220,7 @@ export class OrganizationsService {
           where: {
             slug: updateOrganizationDto.slug,
             NOT: { id },
-          }
+          },
         });
 
         if (existingOrg) {
@@ -220,7 +234,7 @@ export class OrganizationsService {
           where: {
             tax_id: updateOrganizationDto.tax_id,
             NOT: { id },
-          }
+          },
         });
 
         if (existingTaxId) {
@@ -246,12 +260,12 @@ export class OrganizationsService {
                   last_name: true,
                   email: true,
                   username: true,
-                }
+                },
               },
               roles: true,
-            }
-          }
-        }
+            },
+          },
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -273,12 +287,12 @@ export class OrganizationsService {
         where: {
           organization_id: id,
           is_active: true,
-        }
+        },
       });
 
       if (activeStores > 0) {
         throw new BadRequestException(
-          'No se puede eliminar la organización porque tiene tiendas activas'
+          'No se puede eliminar la organización porque tiene tiendas activas',
         );
       }
 
@@ -289,7 +303,7 @@ export class OrganizationsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
-            'No se puede eliminar la organización porque tiene datos relacionados'
+            'No se puede eliminar la organización porque tiene datos relacionados',
           );
         }
       }
@@ -298,24 +312,32 @@ export class OrganizationsService {
   }
 
   // Métodos para gestión de usuarios en organizaciones
-  async addUserToOrganization(organizationId: number, userId: number, roleId: number, permissions?: any) {
+  async addUserToOrganization(
+    organizationId: number,
+    userId: number,
+    roleId: number,
+    permissions?: any,
+  ) {
     try {
       // Verificar que la organización existe
       await this.findOne(organizationId);
 
       // Verificar que el usuario no esté ya asignado con el mismo rol
-      const existingAssignment = await this.prisma.organization_users.findUnique({
-        where: {
-          user_id_role_id_organization_id: {
-            user_id: userId,
-            role_id: roleId,
-            organization_id: organizationId,
-          }
-        }
-      });
+      const existingAssignment =
+        await this.prisma.organization_users.findUnique({
+          where: {
+            user_id_role_id_organization_id: {
+              user_id: userId,
+              role_id: roleId,
+              organization_id: organizationId,
+            },
+          },
+        });
 
       if (existingAssignment) {
-        throw new ConflictException('El usuario ya tiene este rol en la organización');
+        throw new ConflictException(
+          'El usuario ya tiene este rol en la organización',
+        );
       }
 
       return await this.prisma.organization_users.create({
@@ -334,15 +356,17 @@ export class OrganizationsService {
               last_name: true,
               email: true,
               username: true,
-            }
+            },
           },
           roles: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          throw new ConflictException('El usuario ya está asignado a esta organización con este rol');
+          throw new ConflictException(
+            'El usuario ya está asignado a esta organización con este rol',
+          );
         }
         if (error.code === 'P2003') {
           throw new BadRequestException('Usuario o rol no válido');
@@ -352,15 +376,19 @@ export class OrganizationsService {
     }
   }
 
-  async removeUserFromOrganization(organizationId: number, userId: number, roleId: number) {
+  async removeUserFromOrganization(
+    organizationId: number,
+    userId: number,
+    roleId: number,
+  ) {
     const assignment = await this.prisma.organization_users.findUnique({
       where: {
         user_id_role_id_organization_id: {
           user_id: userId,
           role_id: roleId,
           organization_id: organizationId,
-        }
-      }
+        },
+      },
     });
 
     if (!assignment) {
@@ -373,8 +401,8 @@ export class OrganizationsService {
           user_id: userId,
           role_id: roleId,
           organization_id: organizationId,
-        }
-      }
+        },
+      },
     });
   }
 
@@ -392,7 +420,7 @@ export class OrganizationsService {
             email: true,
             username: true,
             state: true,
-          }
+          },
         },
         roles: true,
       },

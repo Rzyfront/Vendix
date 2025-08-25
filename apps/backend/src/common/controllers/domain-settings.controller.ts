@@ -46,11 +46,13 @@ export class DomainSettingsController {
     @Body() createDomainSettingDto: CreateDomainSettingDto,
     @CurrentUser() user: any,
   ): Promise<DomainSettingResponse> {
-    this.logger.log(`Creating domain setting for hostname: ${createDomainSettingDto.hostname}`);
-    
+    this.logger.log(
+      `Creating domain setting for hostname: ${createDomainSettingDto.hostname}`,
+    );
+
     // Validar que el usuario tiene permisos sobre la organización
     // TODO: Implementar validación de permisos organizacionales
-    
+
     return this.domainSettingsService.create(createDomainSettingDto);
   }
 
@@ -156,7 +158,7 @@ export class DomainSettingsController {
     @CurrentUser() user?: any,
   ): Promise<DomainSettingResponse> {
     this.logger.log(`Updating domain setting for hostname: ${hostname}`);
-    
+
     // TODO: Validar permisos del usuario sobre el dominio
     return this.domainSettingsService.update(hostname, updateDomainSettingDto);
   }
@@ -172,7 +174,7 @@ export class DomainSettingsController {
     @CurrentUser() user?: any,
   ): Promise<void> {
     this.logger.log(`Deleting domain setting for hostname: ${hostname}`);
-    
+
     // TODO: Validar permisos del usuario sobre el dominio
     await this.domainSettingsService.delete(hostname);
   }
@@ -187,8 +189,10 @@ export class DomainSettingsController {
     @Body() duplicateData: DuplicateDomainDto,
     @CurrentUser() user?: any,
   ): Promise<DomainSettingResponse> {
-    this.logger.log(`Duplicating domain setting from ${hostname} to ${duplicateData.newHostname}`);
-    
+    this.logger.log(
+      `Duplicating domain setting from ${hostname} to ${duplicateData.newHostname}`,
+    );
+
     // TODO: Validar permisos del usuario sobre el dominio original y destino
     return this.domainSettingsService.duplicate(
       hostname,
@@ -211,7 +215,9 @@ export class DomainSettingsController {
     }
 
     // TODO: Validar permisos del usuario sobre la organización
-    const result = await this.domainSettingsService.findAll({ organizationId: orgId });
+    const result = await this.domainSettingsService.findAll({
+      organizationId: orgId,
+    });
     return result.data;
   }
 
@@ -239,7 +245,9 @@ export class DomainSettingsController {
    */
   @Post('validate-hostname')
   @Roles('super_admin', 'organization_admin', 'store_admin')
-  async validateHostname(@Body() data: ValidateHostnameDto): Promise<{ valid: boolean; reason?: string }> {
+  async validateHostname(
+    @Body() data: ValidateHostnameDto,
+  ): Promise<{ valid: boolean; reason?: string }> {
     try {
       // Usar el método privado del servicio de forma indirecta
       await this.domainSettingsService.findByHostname(data.hostname);

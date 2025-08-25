@@ -92,10 +92,10 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles);    // Crear refresh token en la base de datos con información del dispositivo
+    const tokens = await this.generateTokens(userWithRoles); // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
-      userAgent: 'Registration-Device' // TODO: Obtener User-Agent real del request
+      userAgent: 'Registration-Device', // TODO: Obtener User-Agent real del request
     });
 
     // Registrar intento de login exitoso
@@ -103,7 +103,7 @@ export class AuthService {
 
     // Generar token de verificación de email
     const verificationToken = this.generateRandomToken();
-    
+
     // Guardar token de verificación en la base de datos
     await this.prismaService.email_verification_tokens.create({
       data: {
@@ -118,7 +118,7 @@ export class AuthService {
       await this.emailService.sendVerificationEmail(
         userWithRoles.email,
         verificationToken,
-        `${userWithRoles.first_name} ${userWithRoles.last_name}`
+        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
       );
       console.log(`✅ Email de verificación enviado a: ${userWithRoles.email}`);
     } catch (error) {
@@ -190,12 +190,12 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(user);    
-    
+    const tokens = await this.generateTokens(user);
+
     // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(user.id, tokens.refresh_token, {
       ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
-      userAgent: 'Login-Device' // TODO: Obtener User-Agent real del request
+      userAgent: 'Login-Device', // TODO: Obtener User-Agent real del request
     });
 
     // Registrar intento de login exitoso
@@ -216,18 +216,26 @@ export class AuthService {
     };
   }
 
-  async refreshToken(refreshTokenDto: RefreshTokenDto, clientInfo?: {
-    ipAddress?: string;
-    userAgent?: string;
-  }) {
+  async refreshToken(
+    refreshTokenDto: RefreshTokenDto,
+    clientInfo?: {
+      ipAddress?: string;
+      userAgent?: string;
+    },
+  ) {
     const { refresh_token } = refreshTokenDto;
 
     try {
       // Obtener el secret del refresh token
-      const refreshSecret = this.configService.get<string>('JWT_REFRESH_SECRET') || this.configService.get<string>('JWT_SECRET') || 'your-super-secret-jwt-key';
-      
+      const refreshSecret =
+        this.configService.get<string>('JWT_REFRESH_SECRET') ||
+        this.configService.get<string>('JWT_SECRET') ||
+        'your-super-secret-jwt-key';
+
       // Verificar el refresh token con el secret correcto
-      const payload = this.jwtService.verify(refresh_token, { secret: refreshSecret });
+      const payload = this.jwtService.verify(refresh_token, {
+        secret: refreshSecret,
+      });
 
       // Buscar refresh token activo
       const tokenRecord = await this.prismaService.refresh_tokens.findFirst({
@@ -269,9 +277,10 @@ export class AuthService {
       const tokens = await this.generateTokens(tokenRecord.users);
 
       // Actualizar el refresh token en la base de datos
-      const refreshTokenExpiry = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+      const refreshTokenExpiry =
+        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
       const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
-      
+
       await this.prismaService.refresh_tokens.update({
         where: { id: tokenRecord.id },
         data: {
@@ -290,9 +299,9 @@ export class AuthService {
       console.error('🚨 Intento de refresh token sospechoso:', {
         error: error.message,
         clientInfo,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-      
+
       throw new UnauthorizedException('Token de refresco inválido');
     }
   }
@@ -347,10 +356,10 @@ export class AuthService {
   }
 
   // ===== FUNCIONES DE VERIFICACIÓN DE EMAIL =====
-  
+
   async sendEmailVerification(userId: number): Promise<void> {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -364,7 +373,7 @@ export class AuthService {
     // Invalidar tokens anteriores
     await this.prismaService.email_verification_tokens.updateMany({
       where: { user_id: userId, verified: false },
-      data: { verified: true } // Los marcamos como usados
+      data: { verified: true }, // Los marcamos como usados
     });
 
     // Crear nuevo token
@@ -377,21 +386,26 @@ export class AuthService {
         user_id: userId,
         token,
         expires_at: expiresAt,
-      }
+      },
     });
 
     // Enviar email de verificación
-    await this.emailService.sendVerificationEmail(user.email, token, user.first_name);
-    
+    await this.emailService.sendVerificationEmail(
+      user.email,
+      token,
+      user.first_name,
+    );
+
     // También enviamos email de bienvenida después del registro
     await this.emailService.sendWelcomeEmail(user.email, user.first_name);
   }
 
   async verifyEmail(token: string): Promise<{ message: string }> {
-    const verificationToken = await this.prismaService.email_verification_tokens.findUnique({
-      where: { token },
-      include: { users: true }
-    });
+    const verificationToken =
+      await this.prismaService.email_verification_tokens.findUnique({
+        where: { token },
+        include: { users: true },
+      });
 
     if (!verificationToken) {
       throw new BadRequestException('Token de verificación inválido');
@@ -408,7 +422,7 @@ export class AuthService {
     // Marcar token como usado
     await this.prismaService.email_verification_tokens.update({
       where: { id: verificationToken.id },
-      data: { verified: true }
+      data: { verified: true },
     });
 
     // Marcar email como verificado y activar usuario
@@ -416,8 +430,8 @@ export class AuthService {
       where: { id: verificationToken.user_id },
       data: {
         email_verified: true,
-        state: 'active' // Activar usuario al verificar email
-      }
+        state: 'active', // Activar usuario al verificar email
+      },
     });
 
     return { message: 'Email verificado exitosamente' };
@@ -425,7 +439,7 @@ export class AuthService {
 
   async resendEmailVerification(email: string): Promise<{ message: string }> {
     const user = await this.prismaService.users.findUnique({
-      where: { email }
+      where: { email },
     });
 
     if (!user) {
@@ -445,18 +459,21 @@ export class AuthService {
 
   async forgotPassword(email: string): Promise<{ message: string }> {
     const user = await this.prismaService.users.findUnique({
-      where: { email }
+      where: { email },
     });
 
     // Por seguridad, siempre devolvemos el mismo mensaje
     if (!user) {
-      return { message: 'Si el email existe, recibirás instrucciones para restablecer tu contraseña' };
+      return {
+        message:
+          'Si el email existe, recibirás instrucciones para restablecer tu contraseña',
+      };
     }
 
     // Invalidar tokens anteriores
     await this.prismaService.password_reset_tokens.updateMany({
       where: { user_id: user.id },
-      data: { used: true }
+      data: { used: true },
     });
 
     // Crear nuevo token
@@ -469,20 +486,31 @@ export class AuthService {
         user_id: user.id,
         token,
         expires_at: expiresAt,
-      }
+      },
     });
 
     // Enviar email de recuperación de contraseña
-    await this.emailService.sendPasswordResetEmail(user.email, token, user.first_name);
+    await this.emailService.sendPasswordResetEmail(
+      user.email,
+      token,
+      user.first_name,
+    );
 
-    return { message: 'Si el email existe, recibirás instrucciones para restablecer tu contraseña' };
+    return {
+      message:
+        'Si el email existe, recibirás instrucciones para restablecer tu contraseña',
+    };
   }
 
-  async resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
-    const resetToken = await this.prismaService.password_reset_tokens.findUnique({
-      where: { token },
-      include: { users: true }
-    });
+  async resetPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
+    const resetToken =
+      await this.prismaService.password_reset_tokens.findUnique({
+        where: { token },
+        include: { users: true },
+      });
 
     if (!resetToken) {
       throw new BadRequestException('Token de restablecimiento inválido');
@@ -503,29 +531,33 @@ export class AuthService {
     await this.prismaService.$transaction([
       this.prismaService.password_reset_tokens.update({
         where: { id: resetToken.id },
-        data: { used: true }
+        data: { used: true },
       }),
       this.prismaService.users.update({
         where: { id: resetToken.user_id },
         data: {
           password: hashedPassword,
           failed_login_attempts: 0,
-          locked_until: null
-        }
-      })
+          locked_until: null,
+        },
+      }),
     ]);
 
     // Invalidar todas las sesiones activas - eliminar todos los refresh tokens
     await this.prismaService.refresh_tokens.deleteMany({
-      where: { user_id: resetToken.user_id }
+      where: { user_id: resetToken.user_id },
     });
 
     return { message: 'Contraseña restablecida exitosamente' };
   }
 
-  async changePassword(userId: number, currentPassword: string, newPassword: string): Promise<{ message: string }> {
+  async changePassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ message: string }> {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -533,7 +565,10 @@ export class AuthService {
     }
 
     // Verificar contraseña actual
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
     if (!isCurrentPasswordValid) {
       throw new BadRequestException('Contraseña actual incorrecta');
     }
@@ -544,7 +579,7 @@ export class AuthService {
     // Actualizar contraseña
     await this.prismaService.users.update({
       where: { id: userId },
-      data: { password: hashedPassword }
+      data: { password: hashedPassword },
     });
 
     return { message: 'Contraseña cambiada exitosamente' };
@@ -559,10 +594,10 @@ export class AuthService {
         organization_users: {
           include: {
             organizations: true,
-            roles: true
-          }
-        }
-      }
+            roles: true,
+          },
+        },
+      },
     });
 
     if (!user || !user.email_verified) {
@@ -570,8 +605,8 @@ export class AuthService {
     }
 
     // Verificar si ya es propietario de alguna organización
-    const isOwner = user.organization_users.some(ou => 
-      ou.roles.name === 'owner'
+    const isOwner = user.organization_users.some(
+      (ou) => ou.roles.name === 'owner',
     );
 
     return !isOwner; // Solo puede crear si no es propietario de otra
@@ -590,10 +625,10 @@ export class AuthService {
         organization_users: {
           include: {
             organizations: true,
-            roles: true
-          }
-        }
-      }
+            roles: true,
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -618,7 +653,7 @@ export class AuthService {
       canCreateOrganization,
       hasOrganization,
       organizationId: user.organization_users[0]?.organization_id,
-      nextStep
+      nextStep,
     };
   }
 
@@ -631,18 +666,18 @@ export class AuthService {
     data?: any;
   }> {
     const onboardingStatus = await this.getOnboardingStatus(userId);
-    
+
     return {
       status: 'success',
       currentStep: onboardingStatus.nextStep,
       message: 'Estado de onboarding obtenido',
-      data: onboardingStatus
+      data: onboardingStatus,
     };
   }
 
   async createOrganizationDuringOnboarding(
-    userId: number, 
-    organizationData: any
+    userId: number,
+    organizationData: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -652,22 +687,26 @@ export class AuthService {
     // Verificar que el usuario puede crear organización
     const canCreate = await this.canCreateOrganization(userId);
     if (!canCreate) {
-      throw new BadRequestException('No puedes crear una organización en este momento');
+      throw new BadRequestException(
+        'No puedes crear una organización en este momento',
+      );
     }
 
     // Crear la organización
     const organization = await this.prismaService.organizations.create({
       data: {
         ...organizationData,
-        slug: organizationData.slug || this.generateSlugFromName(organizationData.name),
+        slug:
+          organizationData.slug ||
+          this.generateSlugFromName(organizationData.name),
         updated_at: new Date(),
-      }
+      },
     });
 
     // Asignar el usuario como propietario de la organización
     // Primero obtenemos el rol de owner
     const ownerRole = await this.prismaService.roles.findFirst({
-      where: { name: 'owner' }
+      where: { name: 'owner' },
     });
 
     if (!ownerRole) {
@@ -680,22 +719,22 @@ export class AuthService {
         organization_id: organization.id,
         user_id: userId,
         role_id: ownerRole.id,
-        is_active: true
-      }
+        is_active: true,
+      },
     });
 
     return {
       success: true,
       message: 'Organización creada exitosamente',
       organization,
-      nextStep: 'setup_organization'
+      nextStep: 'setup_organization',
     };
   }
 
   async setupOrganization(
     userId: number,
     organizationId: number,
-    setupData: any
+    setupData: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -706,13 +745,15 @@ export class AuthService {
       where: {
         user_id: userId,
         organization_id: organizationId,
-        is_active: true
+        is_active: true,
       },
-      include: { roles: true }
+      include: { roles: true },
     });
 
     if (!userOrg || !['owner', 'admin'].includes(userOrg.roles.name)) {
-      throw new BadRequestException('No tienes permisos para configurar esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta organización',
+      );
     }
 
     // Actualizar la organización con los datos de configuración
@@ -720,8 +761,8 @@ export class AuthService {
       where: { id: organizationId },
       data: {
         ...setupData,
-        updated_at: new Date()
-      }
+        updated_at: new Date(),
+      },
     });
 
     // Si hay datos de dirección, crear/actualizar la dirección
@@ -734,21 +775,21 @@ export class AuthService {
         postal_code: setupData.postal_code,
         country_code: setupData.country_code,
         type: 'business',
-        is_primary: true
+        is_primary: true,
       });
     }
 
     return {
       success: true,
       message: 'Organización configurada exitosamente',
-      nextStep: 'create_store'
+      nextStep: 'create_store',
     };
   }
 
   async createStoreDuringOnboarding(
     userId: number,
     organizationId: number,
-    storeData: any
+    storeData: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -760,13 +801,15 @@ export class AuthService {
       where: {
         user_id: userId,
         organization_id: organizationId,
-        is_active: true
+        is_active: true,
       },
-      include: { roles: true }
+      include: { roles: true },
     });
 
     if (!userOrg || !['owner', 'admin'].includes(userOrg.roles.name)) {
-      throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para crear tiendas en esta organización',
+      );
     }
 
     // Crear la tienda
@@ -777,22 +820,22 @@ export class AuthService {
         manager_id: userId,
         slug: storeData.slug || this.generateSlugFromName(storeData.name),
         is_active: true,
-        updated_at: new Date()
-      }
+        updated_at: new Date(),
+      },
     });
 
     return {
       success: true,
       message: 'Tienda creada exitosamente',
       store,
-      nextStep: 'setup_store'
+      nextStep: 'setup_store',
     };
   }
 
   async setupStore(
     userId: number,
     storeId: number,
-    setupData: any
+    setupData: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -806,11 +849,11 @@ export class AuthService {
           include: {
             organization_users: {
               where: { user_id: userId },
-              include: { roles: true }
-            }
-          }
-        }
-      }
+              include: { roles: true },
+            },
+          },
+        },
+      },
     });
 
     if (!store) {
@@ -819,18 +862,30 @@ export class AuthService {
 
     const userRole = store.organizations.organization_users[0];
     if (!userRole || !['owner', 'admin'].includes(userRole.roles.name)) {
-      throw new BadRequestException('No tienes permisos para configurar esta tienda');
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta tienda',
+      );
     }
 
     // Actualizar configuraciones básicas de la tienda
-    const { address_line1, address_line2, city, state_province, postal_code, country_code, phone, email, ...storeSettings } = setupData;
+    const {
+      address_line1,
+      address_line2,
+      city,
+      state_province,
+      postal_code,
+      country_code,
+      phone,
+      email,
+      ...storeSettings
+    } = setupData;
 
     await this.prismaService.stores.update({
       where: { id: storeId },
       data: {
         ...storeSettings,
-        updated_at: new Date()
-      }
+        updated_at: new Date(),
+      },
     });
 
     // Crear/actualizar configuraciones de la tienda
@@ -847,14 +902,14 @@ export class AuthService {
         country_code,
         phone,
         type: 'business',
-        is_primary: true
+        is_primary: true,
       });
     }
 
     return {
       success: true,
       message: 'Tienda configurada exitosamente',
-      nextStep: 'complete'
+      nextStep: 'complete',
     };
   }
 
@@ -864,7 +919,7 @@ export class AuthService {
     data: any;
   }> {
     const onboardingStatus = await this.getOnboardingStatus(userId);
-    
+
     if (!onboardingStatus.emailVerified || !onboardingStatus.hasOrganization) {
       throw new BadRequestException('Onboarding no completado correctamente');
     }
@@ -875,8 +930,8 @@ export class AuthService {
       where: { id: userId },
       data: {
         // onboarding_completed: true, // Campo por agregar al esquema
-        updated_at: new Date()
-      }
+        updated_at: new Date(),
+      },
     });
 
     return {
@@ -885,20 +940,23 @@ export class AuthService {
       data: {
         ...onboardingStatus,
         currentStep: 'complete',
-        onboardingCompleted: true
-      }
+        onboardingCompleted: true,
+      },
     };
   }
 
   // ===== FUNCIONES AUXILIARES PARA ONBOARDING =====
 
-  private async createOrUpdateOrganizationAddress(organizationId: number, addressData: any) {
+  private async createOrUpdateOrganizationAddress(
+    organizationId: number,
+    addressData: any,
+  ) {
     // Buscar dirección existente
     const existingAddress = await this.prismaService.addresses.findFirst({
       where: {
         organization_id: organizationId,
-        is_primary: true
-      }
+        is_primary: true,
+      },
     });
 
     if (existingAddress) {
@@ -906,16 +964,16 @@ export class AuthService {
         where: { id: existingAddress.id },
         data: {
           ...addressData,
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       });
     } else {
       return await this.prismaService.addresses.create({
         data: {
           ...addressData,
           organization_id: organizationId,
-          is_primary: true
-        }
+          is_primary: true,
+        },
       });
     }
   }
@@ -925,8 +983,8 @@ export class AuthService {
     const existingAddress = await this.prismaService.addresses.findFirst({
       where: {
         store_id: storeId,
-        is_primary: true
-      }
+        is_primary: true,
+      },
     });
 
     if (existingAddress) {
@@ -934,24 +992,27 @@ export class AuthService {
         where: { id: existingAddress.id },
         data: {
           ...addressData,
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       });
     } else {
       return await this.prismaService.addresses.create({
         data: {
           ...addressData,
           store_id: storeId,
-          is_primary: true
-        }
+          is_primary: true,
+        },
       });
     }
   }
 
-  private async createOrUpdateStoreSettings(storeId: number, settingsData: any) {
+  private async createOrUpdateStoreSettings(
+    storeId: number,
+    settingsData: any,
+  ) {
     // Buscar configuraciones existentes
     const existingSettings = await this.prismaService.store_settings.findFirst({
-      where: { store_id: storeId }
+      where: { store_id: storeId },
     });
 
     const settingsToSave = {
@@ -972,15 +1033,15 @@ export class AuthService {
         where: { id: existingSettings.id },
         data: {
           ...settingsToSave,
-          updated_at: new Date()
-        }
+          updated_at: new Date(),
+        },
       });
     } else {
       return await this.prismaService.store_settings.create({
         data: {
           ...settingsToSave,
-          store_id: storeId
-        }
+          store_id: storeId,
+        },
       });
     }
   }
@@ -1004,7 +1065,7 @@ export class AuthService {
     // Extraer roles y permisos del usuario
     const roles = user.user_roles.map((ur: any) => ur.roles.name);
     const permissions = user.user_roles.flatMap((ur: any) =>
-      ur.roles.role_permissions.map((rp: any) => rp.permissions.name)
+      ur.roles.role_permissions.map((rp: any) => rp.permissions.name),
     );
 
     const payload = {
@@ -1015,17 +1076,22 @@ export class AuthService {
     };
 
     // Obtener configuraciones del entorno con valores por defecto
-    const accessTokenExpiry = this.configService.get<string>('JWT_EXPIRES_IN') || '15m';
-    const refreshTokenExpiry = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
-    const refreshSecret = this.configService.get<string>('JWT_REFRESH_SECRET') || this.configService.get<string>('JWT_SECRET') || 'your-super-secret-jwt-key';
+    const accessTokenExpiry =
+      this.configService.get<string>('JWT_EXPIRES_IN') || '15m';
+    const refreshTokenExpiry =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+    const refreshSecret =
+      this.configService.get<string>('JWT_REFRESH_SECRET') ||
+      this.configService.get<string>('JWT_SECRET') ||
+      'your-super-secret-jwt-key';
 
     const [access_token, refresh_token] = await Promise.all([
       // Access token con configuración del entorno
       this.jwtService.signAsync(payload, { expiresIn: accessTokenExpiry }),
       // Refresh token con secret separado y configuración del entorno
-      this.jwtService.signAsync(payload, { 
+      this.jwtService.signAsync(payload, {
         expiresIn: refreshTokenExpiry,
-        secret: refreshSecret
+        secret: refreshSecret,
       }),
     ]);
 
@@ -1039,17 +1105,22 @@ export class AuthService {
       expires_in: expiresInSeconds,
     };
   }
-  private async createUserSession(userId: number, refreshToken: string, clientInfo?: {
-    ipAddress?: string;
-    userAgent?: string;
-  }) {
+  private async createUserSession(
+    userId: number,
+    refreshToken: string,
+    clientInfo?: {
+      ipAddress?: string;
+      userAgent?: string;
+    },
+  ) {
     // Obtener duración del refresh token del entorno
-    const refreshTokenExpiry = this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+    const refreshTokenExpiry =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
     const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
-    
+
     // Generar fingerprint del dispositivo
     const deviceFingerprint = this.generateDeviceFingerprint(clientInfo);
-    
+
     await this.prismaService.refresh_tokens.create({
       data: {
         user_id: userId,
@@ -1149,11 +1220,16 @@ export class AuthService {
     const unit = match[2];
 
     switch (unit) {
-      case 's': return value;
-      case 'm': return value * 60;
-      case 'h': return value * 60 * 60;
-      case 'd': return value * 24 * 60 * 60;
-      default: return 900; // Default: 15 minutos
+      case 's':
+        return value;
+      case 'm':
+        return value * 60;
+      case 'h':
+        return value * 60 * 60;
+      case 'd':
+        return value * 24 * 60 * 60;
+      default:
+        return 900; // Default: 15 minutos
     }
   }
 
@@ -1168,18 +1244,23 @@ export class AuthService {
     const unit = match[2];
 
     switch (unit) {
-      case 's': return value * 1000;
-      case 'm': return value * 60 * 1000;
-      case 'h': return value * 60 * 60 * 1000;
-      case 'd': return value * 24 * 60 * 60 * 1000;
-      default: return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
+      case 's':
+        return value * 1000;
+      case 'm':
+        return value * 60 * 1000;
+      case 'h':
+        return value * 60 * 60 * 1000;
+      case 'd':
+        return value * 24 * 60 * 60 * 1000;
+      default:
+        return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
     }
   }
 
   // 🔒 VALIDACIONES DE SEGURIDAD PARA REFRESH TOKEN
   private async validateRefreshTokenSecurity(
-    tokenRecord: any, 
-    clientInfo?: { ipAddress?: string; userAgent?: string }
+    tokenRecord: any,
+    clientInfo?: { ipAddress?: string; userAgent?: string },
   ): Promise<void> {
     // Si no hay información del cliente, permitir (compatibilidad con versiones anteriores)
     if (!clientInfo) {
@@ -1188,9 +1269,12 @@ export class AuthService {
     }
 
     const config = {
-      strictIpCheck: this.configService.get<boolean>('STRICT_IP_CHECK') || false,
-      strictDeviceCheck: this.configService.get<boolean>('STRICT_DEVICE_CHECK') || true,
-      allowCrossDevice: this.configService.get<boolean>('ALLOW_CROSS_DEVICE_REFRESH') || false,
+      strictIpCheck:
+        this.configService.get<boolean>('STRICT_IP_CHECK') || false,
+      strictDeviceCheck:
+        this.configService.get<boolean>('STRICT_DEVICE_CHECK') || true,
+      allowCrossDevice:
+        this.configService.get<boolean>('ALLOW_CROSS_DEVICE_REFRESH') || false,
     };
 
     // 🔍 VERIFICAR IP ADDRESS
@@ -1200,11 +1284,13 @@ export class AuthService {
           stored: tokenRecord.ip_address,
           current: clientInfo.ipAddress,
           userId: tokenRecord.user_id,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
-        
+
         if (config.strictIpCheck) {
-          throw new UnauthorizedException('Token usage from different IP address detected');
+          throw new UnauthorizedException(
+            'Token usage from different IP address detected',
+          );
         }
       }
     }
@@ -1212,58 +1298,70 @@ export class AuthService {
     // 🔍 VERIFICAR DEVICE FINGERPRINT (Más importante que IP)
     if (tokenRecord.device_fingerprint && clientInfo.userAgent) {
       const currentFingerprint = this.generateDeviceFingerprint(clientInfo);
-      
+
       if (tokenRecord.device_fingerprint !== currentFingerprint) {
-        const storedBrowser = this.extractBrowserFromUserAgent(tokenRecord.user_agent || '');
-        const currentBrowser = this.extractBrowserFromUserAgent(clientInfo.userAgent);
-        const storedOS = this.extractOSFromUserAgent(tokenRecord.user_agent || '');
+        const storedBrowser = this.extractBrowserFromUserAgent(
+          tokenRecord.user_agent || '',
+        );
+        const currentBrowser = this.extractBrowserFromUserAgent(
+          clientInfo.userAgent,
+        );
+        const storedOS = this.extractOSFromUserAgent(
+          tokenRecord.user_agent || '',
+        );
         const currentOS = this.extractOSFromUserAgent(clientInfo.userAgent);
-        
+
         console.error('🚨 DEVICE FINGERPRINT MISMATCH:', {
           userId: tokenRecord.user_id,
           stored: {
             fingerprint: tokenRecord.device_fingerprint,
             browser: storedBrowser,
             os: storedOS,
-            ip: tokenRecord.ip_address
+            ip: tokenRecord.ip_address,
           },
           current: {
             fingerprint: currentFingerprint,
             browser: currentBrowser,
             os: currentOS,
-            ip: clientInfo.ipAddress
+            ip: clientInfo.ipAddress,
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
-        
+
         if (config.strictDeviceCheck && !config.allowCrossDevice) {
           // Revocar el token sospechoso
           await this.prismaService.refresh_tokens.update({
             where: { id: tokenRecord.id },
-            data: { 
-              revoked: true, 
-              revoked_at: new Date() 
-            }
+            data: {
+              revoked: true,
+              revoked_at: new Date(),
+            },
           });
-          
-          throw new UnauthorizedException('🛡️ Token usage from different device detected. For security, please log in again.');
+
+          throw new UnauthorizedException(
+            '🛡️ Token usage from different device detected. For security, please log in again.',
+          );
         }
       }
     }
 
     // 🔍 VERIFICAR FRECUENCIA DE USO
     if (tokenRecord.last_used) {
-      const timeSinceLastUse = Date.now() - new Date(tokenRecord.last_used).getTime();
-      const minTimeBetweenRefresh = (this.configService.get<number>('MAX_REFRESH_FREQUENCY') || 30) * 1000;
-      
+      const timeSinceLastUse =
+        Date.now() - new Date(tokenRecord.last_used).getTime();
+      const minTimeBetweenRefresh =
+        (this.configService.get<number>('MAX_REFRESH_FREQUENCY') || 30) * 1000;
+
       if (timeSinceLastUse < minTimeBetweenRefresh) {
         console.warn('🚨 Refresh token being used too frequently:', {
           userId: tokenRecord.user_id,
           timeSinceLastUse: Math.round(timeSinceLastUse / 1000),
-          minRequired: Math.round(minTimeBetweenRefresh / 1000)
+          minRequired: Math.round(minTimeBetweenRefresh / 1000),
         });
-        
-        throw new UnauthorizedException('Token refresh rate exceeded. Please wait before trying again.');
+
+        throw new UnauthorizedException(
+          'Token refresh rate exceeded. Please wait before trying again.',
+        );
       }
     }
 
@@ -1278,21 +1376,24 @@ export class AuthService {
       clientIP: clientInfo.ipAddress,
       browser: this.extractBrowserFromUserAgent(clientInfo.userAgent || ''),
       os: this.extractOSFromUserAgent(clientInfo.userAgent || ''),
-      deviceMatched: tokenRecord.device_fingerprint === this.generateDeviceFingerprint(clientInfo),
-      timestamp: new Date().toISOString()
+      deviceMatched:
+        tokenRecord.device_fingerprint ===
+        this.generateDeviceFingerprint(clientInfo),
+      timestamp: new Date().toISOString(),
     });
   }
 
   // Extraer navegador principal del User Agent
   private extractBrowserFromUserAgent(userAgent: string): string {
     if (!userAgent) return 'unknown';
-    
+
     if (userAgent.includes('Chrome')) return 'Chrome';
     if (userAgent.includes('Firefox')) return 'Firefox';
-    if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
+    if (userAgent.includes('Safari') && !userAgent.includes('Chrome'))
+      return 'Safari';
     if (userAgent.includes('Edge')) return 'Edge';
     if (userAgent.includes('Opera')) return 'Opera';
-    
+
     return 'other';
   }
 
@@ -1306,28 +1407,35 @@ export class AuthService {
     }
 
     // Extraer información básica del User Agent
-    const browser = this.extractBrowserFromUserAgent(clientInfo.userAgent || '');
+    const browser = this.extractBrowserFromUserAgent(
+      clientInfo.userAgent || '',
+    );
     const os = this.extractOSFromUserAgent(clientInfo.userAgent || '');
-    
+
     // Crear fingerprint básico (sin ser invasivo)
     const fingerprint = `${browser}-${os}-${clientInfo.ipAddress?.split('.')[0] || 'unknown'}`;
-    
+
     // Hash para ofuscar información sensible
     const crypto = require('crypto');
-    return crypto.createHash('sha256').update(fingerprint).digest('hex').substring(0, 32);
+    return crypto
+      .createHash('sha256')
+      .update(fingerprint)
+      .digest('hex')
+      .substring(0, 32);
   }
 
   // Extraer sistema operativo del User Agent
   private extractOSFromUserAgent(userAgent: string): string {
     if (!userAgent) return 'unknown';
-    
+
     if (userAgent.includes('Windows NT 10.0')) return 'Windows10';
     if (userAgent.includes('Windows NT')) return 'Windows';
     if (userAgent.includes('Mac OS X')) return 'macOS';
     if (userAgent.includes('Linux')) return 'Linux';
     if (userAgent.includes('Android')) return 'Android';
-    if (userAgent.includes('iPhone') || userAgent.includes('iPad')) return 'iOS';
-    
+    if (userAgent.includes('iPhone') || userAgent.includes('iPad'))
+      return 'iOS';
+
     return 'other';
   }
 }

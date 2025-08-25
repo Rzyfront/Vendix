@@ -20,8 +20,8 @@ export class EmailController {
       data: {
         ...this.emailService.getConfig(),
         isConfigured: this.emailService.isConfigured(),
-        provider: this.emailService.getProviderName()
-      }
+        provider: this.emailService.getProviderName(),
+      },
     };
   }
 
@@ -34,10 +34,10 @@ export class EmailController {
     }
 
     const result = await this.emailService.testConnection();
-    
+
     return {
       message: 'Email service test completed',
-      data: result
+      data: result,
     };
   }
 
@@ -45,12 +45,13 @@ export class EmailController {
   @UseGuards(JwtAuthGuard)
   async testEmailTemplate(
     @CurrentUser() user: any,
-    @Body() body: { 
-      type: 'verification' | 'password-reset' | 'welcome' | 'onboarding',
-      email?: string,
-      username?: string,
-      step?: string
-    }
+    @Body()
+    body: {
+      type: 'verification' | 'password-reset' | 'welcome' | 'onboarding';
+      email?: string;
+      username?: string;
+      step?: string;
+    },
   ) {
     // Solo admins pueden testear templates
     if (!user.roles?.includes('admin')) {
@@ -65,16 +66,28 @@ export class EmailController {
 
     switch (body.type) {
       case 'verification':
-        result = await this.emailService.sendVerificationEmail(email, token, username);
+        result = await this.emailService.sendVerificationEmail(
+          email,
+          token,
+          username,
+        );
         break;
       case 'password-reset':
-        result = await this.emailService.sendPasswordResetEmail(email, token, username);
+        result = await this.emailService.sendPasswordResetEmail(
+          email,
+          token,
+          username,
+        );
         break;
       case 'welcome':
         result = await this.emailService.sendWelcomeEmail(email, username);
         break;
       case 'onboarding':
-        result = await this.emailService.sendOnboardingEmail(email, username, body.step || 'create_organization');
+        result = await this.emailService.sendOnboardingEmail(
+          email,
+          username,
+          body.step || 'create_organization',
+        );
         break;
       default:
         return { message: 'Invalid template type' };
@@ -82,7 +95,7 @@ export class EmailController {
 
     return {
       message: `${body.type} email template test sent`,
-      data: result
+      data: result,
     };
   }
 
@@ -90,10 +103,11 @@ export class EmailController {
   @UseGuards(JwtAuthGuard)
   async switchProvider(
     @CurrentUser() user: any,
-    @Body() body: { 
-      provider: 'resend' | 'sendgrid' | 'console',
-      apiKey?: string
-    }
+    @Body()
+    body: {
+      provider: 'resend' | 'sendgrid' | 'console';
+      apiKey?: string;
+    },
   ) {
     // Solo admins pueden cambiar proveedores
     if (!user.roles?.includes('admin')) {
@@ -106,8 +120,8 @@ export class EmailController {
       message: `Email provider switched to ${body.provider}`,
       data: {
         provider: this.emailService.getProviderName(),
-        isConfigured: this.emailService.isConfigured()
-      }
+        isConfigured: this.emailService.isConfigured(),
+      },
     };
   }
 }

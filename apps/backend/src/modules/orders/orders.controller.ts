@@ -29,7 +29,10 @@ export class OrdersController {
 
   @Post()
   @RequirePermissions('orders.create')
-  async create(@Body() createOrderDto: CreateOrderDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createOrderDto: CreateOrderDto,
+    @CurrentUser() user: any,
+  ) {
     return this.ordersService.create(createOrderDto);
   }
 
@@ -83,7 +86,7 @@ export class OrdersController {
   @RequirePermissions('orders.update')
   async updateStatus(
     @Param('id', ParseIntPipe) id: number,
-  @Body() body: { status: order_state_enum },
+    @Body() body: { status: order_state_enum },
     @CurrentUser() user: any,
   ) {
     return this.ordersService.updateStatus(id, body.status);
@@ -103,7 +106,10 @@ export class OrdersController {
   @UseGuards(RolesGuard)
   @Roles('super_admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.ordersService.remove(id);
   }
 }

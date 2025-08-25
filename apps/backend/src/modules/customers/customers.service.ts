@@ -6,11 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  CreateCustomerDto,
-  UpdateCustomerDto,
-  CustomerQueryDto,
-} from './dto';
+import { CreateCustomerDto, UpdateCustomerDto, CustomerQueryDto } from './dto';
 import { Prisma } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
@@ -32,7 +28,9 @@ export class CustomersService {
     });
 
     if (existingCustomer) {
-      throw new ConflictException('Customer with this email already exists in store');
+      throw new ConflictException(
+        'Customer with this email already exists in store',
+      );
     }
 
     try {
@@ -43,14 +41,23 @@ export class CustomersService {
         },
         include: {
           stores: { select: { id: true, name: true } },
-          users: { select: { id: true, first_name: true, last_name: true, email: true } },
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
           addresses: true,
         },
       });
     } catch (error) {
-  if (error instanceof PrismaClientKnownRequestError) {
+      if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          throw new ConflictException('Customer with this email already exists');
+          throw new ConflictException(
+            'Customer with this email already exists',
+          );
         }
         if (error.code === 'P2003') {
           throw new BadRequestException('Invalid store or user reference');
@@ -69,7 +76,7 @@ export class CustomersService {
       await this.validateStoreAccess(store_id, user);
     }
 
-  const where: Prisma.customersWhereInput = {
+    const where: Prisma.customersWhereInput = {
       ...(store_id && { store_id }),
       ...(search && {
         OR: [
@@ -121,7 +128,9 @@ export class CustomersService {
       where: { id },
       include: {
         stores: { select: { id: true, name: true } },
-        users: { select: { id: true, first_name: true, last_name: true, email: true } },
+        users: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
         addresses: {
           orderBy: { id: 'desc' }, // addresses table doesn't have created_at
         },
@@ -161,7 +170,7 @@ export class CustomersService {
     await this.validateStoreAccess(storeId, user);
 
     const customer = await this.prisma.customers.findFirst({
-      where: { 
+      where: {
         email,
         store_id: storeId,
       },
@@ -204,7 +213,9 @@ export class CustomersService {
       });
 
       if (existingCustomer) {
-        throw new ConflictException('Customer with this email already exists in store');
+        throw new ConflictException(
+          'Customer with this email already exists in store',
+        );
       }
     }
 
@@ -222,7 +233,7 @@ export class CustomersService {
         },
       });
     } catch (error) {
-  if (error instanceof PrismaClientKnownRequestError) {
+      if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           throw new ConflictException('Email already exists');
         }
@@ -255,7 +266,7 @@ export class CustomersService {
 
     if (orderCount > 0) {
       throw new BadRequestException(
-        'Cannot delete customer with existing orders. Consider deactivating the customer instead.'
+        'Cannot delete customer with existing orders. Consider deactivating the customer instead.',
       );
     }
 
@@ -263,10 +274,10 @@ export class CustomersService {
       await this.prisma.customers.delete({ where: { id } });
       return { message: 'Customer deleted successfully' };
     } catch (error) {
-  if (error instanceof PrismaClientKnownRequestError) {
+      if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
-            'Cannot delete customer due to related data constraints'
+            'Cannot delete customer due to related data constraints',
           );
         }
       }
@@ -309,8 +320,9 @@ export class CustomersService {
     const [totalOrders, totalSpent, recentOrders] = await Promise.all([
       this.prisma.orders.count({
         where: { customer_id: customerId },
-      }),      this.prisma.orders.aggregate({
-        where: { 
+      }),
+      this.prisma.orders.aggregate({
+        where: {
           customer_id: customerId,
           state: { in: ['delivered', 'finished'] }, // using valid order_state_enum values
         },
@@ -348,7 +360,7 @@ export class CustomersService {
 
     const skip = (page - 1) * limit;
 
-  const where: Prisma.customersWhereInput = {
+    const where: Prisma.customersWhereInput = {
       store_id: storeId,
       ...(search && {
         OR: [
@@ -425,10 +437,10 @@ export class CustomersService {
   private async validateStoreAccess(storeId: number, user: any) {
     // Check if user has access to this store
     const storeAccess = await this.prisma.store_staff.findFirst({
-      where: { 
-        store_id: storeId, 
-        user_id: user.id, 
-        is_active: true 
+      where: {
+        store_id: storeId,
+        user_id: user.id,
+        is_active: true,
       },
     });
 

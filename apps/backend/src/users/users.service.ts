@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto, UserQueryDto } from './dto';
 import { Prisma, user_state_enum } from '@prisma/client';
@@ -12,7 +17,7 @@ export class UsersService {
     try {
       // Verificar que el username sea único
       const existingUsername = await this.prisma.users.findUnique({
-        where: { username: createUserDto.username }
+        where: { username: createUserDto.username },
       });
 
       if (existingUsername) {
@@ -21,7 +26,7 @@ export class UsersService {
 
       // Verificar que el email sea único
       const existingEmail = await this.prisma.users.findUnique({
-        where: { email: createUserDto.email }
+        where: { email: createUserDto.email },
       });
 
       if (existingEmail) {
@@ -49,7 +54,7 @@ export class UsersService {
           last_login: true,
           created_at: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -62,7 +67,16 @@ export class UsersService {
   }
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 10, search, state, sort, include_inactive, email_verified, two_factor_enabled } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      sort,
+      include_inactive,
+      email_verified,
+      two_factor_enabled,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.usersWhereInput = {
@@ -72,15 +86,15 @@ export class UsersService {
           { last_name: { contains: search, mode: 'insensitive' } },
           { username: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
-        ]
+        ],
       }),
       ...(state && { state }),
       ...(email_verified !== undefined && { email_verified }),
       ...(two_factor_enabled !== undefined && { two_factor_enabled }),
-      ...(!include_inactive && { 
-        state: { 
-          not: user_state_enum.inactive 
-        } 
+      ...(!include_inactive && {
+        state: {
+          not: user_state_enum.inactive,
+        },
       }),
     };
 
@@ -119,9 +133,9 @@ export class UsersService {
                   id: true,
                   name: true,
                   description: true,
-                }
-              }
-            }
+                },
+              },
+            },
           },
           organization_users: {
             include: {
@@ -130,20 +144,20 @@ export class UsersService {
                   id: true,
                   name: true,
                   slug: true,
-                }
+                },
               },
               roles: {
                 select: {
                   id: true,
                   name: true,
                   description: true,
-                }
-              }
-            }
-          }
-        }
+                },
+              },
+            },
+          },
+        },
       }),
-      this.prisma.users.count({ where })
+      this.prisma.users.count({ where }),
     ]);
 
     return {
@@ -153,17 +167,17 @@ export class UsersService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
-      }
+      },
     };
   }
 
   async findOne(id: number, options?: { includeInactive?: boolean }) {
     const where: Prisma.usersWhereInput = {
       id,
-      ...(!options?.includeInactive && { 
-        state: { 
-          not: user_state_enum.inactive 
-        } 
+      ...(!options?.includeInactive && {
+        state: {
+          not: user_state_enum.inactive,
+        },
       }),
     };
 
@@ -199,13 +213,13 @@ export class UsersService {
                         description: true,
                         path: true,
                         method: true,
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         organization_users: {
           include: {
@@ -214,16 +228,16 @@ export class UsersService {
                 id: true,
                 name: true,
                 slug: true,
-              }
+              },
             },
             roles: {
               select: {
                 id: true,
                 name: true,
                 description: true,
-              }
-            }
-          }
+              },
+            },
+          },
         },
         store_staff: {
           include: {
@@ -232,18 +246,18 @@ export class UsersService {
                 id: true,
                 name: true,
                 store_code: true,
-              }
+              },
             },
             roles: {
               select: {
                 id: true,
                 name: true,
                 description: true,
-              }
-            }
-          }
-        }
-      }
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!user) {
@@ -256,10 +270,10 @@ export class UsersService {
   async findByEmail(email: string, options?: { includeInactive?: boolean }) {
     const where: Prisma.usersWhereInput = {
       email,
-      ...(!options?.includeInactive && { 
-        state: { 
-          not: user_state_enum.inactive 
-        } 
+      ...(!options?.includeInactive && {
+        state: {
+          not: user_state_enum.inactive,
+        },
       }),
     };
 
@@ -277,17 +291,20 @@ export class UsersService {
         last_login: true,
         created_at: true,
         updated_at: true,
-      }
+      },
     });
   }
 
-  async findByUsername(username: string, options?: { includeInactive?: boolean }) {
+  async findByUsername(
+    username: string,
+    options?: { includeInactive?: boolean },
+  ) {
     const where: Prisma.usersWhereInput = {
       username,
-      ...(!options?.includeInactive && { 
-        state: { 
-          not: user_state_enum.inactive 
-        } 
+      ...(!options?.includeInactive && {
+        state: {
+          not: user_state_enum.inactive,
+        },
       }),
     };
 
@@ -305,7 +322,7 @@ export class UsersService {
         last_login: true,
         created_at: true,
         updated_at: true,
-      }
+      },
     });
   }
 
@@ -320,9 +337,12 @@ export class UsersService {
       }
 
       // Si se actualiza el username, verificar que sea único
-      if (updateUserDto.username && updateUserDto.username !== existingUser.username) {
+      if (
+        updateUserDto.username &&
+        updateUserDto.username !== existingUser.username
+      ) {
         const existingUsername = await this.prisma.users.findUnique({
-          where: { username: updateUserDto.username }
+          where: { username: updateUserDto.username },
         });
 
         if (existingUsername) {
@@ -333,7 +353,7 @@ export class UsersService {
       // Si se actualiza el email, verificar que sea único
       if (updateUserDto.email && updateUserDto.email !== existingUser.email) {
         const existingEmail = await this.prisma.users.findUnique({
-          where: { email: updateUserDto.email }
+          where: { email: updateUserDto.email },
         });
 
         if (existingEmail) {
@@ -359,7 +379,7 @@ export class UsersService {
           last_login: true,
           created_at: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -390,10 +410,13 @@ export class UsersService {
           email: true,
           state: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException('Usuario no encontrado');
       }
       throw error;
@@ -416,10 +439,13 @@ export class UsersService {
           email: true,
           state: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException('Usuario no encontrado');
       }
       throw error;
@@ -444,10 +470,13 @@ export class UsersService {
           email_verified: true,
           state: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException('Usuario no encontrado');
       }
       throw error;
@@ -470,10 +499,13 @@ export class UsersService {
           email: true,
           locked_until: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException('Usuario no encontrado');
       }
       throw error;
@@ -498,10 +530,13 @@ export class UsersService {
           locked_until: true,
           failed_login_attempts: true,
           updated_at: true,
-        }
+        },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException('Usuario no encontrado');
       }
       throw error;
@@ -515,7 +550,7 @@ export class UsersService {
 
       // Eliminar usuario (esto debería hacerse con cuidado debido a las relaciones)
       return await this.prisma.users.delete({
-        where: { id }
+        where: { id },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -523,7 +558,9 @@ export class UsersService {
           throw new NotFoundException('Usuario no encontrado');
         }
         if (error.code === 'P2003') {
-          throw new BadRequestException('No se puede eliminar el usuario porque tiene datos relacionados');
+          throw new BadRequestException(
+            'No se puede eliminar el usuario porque tiene datos relacionados',
+          );
         }
       }
       throw error;

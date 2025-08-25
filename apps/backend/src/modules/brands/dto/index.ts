@@ -125,5 +125,3 @@ export class BrandQueryDto {
   @IsBoolean()
   include_inactive?: boolean = false;
 }
-
-

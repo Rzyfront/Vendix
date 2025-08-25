@@ -161,5 +161,3 @@ export class CustomerQueryDto {
   @IsBoolean()
   include_inactive?: boolean = false;
 }
-
-

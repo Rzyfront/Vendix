@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -16,16 +17,26 @@ async function bootstrap() {
         enableImplicitConversion: true,
       },
     }),
-  );  // CORS configuration
+  ); // CORS configuration
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(',') || [
-      'http://localhost:4200', 
+      'http://localhost:4200',
       'http://localhost',
       'http://app.vendix.com',
-      'http://api.vendix.com'
+      'http://api.vendix.com',
     ],
     credentials: true,
   });
+
+  // Swagger configuration
+  const config = new DocumentBuilder()
+    .setTitle('Vendix API')
+    .setDescription('Documentación de la API de Vendix')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api-docs', app, document);
 
   // API prefix
   app.setGlobalPrefix(process.env.API_PREFIX || 'api');
@@ -46,7 +57,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
-  
+
   console.log(`🚀 Vendix Backend is running on: http://localhost:${port}`);
   console.log(`❤️  Health Check: http://localhost:${port}/health`);
 }

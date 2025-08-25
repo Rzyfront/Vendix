@@ -20,8 +20,8 @@ export class TestController {
       data: {
         provider: this.emailService.getProviderName(),
         isConfigured: this.emailService.isConfigured(),
-        config: this.emailService.getConfig()
-      }
+        config: this.emailService.getConfig(),
+      },
     };
   }
 
@@ -31,30 +31,32 @@ export class TestController {
       body.email,
       'Prueba Rápida de Vendix',
       '<h1>🎉 ¡Email funcionando!</h1><p>Tu configuración de email con Resend está trabajando perfectamente.</p>',
-      'Email funcionando! Tu configuración de email con Resend está trabajando perfectamente.'
+      'Email funcionando! Tu configuración de email con Resend está trabajando perfectamente.',
     );
 
     return {
       message: 'Quick email test completed',
-      data: result
+      data: result,
     };
   }
 
   @Post('email-verification-test')
-  async testVerificationEmail(@Body() body: { email: string, username: string }) {
+  async testVerificationEmail(
+    @Body() body: { email: string; username: string },
+  ) {
     const testToken = 'test-token-' + Date.now();
     const result = await this.emailService.sendVerificationEmail(
       body.email,
       testToken,
-      body.username
+      body.username,
     );
 
     return {
       message: 'Verification email test sent',
       data: {
         ...result,
-        testToken // Para que puedas ver el token generado
-      }
+        testToken, // Para que puedas ver el token generado
+      },
     };
   }
 

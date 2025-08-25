@@ -24,7 +24,7 @@ export function generateSlug(text: string): string {
  */
 export async function generateUniqueSlug(
   baseSlug: string,
-  existingSlugChecker: (slug: string) => Promise<boolean>
+  existingSlugChecker: (slug: string) => Promise<boolean>,
 ): Promise<string> {
   let slug = baseSlug;
   let counter = 1;

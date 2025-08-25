@@ -111,7 +111,11 @@ export class TaxesService {
     return taxCategory;
   }
 
-  async update(id: number, updateTaxCategoryDto: UpdateTaxCategoryDto, user: any) {
+  async update(
+    id: number,
+    updateTaxCategoryDto: UpdateTaxCategoryDto,
+    user: any,
+  ) {
     const taxCategory = await this.prisma.tax_categories.findUnique({
       where: { id },
     });
@@ -120,7 +124,7 @@ export class TaxesService {
       throw new NotFoundException('Tax category not found');
     }
 
-    // Validate access if store_id exists  
+    // Validate access if store_id exists
     if (taxCategory.store_id) {
       await this.validateStoreAccess(taxCategory.store_id, user);
     }
@@ -128,8 +132,10 @@ export class TaxesService {
     // Only update fields that exist in the schema
     const updateData: any = {};
     if (updateTaxCategoryDto.name) updateData.name = updateTaxCategoryDto.name;
-    if (updateTaxCategoryDto.description !== undefined) updateData.description = updateTaxCategoryDto.description;
-    if (updateTaxCategoryDto.store_id) updateData.store_id = updateTaxCategoryDto.store_id;
+    if (updateTaxCategoryDto.description !== undefined)
+      updateData.description = updateTaxCategoryDto.description;
+    if (updateTaxCategoryDto.store_id)
+      updateData.store_id = updateTaxCategoryDto.store_id;
 
     return await this.prisma.tax_categories.update({
       where: { id },
@@ -161,7 +167,9 @@ export class TaxesService {
     });
 
     if (productCount > 0) {
-      throw new ForbiddenException('Tax category is assigned to products and cannot be deleted');
+      throw new ForbiddenException(
+        'Tax category is assigned to products and cannot be deleted',
+      );
     }
 
     await this.prisma.tax_categories.delete({ where: { id } });
@@ -180,7 +188,9 @@ export class TaxesService {
     });
   }
 
-  async calculateTax(taxCalculationDto: TaxCalculationDto): Promise<TaxCalculationResultDto> {
+  async calculateTax(
+    taxCalculationDto: TaxCalculationDto,
+  ): Promise<TaxCalculationResultDto> {
     const { subtotal, store_id, product_id } = taxCalculationDto;
 
     // Get applicable tax categories for the product/store
@@ -188,17 +198,18 @@ export class TaxesService {
 
     if (product_id) {
       // Get tax categories assigned to the specific product
-      const productTaxAssignments = await this.prisma.product_tax_assignments.findMany({
-        where: { product_id },
-        include: {
-          tax_categories: {
-            include: {
-              tax_rates: true,
+      const productTaxAssignments =
+        await this.prisma.product_tax_assignments.findMany({
+          where: { product_id },
+          include: {
+            tax_categories: {
+              include: {
+                tax_rates: true,
+              },
             },
           },
-        },
-      });
-      taxCategories = productTaxAssignments.map(pta => pta.tax_categories);
+        });
+      taxCategories = productTaxAssignments.map((pta) => pta.tax_categories);
     } else {
       // Get all tax categories for the store
       taxCategories = await this.prisma.tax_categories.findMany({
@@ -216,12 +227,14 @@ export class TaxesService {
     // Calculate taxes using tax_rates table
     for (const taxCategory of taxCategories) {
       // Get tax rates for this category (sorted by priority)
-      const taxRates = taxCategory.tax_rates.sort((a: any, b: any) => (a.priority || 0) - (b.priority || 0));
-      
+      const taxRates = taxCategory.tax_rates.sort(
+        (a: any, b: any) => (a.priority || 0) - (b.priority || 0),
+      );
+
       for (const taxRate of taxRates) {
         const baseAmount = taxRate.is_compound ? runningTotal : subtotal;
         const taxAmount = (baseAmount * Number(taxRate.rate)) / 100;
-        
+
         totalTax += taxAmount;
 
         taxBreakdown.push({
@@ -310,10 +323,10 @@ export class TaxesService {
   private async validateStoreAccess(storeId: number, user: any) {
     // Check if user has access to this store
     const storeAccess = await this.prisma.store_staff.findFirst({
-      where: { 
-        store_id: storeId, 
-        user_id: user.id, 
-        is_active: true 
+      where: {
+        store_id: storeId,
+        user_id: user.id,
+        is_active: true,
       },
     });
 

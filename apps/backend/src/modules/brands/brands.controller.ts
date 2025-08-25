@@ -26,7 +26,10 @@ export class BrandsController {
 
   @Post()
   @Permissions('brands:create')
-  async create(@Body() createBrandDto: CreateBrandDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createBrandDto: CreateBrandDto,
+    @CurrentUser() user: any,
+  ) {
     return this.brandsService.create(createBrandDto, user);
   }
 
@@ -80,21 +83,30 @@ export class BrandsController {
 
   @Patch(':id/activate')
   @Permissions('brands:update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.brandsService.activate(id, user);
   }
 
   @Patch(':id/deactivate')
   @Permissions('brands:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.brandsService.deactivate(id, user);
   }
 
   @Delete(':id')
   @Permissions('brands:admin_delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.brandsService.remove(id, user);
   }
 }

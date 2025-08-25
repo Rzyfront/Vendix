@@ -1,16 +1,19 @@
-import { 
-  Controller, 
-  Get, 
-  Param, 
-  NotFoundException, 
+import {
+  Controller,
+  Get,
+  Param,
+  NotFoundException,
   BadRequestException,
   Logger,
   HttpCode,
   HttpStatus,
   Query,
-  Headers
+  Headers,
 } from '@nestjs/common';
-import { DomainResolutionService, DomainResolutionResponse } from '../services/domain-resolution.service';
+import {
+  DomainResolutionService,
+  DomainResolutionResponse,
+} from '../services/domain-resolution.service';
 
 /**
  * Controlador público para endpoints que no requieren autenticación
@@ -20,14 +23,16 @@ import { DomainResolutionService, DomainResolutionResponse } from '../services/d
 export class PublicController {
   private readonly logger = new Logger(PublicController.name);
 
-  constructor(private readonly domainResolutionService: DomainResolutionService) {}
+  constructor(
+    private readonly domainResolutionService: DomainResolutionService,
+  ) {}
 
   /**
    * Resuelve la configuración de un dominio específico
-   * 
+   *
    * @param hostname - El hostname a resolver (ej: "store.mordoc.com")
    * @returns Configuración completa del tenant incluyendo branding, tema, features, etc.
-   * 
+   *
    * @example
    * GET /api/public/domains/resolve/store.mordoc.com
    * GET /api/public/domains/resolve/localhost:4200?subdomain=luda
@@ -38,7 +43,7 @@ export class PublicController {
     @Param('hostname') hostname: string,
     @Query('subdomain') subdomain?: string,
     @Headers('x-forwarded-host') forwardedHost?: string,
-    @Headers('host') hostHeader?: string
+    @Headers('host') hostHeader?: string,
   ): Promise<DomainResolutionResponse> {
     try {
       // Validar entrada
@@ -48,7 +53,7 @@ export class PublicController {
 
       // Normalizar hostname
       let resolvedHostname = hostname.toLowerCase().trim();
-      
+
       // Si es localhost y tenemos subdomain, construir el hostname completo
       if (resolvedHostname.includes('localhost') && subdomain) {
         resolvedHostname = `${subdomain}.${resolvedHostname}`;
@@ -59,37 +64,50 @@ export class PublicController {
         resolvedHostname = forwardedHost.toLowerCase().trim();
       }
 
-      this.logger.log(`Resolving domain configuration for: ${resolvedHostname}`);
+      this.logger.log(
+        `Resolving domain configuration for: ${resolvedHostname}`,
+      );
 
       // Resolver la configuración del dominio
-      const domainConfig = await this.domainResolutionService.resolveDomain(resolvedHostname);
+      const domainConfig =
+        await this.domainResolutionService.resolveDomain(resolvedHostname);
 
       if (!domainConfig) {
-        this.logger.warn(`Domain configuration not found for: ${resolvedHostname}`);
-        throw new NotFoundException(`Domain configuration not found for hostname: ${resolvedHostname}`);
+        this.logger.warn(
+          `Domain configuration not found for: ${resolvedHostname}`,
+        );
+        throw new NotFoundException(
+          `Domain configuration not found for hostname: ${resolvedHostname}`,
+        );
       }
 
       // Log successful resolution
-      this.logger.log(`Successfully resolved domain: ${resolvedHostname} -> Organization: ${domainConfig.organizationId}`);
+      this.logger.log(
+        `Successfully resolved domain: ${resolvedHostname} -> Organization: ${domainConfig.organizationId}`,
+      );
 
       return domainConfig;
-
     } catch (error) {
       this.logger.error(`Error resolving domain ${hostname}:`, error.message);
-      
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+
+      if (
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
         throw error;
       }
 
       // Para errores internos, log detallado pero respuesta genérica
       this.logger.error(`Internal error resolving domain ${hostname}:`, error);
-      throw new NotFoundException(`Unable to resolve domain configuration for: ${hostname}`);
+      throw new NotFoundException(
+        `Unable to resolve domain configuration for: ${hostname}`,
+      );
     }
   }
 
   /**
    * Verifica si un dominio está disponible y configurado
-   * 
+   *
    * @param hostname - El hostname a verificar
    * @returns Estado del dominio (disponible, configurado, etc.)
    */
@@ -111,7 +129,8 @@ export class PublicController {
       const normalizedHostname = hostname.toLowerCase().trim();
       this.logger.log(`Checking domain availability: ${normalizedHostname}`);
 
-      const domainConfig = await this.domainResolutionService.resolveDomain(normalizedHostname);
+      const domainConfig =
+        await this.domainResolutionService.resolveDomain(normalizedHostname);
 
       return {
         hostname: normalizedHostname,
@@ -119,12 +138,11 @@ export class PublicController {
         configured: !!domainConfig,
         active: !!domainConfig, // Simplificado: si existe, está activo
         organizationId: domainConfig?.organizationId,
-        storeId: domainConfig?.storeId
+        storeId: domainConfig?.storeId,
       };
-
     } catch (error) {
       this.logger.error(`Error checking domain ${hostname}:`, error.message);
-      
+
       if (error instanceof BadRequestException) {
         throw error;
       }
@@ -134,7 +152,7 @@ export class PublicController {
         hostname: hostname.toLowerCase().trim(),
         available: false,
         configured: false,
-        active: false
+        active: false,
       };
     }
   }
@@ -153,7 +171,7 @@ export class PublicController {
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      service: 'vendix-backend-public'
+      service: 'vendix-backend-public',
     };
   }
 
@@ -179,47 +197,47 @@ export class PublicController {
         {
           type: 'vendix_core',
           description: 'Dominios principales de Vendix',
-          examples: ['vendix.com', 'admin.vendix.com', 'api.vendix.com']
+          examples: ['vendix.com', 'admin.vendix.com', 'api.vendix.com'],
         },
         {
           type: 'organization_root',
           description: 'Dominio raíz de la organización',
-          examples: ['mordoc.com', 'acme.com']
+          examples: ['mordoc.com', 'acme.com'],
         },
         {
           type: 'organization_subdomain',
           description: 'Subdominio de la organización',
-          examples: ['app.mordoc.com', 'portal.acme.com']
+          examples: ['app.mordoc.com', 'portal.acme.com'],
         },
         {
           type: 'store_subdomain',
           description: 'Subdominio de tienda',
-          examples: ['luda.mordoc.com', 'store.acme.com']
+          examples: ['luda.mordoc.com', 'store.acme.com'],
         },
         {
           type: 'store_custom',
           description: 'Dominio personalizado de tienda',
-          examples: ['luda.com', 'mystoresite.com']
-        }
+          examples: ['luda.com', 'mystoresite.com'],
+        },
       ],
       purposes: [
         {
           purpose: 'landing',
-          description: 'Página de inicio o marketing'
+          description: 'Página de inicio o marketing',
         },
         {
           purpose: 'admin',
-          description: 'Panel de administración'
+          description: 'Panel de administración',
         },
         {
           purpose: 'ecommerce',
-          description: 'Tienda online'
+          description: 'Tienda online',
         },
         {
           purpose: 'api',
-          description: 'Endpoints de API'
-        }
-      ]
+          description: 'Endpoints de API',
+        },
+      ],
     };
   }
 }

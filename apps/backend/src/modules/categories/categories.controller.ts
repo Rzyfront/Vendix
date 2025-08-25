@@ -31,7 +31,10 @@ export class CategoriesController {
 
   @Post()
   @Permissions('categories:create')
-  async create(@Body() createCategoryDto: CreateCategoryDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createCategoryDto: CreateCategoryDto,
+    @CurrentUser() user: any,
+  ) {
     return this.categoriesService.create(createCategoryDto, user);
   }
 
@@ -97,21 +100,30 @@ export class CategoriesController {
 
   @Patch(':id/activate')
   @Permissions('categories:update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.categoriesService.activate(id, user);
   }
 
   @Patch(':id/deactivate')
   @Permissions('categories:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.categoriesService.deactivate(id, user);
   }
 
   @Delete(':id')
   @Permissions('categories:admin_delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.categoriesService.remove(id, user);
   }
 
@@ -123,7 +135,11 @@ export class CategoriesController {
     @Body() assignProductDto: AssignProductToCategoryDto,
     @CurrentUser() user: any,
   ) {
-    return this.categoriesService.assignProduct(categoryId, assignProductDto, user);
+    return this.categoriesService.assignProduct(
+      categoryId,
+      assignProductDto,
+      user,
+    );
   }
 
   @Delete(':id/products/:productId')

@@ -26,7 +26,10 @@ export class CustomersController {
 
   @Post()
   @Permissions('customers:create')
-  async create(@Body() createCustomerDto: CreateCustomerDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createCustomerDto: CreateCustomerDto,
+    @CurrentUser() user: any,
+  ) {
     return this.customersService.create(createCustomerDto, user);
   }
   @Get()
@@ -79,14 +82,20 @@ export class CustomersController {
 
   @Patch(':id/activate')
   @Permissions('customers:update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.customersService.activate(id, user);
   }
 
   @Patch(':id/deactivate')
   @Permissions('customers:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.customersService.deactivate(id, user);
   }
 
@@ -98,14 +107,20 @@ export class CustomersController {
 
   @Patch(':id/verify')
   @Permissions('customers:update')
-  async verify(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async verify(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.customersService.verify(id, user);
   }
 
   @Delete(':id')
   @Permissions('customers:admin_delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.customersService.remove(id, user);
   }
 }

@@ -1,6 +1,19 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateProductDto, UpdateProductDto, ProductQueryDto, CreateProductVariantDto, UpdateProductVariantDto, ProductImageDto, ProductState } from './dto';
+import {
+  CreateProductDto,
+  UpdateProductDto,
+  ProductQueryDto,
+  CreateProductVariantDto,
+  UpdateProductVariantDto,
+  ProductImageDto,
+  ProductState,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '../../common/utils/slug.util';
 
@@ -12,10 +25,10 @@ export class ProductsService {
     try {
       // Verificar que la tienda existe y está activa
       const store = await this.prisma.stores.findFirst({
-        where: { 
+        where: {
           id: createProductDto.store_id,
-          is_active: true 
-        }
+          is_active: true,
+        },
       });
 
       if (!store) {
@@ -30,21 +43,23 @@ export class ProductsService {
         where: {
           store_id: createProductDto.store_id,
           slug: slug,
-          state: { not: ProductState.ARCHIVED }
-        }
+          state: { not: ProductState.ARCHIVED },
+        },
       });
 
       if (existingProduct) {
-        throw new ConflictException('El slug del producto ya existe en esta tienda');
+        throw new ConflictException(
+          'El slug del producto ya existe en esta tienda',
+        );
       }
 
       // Verificar que el SKU sea único si se proporciona
       if (createProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
-          where: { 
+          where: {
             sku: createProductDto.sku,
-            state: { not: ProductState.ARCHIVED }
-          }
+            state: { not: ProductState.ARCHIVED },
+          },
         });
 
         if (existingSku) {
@@ -52,7 +67,8 @@ export class ProductsService {
         }
       }
 
-      const { category_ids, tax_category_ids, image_urls, ...productData } = createProductDto;
+      const { category_ids, tax_category_ids, image_urls, ...productData } =
+        createProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
         // Crear producto
@@ -61,26 +77,26 @@ export class ProductsService {
             ...productData,
             slug: slug,
             updated_at: new Date(),
-          }
+          },
         });
 
         // Asignar categorías si se proporcionan
         if (category_ids && category_ids.length > 0) {
           await prisma.product_categories.createMany({
-            data: category_ids.map(categoryId => ({
+            data: category_ids.map((categoryId) => ({
               product_id: product.id,
               category_id: categoryId,
-            }))
+            })),
           });
         }
 
         // Asignar categorías de impuestos si se proporcionan
         if (tax_category_ids && tax_category_ids.length > 0) {
           await prisma.product_tax_assignments.createMany({
-            data: tax_category_ids.map(taxCategoryId => ({
+            data: tax_category_ids.map((taxCategoryId) => ({
               product_id: product.id,
               tax_category_id: taxCategoryId,
-            }))
+            })),
           });
         }
 
@@ -91,7 +107,7 @@ export class ProductsService {
               product_id: product.id,
               image_url: url,
               is_main: index === 0, // Primera imagen como principal
-            }))
+            })),
           });
         }
 
@@ -113,7 +129,16 @@ export class ProductsService {
   }
 
   async findAll(query: ProductQueryDto) {
-    const { page = 1, limit = 10, search, state, store_id, category_id, brand_id, include_inactive } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      store_id,
+      category_id,
+      brand_id,
+      include_inactive,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.productsWhereInput = {
@@ -124,15 +149,15 @@ export class ProductsService {
           { name: { contains: search, mode: 'insensitive' } },
           { description: { contains: search, mode: 'insensitive' } },
           { sku: { contains: search, mode: 'insensitive' } },
-        ]
+        ],
       }),
       ...(state && { state }),
       ...(store_id && { store_id }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
-          some: { category_id }
-        }
+          some: { category_id },
+        },
       }),
     };
 
@@ -147,13 +172,13 @@ export class ProductsService {
               id: true,
               name: true,
               slug: true,
-            }
+            },
           },
           brands: {
             select: {
               id: true,
               name: true,
-            }
+            },
           },
           product_categories: {
             include: {
@@ -161,9 +186,9 @@ export class ProductsService {
                 select: {
                   id: true,
                   name: true,
-                }
-              }
-            }
+                },
+              },
+            },
           },
           product_images: {
             where: { is_main: true },
@@ -174,8 +199,8 @@ export class ProductsService {
               product_variants: true,
               product_images: true,
               reviews: true,
-            }
-          }
+            },
+          },
         },
         orderBy: { created_at: 'desc' },
       }),
@@ -195,9 +220,9 @@ export class ProductsService {
 
   async findOne(id: number) {
     const product = await this.prisma.products.findFirst({
-      where: { 
+      where: {
         id,
-        state: { not: ProductState.ARCHIVED } // No mostrar productos archivados
+        state: { not: ProductState.ARCHIVED }, // No mostrar productos archivados
       },
       include: {
         stores: {
@@ -206,18 +231,18 @@ export class ProductsService {
             name: true,
             slug: true,
             organization_id: true,
-          }
+          },
         },
         brands: true,
         product_categories: {
           include: {
             categories: true,
-          }
+          },
         },
         product_tax_assignments: {
           include: {
             tax_categories: true,
-          }
+          },
         },
         product_images: {
           orderBy: { is_main: 'desc' },
@@ -225,7 +250,7 @@ export class ProductsService {
         product_variants: {
           include: {
             product_images: true,
-          }
+          },
         },
         reviews: {
           where: { state: 'approved' },
@@ -235,8 +260,8 @@ export class ProductsService {
                 id: true,
                 first_name: true,
                 last_name: true,
-              }
-            }
+              },
+            },
           },
           orderBy: { created_at: 'desc' },
           take: 10,
@@ -246,8 +271,8 @@ export class ProductsService {
             product_variants: true,
             product_images: true,
             reviews: true,
-          }
-        }
+          },
+        },
       },
     });
 
@@ -260,10 +285,10 @@ export class ProductsService {
 
   async findBySlug(storeId: number, slug: string) {
     const product = await this.prisma.products.findFirst({
-      where: { 
+      where: {
         store_id: storeId,
         slug,
-        state: ProductState.ACTIVE // Solo productos activos
+        state: ProductState.ACTIVE, // Solo productos activos
       },
       include: {
         stores: true,
@@ -284,10 +309,10 @@ export class ProductsService {
     try {
       // Verificar que el producto existe y no está archivado
       const existingProduct = await this.prisma.products.findFirst({
-        where: { 
+        where: {
           id,
-          state: { not: ProductState.ARCHIVED }
-        }
+          state: { not: ProductState.ARCHIVED },
+        },
       });
 
       if (!existingProduct) {
@@ -302,7 +327,7 @@ export class ProductsService {
             slug: updateProductDto.slug,
             state: { not: ProductState.ARCHIVED },
             NOT: { id },
-          }
+          },
         });
 
         if (existingSlug) {
@@ -317,7 +342,7 @@ export class ProductsService {
             sku: updateProductDto.sku,
             state: { not: ProductState.ARCHIVED },
             NOT: { id },
-          }
+          },
         });
 
         if (existingSku) {
@@ -325,7 +350,8 @@ export class ProductsService {
         }
       }
 
-      const { category_ids, tax_category_ids, image_urls, ...productData } = updateProductDto;
+      const { category_ids, tax_category_ids, image_urls, ...productData } =
+        updateProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
         // Actualizar producto
@@ -334,21 +360,21 @@ export class ProductsService {
           data: {
             ...productData,
             updated_at: new Date(),
-          }
+          },
         });
 
         // Actualizar categorías si se proporcionan
         if (category_ids !== undefined) {
           await prisma.product_categories.deleteMany({
-            where: { product_id: id }
+            where: { product_id: id },
           });
 
           if (category_ids.length > 0) {
             await prisma.product_categories.createMany({
-              data: category_ids.map(categoryId => ({
+              data: category_ids.map((categoryId) => ({
                 product_id: id,
                 category_id: categoryId,
-              }))
+              })),
             });
           }
         }
@@ -356,15 +382,15 @@ export class ProductsService {
         // Actualizar categorías de impuestos si se proporcionan
         if (tax_category_ids !== undefined) {
           await prisma.product_tax_assignments.deleteMany({
-            where: { product_id: id }
+            where: { product_id: id },
           });
 
           if (tax_category_ids.length > 0) {
             await prisma.product_tax_assignments.createMany({
-              data: tax_category_ids.map(taxCategoryId => ({
+              data: tax_category_ids.map((taxCategoryId) => ({
                 product_id: id,
                 tax_category_id: taxCategoryId,
-              }))
+              })),
             });
           }
         }
@@ -372,7 +398,7 @@ export class ProductsService {
         // Actualizar imágenes si se proporcionan
         if (image_urls !== undefined) {
           await prisma.product_images.deleteMany({
-            where: { product_id: id }
+            where: { product_id: id },
           });
 
           if (image_urls.length > 0) {
@@ -381,7 +407,7 @@ export class ProductsService {
                 product_id: id,
                 image_url: url,
                 is_main: index === 0,
-              }))
+              })),
             });
           }
         }
@@ -406,10 +432,10 @@ export class ProductsService {
   // Borrado lógico para roles normales
   async deactivate(id: number) {
     const existingProduct = await this.prisma.products.findFirst({
-      where: { 
+      where: {
         id,
-        state: { not: ProductState.ARCHIVED }
-      }
+        state: { not: ProductState.ARCHIVED },
+      },
     });
 
     if (!existingProduct) {
@@ -421,7 +447,7 @@ export class ProductsService {
       data: {
         state: ProductState.INACTIVE,
         updated_at: new Date(),
-      }
+      },
     });
   }
 
@@ -433,12 +459,12 @@ export class ProductsService {
 
       // Verificar si tiene órdenes relacionadas
       const relatedOrders = await this.prisma.order_items.count({
-        where: { product_id: id }
+        where: { product_id: id },
       });
 
       if (relatedOrders > 0) {
         throw new BadRequestException(
-          'No se puede eliminar el producto porque tiene órdenes relacionadas. Use borrado lógico.'
+          'No se puede eliminar el producto porque tiene órdenes relacionadas. Use borrado lógico.',
         );
       }
 
@@ -449,7 +475,7 @@ export class ProductsService {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
-            'No se puede eliminar el producto porque tiene datos relacionados'
+            'No se puede eliminar el producto porque tiene datos relacionados',
           );
         }
       }
@@ -460,9 +486,9 @@ export class ProductsService {
   // Obtener productos por tienda (solo activos)
   async getProductsByStore(storeId: number) {
     return await this.prisma.products.findMany({
-      where: { 
+      where: {
         store_id: storeId,
-        state: ProductState.ACTIVE
+        state: ProductState.ACTIVE,
       },
       include: {
         brands: true,
@@ -474,8 +500,8 @@ export class ProductsService {
           select: {
             product_variants: true,
             reviews: true,
-          }
-        }
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -486,10 +512,10 @@ export class ProductsService {
     try {
       // Verificar que el producto existe y está activo
       const product = await this.prisma.products.findFirst({
-        where: { 
+        where: {
           id: createVariantDto.product_id,
-          state: ProductState.ACTIVE
-        }
+          state: ProductState.ACTIVE,
+        },
       });
 
       if (!product) {
@@ -498,7 +524,7 @@ export class ProductsService {
 
       // Verificar que el SKU sea único
       const existingSku = await this.prisma.product_variants.findUnique({
-        where: { sku: createVariantDto.sku }
+        where: { sku: createVariantDto.sku },
       });
 
       if (existingSku) {
@@ -513,7 +539,7 @@ export class ProductsService {
         include: {
           products: true,
           product_images: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -525,10 +551,13 @@ export class ProductsService {
     }
   }
 
-  async updateVariant(variantId: number, updateVariantDto: UpdateProductVariantDto) {
+  async updateVariant(
+    variantId: number,
+    updateVariantDto: UpdateProductVariantDto,
+  ) {
     try {
       const existingVariant = await this.prisma.product_variants.findUnique({
-        where: { id: variantId }
+        where: { id: variantId },
       });
 
       if (!existingVariant) {
@@ -540,7 +569,7 @@ export class ProductsService {
           where: {
             sku: updateVariantDto.sku,
             NOT: { id: variantId },
-          }
+          },
         });
 
         if (existingSku) {
@@ -557,7 +586,7 @@ export class ProductsService {
         include: {
           products: true,
           product_images: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -571,7 +600,7 @@ export class ProductsService {
 
   async removeVariant(variantId: number) {
     const existingVariant = await this.prisma.product_variants.findUnique({
-      where: { id: variantId }
+      where: { id: variantId },
     });
 
     if (!existingVariant) {
@@ -579,7 +608,7 @@ export class ProductsService {
     }
 
     return await this.prisma.product_variants.delete({
-      where: { id: variantId }
+      where: { id: variantId },
     });
   }
 
@@ -587,10 +616,10 @@ export class ProductsService {
   async addImage(productId: number, imageDto: ProductImageDto) {
     // Verificar que el producto existe y está activo
     const product = await this.prisma.products.findFirst({
-      where: { 
+      where: {
         id: productId,
-        state: ProductState.ACTIVE
-      }
+        state: ProductState.ACTIVE,
+      },
     });
 
     if (!product) {
@@ -601,7 +630,7 @@ export class ProductsService {
     if (imageDto.is_main) {
       await this.prisma.product_images.updateMany({
         where: { product_id: productId },
-        data: { is_main: false }
+        data: { is_main: false },
       });
     }
 
@@ -609,13 +638,13 @@ export class ProductsService {
       data: {
         product_id: productId,
         ...imageDto,
-      }
+      },
     });
   }
 
   async removeImage(imageId: number) {
     const existingImage = await this.prisma.product_images.findUnique({
-      where: { id: imageId }
+      where: { id: imageId },
     });
 
     if (!existingImage) {
@@ -623,7 +652,7 @@ export class ProductsService {
     }
 
     return await this.prisma.product_images.delete({
-      where: { id: imageId }
+      where: { id: imageId },
     });
   }
 }

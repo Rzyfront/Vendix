@@ -11,14 +11,16 @@ export interface JwtPayload {
 }
 
 @Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy) {  constructor(
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
     private configService: ConfigService,
     private prismaService: PrismaService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET') || 'fallback-secret-key',
+      secretOrKey:
+        configService.get<string>('JWT_SECRET') || 'fallback-secret-key',
     });
   }
   async validate(payload: JwtPayload) {
@@ -51,7 +53,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {  constructor(
 
     if (user.locked_until && user.locked_until > new Date()) {
       throw new UnauthorizedException('Cuenta bloqueada temporalmente');
-    }    // Retornamos el usuario con roles y permisos
+    } // Retornamos el usuario con roles y permisos
     return {
       id: user.id,
       email: user.email,
@@ -59,12 +61,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {  constructor(
       lastName: user.last_name,
       fullName: `${user.first_name} ${user.last_name}`,
       roles: user.user_roles.map((ur) => ur.roles?.name || ''),
-      permissions: user.user_roles.flatMap((ur) =>
-        ur.roles?.role_permissions?.map((rp) => ({
-          path: rp.permissions?.path || '',
-          method: rp.permissions?.method || '',
-          status: rp.permissions?.status || '',
-        })) || [],
+      permissions: user.user_roles.flatMap(
+        (ur) =>
+          ur.roles?.role_permissions?.map((rp) => ({
+            path: rp.permissions?.path || '',
+            method: rp.permissions?.method || '',
+            status: rp.permissions?.status || '',
+          })) || [],
       ),
     };
   }

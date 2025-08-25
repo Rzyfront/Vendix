@@ -74,11 +74,11 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any, @Body() body?: { refresh_token?: string }) {
-    const result = await this.authService.logout(
-      user.id,
-      body?.refresh_token,
-    );
+  async logout(
+    @CurrentUser() user: any,
+    @Body() body?: { refresh_token?: string },
+  ) {
+    const result = await this.authService.logout(user.id, body?.refresh_token);
 
     return {
       message: result.message,
@@ -109,7 +109,9 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {
-    const result = await this.authService.resendEmailVerification(resendDto.email);
+    const result = await this.authService.resendEmailVerification(
+      resendDto.email,
+    );
 
     return {
       message: result.message,
@@ -130,8 +132,13 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
-  async resetPassword(@Body() resetDto: { token: string; newPassword: string }) {
-    const result = await this.authService.resetPassword(resetDto.token, resetDto.newPassword);
+  async resetPassword(
+    @Body() resetDto: { token: string; newPassword: string },
+  ) {
+    const result = await this.authService.resetPassword(
+      resetDto.token,
+      resetDto.newPassword,
+    );
 
     return {
       message: result.message,
@@ -141,8 +148,15 @@ export class AuthController {
   @Post('change-password')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async changePassword(@CurrentUser() user: any, @Body() changeDto: { currentPassword: string; newPassword: string }) {
-    const result = await this.authService.changePassword(user.id, changeDto.currentPassword, changeDto.newPassword);
+  async changePassword(
+    @CurrentUser() user: any,
+    @Body() changeDto: { currentPassword: string; newPassword: string },
+  ) {
+    const result = await this.authService.changePassword(
+      user.id,
+      changeDto.currentPassword,
+      changeDto.newPassword,
+    );
 
     return {
       message: result.message,
@@ -165,14 +179,20 @@ export class AuthController {
   @Post('onboarding/create-organization')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
-  async createOrganizationOnboarding(@CurrentUser() user: any, @Body() organizationData: any) {
-    const result = await this.authService.createOrganizationDuringOnboarding(user.id, organizationData);
+  async createOrganizationOnboarding(
+    @CurrentUser() user: any,
+    @Body() organizationData: any,
+  ) {
+    const result = await this.authService.createOrganizationDuringOnboarding(
+      user.id,
+      organizationData,
+    );
 
     return {
       message: result.message,
       data: {
         organization: result.organization,
-        nextStep: result.nextStep
+        nextStep: result.nextStep,
       },
     };
   }
@@ -181,16 +201,20 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async setupOrganization(
-    @CurrentUser() user: any, 
+    @CurrentUser() user: any,
     @Param('organizationId') organizationId: string,
-    @Body() setupData: any
+    @Body() setupData: any,
   ) {
-    const result = await this.authService.setupOrganization(user.id, parseInt(organizationId), setupData);
+    const result = await this.authService.setupOrganization(
+      user.id,
+      parseInt(organizationId),
+      setupData,
+    );
 
     return {
       message: result.message,
       data: {
-        nextStep: result.nextStep
+        nextStep: result.nextStep,
       },
     };
   }
@@ -199,17 +223,21 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async createStoreOnboarding(
-    @CurrentUser() user: any, 
+    @CurrentUser() user: any,
     @Param('organizationId') organizationId: string,
-    @Body() storeData: any
+    @Body() storeData: any,
   ) {
-    const result = await this.authService.createStoreDuringOnboarding(user.id, parseInt(organizationId), storeData);
+    const result = await this.authService.createStoreDuringOnboarding(
+      user.id,
+      parseInt(organizationId),
+      storeData,
+    );
 
     return {
       message: result.message,
       data: {
         store: result.store,
-        nextStep: result.nextStep
+        nextStep: result.nextStep,
       },
     };
   }
@@ -218,16 +246,20 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async setupStore(
-    @CurrentUser() user: any, 
+    @CurrentUser() user: any,
     @Param('storeId') storeId: string,
-    @Body() setupData: any
+    @Body() setupData: any,
   ) {
-    const result = await this.authService.setupStore(user.id, parseInt(storeId), setupData);
+    const result = await this.authService.setupStore(
+      user.id,
+      parseInt(storeId),
+      setupData,
+    );
 
     return {
       message: result.message,
       data: {
-        nextStep: result.nextStep
+        nextStep: result.nextStep,
       },
     };
   }

@@ -11,7 +11,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { StoresService } from './stores.service';
-import { CreateStoreDto, UpdateStoreDto, StoreQueryDto, AddStaffToStoreDto, UpdateStoreSettingsDto } from './dto';
+import {
+  CreateStoreDto,
+  UpdateStoreDto,
+  StoreQueryDto,
+  AddStaffToStoreDto,
+  UpdateStoreSettingsDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../../auth/guards';
 import { Roles, RequirePermissions, CurrentUser } from '../../auth/decorators';
 
@@ -46,7 +52,7 @@ export class StoresController {
   @RequirePermissions('stores.read')
   findBySlug(
     @Param('organizationId', ParseIntPipe) organizationId: number,
-    @Param('slug') slug: string
+    @Param('slug') slug: string,
   ) {
     return this.storesService.findBySlug(organizationId, slug);
   }
@@ -54,7 +60,9 @@ export class StoresController {
   @Get('organization/:organizationId')
   @UseGuards(PermissionsGuard)
   @RequirePermissions('stores.read')
-  getStoresByOrganization(@Param('organizationId', ParseIntPipe) organizationId: number) {
+  getStoresByOrganization(
+    @Param('organizationId', ParseIntPipe) organizationId: number,
+  ) {
     return this.storesService.getStoresByOrganization(organizationId);
   }
 

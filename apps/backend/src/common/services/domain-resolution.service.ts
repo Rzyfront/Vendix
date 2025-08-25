@@ -26,17 +26,19 @@ export class DomainResolutionService {
 
     const domainConfig = await this.prisma.domain_settings.findUnique({
       where: {
-        hostname: hostname
-      }
+        hostname: hostname,
+      },
     });
 
     if (!domainConfig) {
       this.logger.warn(`Domain not found: ${hostname}`);
-      throw new NotFoundException(`Domain configuration not found for hostname: ${hostname}`);
+      throw new NotFoundException(
+        `Domain configuration not found for hostname: ${hostname}`,
+      );
     }
 
     this.logger.log(`Found domain configuration for: ${hostname}`);
-    
+
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
@@ -44,7 +46,7 @@ export class DomainResolutionService {
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
-      updatedAt: domainConfig.updated_at?.toISOString() || ''
+      updatedAt: domainConfig.updated_at?.toISOString() || '',
     };
   }
 
@@ -53,17 +55,17 @@ export class DomainResolutionService {
    */
   async getAllDomainConfigs(): Promise<DomainResolutionResponse[]> {
     const domains = await this.prisma.domain_settings.findMany({
-      orderBy: { hostname: 'asc' }
+      orderBy: { hostname: 'asc' },
     });
 
-    return domains.map(domain => ({
+    return domains.map((domain) => ({
       id: domain.id,
       hostname: domain.hostname,
       organizationId: domain.organization_id,
       storeId: domain.store_id || undefined,
       config: domain.config,
       createdAt: domain.created_at?.toISOString() || '',
-      updatedAt: domain.updated_at?.toISOString() || ''
+      updatedAt: domain.updated_at?.toISOString() || '',
     }));
   }
 
@@ -81,8 +83,8 @@ export class DomainResolutionService {
         hostname: data.hostname,
         organization_id: data.organizationId,
         store_id: data.storeId,
-        config: data.config
-      }
+        config: data.config,
+      },
     });
 
     return {
@@ -92,17 +94,20 @@ export class DomainResolutionService {
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
-      updatedAt: domainConfig.updated_at?.toISOString() || ''
+      updatedAt: domainConfig.updated_at?.toISOString() || '',
     };
   }
 
   /**
    * Actualiza una configuración de dominio
    */
-  async updateDomainConfig(hostname: string, config: any): Promise<DomainResolutionResponse> {
+  async updateDomainConfig(
+    hostname: string,
+    config: any,
+  ): Promise<DomainResolutionResponse> {
     const domainConfig = await this.prisma.domain_settings.update({
       where: { hostname },
-      data: { config }
+      data: { config },
     });
 
     return {
@@ -112,7 +117,7 @@ export class DomainResolutionService {
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
-      updatedAt: domainConfig.updated_at?.toISOString() || ''
+      updatedAt: domainConfig.updated_at?.toISOString() || '',
     };
   }
 
@@ -121,9 +126,9 @@ export class DomainResolutionService {
    */
   async deleteDomainConfig(hostname: string): Promise<void> {
     await this.prisma.domain_settings.delete({
-      where: { hostname }
+      where: { hostname },
     });
-    
+
     this.logger.log(`Domain configuration deleted: ${hostname}`);
   }
 }

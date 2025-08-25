@@ -48,7 +48,9 @@ export class CategoriesService {
       return category;
     } catch (error) {
       if (error.code === 'P2002') {
-        throw new ConflictException('Category slug already exists in this store');
+        throw new ConflictException(
+          'Category slug already exists in this store',
+        );
       }
       throw error;
     }
@@ -173,15 +175,15 @@ export class CategoriesService {
 
     // Build update data
     const updateData: any = {};
-    
+
     if (updateCategoryDto.name) {
       updateData.name = updateCategoryDto.name;
     }
-    
+
     if (updateCategoryDto.description !== undefined) {
       updateData.description = updateCategoryDto.description;
     }
-    
+
     if (updateCategoryDto.image_url !== undefined) {
       updateData.image_url = updateCategoryDto.image_url;
     }
@@ -209,7 +211,9 @@ export class CategoriesService {
       return updatedCategory;
     } catch (error) {
       if (error.code === 'P2002') {
-        throw new ConflictException('Category slug already exists in this store');
+        throw new ConflictException(
+          'Category slug already exists in this store',
+        );
       }
       throw error;
     }
@@ -307,7 +311,9 @@ export class CategoriesService {
     });
 
     if (existingAssignment) {
-      throw new ConflictException('Product is already assigned to this category');
+      throw new ConflictException(
+        'Product is already assigned to this category',
+      );
     }
 
     const assignment = await this.prisma.product_categories.create({
@@ -375,8 +381,8 @@ export class CategoriesService {
           select: { id: true, name: true },
         },
         _count: {
-          select: { 
-            product_categories: true 
+          select: {
+            product_categories: true,
           },
         },
       },
@@ -384,7 +390,7 @@ export class CategoriesService {
 
     // Build a simple tree structure (assuming flat structure for now)
     return {
-      data: categories.map(category => ({
+      data: categories.map((category) => ({
         ...category,
         children: [], // Categories don't have parent_id in the schema, so flat structure
         product_count: category._count.product_categories,

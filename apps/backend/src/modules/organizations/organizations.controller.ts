@@ -12,7 +12,12 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
-import { CreateOrganizationDto, UpdateOrganizationDto, OrganizationQueryDto, AddUserToOrganizationDto } from './dto';
+import {
+  CreateOrganizationDto,
+  UpdateOrganizationDto,
+  OrganizationQueryDto,
+  AddUserToOrganizationDto,
+} from './dto';
 import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../../auth/guards';
 import { Roles, RequirePermissions, CurrentUser } from '../../auth/decorators';
 
@@ -24,7 +29,10 @@ export class OrganizationsController {
   @Post()
   @UseGuards(PermissionsGuard)
   @RequirePermissions('organizations.create')
-  create(@Body() createOrganizationDto: CreateOrganizationDto, @CurrentUser() user: any) {
+  create(
+    @Body() createOrganizationDto: CreateOrganizationDto,
+    @CurrentUser() user: any,
+  ) {
     return this.organizationsService.create(createOrganizationDto);
   }
 
@@ -90,7 +98,11 @@ export class OrganizationsController {
     @Param('userId', ParseIntPipe) userId: number,
     @Param('roleId', ParseIntPipe) roleId: number,
   ) {
-    return this.organizationsService.removeUserFromOrganization(organizationId, userId, roleId);
+    return this.organizationsService.removeUserFromOrganization(
+      organizationId,
+      userId,
+      roleId,
+    );
   }
 
   @Get(':id/users')

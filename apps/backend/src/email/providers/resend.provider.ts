@@ -1,6 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EmailProvider, EmailResult, EmailConfig } from '../interfaces/email.interface';
-import { EmailTemplates, EmailTemplateData } from '../templates/email-templates';
+import {
+  EmailProvider,
+  EmailResult,
+  EmailConfig,
+} from '../interfaces/email.interface';
+import {
+  EmailTemplates,
+  EmailTemplateData,
+} from '../templates/email-templates';
 
 @Injectable()
 export class ResendProvider implements EmailProvider {
@@ -23,7 +30,12 @@ export class ResendProvider implements EmailProvider {
     }
   }
 
-  async sendEmail(to: string, subject: string, html: string, text?: string): Promise<EmailResult> {
+  async sendEmail(
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+  ): Promise<EmailResult> {
     try {
       const result = await this.resend.emails.send({
         from: `${this.config.fromName} <${this.config.fromEmail}>`,
@@ -37,46 +49,56 @@ export class ResendProvider implements EmailProvider {
         this.logger.error('Resend email error:', result.error);
         return {
           success: false,
-          error: result.error.message || 'Failed to send email'
+          error: result.error.message || 'Failed to send email',
         };
       }
 
-      this.logger.log(`Email sent successfully to ${to}, ID: ${result.data?.id}`);
+      this.logger.log(
+        `Email sent successfully to ${to}, ID: ${result.data?.id}`,
+      );
       return {
         success: true,
-        messageId: result.data?.id
+        messageId: result.data?.id,
       };
     } catch (error) {
       this.logger.error('Resend send error:', error);
       return {
         success: false,
-        error: error.message || 'Failed to send email'
+        error: error.message || 'Failed to send email',
       };
     }
   }
 
-  async sendVerificationEmail(to: string, token: string, username: string): Promise<EmailResult> {
+  async sendVerificationEmail(
+    to: string,
+    token: string,
+    username: string,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
-      year: new Date().getFullYear()
+      year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getVerificationTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendPasswordResetEmail(to: string, token: string, username: string): Promise<EmailResult> {
+  async sendPasswordResetEmail(
+    to: string,
+    token: string,
+    username: string,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
-      year: new Date().getFullYear()
+      year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getPasswordResetTemplate(templateData);
@@ -89,21 +111,25 @@ export class ResendProvider implements EmailProvider {
       email: to,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
-      year: new Date().getFullYear()
+      year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getWelcomeTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendOnboardingEmail(to: string, username: string, step: string): Promise<EmailResult> {
+  async sendOnboardingEmail(
+    to: string,
+    username: string,
+    step: string,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData & { step: string } = {
       username,
       email: to,
       step,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
-      year: new Date().getFullYear()
+      year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getOnboardingTemplate(templateData);

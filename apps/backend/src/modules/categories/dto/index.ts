@@ -163,5 +163,3 @@ export class CategoryTreeDto {
   children?: CategoryTreeDto[];
   product_count?: number;
 }
-
-

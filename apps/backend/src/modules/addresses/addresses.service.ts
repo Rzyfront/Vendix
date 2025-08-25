@@ -22,7 +22,9 @@ export class AddressesService {
   async create(createAddressDto: CreateAddressDto, user: any) {
     // Validate that either customer_id or store_id is provided
     if (!createAddressDto.customer_id && !createAddressDto.store_id) {
-      throw new BadRequestException('Either customer_id or store_id must be provided');
+      throw new BadRequestException(
+        'Either customer_id or store_id must be provided',
+      );
     }
 
     // Validate access
@@ -36,7 +38,7 @@ export class AddressesService {
     // Handle default address logic
     if (createAddressDto.is_default) {
       await this.unsetOtherDefaults(createAddressDto);
-    }    // Map DTO fields to schema fields
+    } // Map DTO fields to schema fields
     const addressData: Prisma.addressesUncheckedCreateInput = {
       address_line1: createAddressDto.address_line_1,
       address_line2: createAddressDto.address_line_2,
@@ -46,8 +48,12 @@ export class AddressesService {
       country_code: createAddressDto.country,
       type: createAddressDto.type as any,
       is_primary: createAddressDto.is_default,
-      latitude: createAddressDto.latitude ? parseFloat(createAddressDto.latitude) : null,
-      longitude: createAddressDto.longitude ? parseFloat(createAddressDto.longitude) : null,
+      latitude: createAddressDto.latitude
+        ? parseFloat(createAddressDto.latitude)
+        : null,
+      longitude: createAddressDto.longitude
+        ? parseFloat(createAddressDto.longitude)
+        : null,
       customer_id: createAddressDto.customer_id,
       store_id: createAddressDto.store_id,
     };
@@ -56,7 +62,14 @@ export class AddressesService {
       return await this.prisma.addresses.create({
         data: addressData,
         include: {
-          customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+          customers: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
           stores: { select: { id: true, name: true } },
         },
       });
@@ -87,7 +100,7 @@ export class AddressesService {
     } = query;
 
     const skip = (page - 1) * limit;
-  const where: Prisma.addressesWhereInput = {};
+    const where: Prisma.addressesWhereInput = {};
 
     if (search) {
       where.OR = [
@@ -111,7 +124,8 @@ export class AddressesService {
     if (is_default !== undefined) where.is_primary = is_default;
     if (city) where.city = { contains: city, mode: 'insensitive' };
     if (state) where.state_province = { contains: state, mode: 'insensitive' };
-    if (country) where.country_code = { contains: country, mode: 'insensitive' };
+    if (country)
+      where.country_code = { contains: country, mode: 'insensitive' };
 
     const [addresses, total] = await Promise.all([
       this.prisma.addresses.findMany({
@@ -120,7 +134,14 @@ export class AddressesService {
         take: limit,
         orderBy: { [sort_by]: sort_order },
         include: {
-          customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+          customers: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
           stores: { select: { id: true, name: true } },
         },
       }),
@@ -137,7 +158,9 @@ export class AddressesService {
     const address = await this.prisma.addresses.findFirst({
       where: { id },
       include: {
-        customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+        customers: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
         stores: { select: { id: true, name: true } },
       },
     });
@@ -163,7 +186,9 @@ export class AddressesService {
     return await this.prisma.addresses.findMany({
       where: { customer_id: customerId },
       include: {
-        customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+        customers: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
       },
       orderBy: { is_primary: 'desc' },
     });
@@ -182,7 +207,7 @@ export class AddressesService {
   }
 
   async getDefaultAddress(customerId?: number, storeId?: number, user?: any) {
-  const where: Prisma.addressesWhereInput = {
+    const where: Prisma.addressesWhereInput = {
       is_primary: true,
     };
 
@@ -198,7 +223,9 @@ export class AddressesService {
     const address = await this.prisma.addresses.findFirst({
       where,
       include: {
-        customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+        customers: {
+          select: { id: true, first_name: true, last_name: true, email: true },
+        },
         stores: { select: { id: true, name: true } },
       },
     });
@@ -215,27 +242,43 @@ export class AddressesService {
 
     // Handle default address logic
     if (updateAddressDto.is_default) {
-      await this.unsetOtherDefaults({
-        customer_id: address.customer_id || undefined,
-        store_id: address.store_id || undefined,
-      }, id);
-    }    // Map DTO fields to schema fields
+      await this.unsetOtherDefaults(
+        {
+          customer_id: address.customer_id || undefined,
+          store_id: address.store_id || undefined,
+        },
+        id,
+      );
+    } // Map DTO fields to schema fields
     const updateData: any = {};
-    if (updateAddressDto.address_line_1) updateData.address_line1 = updateAddressDto.address_line_1;
-    if (updateAddressDto.address_line_2) updateData.address_line2 = updateAddressDto.address_line_2;
+    if (updateAddressDto.address_line_1)
+      updateData.address_line1 = updateAddressDto.address_line_1;
+    if (updateAddressDto.address_line_2)
+      updateData.address_line2 = updateAddressDto.address_line_2;
     if (updateAddressDto.city) updateData.city = updateAddressDto.city;
-    if (updateAddressDto.state) updateData.state_province = updateAddressDto.state;
-    if (updateAddressDto.postal_code) updateData.postal_code = updateAddressDto.postal_code;
-    if (updateAddressDto.country) updateData.country_code = updateAddressDto.country;
+    if (updateAddressDto.state)
+      updateData.state_province = updateAddressDto.state;
+    if (updateAddressDto.postal_code)
+      updateData.postal_code = updateAddressDto.postal_code;
+    if (updateAddressDto.country)
+      updateData.country_code = updateAddressDto.country;
     if (updateAddressDto.type) updateData.type = updateAddressDto.type;
-    if (updateAddressDto.is_default !== undefined) updateData.is_primary = updateAddressDto.is_default;
+    if (updateAddressDto.is_default !== undefined)
+      updateData.is_primary = updateAddressDto.is_default;
 
     try {
       return await this.prisma.addresses.update({
         where: { id },
         data: updateData,
         include: {
-          customers: { select: { id: true, first_name: true, last_name: true, email: true } },
+          customers: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
           stores: { select: { id: true, name: true } },
         },
       });
@@ -249,7 +292,11 @@ export class AddressesService {
     }
   }
 
-  async updateGPSCoordinates(id: number, gpsData: UpdateGPSCoordinatesDto, user: any) {
+  async updateGPSCoordinates(
+    id: number,
+    gpsData: UpdateGPSCoordinatesDto,
+    user: any,
+  ) {
     await this.findOne(id, user); // Validates access
 
     return await this.prisma.addresses.update({
@@ -265,10 +312,13 @@ export class AddressesService {
     const address = await this.findOne(id, user);
 
     // Unset other defaults
-    await this.unsetOtherDefaults({
-      customer_id: address.customer_id || undefined,
-      store_id: address.store_id || undefined,
-    }, id);
+    await this.unsetOtherDefaults(
+      {
+        customer_id: address.customer_id || undefined,
+        store_id: address.store_id || undefined,
+      },
+      id,
+    );
 
     return await this.prisma.addresses.update({
       where: { id },
@@ -297,15 +347,14 @@ export class AddressesService {
     // Check if address is used in orders
     const orderCount = await this.prisma.orders.count({
       where: {
-        OR: [
-          { billing_address_id: id },
-          { shipping_address_id: id },
-        ],
+        OR: [{ billing_address_id: id }, { shipping_address_id: id }],
       },
     });
 
     if (orderCount > 0) {
-      throw new BadRequestException('Cannot delete address that is used in orders');
+      throw new BadRequestException(
+        'Cannot delete address that is used in orders',
+      );
     }
 
     try {
@@ -314,7 +363,9 @@ export class AddressesService {
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
-          throw new BadRequestException('Cannot delete address due to related data constraints');
+          throw new BadRequestException(
+            'Cannot delete address due to related data constraints',
+          );
         }
       }
       throw error;
@@ -338,10 +389,10 @@ export class AddressesService {
 
   private async validateStoreAccess(storeId: number, user: any) {
     const storeAccess = await this.prisma.store_staff.findFirst({
-      where: { 
-        store_id: storeId, 
-        user_id: user.id, 
-        is_active: true 
+      where: {
+        store_id: storeId,
+        user_id: user.id,
+        is_active: true,
       },
     });
 
@@ -354,7 +405,7 @@ export class AddressesService {
     criteria: { customer_id?: number; store_id?: number },
     excludeId?: number,
   ) {
-  const where: Prisma.addressesWhereInput = {
+    const where: Prisma.addressesWhereInput = {
       is_primary: true,
     };
 

@@ -10,13 +10,14 @@ export interface EmailTemplateData {
 }
 
 export class EmailTemplates {
-  private static readonly BASE_URL = process.env.FRONTEND_URL || 'http://localhost:4200';
+  private static readonly BASE_URL =
+    process.env.FRONTEND_URL || 'http://localhost:4200';
   private static readonly COMPANY_NAME = 'Vendix';
   private static readonly SUPPORT_EMAIL = 'soporte@vendix.com';
 
   static getVerificationTemplate(data: EmailTemplateData) {
     const verificationUrl = `${this.BASE_URL}/auth/verify-email?token=${data.token}`;
-    
+
     return {
       subject: `¡Verifica tu cuenta en ${this.COMPANY_NAME}!`,
       html: `
@@ -85,13 +86,13 @@ export class EmailTemplates {
         Saludos,
         El equipo de ${this.COMPANY_NAME}
         ${this.SUPPORT_EMAIL}
-      `
+      `,
     };
   }
 
   static getPasswordResetTemplate(data: EmailTemplateData) {
     const resetUrl = `${this.BASE_URL}/auth/reset-password?token=${data.token}`;
-    
+
     return {
       subject: `Restablece tu contraseña en ${this.COMPANY_NAME}`,
       html: `
@@ -161,13 +162,13 @@ export class EmailTemplates {
         Saludos,
         El equipo de ${this.COMPANY_NAME}
         ${this.SUPPORT_EMAIL}
-      `
+      `,
     };
   }
 
   static getWelcomeTemplate(data: EmailTemplateData) {
     const dashboardUrl = `${this.BASE_URL}/dashboard`;
-    
+
     return {
       subject: `¡Bienvenido a ${this.COMPANY_NAME}! 🎉`,
       html: `
@@ -244,33 +245,36 @@ export class EmailTemplates {
 
         ¡Bienvenido al equipo!
         ${this.COMPANY_NAME}
-      `
+      `,
     };
   }
 
   static getOnboardingTemplate(data: EmailTemplateData & { step: string }) {
     const dashboardUrl = `${this.BASE_URL}/onboarding`;
-    
+
     const stepMessages = {
-      'create_organization': {
+      create_organization: {
         title: '🏢 Configura tu Organización',
-        message: 'El siguiente paso es configurar tu organización con tus datos de negocio.',
-        action: 'Configurar Organización'
+        message:
+          'El siguiente paso es configurar tu organización con tus datos de negocio.',
+        action: 'Configurar Organización',
       },
-      'create_store': {
+      create_store: {
         title: '🏪 Crea tu Primera Tienda',
         message: 'Ahora puedes crear tu primera tienda y comenzar a vender.',
-        action: 'Crear Tienda'
+        action: 'Crear Tienda',
       },
-      'setup_store': {
+      setup_store: {
         title: '⚙️ Configura tu Tienda',
-        message: 'Configura tu tienda con inventario, métodos de pago y envíos.',
-        action: 'Configurar Tienda'
-      }
+        message:
+          'Configura tu tienda con inventario, métodos de pago y envíos.',
+        action: 'Configurar Tienda',
+      },
     };
 
-    const stepInfo = stepMessages[data.step] || stepMessages['create_organization'];
-    
+    const stepInfo =
+      stepMessages[data.step] || stepMessages['create_organization'];
+
     return {
       subject: `${stepInfo.title} - Continúa configurando ${this.COMPANY_NAME}`,
       html: `
@@ -338,7 +342,7 @@ export class EmailTemplates {
         Saludos,
         El equipo de ${this.COMPANY_NAME}
         ${this.SUPPORT_EMAIL}
-      `
+      `,
     };
   }
 }

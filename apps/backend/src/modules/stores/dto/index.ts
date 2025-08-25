@@ -1,4 +1,19 @@
-import { IsString, IsEmail, IsOptional, IsEnum, IsUrl, MaxLength, MinLength, IsInt, IsBoolean, IsObject, IsIn, IsDecimal, IsArray, IsJSON } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  IsEnum,
+  IsUrl,
+  MaxLength,
+  MinLength,
+  IsInt,
+  IsBoolean,
+  IsObject,
+  IsIn,
+  IsDecimal,
+  IsArray,
+  IsJSON,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export enum StoreType {

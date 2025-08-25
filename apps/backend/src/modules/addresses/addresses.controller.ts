@@ -31,7 +31,10 @@ export class AddressesController {
 
   @Post()
   @Permissions('addresses:create')
-  async create(@Body() createAddressDto: CreateAddressDto, @CurrentUser() user: any) {
+  async create(
+    @Body() createAddressDto: CreateAddressDto,
+    @CurrentUser() user: any,
+  ) {
     return this.addressesService.create(createAddressDto, user);
   }
   @Get()
@@ -60,13 +63,17 @@ export class AddressesController {
 
   @Get('default/customer/:customerId')
   @Permissions('addresses:read')
-  async getCustomerDefaultAddress(@Param('customerId', ParseIntPipe) customerId: number) {
+  async getCustomerDefaultAddress(
+    @Param('customerId', ParseIntPipe) customerId: number,
+  ) {
     return this.addressesService.getDefaultAddress(customerId);
   }
 
   @Get('default/store/:storeId')
   @Permissions('addresses:read')
-  async getStoreDefaultAddress(@Param('storeId', ParseIntPipe) storeId: number) {
+  async getStoreDefaultAddress(
+    @Param('storeId', ParseIntPipe) storeId: number,
+  ) {
     return this.addressesService.getDefaultAddress(undefined, storeId);
   }
 
@@ -103,27 +110,39 @@ export class AddressesController {
 
   @Patch(':id/set-default')
   @Permissions('addresses:update')
-  async setAsDefault(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async setAsDefault(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.addressesService.setAsDefault(id, user);
   }
 
   @Patch(':id/activate')
   @Permissions('addresses:update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.addressesService.activate(id, user);
   }
 
   @Patch(':id/deactivate')
   @Permissions('addresses:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.addressesService.deactivate(id, user);
   }
 
   @Delete(':id')
   @Permissions('addresses:admin_delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.addressesService.remove(id, user);
   }
 }

@@ -68,7 +68,8 @@ export class UsersController {
   ) {
     return this.usersService.findByUsername(username, {
       includeInactive: includeInactive === 'true',
-    });  }
+    });
+  }
 
   @Patch(':id')
   @RequirePermissions('users.update')
@@ -82,20 +83,29 @@ export class UsersController {
 
   @Patch(':id/activate')
   @RequirePermissions('users.update')
-  async activate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async activate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.usersService.activate(id);
   }
 
   @Patch(':id/deactivate')
   @RequirePermissions('users.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async deactivate(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.usersService.deactivate(id);
   }
 
   @Patch(':id/verify-email')
   @RequirePermissions('users.update')
-  async verifyEmail(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async verifyEmail(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.usersService.verifyEmail(id);
   }
 
@@ -112,7 +122,10 @@ export class UsersController {
 
   @Patch(':id/unlock')
   @RequirePermissions('users.lock')
-  async unlockUser(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async unlockUser(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.usersService.unlockUser(id);
   }
 
@@ -120,7 +133,10 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles('super_admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: any,
+  ) {
     return this.usersService.remove(id);
   }
 }

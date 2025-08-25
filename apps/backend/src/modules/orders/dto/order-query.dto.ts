@@ -1,4 +1,11 @@
-import { IsOptional, IsString, IsInt, Min, IsEnum, IsDateString } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  Min,
+  IsEnum,
+  IsDateString,
+} from 'class-validator';
 import { order_state_enum, payments_state_enum } from '@prisma/client';
 import { Transform } from 'class-transformer';
 

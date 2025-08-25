@@ -1,6 +1,15 @@
-import { Injectable, ConflictException, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateDomainSettingDto, UpdateDomainSettingDto } from '../dto/domain-settings.dto';
+import {
+  CreateDomainSettingDto,
+  UpdateDomainSettingDto,
+} from '../dto/domain-settings.dto';
 
 export interface DomainSettingResponse {
   id: number;
@@ -39,20 +48,24 @@ export class DomainSettingsService {
 
     // Verificar que no exista ya el hostname
     const existingDomain = await this.prisma.domain_settings.findUnique({
-      where: { hostname: data.hostname }
+      where: { hostname: data.hostname },
     });
 
     if (existingDomain) {
-      throw new ConflictException(`Domain configuration already exists for hostname: ${data.hostname}`);
+      throw new ConflictException(
+        `Domain configuration already exists for hostname: ${data.hostname}`,
+      );
     }
 
     // Verificar que la organización existe
     const organization = await this.prisma.organizations.findUnique({
-      where: { id: data.organizationId }
+      where: { id: data.organizationId },
     });
 
     if (!organization) {
-      throw new NotFoundException(`Organization with ID ${data.organizationId} not found`);
+      throw new NotFoundException(
+        `Organization with ID ${data.organizationId} not found`,
+      );
     }
 
     // Si se especifica storeId, verificar que la tienda existe y pertenece a la organización
@@ -60,12 +73,14 @@ export class DomainSettingsService {
       const store = await this.prisma.stores.findFirst({
         where: {
           id: data.storeId,
-          organization_id: data.organizationId
-        }
+          organization_id: data.organizationId,
+        },
       });
 
       if (!store) {
-        throw new NotFoundException(`Store with ID ${data.storeId} not found in organization ${data.organizationId}`);
+        throw new NotFoundException(
+          `Store with ID ${data.storeId} not found in organization ${data.organizationId}`,
+        );
       }
     }
 
@@ -75,28 +90,30 @@ export class DomainSettingsService {
         hostname: data.hostname,
         organization_id: data.organizationId,
         store_id: data.storeId,
-        config: data.config as any // Cast to any for JSON compatibility
+        config: data.config as any, // Cast to any for JSON compatibility
       },
       include: {
         organization: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
+            slug: true,
+          },
         },
         store: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
-        }
-      }
+            slug: true,
+          },
+        },
+      },
     });
 
-    this.logger.log(`Domain setting created successfully for hostname: ${data.hostname}`);
-    
+    this.logger.log(
+      `Domain setting created successfully for hostname: ${data.hostname}`,
+    );
+
     return this.mapToResponse(domainSetting);
   }
 
@@ -128,7 +145,7 @@ export class DomainSettingsService {
     if (filters?.search) {
       where.hostname = {
         contains: filters.search,
-        mode: 'insensitive'
+        mode: 'insensitive',
       };
     }
 
@@ -143,29 +160,29 @@ export class DomainSettingsService {
             select: {
               id: true,
               name: true,
-              slug: true
-            }
+              slug: true,
+            },
           },
           store: {
             select: {
               id: true,
               name: true,
-              slug: true
-            }
-          }
+              slug: true,
+            },
+          },
         },
         orderBy: { hostname: 'asc' },
         take: limit,
-        skip: offset
+        skip: offset,
       }),
-      this.prisma.domain_settings.count({ where })
+      this.prisma.domain_settings.count({ where }),
     ]);
 
     return {
-      data: domainSettings.map(ds => this.mapToResponse(ds)),
+      data: domainSettings.map((ds) => this.mapToResponse(ds)),
       total,
       limit,
-      offset
+      offset,
     };
   }
 
@@ -182,21 +199,23 @@ export class DomainSettingsService {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
+            slug: true,
+          },
         },
         store: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
-        }
-      }
+            slug: true,
+          },
+        },
+      },
     });
 
     if (!domainSetting) {
-      throw new NotFoundException(`Domain setting not found for hostname: ${hostname}`);
+      throw new NotFoundException(
+        `Domain setting not found for hostname: ${hostname}`,
+      );
     }
 
     return this.mapToResponse(domainSetting);
@@ -215,17 +234,17 @@ export class DomainSettingsService {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
+            slug: true,
+          },
         },
         store: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
-        }
-      }
+            slug: true,
+          },
+        },
+      },
     });
 
     if (!domainSetting) {
@@ -238,7 +257,10 @@ export class DomainSettingsService {
   /**
    * Actualiza una configuración de dominio
    */
-  async update(hostname: string, data: UpdateDomainSettingDto): Promise<DomainSettingResponse> {
+  async update(
+    hostname: string,
+    data: UpdateDomainSettingDto,
+  ): Promise<DomainSettingResponse> {
     this.logger.log(`Updating domain setting for hostname: ${hostname}`);
 
     // Verificar que el dominio existe
@@ -248,39 +270,44 @@ export class DomainSettingsService {
       where: { hostname },
       data: {
         config: data.config as any, // Cast to any for JSON compatibility
-        updated_at: new Date()
+        updated_at: new Date(),
       },
       include: {
         organization: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
+            slug: true,
+          },
         },
         store: {
           select: {
             id: true,
             name: true,
-            slug: true
-          }
-        }
-      }
+            slug: true,
+          },
+        },
+      },
     });
 
-    this.logger.log(`Domain setting updated successfully for hostname: ${hostname}`);
-    
+    this.logger.log(
+      `Domain setting updated successfully for hostname: ${hostname}`,
+    );
+
     return this.mapToResponse(domainSetting);
   }
 
   /**
    * Actualiza parcialmente la configuración de un dominio
    */
-  async updateConfig(hostname: string, configUpdates: any): Promise<DomainSettingResponse> {
+  async updateConfig(
+    hostname: string,
+    configUpdates: any,
+  ): Promise<DomainSettingResponse> {
     this.logger.log(`Updating config for domain: ${hostname}`);
 
     const existing = await this.findByHostname(hostname);
-    
+
     // Merge de configuraciones
     const mergedConfig = this.deepMerge(existing.config, configUpdates);
 
@@ -297,17 +324,24 @@ export class DomainSettingsService {
     await this.findByHostname(hostname);
 
     await this.prisma.domain_settings.delete({
-      where: { hostname }
+      where: { hostname },
     });
 
-    this.logger.log(`Domain setting deleted successfully for hostname: ${hostname}`);
+    this.logger.log(
+      `Domain setting deleted successfully for hostname: ${hostname}`,
+    );
   }
 
   /**
    * Duplica una configuración de dominio a un nuevo hostname
    */
-  async duplicate(sourceHostname: string, targetHostname: string): Promise<DomainSettingResponse> {
-    this.logger.log(`Duplicating domain setting from ${sourceHostname} to ${targetHostname}`);
+  async duplicate(
+    sourceHostname: string,
+    targetHostname: string,
+  ): Promise<DomainSettingResponse> {
+    this.logger.log(
+      `Duplicating domain setting from ${sourceHostname} to ${targetHostname}`,
+    );
 
     // Obtener configuración origen
     const source = await this.findByHostname(sourceHostname);
@@ -317,14 +351,16 @@ export class DomainSettingsService {
       hostname: targetHostname,
       organizationId: source.organizationId,
       storeId: source.storeId,
-      config: source.config
+      config: source.config,
     });
   }
 
   /**
    * Obtiene configuraciones por organización
    */
-  async findByOrganization(organizationId: number): Promise<DomainSettingResponse[]> {
+  async findByOrganization(
+    organizationId: number,
+  ): Promise<DomainSettingResponse[]> {
     const result = await this.findAll({ organizationId });
     return result.data;
   }
@@ -345,8 +381,9 @@ export class DomainSettingsService {
     }
 
     // Validación básica de formato de hostname
-    const hostnameRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-    
+    const hostnameRegex =
+      /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
     if (!hostnameRegex.test(hostname)) {
       throw new BadRequestException('Invalid hostname format');
     }
@@ -366,21 +403,25 @@ export class DomainSettingsService {
       createdAt: domainSetting.created_at?.toISOString() || '',
       updatedAt: domainSetting.updated_at?.toISOString() || '',
       organization: domainSetting.organization,
-      store: domainSetting.store
+      store: domainSetting.store,
     };
   }
 
   private deepMerge(target: any, source: any): any {
     const result = { ...target };
-    
+
     for (const key in source) {
-      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+      if (
+        source[key] &&
+        typeof source[key] === 'object' &&
+        !Array.isArray(source[key])
+      ) {
         result[key] = this.deepMerge(target[key] || {}, source[key]);
       } else {
         result[key] = source[key];
       }
     }
-    
+
     return result;
   }
 }

@@ -1,6 +1,17 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateStoreDto, UpdateStoreDto, StoreQueryDto, AddStaffToStoreDto, UpdateStoreSettingsDto } from './dto';
+import {
+  CreateStoreDto,
+  UpdateStoreDto,
+  StoreQueryDto,
+  AddStaffToStoreDto,
+  UpdateStoreSettingsDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '../../common/utils/slug.util';
 
@@ -12,7 +23,7 @@ export class StoresService {
     try {
       // Verificar que la organización existe
       const organization = await this.prisma.organizations.findUnique({
-        where: { id: createStoreDto.organization_id }
+        where: { id: createStoreDto.organization_id },
       });
 
       if (!organization) {
@@ -28,24 +39,27 @@ export class StoresService {
       const existingStore = await this.prisma.stores.findFirst({
         where: {
           organization_id: createStoreDto.organization_id,
-          slug: createStoreDto.slug
-        }
+          slug: createStoreDto.slug,
+        },
       });
 
       if (existingStore) {
-        throw new ConflictException('El slug de la tienda ya existe en esta organización');
+        throw new ConflictException(
+          'El slug de la tienda ya existe en esta organización',
+        );
       }
 
       // Verificar que el store_code sea único si se proporciona
       if (createStoreDto.store_code) {
         const existingStoreCode = await this.prisma.stores.findUnique({
-          where: { store_code: createStoreDto.store_code }
+          where: { store_code: createStoreDto.store_code },
         });
 
         if (existingStoreCode) {
           throw new ConflictException('El código de tienda ya está en uso');
         }
-      }      return await this.prisma.stores.create({
+      }
+      return await this.prisma.stores.create({
         data: {
           ...createStoreDto,
           slug: createStoreDto.slug || generateSlug(createStoreDto.name),
@@ -57,7 +71,7 @@ export class StoresService {
               id: true,
               name: true,
               slug: true,
-            }
+            },
           },
           manager: {
             select: {
@@ -65,7 +79,7 @@ export class StoresService {
               first_name: true,
               last_name: true,
               email: true,
-            }
+            },
           },
           addresses: true,
           store_settings: true,
@@ -75,9 +89,9 @@ export class StoresService {
               orders: true,
               customers: true,
               store_staff: true,
-            }
-          }
-        }
+            },
+          },
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -85,7 +99,9 @@ export class StoresService {
           throw new ConflictException('La tienda ya existe');
         }
         if (error.code === 'P2003') {
-          throw new BadRequestException('Organización o usuario manager no válido');
+          throw new BadRequestException(
+            'Organización o usuario manager no válido',
+          );
         }
       }
       throw error;
@@ -93,7 +109,14 @@ export class StoresService {
   }
 
   async findAll(query: StoreQueryDto) {
-    const { page = 1, limit = 10, search, store_type, is_active, organization_id } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      store_type,
+      is_active,
+      organization_id,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.storesWhereInput = {
@@ -102,7 +125,7 @@ export class StoresService {
           { name: { contains: search, mode: 'insensitive' } },
           { store_code: { contains: search, mode: 'insensitive' } },
           { domain: { contains: search, mode: 'insensitive' } },
-        ]
+        ],
       }),
       ...(store_type && { store_type }),
       ...(is_active !== undefined && { is_active }),
@@ -120,7 +143,7 @@ export class StoresService {
               id: true,
               name: true,
               slug: true,
-            }
+            },
           },
           manager: {
             select: {
@@ -128,7 +151,7 @@ export class StoresService {
               first_name: true,
               last_name: true,
               email: true,
-            }
+            },
           },
           addresses: {
             where: { is_primary: true },
@@ -139,7 +162,7 @@ export class StoresService {
               state_province: true,
               country_code: true,
               type: true,
-            }
+            },
           },
           _count: {
             select: {
@@ -147,8 +170,8 @@ export class StoresService {
               orders: true,
               customers: true,
               store_staff: true,
-            }
-          }
+            },
+          },
         },
         orderBy: { created_at: 'desc' },
       }),
@@ -177,7 +200,7 @@ export class StoresService {
             slug: true,
             email: true,
             phone: true,
-          }
+          },
         },
         manager: {
           select: {
@@ -186,7 +209,7 @@ export class StoresService {
             last_name: true,
             email: true,
             username: true,
-          }
+          },
         },
         addresses: true,
         store_settings: true,
@@ -199,10 +222,10 @@ export class StoresService {
                 last_name: true,
                 email: true,
                 username: true,
-              }
+              },
             },
             roles: true,
-          }
+          },
         },
         _count: {
           select: {
@@ -211,8 +234,8 @@ export class StoresService {
             customers: true,
             categories: true,
             store_staff: true,
-          }
-        }
+          },
+        },
       },
     });
 
@@ -225,9 +248,9 @@ export class StoresService {
 
   async findBySlug(organizationId: number, slug: string) {
     const store = await this.prisma.stores.findFirst({
-      where: { 
+      where: {
         organization_id: organizationId,
-        slug 
+        slug,
       },
       include: {
         organizations: true,
@@ -237,7 +260,7 @@ export class StoresService {
             first_name: true,
             last_name: true,
             email: true,
-          }
+          },
         },
         addresses: true,
         store_settings: true,
@@ -263,11 +286,13 @@ export class StoresService {
             organization_id: existingStore.organization_id,
             slug: updateStoreDto.slug,
             NOT: { id },
-          }
+          },
         });
 
         if (existingStoreWithSlug) {
-          throw new ConflictException('El slug ya está en uso en esta organización');
+          throw new ConflictException(
+            'El slug ya está en uso en esta organización',
+          );
         }
       }
 
@@ -277,7 +302,7 @@ export class StoresService {
           where: {
             store_code: updateStoreDto.store_code,
             NOT: { id },
-          }
+          },
         });
 
         if (existingStoreCode) {
@@ -297,7 +322,7 @@ export class StoresService {
               id: true,
               name: true,
               slug: true,
-            }
+            },
           },
           manager: {
             select: {
@@ -305,11 +330,11 @@ export class StoresService {
               first_name: true,
               last_name: true,
               email: true,
-            }
+            },
           },
           addresses: true,
           store_settings: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -334,14 +359,14 @@ export class StoresService {
         where: {
           store_id: id,
           state: {
-            in: ['created', 'pending_payment', 'processing', 'shipped']
-          }
-        }
+            in: ['created', 'pending_payment', 'processing', 'shipped'],
+          },
+        },
       });
 
       if (activeOrders > 0) {
         throw new BadRequestException(
-          'No se puede eliminar la tienda porque tiene pedidos activos'
+          'No se puede eliminar la tienda porque tiene pedidos activos',
         );
       }
 
@@ -352,7 +377,7 @@ export class StoresService {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
-            'No se puede eliminar la tienda porque tiene datos relacionados'
+            'No se puede eliminar la tienda porque tiene datos relacionados',
           );
         }
       }
@@ -373,12 +398,14 @@ export class StoresService {
             user_id: staffData.user_id,
             role_id: staffData.role_id,
             store_id: storeId,
-          }
-        }
+          },
+        },
       });
 
       if (existingAssignment) {
-        throw new ConflictException('El usuario ya tiene este rol en la tienda');
+        throw new ConflictException(
+          'El usuario ya tiene este rol en la tienda',
+        );
       }
 
       return await this.prisma.store_staff.create({
@@ -387,7 +414,9 @@ export class StoresService {
           user_id: staffData.user_id,
           role_id: staffData.role_id,
           permissions: staffData.permissions,
-          hire_date: staffData.hire_date ? new Date(staffData.hire_date) : undefined,
+          hire_date: staffData.hire_date
+            ? new Date(staffData.hire_date)
+            : undefined,
           is_active: staffData.is_active,
         },
         include: {
@@ -398,15 +427,17 @@ export class StoresService {
               last_name: true,
               email: true,
               username: true,
-            }
+            },
           },
           roles: true,
-        }
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          throw new ConflictException('El usuario ya está asignado a esta tienda con este rol');
+          throw new ConflictException(
+            'El usuario ya está asignado a esta tienda con este rol',
+          );
         }
         if (error.code === 'P2003') {
           throw new BadRequestException('Usuario o rol no válido');
@@ -423,8 +454,8 @@ export class StoresService {
           user_id: userId,
           role_id: roleId,
           store_id: storeId,
-        }
-      }
+        },
+      },
     });
 
     if (!assignment) {
@@ -437,8 +468,8 @@ export class StoresService {
           user_id: userId,
           role_id: roleId,
           store_id: storeId,
-        }
-      }
+        },
+      },
     });
   }
 
@@ -456,7 +487,7 @@ export class StoresService {
             email: true,
             username: true,
             state: true,
-          }
+          },
         },
         roles: true,
       },
@@ -465,7 +496,10 @@ export class StoresService {
   }
 
   // Gestión de configuraciones de tienda
-  async updateStoreSettings(storeId: number, settingsDto: UpdateStoreSettingsDto) {
+  async updateStoreSettings(
+    storeId: number,
+    settingsDto: UpdateStoreSettingsDto,
+  ) {
     // Verificar que la tienda existe
     await this.findOne(storeId);
 
@@ -502,7 +536,7 @@ export class StoresService {
             first_name: true,
             last_name: true,
             email: true,
-          }
+          },
         },
         addresses: {
           where: { is_primary: true },
@@ -512,8 +546,8 @@ export class StoresService {
             products: true,
             orders: true,
             customers: true,
-          }
-        }
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
     });

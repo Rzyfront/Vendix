@@ -5,11 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  CreateBrandDto,
-  UpdateBrandDto,
-  BrandQueryDto,
-} from './dto';
+import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 
 @Injectable()
 export class BrandsService {
@@ -101,7 +97,7 @@ export class BrandsService {
     where.products = {
       some: {
         store_id: storeId,
-      }
+      },
     };
 
     const [brands, total] = await Promise.all([
@@ -147,16 +143,20 @@ export class BrandsService {
     return brand;
   }
 
-  async findBySlug(slug: string, storeId: number, options?: { includeInactive?: boolean }) {
+  async findBySlug(
+    slug: string,
+    storeId: number,
+    options?: { includeInactive?: boolean },
+  ) {
     // Since brands don't have slugs in the schema, we'll treat slug as name for now
     const brand = await this.prisma.brands.findFirst({
-      where: { 
+      where: {
         name: { contains: slug, mode: 'insensitive' },
         products: {
           some: {
             store_id: storeId,
-          }
-        }
+          },
+        },
       },
       include: {
         _count: {
@@ -174,7 +174,7 @@ export class BrandsService {
 
   async activate(id: number, user: any) {
     const brand = await this.findOne(id);
-    
+
     // Since brands don't have a status field in the schema, we'll just return the brand
     // In a real implementation, you might want to add a status field to the schema
     return brand;
@@ -182,7 +182,7 @@ export class BrandsService {
 
   async deactivate(id: number, user: any) {
     const brand = await this.findOne(id);
-    
+
     // Since brands don't have a status field in the schema, we'll just return the brand
     // In a real implementation, you might want to add a status field to the schema
     return brand;
@@ -193,15 +193,15 @@ export class BrandsService {
 
     // Build update data
     const updateData: any = {};
-    
+
     if (updateBrandDto.name) {
       updateData.name = updateBrandDto.name;
     }
-    
+
     if (updateBrandDto.description !== undefined) {
       updateData.description = updateBrandDto.description;
     }
-    
+
     if (updateBrandDto.logo_url !== undefined) {
       updateData.logo_url = updateBrandDto.logo_url;
     }
