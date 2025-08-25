@@ -26,6 +26,7 @@ services:
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
+      CHOKIDAR_USEPOLLING: 'true'
     depends_on:
       - db
     ports:

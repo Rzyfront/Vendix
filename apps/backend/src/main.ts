@@ -42,7 +42,7 @@ async function bootstrap() {
   app.setGlobalPrefix(process.env.API_PREFIX || 'api');
 
   // Health check endpoint
-  app.getHttpAdapter().get('/health', (req, res) => {
+  app.getHttpAdapter().get('/api/health', (req, res) => {
     res.status(200).json({
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -58,7 +58,7 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
 
-  console.log(`🚀 Vendix Backend is running on: http://localhost:${port}`);
-  console.log(`❤️  Health Check: http://localhost:${port}/health`);
+  console.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);
+  console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
 }
 bootstrap();
