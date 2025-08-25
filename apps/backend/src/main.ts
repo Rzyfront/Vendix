@@ -60,6 +60,5 @@ async function bootstrap() {
 
   console.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);
   console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
-  console.log(`📄  API Docs: http://localhost:${port}/api-docs`);
 }
 bootstrap();
