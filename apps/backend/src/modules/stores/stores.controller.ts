@@ -18,8 +18,8 @@ import {
   AddStaffToStoreDto,
   UpdateStoreSettingsDto,
 } from './dto';
-import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../../auth/guards';
-import { Roles, RequirePermissions, CurrentUser } from '../../auth/decorators';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../auth/guards';
+import { Roles, RequirePermissions, CurrentUser } from '../auth/decorators';
 
 @Controller('stores')
 @UseGuards(JwtAuthGuard)

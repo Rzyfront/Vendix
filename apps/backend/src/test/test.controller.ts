@@ -1,10 +1,10 @@
 import { Controller, Get, UseGuards, Post, Body } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../modules/auth/guards/roles.guard';
+import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
+import { Roles } from '../modules/auth/decorators/roles.decorator';
+import { RequirePermissions } from '../modules/auth/decorators/permissions.decorator';
+import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
 import { EmailService } from '../email/email.service';
 
 @Controller('test')

@@ -18,8 +18,8 @@ import {
   OrganizationQueryDto,
   AddUserToOrganizationDto,
 } from './dto';
-import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../../auth/guards';
-import { Roles, RequirePermissions, CurrentUser } from '../../auth/decorators';
+import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../auth/guards';
+import { Roles, RequirePermissions, CurrentUser } from '../auth/decorators';
 
 @Controller('organizations')
 @UseGuards(JwtAuthGuard)
