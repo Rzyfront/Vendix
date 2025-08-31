@@ -8,7 +8,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  NotImplementedException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
@@ -31,8 +30,13 @@ export class AuthController {
     @Req() request: Request,
   ) {
     const result = await this.authService.registerOwner(registerOwnerDto);
+
+    if (result.refresh_token) {
+      //TODO: Agregaré actualizacion de IP
+    }
+
     return {
-      message: 'Bienvenido a Vendix! Tu organización ha sido creada.',
+      message: 'Bienvenido a Vendix!',
       data: result,
     };
   }
@@ -43,21 +47,35 @@ export class AuthController {
     @Body() registerCustomerDto: RegisterCustomerDto,
     @Req() request: Request,
   ) {
-    await this.authService.registerCustomer(registerCustomerDto);
-    throw new NotImplementedException('El registro de clientes aún no está implementado.');
+    const result = await this.authService.registerCustomer(registerCustomerDto);
+    return {
+      message: '¡Bienvenido! Tu cuenta de cliente ha sido creada.',
+      data: result,
+    };
   }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() registerDto: RegisterDto, @Req() request: Request) {
-    await this.authService.register(registerDto);
-    throw new NotImplementedException('Esta ruta está obsoleta. Utilice "register-owner" o "register-customer".');
+    const result = await this.authService.register(registerDto);
+
+    //TODO: Actualizar sesión con IP y User Agent
+    if (result.refresh_token) {
+      // Aquí se podría actualizar la sesión con la IP y User Agent del request
+      // Para simplificar, lo omitimos por ahora
+    }
+
+    return {
+      message: 'Usuario registrado exitosamente',
+      data: result,
+    };
   }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto, @Req() request: Request) {
     const result = await this.authService.login(loginDto);
+
     return {
       message: 'Login exitoso',
       data: result,
@@ -68,6 +86,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     const result = await this.authService.refreshToken(refreshTokenDto);
+
     return {
       message: 'Token refrescado exitosamente',
       data: result,
@@ -78,6 +97,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getProfile(@CurrentUser() user: any) {
     const profile = await this.authService.getProfile(user.id);
+
     return {
       message: 'Perfil obtenido exitosamente',
       data: profile,
@@ -94,6 +114,7 @@ export class AuthController {
       };
     }
     const result = await this.authService.logout(user.id, body.refresh_token);
+
     return {
       message: result.message,
     };
@@ -113,15 +134,23 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: { token: string }) {
-    await this.authService.verifyEmail(verifyEmailDto.token);
-    throw new NotImplementedException('La verificación de email aún no está implementada.');
+    const result = await this.authService.verifyEmail(verifyEmailDto.token);
+
+    return {
+      message: result.message,
+    };
   }
 
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {
-    await this.authService.resendEmailVerification(resendDto.email);
-     throw new NotImplementedException('El reenvío de verificación aún no está implementado.');
+    const result = await this.authService.resendEmailVerification(
+      resendDto.email,
+    );
+
+    return {
+      message: result.message,
+    };
   }
 
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
@@ -129,8 +158,11 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotDto: { email: string }) {
-    await this.authService.forgotPassword(forgotDto.email);
-    throw new NotImplementedException('La recuperación de contraseña aún no está implementada.');
+    const result = await this.authService.forgotPassword(forgotDto.email);
+
+    return {
+      message: result.message,
+    };
   }
 
   @Post('reset-password')
@@ -138,11 +170,14 @@ export class AuthController {
   async resetPassword(
     @Body() resetDto: { token: string; newPassword: string },
   ) {
-    await this.authService.resetPassword(
+    const result = await this.authService.resetPassword(
       resetDto.token,
       resetDto.newPassword,
     );
-    throw new NotImplementedException('El reseteo de contraseña aún no está implementado.');
+
+    return {
+      message: result.message,
+    };
   }
 
   @Post('change-password')
@@ -152,19 +187,22 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() changeDto: { currentPassword: string; newPassword: string },
   ) {
-    await this.authService.changePassword(
+    const result = await this.authService.changePassword(
       user.id,
       changeDto.currentPassword,
       changeDto.newPassword,
     );
-    throw new NotImplementedException('El cambio de contraseña aún no está implementado.');
+
+    return {
+      message: result.message,
+    };
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('sessions')
   async getUserSessions(@CurrentUser() user: any) {
-    await this.authService.getUserSessions(user.id);
-    throw new NotImplementedException('La obtención de sesiones aún no está implementada.');
+    const sessions = await this.authService.getUserSessions(user.id);
+    return { sessions };
   }
 
   // ===== RUTAS DE ONBOARDING =====
@@ -172,8 +210,12 @@ export class AuthController {
   @Get('onboarding/status')
   @UseGuards(JwtAuthGuard)
   async getOnboardingStatus(@CurrentUser() user: any) {
-    await this.authService.startOnboarding(user.id);
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    const result = await this.authService.startOnboarding(user.id);
+
+    return {
+      message: result.message,
+      data: result.data,
+    };
   }
 
   @Post('onboarding/create-organization')
@@ -183,11 +225,18 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() organizationData: any,
   ) {
-    await this.authService.createOrganizationDuringOnboarding(
+    const result = await this.authService.createOrganizationDuringOnboarding(
       user.id,
       organizationData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+
+    return {
+      message: result.message,
+      data: {
+        organization: result.organization,
+        nextStep: result.nextStep,
+      },
+    };
   }
 
   @Post('onboarding/setup-organization/:organizationId')
@@ -198,12 +247,18 @@ export class AuthController {
     @Param('organizationId') organizationId: string,
     @Body() setupData: any,
   ) {
-    await this.authService.setupOrganization(
+    const result = await this.authService.setupOrganization(
       user.id,
       parseInt(organizationId),
       setupData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+
+    return {
+      message: result.message,
+      data: {
+        nextStep: result.nextStep,
+      },
+    };
   }
 
   @Post('onboarding/create-store/:organizationId')
@@ -214,12 +269,19 @@ export class AuthController {
     @Param('organizationId') organizationId: string,
     @Body() storeData: any,
   ) {
-    await this.authService.createStoreDuringOnboarding(
+    const result = await this.authService.createStoreDuringOnboarding(
       user.id,
       parseInt(organizationId),
       storeData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+
+    return {
+      message: result.message,
+      data: {
+        store: result.store,
+        nextStep: result.nextStep,
+      },
+    };
   }
 
   @Post('onboarding/setup-store/:storeId')
@@ -230,19 +292,29 @@ export class AuthController {
     @Param('storeId') storeId: string,
     @Body() setupData: any,
   ) {
-    await this.authService.setupStore(
+    const result = await this.authService.setupStore(
       user.id,
       parseInt(storeId),
       setupData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+
+    return {
+      message: result.message,
+      data: {
+        nextStep: result.nextStep,
+      },
+    };
   }
 
   @Post('onboarding/complete')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async completeOnboarding(@CurrentUser() user: any) {
-    await this.authService.completeOnboarding(user.id);
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    const result = await this.authService.completeOnboarding(user.id);
+
+    return {
+      message: result.message,
+      data: result.data,
+    };
   }
 }
