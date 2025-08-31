@@ -23,6 +23,244 @@ export class AuthService {
     private readonly configService: ConfigService,
   ) {}
 
+  async registerOwner(registerOwnerDto: RegisterDto) {
+    const { email, password, first_name, last_name } = registerOwnerDto;
+
+    const existingUser = await this.prismaService.users.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Ya se ha registrado este Email!');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Buscar rol owner
+    const ownerRole = await this.prismaService.roles.findUnique({
+      where: { name: 'owner' },
+    });
+    if (!ownerRole) {
+      throw new BadRequestException('Rol de owner no encontrado');
+    }
+
+    // Crear usuario
+    const user = await this.prismaService.users.create({
+      data: {
+        email,
+        password: hashedPassword,
+        first_name,
+        last_name,
+        username: email.split('@')[0],
+        email_verified: false,
+      },
+    });
+
+    // Asignar rol owner al usuario
+    await this.prismaService.user_roles.create({
+      data: {
+        user_id: user.id,
+        role_id: ownerRole.id,
+      },
+    });
+
+    // Obtener usuario con roles incluidos
+    const userWithRoles = await this.prismaService.users.findUnique({
+      where: { id: user.id },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!userWithRoles) {
+      throw new BadRequestException('Error al crear usuario owner');
+    }
+
+    // Generar tokens
+    const tokens = await this.generateTokens(userWithRoles);
+    await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
+      ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
+      userAgent: 'Registration-Device', // TODO: Obtener User-Agent real del request
+    });
+
+    // Registrar intento de login exitoso
+    await this.logLoginAttempt(userWithRoles.id, true);
+
+    // Generar token de verificación de email
+    const verificationToken = this.generateRandomToken();
+
+    // Guardar token de verificación en la base de datos
+    await this.prismaService.email_verification_tokens.create({
+      data: {
+        user_id: userWithRoles.id,
+        token: verificationToken,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
+      },
+    });
+
+    // Enviar email de verificación
+    try {
+      await this.emailService.sendVerificationEmail(
+        userWithRoles.email,
+        verificationToken,
+        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
+      );
+      console.log(`✅ Email de verificación enviado a: ${userWithRoles.email}`);
+    } catch (error) {
+      console.error('❌ Error enviando email de verificación:', error);
+      // No fallar el registro si el email no se puede enviar
+    }
+
+    // Remover password del response
+    const { password: _, ...userWithoutPassword } = userWithRoles;
+
+    return {
+      user: userWithoutPassword,
+      ...tokens,
+    };
+  }
+
+  async registerCustomer(registerCustomerDto) {
+    const { email, password, first_name, last_name, store_slug } =
+      registerCustomerDto;
+
+    // Verificar si el usuario ya existe
+    const existingUser = await this.prismaService.users.findUnique({
+      where: { email }, //Por email y tienda porque los emails pueden ser duplicados
+    });
+    if (existingUser) {
+      throw new ConflictException('El usuario con este email ya existe');
+    }
+
+    // Buscar la tienda por slug
+    const store = await this.prismaService.stores.findUnique({
+      where: { slug: store_slug },
+    });
+    if (!store) {
+      throw new BadRequestException('Tienda no encontrada');
+    }
+
+    // Buscar rol customer
+    const customerRole = await this.prismaService.roles.findUnique({
+      where: { name: 'customer' },
+    });
+    if (!customerRole) {
+      throw new BadRequestException('Rol customer no encontrado');
+    }
+
+    // Hash de la contraseña
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Crear usuario asociado a la tienda
+    const user = await this.prismaService.users.create({
+      data: {
+        email,
+        password: hashedPassword,
+        first_name,
+        last_name,
+        username: email.split('@')[0],
+        email_verified: false,
+        store_id: store.id,
+      },
+    });
+
+    // Asignar rol customer al usuario
+    await this.prismaService.user_roles.create({
+      data: {
+        user_id: user.id,
+        role_id: customerRole.id,
+      },
+    });
+
+    // Obtener usuario con roles incluidos
+    const userWithRoles = await this.prismaService.users.findUnique({
+      where: { id: user.id },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!userWithRoles) {
+      throw new BadRequestException('Error al crear usuario customer');
+    }
+
+    // Generar tokens
+    const tokens = await this.generateTokens(userWithRoles);
+    await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
+      ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
+      userAgent: 'Registration-Device', // TODO: Obtener User-Agent real del request
+    });
+
+    // Registrar intento de login exitoso
+    await this.logLoginAttempt(userWithRoles.id, true);
+
+    // Generar token de verificación de email
+    const verificationToken = this.generateRandomToken();
+
+    // Guardar token de verificación en la base de datos
+    await this.prismaService.email_verification_tokens.create({
+      data: {
+        user_id: userWithRoles.id,
+        token: verificationToken,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
+      },
+    });
+
+    // Enviar email de bienvenida y verificación
+    try {
+      await this.emailService.sendVerificationEmail(
+        userWithRoles.email,
+        verificationToken,
+        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
+      );
+      await this.emailService.sendWelcomeEmail(
+        userWithRoles.email,
+        userWithRoles.first_name,
+      );
+      console.log(
+        `✅ Email de verificación y bienvenida enviado a: ${userWithRoles.email}`,
+      );
+    } catch (error) {
+      console.error(
+        '❌ Error enviando email de verificación/bienvenida:',
+        error,
+      );
+      // No fallar el registro si el email no se puede enviar
+    }
+
+    // Remover password del response
+    const { password: _, ...userWithoutPassword } = userWithRoles;
+
+    return {
+      user: userWithoutPassword,
+      ...tokens,
+    };
+  }
+
   async register(registerDto: RegisterDto) {
     const { email, password, first_name, last_name } = registerDto;
 
@@ -336,23 +574,34 @@ export class AuthService {
   }
 
   async logout(userId: number, refreshToken?: string) {
-    // Invalidar refresh tokens del usuario
+    // Revocar refresh tokens del usuario
+    const now = new Date();
     if (refreshToken) {
-      // Invalidar token específico
-      await this.prismaService.refresh_tokens.deleteMany({
-        where: {
-          user_id: userId,
-          token: refreshToken,
-        },
-      });
-    } else {
-      // Invalidar todos los tokens del usuario
-      await this.prismaService.refresh_tokens.deleteMany({
-        where: { user_id: userId },
-      });
+      // Revocar solo el token específico de la sesión actual
+      try {
+        const result = await this.prismaService.refresh_tokens.updateMany({
+          where: {
+            user_id: userId,
+            token: refreshToken,
+            revoked: false,
+          },
+          data: {
+            revoked: true,
+            revoked_at: now,
+          },
+        });
+        if (result.count === 0) {
+          return { message: 'Sesion no encontrada' };
+        }
+        return { message: 'Logout exitoso' };
+      } catch (error) {
+        // Loguear el error para auditoría
+        throw new BadRequestException(
+          'No se pudo cerrar la sesión. Intenta de nuevo.',
+        );
+      }
     }
-
-    return { message: 'Logout exitoso' };
+    return { message: 'No se proporcionó refresh token para revocar.' };
   }
 
   // ===== FUNCIONES DE VERIFICACIÓN DE EMAIL =====
@@ -1207,6 +1456,13 @@ export class AuthService {
 
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
+  }
+
+  async getUserSessions(userId: number) {
+    return this.prismaService.refresh_tokens.findMany({
+      where: { user_id: userId },
+      orderBy: { last_used: 'desc' },
+    });
   }
 
   // Método auxiliar para convertir duraciones JWT a segundos

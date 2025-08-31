@@ -30,32 +30,50 @@ export class CreateUserDto {
   @MaxLength(50)
   username: string;
 
-  @ApiProperty({ example: 'juan@email.com', description: 'Correo electrónico del usuario' })
+  @ApiProperty({
+    example: 'juan@email.com',
+    description: 'Correo electrónico del usuario',
+  })
   @IsEmail()
   @MaxLength(255)
   email: string;
 
-  @ApiProperty({ example: 'password123', description: 'Contraseña del usuario (mínimo 8 caracteres)' })
+  @ApiProperty({
+    example: 'password123',
+    description: 'Contraseña del usuario (mínimo 8 caracteres)',
+  })
   @IsString()
   @MinLength(8)
   password: string;
 
-  @ApiPropertyOptional({ example: 'active', description: 'Estado del usuario (opcional)' })
+  @ApiPropertyOptional({
+    example: 'active',
+    description: 'Estado del usuario (opcional)',
+  })
   @IsOptional()
   @IsEnum(user_state_enum)
   state?: user_state_enum;
 
-  @ApiPropertyOptional({ example: false, description: '¿Email verificado? (opcional)' })
+  @ApiPropertyOptional({
+    example: false,
+    description: '¿Email verificado? (opcional)',
+  })
   @IsOptional()
   @IsBoolean()
   email_verified?: boolean;
 
-  @ApiPropertyOptional({ example: false, description: '¿Tiene 2FA habilitado? (opcional)' })
+  @ApiPropertyOptional({
+    example: false,
+    description: '¿Tiene 2FA habilitado? (opcional)',
+  })
   @IsOptional()
   @IsBoolean()
   two_factor_enabled?: boolean;
 
-  @ApiPropertyOptional({ example: 'SECRET2FA', description: 'Secreto de 2FA (opcional)' })
+  @ApiPropertyOptional({
+    example: 'SECRET2FA',
+    description: 'Secreto de 2FA (opcional)',
+  })
   @IsOptional()
   @IsString()
   two_factor_secret?: string;

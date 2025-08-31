@@ -1,17 +1,16 @@
 import {
   IsEmail,
   IsNotEmpty,
-  IsOptional,
   IsString,
   MinLength,
   Matches,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 
-export class RegisterDto {
+export class RegisterCustomerDto {
   @ApiProperty({
-    example: 'usuario@email.com',
-    description: 'Correo electrónico del usuario',
+    example: 'cliente@email.com',
+    description: 'Correo electrónico del cliente',
   })
   @IsEmail({}, { message: 'Debe ser un email válido' })
   @IsNotEmpty({ message: 'El email es requerido' })
@@ -20,7 +19,7 @@ export class RegisterDto {
   @ApiProperty({
     example: 'Password@123',
     description:
-      'Contraseña del usuario (mínimo 8 caracteres, al menos un carácter especial)',
+      'Contraseña del cliente (mínimo 8 caracteres, al menos un carácter especial)',
   })
   @IsString({ message: 'La contraseña debe ser un string' })
   @IsNotEmpty({ message: 'La contraseña es requerida' })
@@ -30,21 +29,21 @@ export class RegisterDto {
   })
   password: string;
 
-  @ApiProperty({ example: 'Juan', description: 'Nombre del usuario' })
+  @ApiProperty({ example: 'Juan', description: 'Nombre del cliente' })
   @IsString({ message: 'El nombre debe ser un string' })
   @IsNotEmpty({ message: 'El nombre es requerido' })
   first_name: string;
 
-  @ApiProperty({ example: 'Pérez', description: 'Apellido del usuario' })
+  @ApiProperty({ example: 'Pérez', description: 'Apellido del cliente' })
   @IsString({ message: 'El apellido debe ser un string' })
   @IsNotEmpty({ message: 'El apellido es requerido' })
   last_name: string;
 
-  @ApiPropertyOptional({
-    example: '+521234567890',
-    description: 'Teléfono del usuario (opcional)',
+  @ApiProperty({
+    example: 'mi-tienda',
+    description: 'Slug de la tienda donde se registra el cliente',
   })
-  @IsString({ message: 'El teléfono debe ser un string' })
-  @IsOptional()
-  phone?: string;
+  @IsString({ message: 'El slug de la tienda es requerido' })
+  @IsNotEmpty({ message: 'El slug de la tienda es requerido' })
+  store_slug: string;
 }

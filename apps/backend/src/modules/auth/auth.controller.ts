@@ -13,6 +13,8 @@ import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RegisterOwnerDto } from './dto/register-owner.dto';
+import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -21,12 +23,43 @@ import { CurrentUser } from './decorators/current-user.decorator';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @Post('register-owner')
+  @HttpCode(HttpStatus.CREATED)
+  async registerOwner(
+    @Body() registerOwnerDto: RegisterOwnerDto,
+    @Req() request: Request,
+  ) {
+    const result = await this.authService.registerOwner(registerOwnerDto);
+
+    if (result.refresh_token) {
+      //TODO: Agregaré actualizacion de IP
+    }
+
+    return {
+      message: 'Bienvenido a Vendix!',
+      data: result,
+    };
+  }
+
+  @Post('register-customer')
+  @HttpCode(HttpStatus.CREATED)
+  async registerCustomer(
+    @Body() registerCustomerDto: RegisterCustomerDto,
+    @Req() request: Request,
+  ) {
+    const result = await this.authService.registerCustomer(registerCustomerDto);
+    return {
+      message: '¡Bienvenido! Tu cuenta de cliente ha sido creada.',
+      data: result,
+    };
+  }
+
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() registerDto: RegisterDto, @Req() request: Request) {
     const result = await this.authService.register(registerDto);
 
-    // Actualizar sesión con IP y User Agent
+    //TODO: Actualizar sesión con IP y User Agent
     if (result.refresh_token) {
       // Aquí se podría actualizar la sesión con la IP y User Agent del request
       // Para simplificar, lo omitimos por ahora
@@ -74,11 +107,13 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(
-    @CurrentUser() user: any,
-    @Body() body?: { refresh_token?: string },
-  ) {
-    const result = await this.authService.logout(user.id, body?.refresh_token);
+  async logout(@CurrentUser() user: any, @Body() body: RefreshTokenDto) {
+    if (!body?.refresh_token) {
+      return {
+        message: 'El refresh_token es obligatorio para cerrar sesión.',
+      };
+    }
+    const result = await this.authService.logout(user.id, body.refresh_token);
 
     return {
       message: result.message,
@@ -161,6 +196,13 @@ export class AuthController {
     return {
       message: result.message,
     };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('sessions')
+  async getUserSessions(@CurrentUser() user: any) {
+    const sessions = await this.authService.getUserSessions(user.id);
+    return { sessions };
   }
 
   // ===== RUTAS DE ONBOARDING =====
