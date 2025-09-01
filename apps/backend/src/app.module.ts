@@ -8,7 +8,6 @@ import { UsersModule } from './modules/users/users.module';
 import { TestModule } from './test/test.module';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { StoresModule } from './modules/stores/stores.module';
-import { CustomersModule } from './modules/customers/customers.module';
 import { AddressesModule } from './modules/addresses/addresses.module';
 import { BrandsModule } from './modules/brands/brands.module';
 import { CategoriesModule } from './modules/categories/categories.module';
@@ -32,7 +31,6 @@ import { DomainSettingsModule } from './common/modules/domain-settings.module';
     OrganizationsModule,
     StoresModule,
     UsersModule,
-    CustomersModule,
     AddressesModule,
     BrandsModule,
     CategoriesModule,

@@ -17,7 +17,6 @@ import {
   CreateAddressDto,
   UpdateAddressDto,
   AddressQueryDto,
-  UpdateGPSCoordinatesDto,
 } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -37,55 +36,29 @@ export class AddressesController {
   ) {
     return this.addressesService.create(createAddressDto, user);
   }
+
   @Get()
   @Permissions('addresses:read')
   async findAll(@Query() query: AddressQueryDto, @CurrentUser() user: any) {
     return this.addressesService.findAll(query, user);
   }
 
-  @Get('customer/:customerId')
-  @Permissions('addresses:read')
-  async findByCustomer(
-    @Param('customerId', ParseIntPipe) customerId: number,
-    @Query() query: AddressQueryDto,
-  ) {
-    return this.addressesService.findByCustomer(customerId, query);
-  }
-
   @Get('store/:storeId')
   @Permissions('addresses:read')
   async findByStore(
     @Param('storeId', ParseIntPipe) storeId: number,
-    @Query() query: AddressQueryDto,
+    @CurrentUser() user: any,
   ) {
-    return this.addressesService.findByStore(storeId, query);
-  }
-
-  @Get('default/customer/:customerId')
-  @Permissions('addresses:read')
-  async getCustomerDefaultAddress(
-    @Param('customerId', ParseIntPipe) customerId: number,
-  ) {
-    return this.addressesService.getDefaultAddress(customerId);
-  }
-
-  @Get('default/store/:storeId')
-  @Permissions('addresses:read')
-  async getStoreDefaultAddress(
-    @Param('storeId', ParseIntPipe) storeId: number,
-  ) {
-    return this.addressesService.getDefaultAddress(undefined, storeId);
+    return this.addressesService.findByStore(storeId, user);
   }
 
   @Get(':id')
   @Permissions('addresses:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
-    @Query('include_inactive') includeInactive?: string,
+    @CurrentUser() user: any,
   ) {
-    return this.addressesService.findOne(id, {
-      includeInactive: includeInactive === 'true',
-    });
+    return this.addressesService.findOne(id, user);
   }
 
   @Patch(':id')
@@ -98,46 +71,8 @@ export class AddressesController {
     return this.addressesService.update(id, updateAddressDto, user);
   }
 
-  @Patch(':id/gps')
-  @Permissions('addresses:update')
-  async updateGPS(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() gpsData: UpdateGPSCoordinatesDto,
-    @CurrentUser() user: any,
-  ) {
-    return this.addressesService.updateGPSCoordinates(id, gpsData, user);
-  }
-
-  @Patch(':id/set-default')
-  @Permissions('addresses:update')
-  async setAsDefault(
-    @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
-  ) {
-    return this.addressesService.setAsDefault(id, user);
-  }
-
-  @Patch(':id/activate')
-  @Permissions('addresses:update')
-  async activate(
-    @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
-  ) {
-    return this.addressesService.activate(id, user);
-  }
-
-  @Patch(':id/deactivate')
-  @Permissions('addresses:delete')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deactivate(
-    @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
-  ) {
-    return this.addressesService.deactivate(id, user);
-  }
-
   @Delete(':id')
-  @Permissions('addresses:admin_delete')
+  @Permissions('addresses:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id', ParseIntPipe) id: number,

@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class LoginDto {
@@ -11,11 +11,19 @@ export class LoginDto {
   email: string;
 
   @ApiProperty({
-    example: 'password123',
+    example: 'Password@123',
     description: 'Contraseña del usuario',
   })
   @IsString({ message: 'La contraseña debe ser un string' })
   @IsNotEmpty({ message: 'La contraseña es requerida' })
-  @MinLength(6, { message: 'La contraseña debe tener al menos 6 caracteres' })
   password: string;
+
+  @ApiProperty({
+    example: 'mi-super-tienda',
+    description: 'Slug de la organización a la que se intenta acceder',
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'El slug de la organización es requerido' })
+  organizationSlug: string;
 }
+

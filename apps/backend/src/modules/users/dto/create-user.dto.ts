@@ -6,12 +6,16 @@ import {
   MaxLength,
   IsEnum,
   IsBoolean,
-  IsDateString,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { user_state_enum } from '@prisma/client';
 
 export class CreateUserDto {
+  @ApiProperty({ example: 1, description: 'ID de la organización' })
+  @IsInt()
+  organization_id: number;
+
   @ApiProperty({ example: 'Juan', description: 'Nombre del usuario' })
   @IsString()
   @MinLength(1)
@@ -53,28 +57,4 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(user_state_enum)
   state?: user_state_enum;
-
-  @ApiPropertyOptional({
-    example: false,
-    description: '¿Email verificado? (opcional)',
-  })
-  @IsOptional()
-  @IsBoolean()
-  email_verified?: boolean;
-
-  @ApiPropertyOptional({
-    example: false,
-    description: '¿Tiene 2FA habilitado? (opcional)',
-  })
-  @IsOptional()
-  @IsBoolean()
-  two_factor_enabled?: boolean;
-
-  @ApiPropertyOptional({
-    example: 'SECRET2FA',
-    description: 'Secreto de 2FA (opcional)',
-  })
-  @IsOptional()
-  @IsString()
-  two_factor_secret?: string;
 }

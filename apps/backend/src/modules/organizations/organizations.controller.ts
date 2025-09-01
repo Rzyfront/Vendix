@@ -9,57 +9,48 @@ import {
   Query,
   ParseIntPipe,
   UseGuards,
-  HttpStatus,
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import {
   CreateOrganizationDto,
   UpdateOrganizationDto,
   OrganizationQueryDto,
-  AddUserToOrganizationDto,
 } from './dto';
-import { JwtAuthGuard, RolesGuard, PermissionsGuard } from '../auth/guards';
-import { Roles, RequirePermissions, CurrentUser } from '../auth/decorators';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @Controller('organizations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class OrganizationsController {
   constructor(private readonly organizationsService: OrganizationsService) {}
 
   @Post()
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.create')
-  create(
-    @Body() createOrganizationDto: CreateOrganizationDto,
-    @CurrentUser() user: any,
-  ) {
+  @Permissions('organizations:create')
+  create(@Body() createOrganizationDto: CreateOrganizationDto) {
     return this.organizationsService.create(createOrganizationDto);
   }
 
   @Get()
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.read')
+  @Permissions('organizations:read')
   findAll(@Query() query: OrganizationQueryDto) {
     return this.organizationsService.findAll(query);
   }
 
   @Get(':id')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.read')
+  @Permissions('organizations:read')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.organizationsService.findOne(id);
   }
 
   @Get('slug/:slug')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.read')
+  @Permissions('organizations:read')
   findBySlug(@Param('slug') slug: string) {
     return this.organizationsService.findBySlug(slug);
   }
 
   @Patch(':id')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.update')
+  @Permissions('organizations:update')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateOrganizationDto: UpdateOrganizationDto,
@@ -68,47 +59,8 @@ export class OrganizationsController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles('super_admin', 'owner')
+  @Permissions('organizations:delete')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.organizationsService.remove(id);
-  }
-
-  // Endpoints para gestión de usuarios en organizaciones
-  @Post(':id/users')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.manage_users')
-  addUser(
-    @Param('id', ParseIntPipe) organizationId: number,
-    @Body() addUserDto: AddUserToOrganizationDto,
-  ) {
-    return this.organizationsService.addUserToOrganization(
-      organizationId,
-      addUserDto.user_id,
-      addUserDto.role_id,
-      addUserDto.permissions,
-    );
-  }
-
-  @Delete(':organizationId/users/:userId/roles/:roleId')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.manage_users')
-  removeUser(
-    @Param('organizationId', ParseIntPipe) organizationId: number,
-    @Param('userId', ParseIntPipe) userId: number,
-    @Param('roleId', ParseIntPipe) roleId: number,
-  ) {
-    return this.organizationsService.removeUserFromOrganization(
-      organizationId,
-      userId,
-      roleId,
-    );
-  }
-
-  @Get(':id/users')
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions('organizations.read')
-  getUsers(@Param('id', ParseIntPipe) organizationId: number) {
-    return this.organizationsService.getOrganizationUsers(organizationId);
   }
 }

@@ -1,47 +1,25 @@
-# Checklist de Servicios de Autenticación y Seguridad en Vendix
+# Checklist de Implementación: Módulo de Autenticación Multi-Inquilino
 
-## 1. Registro y Autenticación
+## Fase 1: Cimientos Multi-Inquilino (Completado)
+- [x] **Schema de Base de Datos:** Refactorizar `schema.prisma` para eliminar la unicidad global del `email` y establecer la relación `user -> organization`.
+- [x] **Registro de Dueño:** Implementar el servicio `registerOwner` para crear un `user` y su `organization` de forma transaccional.
+- [x] **Login Contextual:** Implementar el servicio de `login` que requiere `email`, `password` y `organizationSlug` para validar al usuario en el contexto de su inquilino.
+- [x] **DTOs Actualizados:** Adaptar `LoginDto` y `RegisterOwnerDto` para soportar el nuevo flujo multi-inquilino.
+- [x] **Errores de Compilación (Global):** Solucionar todos los errores de compilación causados por la refactorización del esquema, regenerando el cliente de Prisma y adaptando los servicios (`addresses`, `orders`, `users`, etc.) para que el proyecto sea compilable.
 
-### 1.1 Registro de Owner (Plataforma Vendix)
-- [ ] Servicio de registro de owner (`POST /auth/register-owner`):
-	- Crea usuario con rol `owner` y datos de organización
-	- Inicia onboarding y asocia organización
-	- Envía email de verificación
+## Fase 2: Funcionalidades Críticas (Pendiente)
+- [ ] **Recuperación de Contraseña:** Implementar el flujo completo de `forgotPassword` y `resetPassword`, asegurando que sea contextual a la organización.
+- [ ] **Registro de Clientes:** Implementar la lógica en `registerCustomer` para crear usuarios con rol "cliente" asociados a una tienda y su respectiva organización.
 
-### 1.2 Registro de Customer (E-commerce de Tienda)
-- [ ] Servicio de registro de customer (`POST /auth/register-customer`):
-	- Crea usuario con rol `customer` asociado a una tienda/organización
-	- Envía email de bienvenida/verificación
+## Fase 3: Flujos Secundarios y de Soporte (Pendiente)
+- [ ] **Verificación de Email:** Implementar los servicios `verifyEmail` y `resendEmailVerification`.
+- [ ] **Onboarding Inconcluso:** Añadir la lógica para detectar y redirigir a usuarios con un proceso de onboarding pendiente, como se describe en el documento de diseño.
+- [ ] **Registro de Staff:** Implementar la funcionalidad para que un administrador pueda crear cuentas de staff desde el panel de control.
 
-- [ ] Servicio de login (autenticación con email/usuario y contraseña)
-- [ ] Servicio de generación y rotación de tokens JWT y refresh
-- [ ] Servicio de cierre de sesión (logout y revocación de refresh token)
-
-## 2. Gestión de Roles y Permisos
-- [ ] Servicio para asignar roles a usuarios (desde interfaz privada)
-- [ ] Servicio para invitar/crear usuarios especiales (admin, staff, etc.)
-- [ ] Servicio para consultar roles y permisos del usuario autenticado
-
-## 3. Verificación y Seguridad de Cuenta
-- [ ] Servicio de envío de email de verificación
-- [ ] Servicio de verificación de email (con token)
-- [ ] Servicio para reenvío de email de verificación
-- [ ] Servicio de recuperación de contraseña (enviar email)
-- [ ] Servicio de restablecimiento de contraseña (con token)
-- [ ] Servicio de cambio de contraseña autenticado
-- [ ] Servicio de bloqueo/desbloqueo automático tras intentos fallidos
-
-## 4. Auditoría y Sesiones
-- [ ] Servicio de registro de intentos de login (exitosos/fallidos)
-- [ ] Servicio de consulta de sesiones activas y revocación manual
-- [ ] Servicio de validación avanzada de refresh token (fingerprint, IP, user agent)
-
-## 5. Onboarding y Organización
-- [ ] Servicio para iniciar onboarding tras registro de owner
-- [ ] Servicio para crear organización durante onboarding
-- [ ] Servicio para invitar miembros a la organización
-- [ ] Servicio para consultar estado de onboarding
+## Fase 4: Seguridad y Mejoras (Pendiente)
+- [ ] **Asignación de Roles:** Asignar automáticamente los roles de `owner` y `customer` durante los flujos de registro correspondientes.
+- [ ] **Seguridad de Tokens:** Implementar `device fingerprinting` y seguimiento de IP en los `refresh_tokens` para mayor seguridad.
 
 ---
 
-> **Nota:** Este checklist diferencia claramente el registro de owner (plataforma) y de customer (tienda), y cubre todos los flujos de autenticación y seguridad requeridos para una solución multi-tenant robusta en Vendix.
+> **Nota:** Este checklist refleja el estado del proyecto tras la refactorización inicial a una arquitectura multi-inquilino. La Fase 1 está completa, sentando las bases para el desarrollo de las funcionalidades pendientes.

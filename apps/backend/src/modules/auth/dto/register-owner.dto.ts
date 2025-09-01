@@ -10,6 +10,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RegisterOwnerDto {
   @ApiProperty({
+    example: 'Mi Super Tienda',
+    description: 'Nombre de la nueva organización',
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'El nombre de la organización es requerido' })
+  organizationName: string;
+
+  @ApiProperty({
     example: 'usuario@email.com',
     description: 'Correo electrónico del usuario',
   })
