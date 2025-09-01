@@ -24,14 +24,17 @@ export class AuthService {
   ) {}
 
   async registerOwner(registerOwnerDto: RegisterDto) {
-    const { email, password, first_name, last_name } = registerOwnerDto;
+    const { email, password, first_name, last_name, organization_id } = registerOwnerDto;
 
-    const existingUser = await this.prismaService.users.findUnique({
-      where: { email },
+    // Verificar si ya existe un usuario con ese email en la organización
+    const existingUser = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: organization_id ?? undefined,
+      },
     });
-
     if (existingUser) {
-      throw new ConflictException('Ya se ha registrado este Email!');
+      throw new ConflictException('Ya se ha registrado este Email en esta organización!');
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -133,16 +136,7 @@ export class AuthService {
   }
 
   async registerCustomer(registerCustomerDto) {
-    const { email, password, first_name, last_name, store_slug } =
-      registerCustomerDto;
-
-    // Verificar si el usuario ya existe
-    const existingUser = await this.prismaService.users.findUnique({
-      where: { email }, //Por email y tienda porque los emails pueden ser duplicados
-    });
-    if (existingUser) {
-      throw new ConflictException('El usuario con este email ya existe');
-    }
+    const { email, password, first_name, last_name, store_slug } = registerCustomerDto;
 
     // Buscar la tienda por slug
     const store = await this.prismaService.stores.findUnique({
@@ -150,6 +144,17 @@ export class AuthService {
     });
     if (!store) {
       throw new BadRequestException('Tienda no encontrada');
+    }
+
+    // Verificar si el usuario ya existe en la tienda
+    const existingUser = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: store.organization_id,
+      },
+    });
+    if (existingUser) {
+      throw new ConflictException('El usuario con este email ya existe en esta organización/tienda');
     }
 
     // Buscar rol customer
@@ -262,15 +267,17 @@ export class AuthService {
   }
 
   async register(registerDto: RegisterDto) {
-    const { email, password, first_name, last_name } = registerDto;
+    const { email, password, first_name, last_name, organization_id } = registerDto;
 
-    // Verificar si el usuario ya existe
-    const existingUser = await this.prismaService.users.findUnique({
-      where: { email },
+    // Verificar si el usuario ya existe en la organización
+    const existingUser = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: organization_id ?? undefined,
+      },
     });
-
     if (existingUser) {
-      throw new ConflictException('El usuario con este email ya existe');
+      throw new ConflictException('El usuario con este email ya existe en esta organización');
     }
 
     // Hash de la contraseña
