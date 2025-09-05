@@ -47,4 +47,11 @@ export class RegisterDto {
   @IsString({ message: 'El teléfono debe ser un string' })
   @IsOptional()
   phone?: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'ID de la organización a la que pertenece el usuario (opcional en algunos flujos)',
+  })
+  @IsOptional()
+  organization_id?: number;
 }

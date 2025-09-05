@@ -148,13 +148,13 @@ model user_sessions {
 model login_attempts {
   id             Int       @id @default(autoincrement())
   email          String    @db.VarChar(255)
-  store_id       Int
+  store_id       Int?
   ip_address     String?   @db.VarChar(45)
   user_agent     String?
   success        Boolean
   failure_reason String?   @db.VarChar(100)
   attempted_at   DateTime? @default(now()) @db.Timestamp(6)
-  stores         stores    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores         stores?   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 model password_reset_tokens {

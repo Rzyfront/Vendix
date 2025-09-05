@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Param,
   NotImplementedException,
+  ConflictException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
@@ -30,7 +31,24 @@ export class AuthController {
     @Body() registerOwnerDto: RegisterOwnerDto,
     @Req() request: Request,
   ) {
-    const result = await this.authService.registerOwner(registerOwnerDto);
+    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
+    const userAgent = request.get('user-agent') || '';
+    const clientInfo = {
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+    };
+    const result = await this.authService.registerOwner(registerOwnerDto, clientInfo);
+    
+    if (result.wasExistingUser) {
+      throw new ConflictException({
+        message: 'Ya tienes un registro pendiente. Completa tu onboarding.',
+        nextStep: 'complete_onboarding',
+        organizationId: result.user.organization_id,
+        data: result,
+      });
+    }
+    
     return {
       message: 'Bienvenido a Vendix! Tu organización ha sido creada.',
       data: result,
