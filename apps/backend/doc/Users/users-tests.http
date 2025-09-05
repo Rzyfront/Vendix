@@ -1,0 +1,419 @@
+### VENDIX - Users API Tests
+### Archivo para probar todos los endpoints del servicio de usuarios
+
+@baseUrl = http://localhost:3000/api
+@access_token = TU_TOKEN_AQUI
+@admin_token = TU_TOKEN_ADMIN_AQUI
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. LOGIN PARA OBTENER TOKENS
+### ============================================
+
+### Login como Admin
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 2. GESTIÓN DE USUARIOS - CRUD
+### ============================================
+
+### 2.1 LISTAR USUARIOS - Sin filtros
+GET {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+
+### 2.2 LISTAR USUARIOS - Con paginación
+GET {{baseUrl}}/users?page=1&limit=5
+Authorization: Bearer {{admin_token}}
+
+### 2.3 LISTAR USUARIOS - Con búsqueda
+GET {{baseUrl}}/users?page=1&limit=10&search=test
+Authorization: Bearer {{admin_token}}
+
+### 2.4 LISTAR USUARIOS - Con filtro de estado
+GET {{baseUrl}}/users?page=1&limit=10&state=active
+Authorization: Bearer {{admin_token}}
+
+### 2.5 LISTAR USUARIOS - Con filtro de organización
+GET {{baseUrl}}/users?page=1&limit=10&organization_id=1
+Authorization: Bearer {{admin_token}}
+
+### 2.6 CREAR USUARIO - ÉXITO
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "username": "juan.perez.test",
+  "email": "juan.perez.test@example.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### 2.7 CREAR USUARIO - ERROR: Email duplicado en organización
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Duplicado",
+  "username": "juan.duplicado",
+  "email": "testadmin@vendix.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### 2.8 CREAR USUARIO - ERROR: Username duplicado
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Duplicado",
+  "username": "testadmin",
+  "email": "juan.duplicado@example.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### 2.9 OBTENER USUARIO ESPECÍFICO - ÉXITO
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### 2.10 OBTENER USUARIO - ERROR: Usuario no encontrado
+GET {{baseUrl}}/users/999
+Authorization: Bearer {{admin_token}}
+
+### 2.11 ACTUALIZAR USUARIO - ÉXITO
+PATCH {{baseUrl}}/users/13
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "first_name": "Juan Carlos",
+  "state": "active"
+}
+
+### 2.12 ACTUALIZAR USUARIO - Con cambio de contraseña
+PATCH {{baseUrl}}/users/13
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "first_name": "Juan Carlos",
+  "password": "NewSecurePass456!",
+  "state": "active"
+}
+
+### 2.13 ELIMINAR USUARIO - ÉXITO
+DELETE {{baseUrl}}/users/13
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 3. PRUEBAS DE VALIDACIÓN
+### ============================================
+
+### 3.1 CREAR USUARIO - ERROR: Campos requeridos faltantes
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan"
+}
+
+### 3.2 CREAR USUARIO - ERROR: Email inválido
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "username": "juan.emailinvalido",
+  "email": "email-invalido",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### 3.3 CREAR USUARIO - ERROR: Contraseña muy corta
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "username": "juan.passcorta",
+  "email": "juan.passcorta@example.com",
+  "password": "123",
+  "state": "active"
+}
+
+### 3.4 CREAR USUARIO - ERROR: Organización inexistente
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 999,
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "username": "juan.orginvalida",
+  "email": "juan.orginvalida@example.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### ============================================
+### 4. PRUEBAS DE SEGURIDAD
+### ============================================
+
+### 4.1 ACCESO SIN AUTENTICACIÓN - ERROR 401
+GET {{baseUrl}}/users
+
+### 4.2 ACCESO CON TOKEN INVÁLIDO - ERROR 401
+GET {{baseUrl}}/users
+Authorization: Bearer token_invalido
+
+### 4.3 ACCESO SIN PERMISOS - ERROR 403
+GET {{baseUrl}}/users
+Authorization: Bearer {{access_token}}
+
+### 4.4 CREAR USUARIO SIN PERMISO - ERROR 403
+POST {{baseUrl}}/users
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Juan",
+  "last_name": "Pérez",
+  "username": "juan.sinpermiso",
+  "email": "juan.sinpermiso@example.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### ============================================
+### 5. PRUEBAS DE CONSULTAS AVANZADAS
+### ============================================
+
+### 5.1 BÚSQUEDA POR NOMBRE - Case insensitive
+GET {{baseUrl}}/users?page=1&limit=10&search=JUAN
+Authorization: Bearer {{admin_token}}
+
+### 5.2 BÚSQUEDA POR APELLIDO
+GET {{baseUrl}}/users?page=1&limit=10&search=Pérez
+Authorization: Bearer {{admin_token}}
+
+### 5.3 BÚSQUEDA POR EMAIL
+GET {{baseUrl}}/users?page=1&limit=10&search=@vendix.com
+Authorization: Bearer {{admin_token}}
+
+### 5.4 FILTRO POR ESTADO INACTIVO
+GET {{baseUrl}}/users?page=1&limit=10&state=inactive
+Authorization: Bearer {{admin_token}}
+
+### 5.5 COMBINACIÓN DE FILTROS
+GET {{baseUrl}}/users?page=1&limit=10&search=test&state=active&organization_id=1
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 6. PRUEBAS DE LÍMITE
+### ============================================
+
+### 6.1 PAGINACIÓN - Página grande
+GET {{baseUrl}}/users?page=100&limit=10
+Authorization: Bearer {{admin_token}}
+
+### 6.2 LÍMITE MÁXIMO
+GET {{baseUrl}}/users?page=1&limit=100
+Authorization: Bearer {{admin_token}}
+
+### 6.3 LÍMITE EXCESIVO - ERROR
+GET {{baseUrl}}/users?page=1&limit=1000
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 7. PRUEBAS DE RELACIONES
+### ============================================
+
+### 7.1 USUARIO CON ROLES Y TIENDAS
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### 7.2 USUARIO CON ORGANIZACIÓN
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 8. PRUEBAS DE STRESS
+### ============================================
+
+### 8.1 MÚLTIPLES CONSULTAS SIMULTÁNEAS
+GET {{baseUrl}}/users?page=1&limit=5
+Authorization: Bearer {{admin_token}}
+
+###
+GET {{baseUrl}}/users?page=2&limit=5
+Authorization: Bearer {{admin_token}}
+
+###
+GET {{baseUrl}}/users?page=3&limit=5
+Authorization: Bearer {{admin_token}}
+
+### 8.2 CREACIÓN MASIVA (simulada)
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": 1,
+  "first_name": "Usuario",
+  "last_name": "Test{{randomInt 100 999}}",
+  "username": "user.test{{randomInt 100 999}}",
+  "email": "user.test{{randomInt 100 999}}@example.com",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### ============================================
+### 9. PRUEBAS DE REGRESIÓN
+### ============================================
+
+### 9.1 VERIFICAR ESTADO DESPUÉS DE OPERACIONES
+GET {{baseUrl}}/users?page=1&limit=10
+Authorization: Bearer {{admin_token}}
+
+### 9.2 VERIFICAR USUARIO CREADO
+GET {{baseUrl}}/users/13
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 10. PRUEBAS DE PERFORMANCE
+### ============================================
+
+### 10.1 CONSULTA SIMPLE
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### 10.2 CONSULTA CON FILTROS
+GET {{baseUrl}}/users?page=1&limit=10&search=test&state=active
+Authorization: Bearer {{admin_token}}
+
+### 10.3 CONSULTA SIN FILTROS
+GET {{baseUrl}}/users?page=1&limit=10
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### VARIABLES PARA TESTING AVANZADO
+### ============================================
+
+@new_user_id = 0
+@test_org_id = 1
+@test_user_email = test.user.{{$randomInt 100 999}}@example.com
+@test_username = testuser{{$randomInt 100 999}}
+
+### 11. PRUEBAS CON DATOS DINÁMICOS
+### ============================================
+
+### Crear usuario con datos aleatorios
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": {{test_org_id}},
+  "first_name": "Test",
+  "last_name": "User{{$randomInt 100 999}}",
+  "username": "{{test_username}}",
+  "email": "{{test_user_email}}",
+  "password": "TestPass123!",
+  "state": "active"
+}
+
+### Consultar usuario creado
+GET {{baseUrl}}/users/{{new_user_id}}
+Authorization: Bearer {{admin_token}}
+
+### Actualizar usuario creado
+PATCH {{baseUrl}}/users/{{new_user_id}}
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "first_name": "Test Updated",
+  "state": "active"
+}
+
+### ============================================
+### 12. PRUEBAS DE ERROR HANDLING
+### ============================================
+
+### 12.1 JSON INVÁLIDO
+POST {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "organization_id": "invalid",
+  "first_name": 123,
+  "email": null
+}
+
+### 12.2 PARÁMETROS DE QUERY INVÁLIDOS
+GET {{baseUrl}}/users?page=abc&limit=xyz
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 13. LIMPIEZA DE DATOS DE PRUEBA
+### ============================================
+
+### Eliminar usuario de prueba
+DELETE {{baseUrl}}/users/{{new_user_id}}
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 14. REPORTES Y VERIFICACIONES FINALES
+### ============================================
+
+### Verificar estado final
+GET {{baseUrl}}/users?page=1&limit=5
+Authorization: Bearer {{admin_token}}
+
+### Verificar auditoría
+GET {{baseUrl}}/audit?resource=USERS&limit=5
+Authorization: Bearer {{admin_token}}
+
+### ============================================
+### 15. PRUEBAS DE INTEGRACIÓN
+### ============================================
+
+### Verificar integración con roles
+GET {{baseUrl}}/roles/user/1/roles
+Authorization: Bearer {{admin_token}}
+
+### Verificar integración con organizaciones
+GET {{baseUrl}}/organizations/1
+Authorization: Bearer {{admin_token}}
