@@ -187,8 +187,8 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotDto: { email: string }) {
-    await this.authService.forgotPassword(forgotDto.email);
-    throw new NotImplementedException('La recuperación de contraseña aún no está implementada.');
+    const result = await this.authService.forgotPassword(forgotDto.email);
+    return result;
   }
 
   @Post('reset-password')
@@ -196,11 +196,11 @@ export class AuthController {
   async resetPassword(
     @Body() resetDto: { token: string; newPassword: string },
   ) {
-    await this.authService.resetPassword(
+    const result = await this.authService.resetPassword(
       resetDto.token,
       resetDto.newPassword,
     );
-    throw new NotImplementedException('El reseteo de contraseña aún no está implementado.');
+    return result;
   }
 
   @Post('change-password')
@@ -210,12 +210,12 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() changeDto: { currentPassword: string; newPassword: string },
   ) {
-    await this.authService.changePassword(
+    const result = await this.authService.changePassword(
       user.id,
       changeDto.currentPassword,
       changeDto.newPassword,
     );
-    throw new NotImplementedException('El cambio de contraseña aún no está implementado.');
+    return result;
   }
 
   @UseGuards(JwtAuthGuard)

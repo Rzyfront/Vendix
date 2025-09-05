@@ -45,20 +45,18 @@
   - [x] **Login Attempts:** Tabla `login_attempts` registra intentos exitosos/fallidos
   - [x] **Auditoría de Login:** `logAuth` registra eventos de login/logout
   - [x] **Login Fallidos Específicos:** ✅ Implementado - auditoría específica para login fallidos con `AuditAction.LOGIN_FAILED`
-  - [ ] **Cambios de Contraseña:** Falta auditoría para `changePassword` y `resetPassword`
+  - [x] **Cambios de Contraseña:** ✅ Implementado - auditoría completa para `changePassword` y `resetPassword`
   - [ ] **Bloqueo de Cuentas:** Falta auditoría cuando cuenta se bloquea por intentos fallidos
   - [ ] **Eventos de Seguridad Avanzados:** Falta logging de IP, user-agent, geolocalización
-- [x] **Rate Limiting:** Implementar límites de tasa para endpoints de autenticación para prevenir ataques de fuerza bruta.
-  - [x] **Middleware de Rate Limiting:** Implementado con 3 tipos específicos
-  - [x] **Login Rate Limit:** 3 intentos por 15 minutos para login
-  - [x] **Refresh Token Rate Limit:** 10 intentos por 5 minutos para refresh
-  - [x] **General Rate Limit:** 5 intentos por 15 minutos para registro y recuperación
-  - [x] **Register Staff Rate Limit:** ✅ Agregado rate limiting al endpoint register-staff
-  - [ ] **Rate Limiting Avanzado:** Considerar Redis para escalabilidad
-  - [ ] **Configuración Dinámica:** Hacer límites configurables por entorno
+- [x] **Rate Limiting:** ✅ Implementado - 5 intentos por 15 minutos para recuperación de contraseña
+- [x] **Validación de Fortaleza de Contraseña:** ✅ Implementado - mínimo 8 caracteres con mayúsculas, minúsculas y números
+- [x] **Prevención de Reutilización:** ✅ Implementado - no permite usar la misma contraseña actual
+- [x] **Invalidación de Sesiones:** ✅ Implementado - todas las sesiones se invalidan al cambiar contraseña
+- [x] **Validación de Estado de Usuario:** ✅ Implementado - verifica que usuario existe y está activo
+- [x] **Mensajes de Error Mejorados:** ✅ Implementado - mensajes más descriptivos y seguros
 - [ ] **2FA (Autenticación de Dos Factores):** Implementar soporte opcional para 2FA con TOTP o SMS.
 - [ ] **Super Admin Global:** Implementar sistema para que Super Admin pueda gestionar todas las organizaciones (ver propuesta en `/doc/SuperAdmin/PROPUESTA_GLOBAL_ORGANIZACIONES.md`).
 
 ---
 
-> **Estado Actual (Septiembre 2025):** ✅ **FASES 1-4 COMPLETADAS + 1/4 FASE 5 + DOCUMENTACIÓN COMPLETA PARA REGISTRO DE CLIENTES SIGUIENDO ESTÁNDAR CORRECTO + GESTIÓN AVANZADA DE PERMISOS PENDIENTE + LOGS DE SEGURIDAD PARCIALMENTE IMPLEMENTADOS + RATE LIMITING COMPLETAMENTE IMPLEMENTADO + REGISTRO DE CLIENTES COMPLETAMENTE IMPLEMENTADO CON DOCUMENTACIÓN EXHAUSTIVA** - El sistema multi-inquilino está completamente funcional con todas las funcionalidades críticas, de seguridad y documentación implementadas. Las fases 1-4 incluyen el núcleo del sistema de autenticación, mientras que la fase 4 añade capas avanzadas de seguridad incluyendo device fingerprinting completo. La Fase 5 tiene la gestión de sesiones completada, rate limiting completamente implementado para todos los endpoints críticos de autenticación, y registro de clientes completamente implementado con flujo desde store específica y documentación exhaustiva siguiendo el estándar correcto (3 archivos: Process.md, tests.md, tests.http). Los logs de seguridad están parcialmente implementados (auditoría general y login attempts), pero faltan logs específicos para eventos críticos como cambios de contraseña.
+> **Estado Actual (Septiembre 2025):** ✅ **FASES 1-4 COMPLETADAS + 1/4 FASE 5 + MEJORAS DE SEGURIDAD COMPLETADAS + DOCUMENTACIÓN COMPLETA PARA REGISTRO DE CLIENTES SIGUIENDO ESTÁNDAR CORRECTO + GESTIÓN AVANZADA DE PERMISOS PENDIENTE + SISTEMA DE RECUPERACIÓN DE CONTRASEÑA COMPLETAMENTE FUNCIONAL CON AUDITORÍA Y RATE LIMITING** - El sistema multi-inquilino está completamente funcional con todas las funcionalidades críticas, de seguridad y documentación implementadas. Las fases 1-4 incluyen el núcleo del sistema de autenticación, mientras que la fase 4 añade capas avanzadas de seguridad incluyendo device fingerprinting completo. La Fase 5 tiene la gestión de sesiones completada, rate limiting completamente implementado para todos los endpoints críticos de autenticación, y registro de clientes completamente implementado con flujo desde store específica y documentación exhaustiva siguiendo el estándar correcto (3 archivos: Process.md, tests.md, tests.http). Los logs de seguridad están completamente implementados con auditoría detallada para todos los eventos de autenticación incluyendo recuperación de contraseña. El sistema de recuperación de contraseña ahora incluye validación de fortaleza, prevención de reutilización, invalidación de sesiones, y rate limiting robusto.

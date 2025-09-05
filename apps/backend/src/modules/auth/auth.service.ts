@@ -1183,6 +1183,19 @@ export class AuthService {
       user.first_name,
     );
 
+    // Registrar auditoría de solicitud de recuperación
+    await this.auditService.logAuth(
+      user.id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'forgot_password_request',
+        success: true,
+        email_sent: true,
+      },
+      undefined, // IP no disponible en este contexto
+      undefined  // User-Agent no disponible en este contexto
+    );
+
     return {
       message:
         'Si el email existe, recibirás instrucciones para restablecer tu contraseña',
@@ -1208,7 +1221,25 @@ export class AuthService {
     }
 
     if (new Date() > resetToken.expires_at) {
-      throw new BadRequestException('Token expirado');
+      throw new BadRequestException('Token expirado. Solicita un nuevo enlace de recuperación.');
+    }
+
+    // Verificar que el usuario aún existe y está activo
+    if (!resetToken.users || resetToken.users.state !== 'active') {
+      throw new BadRequestException('Usuario no encontrado o cuenta inactiva');
+    }
+
+    // Validar fortaleza de la nueva contraseña
+    if (!this.validatePasswordStrength(newPassword)) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números'
+      );
+    }
+
+    // Verificar que la nueva contraseña no sea igual a la actual
+    const isSamePassword = await bcrypt.compare(newPassword, resetToken.users.password);
+    if (isSamePassword) {
+      throw new BadRequestException('La nueva contraseña no puede ser igual a la contraseña actual');
     }
 
     // Hashear nueva contraseña
@@ -1235,6 +1266,19 @@ export class AuthService {
       where: { user_id: resetToken.user_id },
     });
 
+    // Registrar auditoría de reset de contraseña
+    await this.auditService.logAuth(
+      resetToken.user_id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'password_reset_token',
+        success: true,
+        token_used: true,
+      },
+      undefined, // IP no disponible en este contexto
+      undefined  // User-Agent no disponible en este contexto
+    );
+
     return { message: 'Contraseña restablecida exitosamente' };
   }
 
@@ -1260,6 +1304,19 @@ export class AuthService {
       throw new BadRequestException('Contraseña actual incorrecta');
     }
 
+    // Validar fortaleza de la nueva contraseña
+    if (!this.validatePasswordStrength(newPassword)) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números'
+      );
+    }
+
+    // Verificar que la nueva contraseña no sea igual a la actual
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    if (isSamePassword) {
+      throw new BadRequestException('La nueva contraseña no puede ser igual a la contraseña actual');
+    }
+
     // Hashear nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
@@ -1269,7 +1326,42 @@ export class AuthService {
       data: { password: hashedPassword },
     });
 
-    return { message: 'Contraseña cambiada exitosamente' };
+    // Invalidar todas las sesiones activas del usuario (seguridad adicional)
+    await this.prismaService.refresh_tokens.deleteMany({
+      where: { user_id: userId },
+    });
+
+    // Registrar auditoría de cambio de contraseña
+    await this.auditService.logAuth(
+      userId,
+      AuditAction.PASSWORD_CHANGE,
+      {
+        method: 'current_password_verification',
+        success: true,
+        sessions_invalidated: true,
+      },
+      undefined, // IP no disponible en este contexto
+      undefined  // User-Agent no disponible en este contexto
+    );
+
+    return { message: 'Contraseña cambiada exitosamente. Todas las sesiones han sido invalidadas por seguridad.' };
+  }
+
+  // Método auxiliar para verificar tokens de cambio de contraseña (para futura implementación)
+  async verifyPasswordChangeToken(token: string): Promise<{ message: string }> {
+    // Este método puede implementarse más adelante si se decide agregar verificación por email
+    throw new BadRequestException('Funcionalidad no implementada aún');
+  }
+
+  // Método auxiliar para validar fortaleza de contraseña
+  private validatePasswordStrength(password: string): boolean {
+    // Mínimo 8 caracteres, al menos una mayúscula, una minúscula, un número
+    const minLength = password.length >= 8;
+    const hasUpperCase = /[A-Z]/.test(password);
+    const hasLowerCase = /[a-z]/.test(password);
+    const hasNumbers = /\d/.test(password);
+
+    return minLength && hasUpperCase && hasLowerCase && hasNumbers;
   }
 
   // ===== FUNCIONES DE ORGANIZACIÓN DESPUÉS DEL REGISTRO =====
