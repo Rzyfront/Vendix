@@ -1,0 +1,111 @@
+### VENDIX - Complete Onboarding API Tests
+### Archivo para probar el endpoint de completar onboarding
+
+@baseUrl = http://localhost:3000/api
+@access_token = TU_TOKEN_AQUI
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. REGISTRO DE USUARIO PARA TESTING
+### ============================================
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization",
+  "email": "testcomplete@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+### ============================================
+### 2. LOGIN PARA OBTENER TOKEN
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testcomplete@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+### ============================================
+### 3. INTENTO SIN AUTENTICACIÓN - 401
+### ============================================
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+
+{}
+
+### ============================================
+### 4. INTENTO CON TOKEN INVÁLIDO - 401
+### ============================================
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer invalid_token
+
+{}
+
+### ============================================
+### 5. INTENTO SIN EMAIL VERIFICADO - 401
+### ============================================
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+### ============================================
+### 6. INTENTO SIN DATOS COMPLETOS - 400
+### ============================================
+# NOTA: Este test requiere que marques el email como verificado primero
+# UPDATE users SET email_verified = true WHERE email = 'testcomplete@example.com';
+
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+### ============================================
+### 7. SETUP COMPLETO PARA ÉXITO
+### ============================================
+# NOTA: Para este test necesitas configurar manualmente:
+# 1. Marcar email como verificado
+# 2. Actualizar datos de organización
+# 3. Crear dirección de organización
+# 4. Crear tienda
+# 5. Crear dirección de tienda
+# 6. Configurar domain_settings con hostname y colores
+
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+### ============================================
+### 8. INTENTO DE REPETIR COMPLETADO - 400
+### ============================================
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+### ============================================
+### 9. VERIFICACIÓN EN BD
+### ============================================
+# SELECT id, email, onboarding_completed FROM users WHERE email = 'testcomplete@example.com';
+
+### ============================================
+### 10. LIMPIEZA - Reset para próximos tests
+### ============================================
+# UPDATE users SET onboarding_completed = false WHERE email = 'testcomplete@example.com';</content>
+<parameter name="filePath">/home/rzydev/Vendix/apps/backend/doc/Auth/Complete Onboarding/complete-onboarding-tests.http

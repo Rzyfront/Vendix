@@ -1244,12 +1244,17 @@ export class AuthService {
       throw new BadRequestException('Onboarding no completado correctamente');
     }
 
+    // Validar todas las pre-condiciones requeridas
+    const validationResult = await this.validateOnboardingCompletion(userId);
+    if (!validationResult.isValid) {
+      throw new BadRequestException(`Faltan datos requeridos: ${validationResult.missingFields.join(', ')}`);
+    }
+
     // Actualizar el estado del usuario como onboarding completado
-    // TODO: Agregar campo onboarding_completed al esquema de users
     await this.prismaService.users.update({
       where: { id: userId },
       data: {
-        // onboarding_completed: true, // Campo por agregar al esquema
+        onboarding_completed: true,
         updated_at: new Date(),
       },
     });
@@ -1262,6 +1267,127 @@ export class AuthService {
         currentStep: 'complete',
         onboardingCompleted: true,
       },
+    };
+  }
+
+  // ===== MÉTODO AUXILIAR PARA VALIDACIONES =====
+
+  private async validateOnboardingCompletion(userId: number): Promise<{
+    isValid: boolean;
+    missingFields: string[];
+  }> {
+    const missingFields: string[] = [];
+
+    // Obtener datos del usuario con organización
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: {
+        organizations: {
+          include: {
+            addresses: true,
+            stores: {
+              include: {
+                addresses: true,
+              },
+            },
+            domain_settings: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      missingFields.push('usuario no encontrado');
+      return { isValid: false, missingFields };
+    }
+
+    // 0. Validar que el usuario NO haya completado ya el onboarding
+    if (user.onboarding_completed) {
+      missingFields.push('onboarding ya completado');
+      return { isValid: false, missingFields };
+    }
+
+    if (!user.organizations) {
+      missingFields.push('organización');
+      return { isValid: false, missingFields };
+    }
+
+    const organization = user.organizations;
+
+    // 1. Validar datos básicos de organización
+    if (!organization.name || !organization.description) {
+      missingFields.push('nombre y descripción de organización');
+    }
+
+    if (!organization.email || !organization.phone) {
+      missingFields.push('email y teléfono de organización');
+    }
+
+    // 2. Validar dirección de organización
+    if (!organization.addresses || organization.addresses.length === 0) {
+      missingFields.push('dirección de organización');
+    } else {
+      const primaryAddress = organization.addresses.find(addr => addr.is_primary);
+      if (!primaryAddress ||
+          !primaryAddress.address_line1 ||
+          !primaryAddress.city ||
+          !primaryAddress.country_code) {
+        missingFields.push('dirección completa de organización');
+      }
+    }
+
+    // 3. Validar que existe al menos una tienda
+    if (!organization.stores || organization.stores.length === 0) {
+      missingFields.push('al menos una tienda configurada');
+    } else {
+      // Validar que la tienda tenga datos básicos
+      const store = organization.stores[0];
+      if (!store.name) {
+        missingFields.push('nombre de tienda');
+      }
+
+      // Validar dirección de tienda
+      if (!store.addresses || store.addresses.length === 0) {
+        missingFields.push('dirección de tienda');
+      }
+    }
+
+    // 4. Validar configuración de dominio
+    if (!organization.domain_settings || organization.domain_settings.length === 0) {
+      missingFields.push('configuración de dominio');
+    } else {
+      const domainSetting = organization.domain_settings[0];
+
+      // Validar hostname
+      if (!domainSetting.hostname) {
+        missingFields.push('hostname en domain_settings');
+      }
+
+      // Validar colores en config JSON
+      if (!domainSetting.config) {
+        missingFields.push('configuración de colores en domain_settings');
+      } else {
+        try {
+          const config = typeof domainSetting.config === 'string'
+            ? JSON.parse(domainSetting.config)
+            : domainSetting.config;
+
+          const colors: string[] = [];
+          if (config.branding?.primaryColor) colors.push('primaryColor');
+          if (config.branding?.secondaryColor) colors.push('secondaryColor');
+
+          if (colors.length < 2) {
+            missingFields.push('al menos 2 colores (primario y secundario) en domain_settings.config.branding');
+          }
+        } catch (error) {
+          missingFields.push('configuración de colores válida en domain_settings');
+        }
+      }
+    }
+
+    return {
+      isValid: missingFields.length === 0,
+      missingFields,
     };
   }
 

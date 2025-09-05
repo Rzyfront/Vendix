@@ -11,6 +11,7 @@ import {
   NotImplementedException,
   ConflictException,
 } from '@nestjs/common';
+import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -259,8 +260,70 @@ export class AuthController {
   @Post('onboarding/complete')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Completar onboarding del usuario',
+    description: 'Permite a un usuario marcar su proceso de onboarding como completado. Valida que todos los datos requeridos estén configurados antes de permitir la finalización.',
+  })
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Onboarding completado exitosamente',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Onboarding completado exitosamente' },
+        data: {
+          type: 'object',
+          properties: {
+            user: {
+              type: 'object',
+              properties: {
+                id: { type: 'number', example: 1 },
+                email: { type: 'string', example: 'usuario@email.com' },
+                first_name: { type: 'string', example: 'Juan' },
+                last_name: { type: 'string', example: 'Pérez' },
+                onboarding_completed: { type: 'boolean', example: true },
+                state: { type: 'string', example: 'active' },
+              },
+            },
+            organization: {
+              type: 'object',
+              properties: {
+                id: { type: 'number', example: 1 },
+                name: { type: 'string', example: 'Mi Organización' },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Datos faltantes o validación fallida',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Faltan datos requeridos: nombre y descripción de organización, email y teléfono de organización, dirección de organización, al menos una tienda configurada, configuración de dominio' },
+        error: { type: 'string', example: 'Bad Request' },
+        statusCode: { type: 'number', example: 400 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Usuario no autenticado o email no verificado',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Email no verificado' },
+        error: { type: 'string', example: 'Unauthorized' },
+        statusCode: { type: 'number', example: 401 },
+      },
+    },
+  })
   async completeOnboarding(@CurrentUser() user: any) {
-    await this.authService.completeOnboarding(user.id);
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    return await this.authService.completeOnboarding(user.id);
   }
 }
