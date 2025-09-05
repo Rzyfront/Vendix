@@ -1,0 +1,190 @@
+### VENDIX - Rate Limiting API Tests
+### Archivo para probar el sistema de rate limiting
+
+@baseUrl = http://localhost:3000/api
+@access_token = TU_TOKEN_AQUI
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. REGISTRO DE USUARIO PARA TESTING
+### ============================================
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization",
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+### ============================================
+### 2. LOGIN PARA OBTENER TOKEN
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+### ============================================
+### 3. REQUESTS NORMALES - Deberían pasar
+### ============================================
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+###
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+###
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{}
+
+### ============================================
+### 4. REQUESTS SIN AUTENTICACIÓN - Límite por IP
+### ============================================
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization 2",
+  "email": "test2@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+###
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization 3",
+  "email": "test3@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+###
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization 4",
+  "email": "test4@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+###
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization 5",
+  "email": "test5@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+###
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Organization 6",
+  "email": "test6@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "User"
+}
+
+### ============================================
+### 5. VERIFICACIÓN DE HEADERS DE RATE LIMIT
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 6. REQUESTS CON DIFERENTES ENDPOINTS
+### ============================================
+# Test con endpoint de login (más restrictivo)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testratelimit@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-organization"
+}
+
+### ============================================
+### 7. VERIFICACIÓN EN LOGS
+### ============================================
+# Buscar en logs por "Rate limit exceeded" o "rate limit"
+
+### ============================================
+### 8. LIMPIEZA - Reset para próximos tests
+### ============================================
+# DELETE FROM users WHERE email LIKE 'testratelimit%';</content>
+<parameter name="filePath">/home/rzydev/Vendix/apps/backend/doc/Auth/Rate Limiting/rate-limiting-tests.http
