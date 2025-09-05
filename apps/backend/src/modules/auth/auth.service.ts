@@ -2487,39 +2487,6 @@ export class AuthService {
     return username;
   }
 
-  // ===== SISTEMA DE AUDITORÍA =====
-
-  private async logAuditEvent(
-    userId: number | null,
-    action: string,
-    resource: string,
-    resourceId: number | null = null,
-    oldValues: any = null,
-    newValues: any = null,
-    ipAddress?: string,
-    userAgent?: string,
-  ) {
-    try {
-      await this.prismaService.audit_logs.create({
-        data: {
-          user_id: userId,
-          action,
-          resource,
-          resource_id: resourceId,
-          old_values: oldValues ? JSON.parse(JSON.stringify(oldValues)) : null,
-          new_values: newValues ? JSON.parse(JSON.stringify(newValues)) : null,
-          ip_address: ipAddress,
-          user_agent: userAgent,
-        },
-      });
-
-      console.log(`📊 AUDIT: ${action} ${resource} (ID: ${resourceId}) por usuario ${userId}`);
-    } catch (error) {
-      console.error('❌ Error registrando evento de auditoría:', error);
-      // No fallar la operación principal por error de auditoría
-    }
-  }
-
   // Parsear información del dispositivo desde User Agent
   private parseDeviceInfo(userAgent: string) {
     if (!userAgent) {

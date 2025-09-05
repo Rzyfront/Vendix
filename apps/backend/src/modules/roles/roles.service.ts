@@ -368,6 +368,24 @@ export class RolesService {
       if (!isSuperAdmin) {
         throw new ForbiddenException('Solo los super administradores pueden asignar el rol super_admin');
       }
+
+      // Verificar que no exista ya un super admin
+      const existingSuperAdmin = await this.prismaService.user_roles.findFirst({
+        where: {
+          roles: {
+            name: 'super_admin'
+          }
+        },
+        include: {
+          users: {
+            select: { id: true, email: true, first_name: true, last_name: true }
+          }
+        }
+      });
+
+      if (existingSuperAdmin) {
+        throw new ConflictException(`Ya existe un super administrador: ${existingSuperAdmin.users?.email}. Solo puede existir un super administrador en el sistema.`);
+      }
     }
 
     // Verificar que no tenga ya este rol
