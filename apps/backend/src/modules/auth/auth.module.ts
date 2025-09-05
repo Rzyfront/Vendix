@@ -17,7 +17,7 @@ import { SessionValidationMiddleware } from '../../common/utils/session-validati
     ConfigModule,
     PrismaModule,
     EmailModule,
-    OrganizationsModule, // Import OrganizationsModule here
+    OrganizationsModule,
     AuditModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
@@ -56,6 +56,7 @@ export class AuthModule {
       .forRoutes(
         { path: 'auth/register-owner', method: RequestMethod.POST },
         { path: 'auth/register-customer', method: RequestMethod.POST },
+        { path: 'auth/register-staff', method: RequestMethod.POST },
         { path: 'auth/forgot-password', method: RequestMethod.POST },
         { path: 'auth/reset-password', method: RequestMethod.POST }
       );

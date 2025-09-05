@@ -737,8 +737,21 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
+      // Registrar auditoría de login fallido
+      await this.auditService.logAuth(
+        user.id,
+        AuditAction.LOGIN_FAILED,
+        {
+          email: user.email,
+          reason: 'Invalid credentials',
+          attempt_number: user.failed_login_attempts + 1,
+        },
+        clientInfo?.ipAddress || '127.0.0.1',
+        clientInfo?.userAgent || 'Unknown'
+      );
+
       // Incrementar intentos fallidos
-      await this.handleFailedLogin(user.id);
+      await this.handleFailedLogin(user.id, clientInfo);
       await this.logLoginAttempt(user.id, false);
       throw new UnauthorizedException('Credenciales inválidas');
     }
@@ -1921,7 +1934,7 @@ export class AuthService {
     });
   }
 
-  private async handleFailedLogin(userId: number) {
+  private async handleFailedLogin(userId: number, clientInfo?: { ipAddress?: string; userAgent?: string }) {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
     });
@@ -1934,6 +1947,19 @@ export class AuthService {
     // Bloquear cuenta después de 5 intentos fallidos por 30 minutos
     if (failedAttempts >= 5) {
       updateData.locked_until = new Date(Date.now() + 30 * 60 * 1000);
+
+      // Registrar auditoría de bloqueo de cuenta
+      await this.auditService.logAuth(
+        userId,
+        AuditAction.ACCOUNT_LOCKED,
+        {
+          reason: 'Too many failed login attempts',
+          failed_attempts: failedAttempts,
+          locked_until: updateData.locked_until,
+        },
+        clientInfo?.ipAddress || '127.0.0.1',
+        clientInfo?.userAgent || 'Unknown'
+      );
     }
 
     await this.prismaService.users.update({
