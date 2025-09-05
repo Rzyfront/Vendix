@@ -9,11 +9,12 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../../email/email.service';
+import * as bcrypt from 'bcrypt'; // ✅ Agregar import de bcrypt
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import * as bcrypt from 'bcryptjs';
+import { AuditService, AuditAction, AuditResource } from '../audit/audit.service';
 
 @Injectable()
 export class AuthService {
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly auditService: AuditService,
   ) {}
 
   async registerOwner(registerOwnerDto: RegisterOwnerDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
@@ -143,6 +145,41 @@ export class AuthService {
     if (!userWithRoles) {
       throw new BadRequestException('Error al crear usuario owner');
     }
+
+    // Registrar auditoría para creación de organización
+    await this.auditService.logCreate(
+      userWithRoles.id,
+      AuditResource.ORGANIZATIONS,
+      result.organization.id,
+      {
+        name: result.organization.name,
+        slug: result.organization.slug,
+        email: result.organization.email,
+      },
+      {
+        registration_type: result.wasExistingUser ? 'existing_user' : 'new_user',
+        ip_address: clientInfo?.ipAddress,
+        user_agent: clientInfo?.userAgent,
+      }
+    );
+
+    // Registrar auditoría para creación/actualización de usuario
+    await this.auditService.logCreate(
+      userWithRoles.id,
+      AuditResource.USERS,
+      userWithRoles.id,
+      {
+        email: userWithRoles.email,
+        first_name: userWithRoles.first_name,
+        last_name: userWithRoles.last_name,
+        organization_id: userWithRoles.organization_id,
+      },
+      {
+        registration_type: result.wasExistingUser ? 'existing_user_assigned' : 'new_registration',
+        ip_address: clientInfo?.ipAddress,
+        user_agent: clientInfo?.userAgent,
+      }
+    );
 
     // Generar tokens
     const tokens = await this.generateTokens(userWithRoles);
@@ -511,6 +548,18 @@ export class AuthService {
 
     // Registrar intento de login exitoso
     await this.logLoginAttempt(user.id, true);
+
+    // Registrar auditoría de login
+    await this.auditService.logAuth(
+      user.id,
+      AuditAction.LOGIN,
+      {
+        login_method: 'password',
+        success: true,
+      },
+      '127.0.0.1', // TODO: Obtener IP real
+      'Login-Device' // TODO: Obtener User-Agent real
+    );
 
     // Actualizar último login
     await this.prismaService.users.update({
@@ -1251,13 +1300,26 @@ export class AuthService {
     }
 
     // Actualizar el estado del usuario como onboarding completado
-    await this.prismaService.users.update({
+    const updatedUser = await this.prismaService.users.update({
       where: { id: userId },
       data: {
         onboarding_completed: true,
         updated_at: new Date(),
       },
     });
+
+    // Registrar auditoría
+    await this.auditService.logUpdate(
+      userId,
+      AuditResource.USERS,
+      userId,
+      { onboarding_completed: false },
+      { onboarding_completed: true },
+      {
+        action: 'complete_onboarding',
+        completed_at: new Date().toISOString(),
+      }
+    );
 
     return {
       success: true,
@@ -1946,5 +2008,38 @@ export class AuthService {
     }
 
     return username;
+  }
+
+  // ===== SISTEMA DE AUDITORÍA =====
+
+  private async logAuditEvent(
+    userId: number | null,
+    action: string,
+    resource: string,
+    resourceId: number | null = null,
+    oldValues: any = null,
+    newValues: any = null,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    try {
+      await this.prismaService.audit_logs.create({
+        data: {
+          user_id: userId,
+          action,
+          resource,
+          resource_id: resourceId,
+          old_values: oldValues ? JSON.parse(JSON.stringify(oldValues)) : null,
+          new_values: newValues ? JSON.parse(JSON.stringify(newValues)) : null,
+          ip_address: ipAddress,
+          user_agent: userAgent,
+        },
+      });
+
+      console.log(`📊 AUDIT: ${action} ${resource} (ID: ${resourceId}) por usuario ${userId}`);
+    } catch (error) {
+      console.error('❌ Error registrando evento de auditoría:', error);
+      // No fallar la operación principal por error de auditoría
+    }
   }
 }

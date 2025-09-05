@@ -18,7 +18,8 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { PublicModule } from './common/public/public.module';
-import { DomainSettingsModule } from './common/modules/domain-settings.module';
+import { AuditModule } from './modules/audit/audit.module';
+import { DomainSettingsModule } from './common/modules/domain-settings.module'; // ✅ Agregar import faltante
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { DomainSettingsModule } from './common/modules/domain-settings.module';
     TestModule,
     PublicModule, // Módulo público para endpoints sin autenticación
     DomainSettingsModule, // Módulo para configuración de dominios
+    AuditModule, // Módulo de auditoría
   ],
   controllers: [AppController],
   providers: [AppService],

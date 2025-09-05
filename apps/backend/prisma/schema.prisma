@@ -29,7 +29,7 @@ model users {
   last_name                 String                      @db.VarChar(100)
   onboarding_completed      Boolean                     @default(false)
   organization_id           Int
-  organizations             organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   api_keys                  api_keys[]
   audit_logs                audit_logs[]
   email_verification_tokens email_verification_tokens[]
@@ -60,14 +60,14 @@ model store_users {
 }
 
 model roles {
-  id                 Int                  @id @default(autoincrement())
-  name               String               @unique @db.VarChar(50)
-  description        String?
-  is_system_role     Boolean              @default(false)
-  created_at         DateTime?            @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?            @default(now()) @db.Timestamp(6)
-  role_permissions   role_permissions[]
-  user_roles         user_roles[]
+  id               Int                @id @default(autoincrement())
+  name             String             @unique @db.VarChar(50)
+  description      String?
+  is_system_role   Boolean            @default(false)
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
+  role_permissions role_permissions[]
+  user_roles       user_roles[]
 }
 
 model permissions {
@@ -178,19 +178,22 @@ model email_verification_tokens {
 }
 
 model audit_logs {
-  id          Int       @id @default(autoincrement())
-  user_id     Int?
-  action      String    @db.VarChar(100)
-  resource    String    @db.VarChar(100)
-  resource_id Int?
-  old_values  Json?
-  new_values  Json?
-  ip_address  String?   @db.VarChar(45)
-  user_agent  String?
-  created_at  DateTime? @default(now()) @db.Timestamp(6)
-  users       users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  id              Int            @id @default(autoincrement())
+  user_id         Int?
+  store_id        Int?
+  organization_id Int? // ✅ Nuevo campo para organización directa
+  action          String         @db.VarChar(100)
+  resource        String         @db.VarChar(100)
+  resource_id     Int?
+  old_values      Json?
+  new_values      Json?
+  ip_address      String?        @db.VarChar(45)
+  user_agent      String?
+  created_at      DateTime?      @default(now()) @db.Timestamp(6)
+  users           users?         @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+  stores          stores?        @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  organizations   organizations? @relation(fields: [organization_id], references: [id], onUpdate: NoAction) // ✅ Nueva relación
 }
-
 
 // Modulo de organizaciones y tiendas
 
@@ -213,6 +216,7 @@ model organizations {
   organization_settings organization_settings?
   stores                stores[]
   users                 users[]
+  audit_logs            audit_logs[] // ✅ Nueva relación con audit_logs
 }
 
 model organization_settings {
@@ -223,7 +227,6 @@ model organization_settings {
   updated_at      DateTime?     @default(now()) @db.Timestamp(6)
   organization    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
 }
-
 
 model stores {
   id              Int               @id @default(autoincrement())
@@ -255,10 +258,10 @@ model stores {
   tax_categories  tax_categories[]
   tax_rates       tax_rates[]
   login_attempts  login_attempts[]
+  audit_logs      audit_logs[] // ✅ Nueva relación con audit_logs
 
   @@unique([organization_id, slug])
 }
-
 
 model store_settings {
   id         Int       @id @default(autoincrement())
@@ -285,28 +288,27 @@ model domain_settings {
 
 // Modulo de productos
 
-
 model addresses {
-  id                                           Int               @id @default(autoincrement())
-  customer_id                                  Int?
-  store_id                                     Int?
-  address_line1                                String
-  address_line2                                String?
-  city                                         String            @db.VarChar(100)
-  state_province                               String?           @db.VarChar(100)
-  country_code                                 String            @db.VarChar(3)
-  postal_code                                  String            @db.VarChar(20)
-  phone_number                                 String?           @db.VarChar(50)
-  type                                         address_type_enum @default(shipping)
-  is_primary                                   Boolean           @default(false)
-  latitude                                     Decimal?          @db.Decimal(10, 8)
-  longitude                                    Decimal?          @db.Decimal(11, 8)
-  organization_id                              Int?
+  id              Int               @id @default(autoincrement())
+  customer_id     Int?
+  store_id        Int?
+  address_line1   String
+  address_line2   String?
+  city            String            @db.VarChar(100)
+  state_province  String?           @db.VarChar(100)
+  country_code    String            @db.VarChar(3)
+  postal_code     String            @db.VarChar(20)
+  phone_number    String?           @db.VarChar(50)
+  type            address_type_enum @default(shipping)
+  is_primary      Boolean           @default(false)
+  latitude        Decimal?          @db.Decimal(10, 8)
+  longitude       Decimal?          @db.Decimal(11, 8)
+  organization_id Int?
 
-  organizations                                organizations?    @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                       stores?           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  orders_orders_billing_address_idToaddresses  orders[]          @relation("orders_billing_address_idToaddresses")
-  orders_orders_shipping_address_idToaddresses orders[]          @relation("orders_shipping_address_idToaddresses")
+  organizations                                organizations? @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                       stores?        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  orders_orders_billing_address_idToaddresses  orders[]       @relation("orders_billing_address_idToaddresses")
+  orders_orders_shipping_address_idToaddresses orders[]       @relation("orders_shipping_address_idToaddresses")
 }
 
 model brands {
@@ -397,31 +399,31 @@ model order_items {
 }
 
 model orders {
-  id                                              Int              @id @default(autoincrement())
-  store_id                                        Int
-  customer_id                                     Int
-  order_number                                    String           @unique @db.VarChar(50)
-  shipping_address_id                             Int?
-  billing_address_id                              Int?
-  shipping_address_snapshot                       Json?
-  billing_address_snapshot                        Json?
-  currency                                        String           @db.VarChar(10)
-  subtotal_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  discount_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  tax_amount                                      Decimal          @default(0.00) @db.Decimal(12, 2)
-  shipping_cost                                   Decimal          @default(0.00) @db.Decimal(12, 2)
-  grand_total                                     Decimal          @default(0.00) @db.Decimal(12, 2)
-  state                                           order_state_enum @default(created)
-  internal_notes                                  String?
-  created_at                                      DateTime?        @default(now()) @db.Timestamp(6)
-  updated_at                                      DateTime?        @default(now()) @db.Timestamp(6)
-  placed_at                                       DateTime?        @db.Timestamp(6)
-  completed_at                                    DateTime?        @db.Timestamp(6)
-  order_items                                     order_items[]
-  addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                                             Int              @id @default(autoincrement())
+  store_id                                       Int
+  customer_id                                    Int
+  order_number                                   String           @unique @db.VarChar(50)
+  shipping_address_id                            Int?
+  billing_address_id                             Int?
+  shipping_address_snapshot                      Json?
+  billing_address_snapshot                       Json?
+  currency                                       String           @db.VarChar(10)
+  subtotal_amount                                Decimal          @default(0.00) @db.Decimal(12, 2)
+  discount_amount                                Decimal          @default(0.00) @db.Decimal(12, 2)
+  tax_amount                                     Decimal          @default(0.00) @db.Decimal(12, 2)
+  shipping_cost                                  Decimal          @default(0.00) @db.Decimal(12, 2)
+  grand_total                                    Decimal          @default(0.00) @db.Decimal(12, 2)
+  state                                          order_state_enum @default(created)
+  internal_notes                                 String?
+  created_at                                     DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at                                     DateTime?        @default(now()) @db.Timestamp(6)
+  placed_at                                      DateTime?        @db.Timestamp(6)
+  completed_at                                   DateTime?        @db.Timestamp(6)
+  order_items                                    order_items[]
+  addresses_orders_billing_address_idToaddresses addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  addresses_orders_shipping_address_idToaddresses addresses? @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                          stores     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
 }
@@ -452,9 +454,9 @@ model payments {
   created_at        DateTime?           @default(now()) @db.Timestamp(6)
   updated_at        DateTime?           @default(now()) @db.Timestamp(6)
 
-  orders            orders              @relation(fields: [order_id], references: [id], onUpdate: NoAction)
-  payment_methods   payment_methods?    @relation(fields: [payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  refunds           refunds[]
+  orders          orders           @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  payment_methods payment_methods? @relation(fields: [payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  refunds         refunds[]
 }
 
 model product_categories {
@@ -557,9 +559,9 @@ model refunds {
   updated_at            DateTime?          @default(now()) @db.Timestamp(6)
   refund_items          refund_items[]
 
-  orders                orders             @relation(fields: [order_id], references: [id], onUpdate: NoAction)
-  payments              payments?          @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  orders   orders    @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  payments payments? @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users    users?    @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 model reviews {
