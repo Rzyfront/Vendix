@@ -1,5 +1,5 @@
-import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, ValidateIf, IsOptional } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class LoginDto {
   @ApiProperty({
@@ -18,12 +18,24 @@ export class LoginDto {
   @IsNotEmpty({ message: 'La contraseña es requerida' })
   password: string;
 
-  @ApiProperty({
-    example: 'mi-super-tienda',
-    description: 'Slug de la organización a la que se intenta acceder',
+  @ApiPropertyOptional({
+    example: 'mi-super-organizacion',
+    description: 'Slug de la organización a la que se intenta acceder (opcional si se proporciona storeSlug)',
   })
   @IsString()
-  @IsNotEmpty({ message: 'El slug de la organización es requerido' })
-  organizationSlug: string;
+  @IsOptional()
+  @ValidateIf((o) => !o.storeSlug)
+  @IsNotEmpty({ message: 'El slug de la organización es requerido si no se proporciona storeSlug' })
+  organizationSlug?: string;
+
+  @ApiPropertyOptional({
+    example: 'mi-tienda-principal',
+    description: 'Slug de la tienda a la que se intenta acceder (opcional si se proporciona organizationSlug)',
+  })
+  @IsString()
+  @IsOptional()
+  @ValidateIf((o) => !o.organizationSlug)
+  @IsNotEmpty({ message: 'El slug de la tienda es requerido si no se proporciona organizationSlug' })
+  storeSlug?: string;
 }
 

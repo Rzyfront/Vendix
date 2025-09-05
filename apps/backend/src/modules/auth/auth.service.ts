@@ -483,8 +483,13 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto) {
-    const { email, password } = loginDto;
+  async login(loginDto: LoginDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
+    const { email, password, organizationSlug, storeSlug } = loginDto;
+
+    // Validar que se proporcione al menos uno de los dos
+    if (!organizationSlug && !storeSlug) {
+      throw new BadRequestException('Debe proporcionar organizationSlug o storeSlug');
+    }
 
     // Buscar usuario con rol y permisos
     const user = await this.prismaService.users.findFirst({
@@ -503,12 +508,62 @@ export class AuthService {
             },
           },
         },
+        organizations: true,
       },
     });
 
     if (!user) {
       await this.logLoginAttempt(null, false, email);
       throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // Validar que el usuario pertenezca a la organización o tienda especificada
+    let targetOrganizationId: number | null = null;
+    let targetStoreId: number | null = null;
+    let loginContext: string = '';
+
+    if (organizationSlug) {
+      // Verificar que el usuario pertenezca a la organización especificada
+      if (user.organization_id) {
+        const userOrganization = await this.prismaService.organizations.findUnique({
+          where: { id: user.organization_id }
+        });
+
+        if (!userOrganization || userOrganization.slug !== organizationSlug) {
+          await this.logLoginAttempt(user.id, false);
+          throw new UnauthorizedException('Usuario no pertenece a la organización especificada');
+        }
+
+        targetOrganizationId = userOrganization.id;
+        loginContext = `organization:${organizationSlug}`;
+      } else {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Usuario no pertenece a ninguna organización');
+      }
+    } else if (storeSlug) {
+      // Verificar que el usuario tenga acceso a la tienda especificada
+      const storeUser = await this.prismaService.store_users.findFirst({
+        where: {
+          user_id: user.id,
+          store: { slug: storeSlug }
+        },
+        include: {
+          store: {
+            include: {
+              organizations: true
+            }
+          }
+        }
+      });
+
+      if (!storeUser) {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Usuario no tiene acceso a la tienda especificada');
+      }
+
+      targetOrganizationId = storeUser.store.organizations.id;
+      targetStoreId = storeUser.store.id;
+      loginContext = `store:${storeSlug}`;
     }
 
     // Verificar si la cuenta está bloqueada
@@ -542,8 +597,8 @@ export class AuthService {
 
     // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(user.id, tokens.refresh_token, {
-      ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
-      userAgent: 'Login-Device', // TODO: Obtener User-Agent real del request
+      ipAddress: clientInfo?.ipAddress || '127.0.0.1',
+      userAgent: clientInfo?.userAgent || 'Login-Device',
     });
 
     // Registrar intento de login exitoso
@@ -556,9 +611,12 @@ export class AuthService {
       {
         login_method: 'password',
         success: true,
+        login_context: loginContext,
+        organization_id: targetOrganizationId,
+        store_id: targetStoreId,
       },
-      '127.0.0.1', // TODO: Obtener IP real
-      'Login-Device' // TODO: Obtener User-Agent real
+      clientInfo?.ipAddress || '127.0.0.1',
+      clientInfo?.userAgent || 'Login-Device'
     );
 
     // Actualizar último login
@@ -582,7 +640,7 @@ export class AuthService {
       ipAddress?: string;
       userAgent?: string;
     },
-  ) {
+  ): Promise<{ user: any; access_token: string; refresh_token: string; token_type: string; expires_in: number }> {
     const { refresh_token } = refreshTokenDto;
 
     try {
@@ -637,6 +695,9 @@ export class AuthService {
       // Generar nuevos tokens
       const tokens = await this.generateTokens(tokenRecord.users);
 
+      // El password no está incluido en esta consulta por seguridad
+      const userWithoutPassword = tokenRecord.users;
+
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =
         this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
@@ -654,7 +715,10 @@ export class AuthService {
         },
       });
 
-      return tokens;
+      return {
+        user: userWithoutPassword,
+        ...tokens,
+      };
     } catch (error) {
       // Log intento sospechoso
       console.error('🚨 Intento de refresh token sospechoso:', {
@@ -696,9 +760,39 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  async logout(userId: number, refreshToken?: string) {
-    // Revocar refresh tokens del usuario
+  async logout(userId: number, refreshToken?: string, allSessions: boolean = false) {
     const now = new Date();
+
+    if (allSessions) {
+      // Cerrar todas las sesiones activas del usuario
+      const result = await this.prismaService.refresh_tokens.updateMany({
+        where: {
+          user_id: userId,
+          revoked: false,
+          expires_at: { gt: now }
+        },
+        data: {
+          revoked: true,
+          revoked_at: now,
+        },
+      });
+
+      // Registrar auditoría
+      await this.auditService.logAuth(
+        userId,
+        AuditAction.LOGOUT,
+        {
+          action: 'logout_all_sessions',
+          sessions_revoked: result.count
+        }
+      );
+
+      return {
+        message: `Se cerraron ${result.count} sesiones activas.`,
+        data: { sessions_revoked: result.count }
+      };
+    }
+
     if (refreshToken) {
       // Hashear el refresh token para comparación
       const hashedRefreshToken = await bcrypt.hash(refreshToken, 12);
@@ -716,18 +810,37 @@ export class AuthService {
             revoked_at: now,
           },
         });
+
         if (result.count === 0) {
-          return { message: 'Sesion no encontrada' };
+          return { message: 'Sesión no encontrada o ya revocada.', data: { sessions_revoked: 0 } };
         }
-        return { message: 'Logout exitoso' };
+
+        // Registrar auditoría
+        await this.auditService.logAuth(
+          userId,
+          AuditAction.LOGOUT,
+          {
+            action: 'logout_single_session',
+            sessions_revoked: result.count
+          }
+        );
+
+        return {
+          message: 'Logout exitoso.',
+          data: { sessions_revoked: result.count }
+        };
       } catch (error) {
-        // Loguear el error para auditoría
+        console.error('Error during logout:', error);
         throw new BadRequestException(
           'No se pudo cerrar la sesión. Intenta de nuevo.',
         );
       }
     }
-    return { message: 'No se proporcionó refresh token para revocar.' };
+
+    return {
+      message: 'No se proporcionó refresh token. Use all_sessions: true para cerrar todas las sesiones.',
+      data: { sessions_revoked: 0 }
+    };
   }
 
   // ===== FUNCIONES DE VERIFICACIÓN DE EMAIL =====
@@ -1753,10 +1866,32 @@ export class AuthService {
   }
 
   async getUserSessions(userId: number) {
-    return this.prismaService.refresh_tokens.findMany({
-      where: { user_id: userId },
+    const sessions = await this.prismaService.refresh_tokens.findMany({
+      where: {
+        user_id: userId,
+        revoked: false,
+        expires_at: { gt: new Date() }
+      },
       orderBy: { last_used: 'desc' },
+      select: {
+        id: true,
+        device_fingerprint: true,
+        ip_address: true,
+        user_agent: true,
+        last_used: true,
+        created_at: true,
+      }
     });
+
+    // Parsear información del dispositivo para cada sesión
+    return sessions.map(session => ({
+      id: session.id,
+      device: this.parseDeviceInfo(session.user_agent || ''),
+      ipAddress: session.ip_address,
+      lastUsed: session.last_used,
+      createdAt: session.created_at,
+      isCurrentSession: false, // TODO: Implementar lógica para identificar sesión actual
+    }));
   }
 
   // Método auxiliar para convertir duraciones JWT a segundos
@@ -2041,5 +2176,37 @@ export class AuthService {
       console.error('❌ Error registrando evento de auditoría:', error);
       // No fallar la operación principal por error de auditoría
     }
+  }
+
+  // Parsear información del dispositivo desde User Agent
+  private parseDeviceInfo(userAgent: string) {
+    if (!userAgent) {
+      return {
+        browser: 'Unknown',
+        os: 'Unknown',
+        type: 'Unknown'
+      };
+    }
+
+    const browser = this.extractBrowserFromUserAgent(userAgent);
+    const os = this.extractOSFromUserAgent(userAgent);
+    const type = this.detectDeviceType(userAgent);
+
+    return {
+      browser,
+      os,
+      type
+    };
+  }
+
+  // Detectar tipo de dispositivo
+  private detectDeviceType(userAgent: string): string {
+    if (userAgent.includes('Mobile') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
+      return 'Mobile';
+    }
+    if (userAgent.includes('Tablet') || userAgent.includes('iPad')) {
+      return 'Tablet';
+    }
+    return 'Desktop';
   }
 }

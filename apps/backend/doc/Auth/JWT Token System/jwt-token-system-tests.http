@@ -1,0 +1,336 @@
+### VENDIX - JWT Token System API Tests
+### Archivo para probar el sistema completo de tokens JWT
+
+@baseUrl = http://localhost:3000/api
+@access_token = TU_TOKEN_AQUI
+@refresh_token = TU_REFRESH_TOKEN_AQUI
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. LOGIN INICIAL - Obtener tokens
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 2. USAR ACCESS TOKEN - Endpoint protegido
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 3. ESPERAR EXPIRACIÓN - Simular token expirado
+### ============================================
+# Esperar 10 horas o modificar JWT_EXPIRES_IN=1s temporalmente
+
+### ============================================
+### 4. INTENTAR USAR TOKEN EXPIRADO - 401
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 5. REFRESH TOKENS - Obtener nuevos tokens
+### ============================================
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refresh_token}}"
+}
+
+### ============================================
+### 6. USAR NUEVO ACCESS TOKEN - Debe funcionar
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 7. REFRESH CON TOKEN INVÁLIDO - 401
+### ============================================
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "invalid_refresh_token"
+}
+
+### ============================================
+### 8. LOGOUT DE SESIÓN ESPECÍFICA
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refresh_token}}"
+}
+
+### ============================================
+### 9. INTENTAR USAR TOKENS DESPUÉS DE LOGOUT - 401
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+###
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refresh_token}}"
+}
+
+### ============================================
+### 10. LOGIN DESPUÉS DE LOGOUT - Nuevos tokens
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 11. LOGOUT COMPLETO - Todas las sesiones
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}
+
+### ============================================
+### 12. VERIFICAR SESIONES ACTIVAS
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 13. RATE LIMITING TEST - Múltiples requests
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 14. RATE LIMIT ACTIVADO - 429
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "wrongpassword",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 15. LOGIN CON STORE SLUG - Diferente contexto
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "storeSlug": "tienda-principal"
+}
+
+### ============================================
+### 16. MÚLTIPLES SESIONES - Diferentes dispositivos
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 17. VERIFICAR MÚLTIPLES SESIONES
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 18. REFRESH CON DEVICE FINGERPRINT DIFERENTE - ERROR
+### ============================================
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (Linux; Android 10; SM-G975F)
+
+{
+  "refresh_token": "{{refresh_token}}"
+}
+
+### ============================================
+### 19. LOGIN CON DIFERENTES USER-AGENTS
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Firefox/89.0
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 20. VERIFICAR SESIONES CON DIFERENTES BROWSERS
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 21. REFRESH TOKEN EXPIRADO - ERROR
+### ============================================
+# Modificar JWT_REFRESH_EXPIRES_IN=1s temporalmente y esperar
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refresh_token}}"
+}
+
+### ============================================
+### 22. LOGIN SIN AUTENTICACIÓN - 401
+### ============================================
+GET {{baseUrl}}/auth/sessions
+
+### ============================================
+### 23. LOGIN CON TOKEN MALFORMADO - 401
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer invalid.jwt.token
+
+### ============================================
+### 24. REFRESH SIN TOKEN - 400
+### ============================================
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{}
+
+### ============================================
+### 25. LOGOUT SIN AUTENTICACIÓN - 401
+### ============================================
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}
+
+### ============================================
+### 26. LIMPIEZA FINAL - LOGOUT COMPLETO
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}
+
+### ============================================
+### 27. VERIFICACIÓN FINAL - Sin sesiones activas
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}</content>
+<parameter name="filePath">/home/rzydev/Vendix/apps/backend/doc/Auth/JWT Token System/jwt-token-system-tests.http

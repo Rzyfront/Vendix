@@ -76,7 +76,15 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto, @Req() request: Request) {
-    const result = await this.authService.login(loginDto);
+    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
+    const userAgent = request.get('user-agent') || '';
+    const clientInfo = {
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+    };
+
+    const result = await this.authService.login(loginDto, clientInfo);
     return {
       message: 'Login exitoso',
       data: result,
@@ -85,8 +93,16 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
-    const result = await this.authService.refreshToken(refreshTokenDto);
+  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto, @Req() request: Request) {
+    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
+    const userAgent = request.get('user-agent') || '';
+    const clientInfo = {
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+    };
+
+    const result = await this.authService.refreshToken(refreshTokenDto, clientInfo);
     return {
       message: 'Token refrescado exitosamente',
       data: result,
@@ -106,15 +122,11 @@ export class AuthController {
   @Post('logout')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any, @Body() body: RefreshTokenDto) {
-    if (!body?.refresh_token) {
-      return {
-        message: 'El refresh_token es obligatorio para cerrar sesión.',
-      };
-    }
-    const result = await this.authService.logout(user.id, body.refresh_token);
+  async logout(@CurrentUser() user: any, @Body() body?: { refresh_token?: string; all_sessions?: boolean }) {
+    const result = await this.authService.logout(user.id, body?.refresh_token, body?.all_sessions);
     return {
       message: result.message,
+      data: result.data
     };
   }
 
@@ -182,8 +194,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('sessions')
   async getUserSessions(@CurrentUser() user: any) {
-    await this.authService.getUserSessions(user.id);
-    throw new NotImplementedException('La obtención de sesiones aún no está implementada.');
+    const sessions = await this.authService.getUserSessions(user.id);
+    return {
+      message: 'Sesiones obtenidas exitosamente',
+      data: sessions,
+    };
   }
 
   // ===== RUTAS DE ONBOARDING =====

@@ -1,0 +1,286 @@
+### VENDIX - Login Contextual API Tests
+### Archivo para probar el endpoint de login flexible con contextos
+
+@baseUrl = http://localhost:3000/api
+@access_token = TU_TOKEN_AQUI
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. REGISTRO DE USUARIO PARA TESTING
+### ============================================
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Login Organization",
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "first_name": "Test",
+  "last_name": "Login"
+}
+
+### ============================================
+### 2. LOGIN CON ORGANIZATIONSLUG - ÉXITO
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### ============================================
+### 3. LOGIN SIN CONTEXTO - ERROR 400
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!"
+}
+
+### ============================================
+### 4. LOGIN CON ORGANIZATIONSLUG INVÁLIDO - ERROR 401
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "wrong-organization"
+}
+
+### ============================================
+### 5. LOGIN CON STORESLUG SIN ACCESO - ERROR 401
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "storeSlug": "non-existent-store"
+}
+
+### ============================================
+### 6. LOGIN CON CONTRASEÑA INCORRECTA - ERROR 401
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### ============================================
+### 7. RATE LIMITING TEST - Múltiples intentos fallidos
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "WrongPassword123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### ============================================
+### 8. LOGIN DESPUÉS DE RATE LIMITING - ERROR 429
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### ============================================
+### 9. OBTENER SESIONES ACTIVAS
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 10. LOGOUT DE UNA SESIÓN ESPECÍFICA
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "refresh_token": "REFRESH_TOKEN_AQUI"
+}
+
+### ============================================
+### 11. LOGOUT DE TODAS LAS SESIONES
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}
+
+### ============================================
+### 12. LOGIN CON STORE SLUG (REQUIERE STORE PRE-CREADA)
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "storeSlug": "tienda-principal"
+}
+
+### ============================================
+### 13. LOGIN CON USUARIO DEL SEED - ORGANIZACIÓN
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 14. LOGIN CON USUARIO DEL SEED - TIENDA
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "storeSlug": "tienda-principal"
+}
+
+### ============================================
+### 15. VERIFICAR SESIONES DESPUÉS DE LOGINS
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 16. LOGOUT COMPLETO - TODAS LAS SESIONES
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}
+
+### ============================================
+### 17. INTENTO DE ACCESO DESPUÉS DE LOGOUT - ERROR 401
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 18. LOGIN CON DIFERENTES USER-AGENTS (SIMULAR DISPOSITIVOS)
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+###
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15
+
+{
+  "email": "superadmin@vendix.com",
+  "password": "password123",
+  "organizationSlug": "vendix-corp"
+}
+
+### ============================================
+### 19. VERIFICAR MÚLTIPLES SESIONES POR DISPOSITIVO
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+
+### ============================================
+### 20. LIMPIEZA - LOGOUT COMPLETO
+### ============================================
+POST {{baseUrl}}/auth/logout
+Authorization: Bearer {{access_token}}
+Content-Type: application/json
+
+{
+  "all_sessions": true
+}

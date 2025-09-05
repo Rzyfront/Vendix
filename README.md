@@ -2,6 +2,10 @@
 
 Este proyecto utiliza Docker Compose para levantar el frontend (Angular), backend (NestJS) y la base de datos (Postgres) en contenedores separados, optimizados para producción.
 
+## 📚 Documentación
+- **[Guía de Desarrollo](README-dev.md)** - Flujo recomendado para desarrollo diario
+- **[Documentación Técnica](apps/backend/doc/)** - Detalles técnicos del sistema
+
 ## Estructura de carpetas
 - `/vendix_app` → Frontend Angular
 - `/vendix_backend` → Backend NestJS (usa Prisma)
