@@ -2,6 +2,7 @@ import {
   IsEmail,
   IsNotEmpty,
   IsString,
+  IsNumber,
   MinLength,
   Matches,
 } from 'class-validator';
@@ -40,10 +41,10 @@ export class RegisterCustomerDto {
   last_name: string;
 
   @ApiProperty({
-    example: 'mi-tienda',
-    description: 'Slug de la tienda donde se registra el cliente',
+    example: 1,
+    description: 'ID de la tienda donde se registra el cliente',
   })
-  @IsString({ message: 'El slug de la tienda es requerido' })
-  @IsNotEmpty({ message: 'El slug de la tienda es requerido' })
-  store_slug: string;
+  @IsNumber({}, { message: 'El ID de la tienda debe ser un número' })
+  @IsNotEmpty({ message: 'El ID de la tienda es requerido' })
+  storeId: number;
 }

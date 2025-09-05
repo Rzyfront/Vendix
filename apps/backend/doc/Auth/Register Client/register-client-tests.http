@@ -1,0 +1,250 @@
+### VENDIX - Register Client API Tests
+### Archivo para probar el endpoint de registro de clientes
+
+@baseUrl = http://localhost:3000/api
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. REGISTRO EXITOSO - Nuevo Cliente
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Juan",
+  "lastName": "Pérez",
+  "phone": "+56912345678",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 2. REGISTRO - Sin teléfono (opcional)
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente2@test.com",
+  "password": "SecurePass123!",
+  "firstName": "María",
+  "lastName": "González",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 3. REGISTRO - Caracteres especiales en nombres
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente3@test.com",
+  "password": "SecurePass123!",
+  "firstName": "José María",
+  "lastName": "O'Connor",
+  "phone": "+56987654321",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 4. ERROR - Tienda no encontrada
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente4@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Pedro",
+  "lastName": "López",
+  "phone": "+56911111111",
+  "storeId": "store_inexistente"
+}
+
+### ============================================
+### 5. ERROR - Usuario ya existe en organización
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente@test.com",
+  "password": "OtraPass123!",
+  "firstName": "Otro",
+  "lastName": "Usuario",
+  "phone": "+56922222222",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 6. ERROR - Email inválido
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "email-invalido",
+  "password": "SecurePass123!",
+  "firstName": "Test",
+  "lastName": "User",
+  "phone": "+56933333333",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 7. ERROR - Contraseña débil
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente5@test.com",
+  "password": "123",
+  "firstName": "Test",
+  "lastName": "User",
+  "phone": "+56944444444",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 8. ERROR - Teléfono inválido
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente6@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Test",
+  "lastName": "User",
+  "phone": "123456789",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 9. ERROR - Campos requeridos faltantes
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente7@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Test"
+  // faltan lastName, phone, storeId
+}
+
+### ============================================
+### 10. ERROR - Rate Limiting (ejecutar múltiples veces)
+### ============================================
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "cliente8@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Rate",
+  "lastName": "Limit",
+  "phone": "+56955555555",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### 11. VERIFICACIÓN - Consultar usuario creado
+### ============================================
+GET {{baseUrl}}/auth/me
+Authorization: Bearer TU_ACCESS_TOKEN_AQUI
+
+### ============================================
+### 12. VERIFICACIÓN - Consultar auditoría
+### ============================================
+# Nota: Este endpoint puede no existir, es solo para verificación manual
+# GET {{baseUrl}}/audit/logs?entityType=user&limit=5
+
+### ============================================
+### TESTING SCRIPTS PARA AUTOMATIZACIÓN
+### ============================================
+
+### Script para testing masivo (usar con precaución)
+# @name bulkRegister
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "bulk{{$randomInt 1 1000}}@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Bulk",
+  "lastName": "Test{{$randomInt 1 1000}}",
+  "phone": "+569{{$randomInt 10000000 99999999}}",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### TESTING DE SEGURIDAD
+### ============================================
+
+### Intento de SQL Injection
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "'; DROP TABLE users; --",
+  "password": "SecurePass123!",
+  "firstName": "Hacker",
+  "lastName": "Test",
+  "phone": "+56966666666",
+  "storeId": "store_123456789"
+}
+
+### XSS Attempt
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "xss@test.com",
+  "password": "SecurePass123!",
+  "firstName": "<script>alert('xss')</script>",
+  "lastName": "Test",
+  "phone": "+56977777777",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### TESTING DE PERFORMANCE
+### ============================================
+
+### Carga normal
+POST {{baseUrl}}/auth/register-customer
+Content-Type: application/json
+
+{
+  "email": "perf{{$timestamp}}@test.com",
+  "password": "SecurePass123!",
+  "firstName": "Perf",
+  "lastName": "Test",
+  "phone": "+56988888888",
+  "storeId": "store_123456789"
+}
+
+### ============================================
+### VERIFICATION QUERIES (para ejecutar manualmente)
+### ============================================
+
+### Verificar usuario en BD (ejecutar en terminal)
+# SELECT id, email, first_name, last_name, status FROM users WHERE email = 'cliente@test.com';
+
+### Verificar rol asignado
+# SELECT r.name FROM user_roles ur JOIN roles r ON ur.role_id = r.id WHERE ur.user_id = (SELECT id FROM users WHERE email = 'cliente@test.com');
+
+### Verificar asociación con tienda
+# SELECT s.name FROM store_users su JOIN stores s ON su.store_id = s.id WHERE su.user_id = (SELECT id FROM users WHERE email = 'cliente@test.com');
+
+### Verificar auditoría
+# SELECT action, details, created_at FROM audit_logs WHERE entity_type = 'user' ORDER BY created_at DESC LIMIT 5;</content>
+<parameter name="filePath">/home/rzydev/Vendix/apps/backend/doc/Auth/Register Client/register-client-tests.http

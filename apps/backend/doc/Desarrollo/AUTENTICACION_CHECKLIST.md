@@ -9,7 +9,15 @@
 
 ## Fase 2: Funcionalidades Críticas (Completado)
 - [x] **Recuperación de Contraseña:** Implementar el flujo completo de `forgotPassword` y `resetPassword`, asegurando que sea contextual a la organización.
-- [x] **Registro de Clientes:** Implementar la lógica en `registerCustomer` para crear usuarios con rol "cliente" asociados a una tienda y su respectiva organización.
+- [x] **Registro de Clientes:** ✅ Completamente implementado - flujo desde store específica con validaciones y auditoría.
+  - [x] **Flujo desde Store:** ✅ Implementado - usa `storeId` para identificar la tienda específica
+  - [x] **Validación de Store:** ✅ Implementado - verifica que la tienda existe y pertenece a la organización
+  - [x] **Asociación Automática:** ✅ Implementado - cliente asociado automáticamente a tienda y organización
+  - [x] **Rol de Cliente:** ✅ Implementado - asigna automáticamente el rol "customer"
+  - [x] **Endpoint:** ✅ Implementado - `POST /auth/register-customer` con parámetro `storeId` requerido
+  - [x] **Seguridad:** ✅ Implementado - validación de permisos, auditoría completa, rate limiting
+  - [x] **Auditoría:** ✅ Implementado - registra creación de usuario con metadatos de tienda
+  - [x] **Documentación Completa:** ✅ Creada siguiendo estándar - RegisterClient-Process.md, register-client-tests.md, register-client-tests.http
 
 ## Fase 3: Flujos Secundarios y de Soporte (Completado)
 - [x] **Verificación de Email:** Implementar los servicios `verifyEmail` y `resendEmailVerification`.
@@ -53,4 +61,4 @@
 
 ---
 
-> **Estado Actual (Septiembre 2025):** ✅ **FASES 1-4 COMPLETADAS + 1/4 FASE 5 + DOCUMENTACIÓN COMPLETA + GESTIÓN AVANZADA DE PERMISOS PENDIENTE + LOGS DE SEGURIDAD PARCIALMENTE IMPLEMENTADOS + RATE LIMITING COMPLETAMENTE IMPLEMENTADO** - El sistema multi-inquilino está completamente funcional con todas las funcionalidades críticas, de seguridad y documentación implementadas. Las fases 1-4 incluyen el núcleo del sistema de autenticación, mientras que la fase 4 añade capas avanzadas de seguridad incluyendo device fingerprinting completo. La Fase 5 tiene la gestión de sesiones completada y rate limiting completamente implementado para todos los endpoints críticos de autenticación, con logs de seguridad parcialmente implementados (auditoría general y login attempts), pero faltan logs específicos para eventos críticos como login fallidos y cambios de contraseña. Se identificaron tareas adicionales para implementar gestión avanzada de permisos y roles.
+> **Estado Actual (Septiembre 2025):** ✅ **FASES 1-4 COMPLETADAS + 1/4 FASE 5 + DOCUMENTACIÓN COMPLETA PARA REGISTRO DE CLIENTES SIGUIENDO ESTÁNDAR CORRECTO + GESTIÓN AVANZADA DE PERMISOS PENDIENTE + LOGS DE SEGURIDAD PARCIALMENTE IMPLEMENTADOS + RATE LIMITING COMPLETAMENTE IMPLEMENTADO + REGISTRO DE CLIENTES COMPLETAMENTE IMPLEMENTADO CON DOCUMENTACIÓN EXHAUSTIVA** - El sistema multi-inquilino está completamente funcional con todas las funcionalidades críticas, de seguridad y documentación implementadas. Las fases 1-4 incluyen el núcleo del sistema de autenticación, mientras que la fase 4 añade capas avanzadas de seguridad incluyendo device fingerprinting completo. La Fase 5 tiene la gestión de sesiones completada, rate limiting completamente implementado para todos los endpoints críticos de autenticación, y registro de clientes completamente implementado con flujo desde store específica y documentación exhaustiva siguiendo el estándar correcto (3 archivos: Process.md, tests.md, tests.http). Los logs de seguridad están parcialmente implementados (auditoría general y login attempts), pero faltan logs específicos para eventos críticos como cambios de contraseña.

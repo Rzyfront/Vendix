@@ -228,12 +228,12 @@ export class AuthService {
     };
   }
 
-  async registerCustomer(registerCustomerDto) {
-    const { email, password, first_name, last_name, store_slug } = registerCustomerDto;
+  async registerCustomer(registerCustomerDto: RegisterCustomerDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
+    const { email, password, first_name, last_name, storeId } = registerCustomerDto;
 
-    // Buscar la tienda por slug
-    const store = await this.prismaService.stores.findFirst({
-      where: { slug: store_slug },
+    // Buscar la tienda por ID
+    const store = await this.prismaService.stores.findUnique({
+      where: { id: storeId },
     });
     if (!store) {
       throw new BadRequestException('Tienda no encontrada');
@@ -317,12 +317,32 @@ export class AuthService {
     // Generar tokens
     const tokens = await this.generateTokens(userWithRoles);
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
-      ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
-      userAgent: 'Registration-Device', // TODO: Obtener User-Agent real del request
+      ipAddress: clientInfo?.ipAddress || '127.0.0.1',
+      userAgent: clientInfo?.userAgent || 'Registration-Device',
     });
 
     // Registrar intento de login exitoso
     await this.logLoginAttempt(userWithRoles.id, true);
+
+    // Registrar auditoría de creación de cliente
+    await this.auditService.logCreate(
+      userWithRoles.id,
+      AuditResource.USERS,
+      userWithRoles.id,
+      {
+        email: userWithRoles.email,
+        first_name: userWithRoles.first_name,
+        last_name: userWithRoles.last_name,
+        role: 'customer',
+        store_id: store.id,
+        organization_id: store.organization_id,
+      },
+      {
+        store_id: store.id,
+        organization_id: store.organization_id,
+        registration_method: 'store_registration',
+      }
+    );
 
     // Generar token de verificación de email
     const verificationToken = this.generateRandomToken();

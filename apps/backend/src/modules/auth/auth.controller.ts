@@ -64,8 +64,19 @@ export class AuthController {
     @Body() registerCustomerDto: RegisterCustomerDto,
     @Req() request: Request,
   ) {
-    await this.authService.registerCustomer(registerCustomerDto);
-    throw new NotImplementedException('El registro de clientes aún no está implementado.');
+    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
+    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
+    const userAgent = request.get('user-agent') || '';
+    const clientInfo = {
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+    };
+
+    const result = await this.authService.registerCustomer(registerCustomerDto, clientInfo);
+    return {
+      message: 'Cliente registrado exitosamente en la tienda.',
+      data: result,
+    };
   }
 
   @Post('register-staff')
