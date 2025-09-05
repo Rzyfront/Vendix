@@ -20,6 +20,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { PublicModule } from './common/public/public.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { DomainSettingsModule } from './common/modules/domain-settings.module'; // ✅ Agregar import faltante
+import { RolesModule } from './modules/roles/roles.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { DomainSettingsModule } from './common/modules/domain-settings.module'; 
     PublicModule, // Módulo público para endpoints sin autenticación
     DomainSettingsModule, // Módulo para configuración de dominios
     AuditModule, // Módulo de auditoría
+    RolesModule, // Módulo de roles y permisos
   ],
   controllers: [AppController],
   providers: [AppService],

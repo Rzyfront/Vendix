@@ -26,6 +26,8 @@ export enum AuditResource {
   PRODUCTS = 'products',
   ORDERS = 'orders',
   AUTH = 'auth',
+  ROLES = 'roles',
+  PERMISSIONS = 'permissions',
   SYSTEM = 'system',
 }
 
