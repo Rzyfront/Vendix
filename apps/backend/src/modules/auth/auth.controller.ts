@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Body,
   UseGuards,
   Req,
@@ -18,6 +19,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
+import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -64,6 +66,20 @@ export class AuthController {
   ) {
     await this.authService.registerCustomer(registerCustomerDto);
     throw new NotImplementedException('El registro de clientes aún no está implementado.');
+  }
+
+  @Post('register-staff')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  async registerStaff(
+    @Body() registerStaffDto: RegisterStaffDto,
+    @CurrentUser() user: any,
+  ) {
+    const result = await this.authService.registerStaff(registerStaffDto, user.id);
+    return {
+      message: result.message,
+      data: result.user,
+    };
   }
 
   @Post('register')
@@ -198,6 +214,20 @@ export class AuthController {
     return {
       message: 'Sesiones obtenidas exitosamente',
       data: sessions,
+    };
+  }
+
+  @Delete('sessions/:sessionId')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async revokeSession(
+    @CurrentUser() user: any,
+    @Param('sessionId') sessionId: string,
+  ) {
+    const result = await this.authService.revokeUserSession(user.id, parseInt(sessionId));
+    return {
+      message: result.message,
+      data: result.data,
     };
   }
 

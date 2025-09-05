@@ -13,6 +13,8 @@ import * as bcrypt from 'bcrypt'; // ✅ Agregar import de bcrypt
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
+import { RegisterCustomerDto } from './dto/register-customer.dto';
+import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuditService, AuditAction, AuditResource } from '../audit/audit.service';
 
@@ -362,6 +364,166 @@ export class AuthService {
     return {
       user: userWithoutPassword,
       ...tokens,
+    };
+  }
+
+  async registerStaff(registerStaffDto: RegisterStaffDto, adminUserId: number) {
+    const { email, password, first_name, last_name, role, store_id } = registerStaffDto;
+
+    // Verificar que el usuario admin tenga permisos
+    const adminUser = await this.prismaService.users.findUnique({
+      where: { id: adminUserId },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    if (!adminUser) {
+      throw new NotFoundException('Usuario administrador no encontrado');
+    }
+
+    // Verificar que el admin tenga rol de owner, admin o super_admin
+    const hasPermission = adminUser.user_roles.some(ur =>
+      ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'super_admin'
+    );
+
+    if (!hasPermission) {
+      throw new UnauthorizedException('No tienes permisos para crear usuarios staff');
+    }
+
+    // Obtener organización del admin
+    const adminOrganization = await this.prismaService.organizations.findFirst({
+      where: { id: adminUser.organization_id },
+    });
+
+    if (!adminOrganization) {
+      throw new BadRequestException('Organización del administrador no encontrada');
+    }
+
+    // Verificar si el usuario ya existe en la organización
+    const existingUser = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: adminUser.organization_id,
+      },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('El usuario con este email ya existe en esta organización');
+    }
+
+    // Verificar rol válido (solo roles de staff que puede asignar un admin)
+    const validRoles = ['manager', 'supervisor', 'employee'];
+    if (!validRoles.includes(role)) {
+      throw new BadRequestException(`Rol inválido. Roles válidos: ${validRoles.join(', ')}`);
+    }
+
+    // Buscar rol en la base de datos
+    const staffRole = await this.prismaService.roles.findFirst({
+      where: { name: role },
+    });
+
+    if (!staffRole) {
+      throw new BadRequestException(`Rol '${role}' no encontrado en la base de datos`);
+    }
+
+    // Verificar store si se proporciona
+    if (store_id) {
+      const store = await this.prismaService.stores.findFirst({
+        where: {
+          id: store_id,
+          organization_id: adminUser.organization_id,
+        },
+      });
+
+      if (!store) {
+        throw new BadRequestException('Tienda no encontrada o no pertenece a tu organización');
+      }
+    }
+
+    // Hash de la contraseña
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    // Crear usuario
+    const user = await this.prismaService.users.create({
+      data: {
+        email,
+        password: hashedPassword,
+        first_name,
+        last_name,
+        username: await this.generateUniqueUsername(email),
+        organization_id: adminUser.organization_id,
+        email_verified: true, // Staff creado por admin, email ya verificado
+        state: 'active',
+      },
+    });
+
+    // Asignar rol
+    await this.prismaService.user_roles.create({
+      data: {
+        user_id: user.id,
+        role_id: staffRole.id,
+      },
+    });
+
+    // Asignar a tienda si se especificó
+    if (store_id) {
+      await this.prismaService.store_users.create({
+        data: {
+          store_id,
+          user_id: user.id,
+        },
+      });
+    }
+
+    // Obtener usuario con roles incluidos
+    const userWithRoles = await this.prismaService.users.findFirst({
+      where: { id: user.id },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Registrar auditoría
+    await this.auditService.logCreate(
+      adminUserId,
+      AuditResource.USERS,
+      user.id,
+      {
+        email,
+        first_name,
+        last_name,
+        role,
+        store_id,
+        created_by: adminUserId,
+      },
+      {
+        description: `Usuario staff creado por administrador ${adminUser.email}`
+      }
+    );
+
+    // Remover password del response (no es necesario ya que no se incluye en la query)
+    const userWithoutPassword = userWithRoles;
+
+    return {
+      message: `Usuario ${role} creado exitosamente`,
+      user: userWithoutPassword,
     };
   }
 
@@ -1892,6 +2054,48 @@ export class AuthService {
       createdAt: session.created_at,
       isCurrentSession: false, // TODO: Implementar lógica para identificar sesión actual
     }));
+  }
+
+  async revokeUserSession(userId: number, sessionId: number) {
+    // Verificar que la sesión pertenece al usuario
+    const session = await this.prismaService.refresh_tokens.findFirst({
+      where: {
+        id: sessionId,
+        user_id: userId,
+        revoked: false,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Sesión no encontrada o no pertenece al usuario');
+    }
+
+    // Revocar la sesión
+    await this.prismaService.refresh_tokens.update({
+      where: { id: sessionId },
+      data: { revoked: true },
+    });
+
+    // Registrar auditoría
+    await this.auditService.log({
+      userId: userId,
+      action: AuditAction.UPDATE,
+      resource: AuditResource.USERS,
+      resourceId: userId,
+      oldValues: { session_active: true },
+      newValues: { session_active: false },
+      metadata: {
+        session_id: sessionId,
+        action: 'revoke_session'
+      },
+      ipAddress: session.ip_address || undefined,
+      userAgent: session.user_agent || undefined,
+    });
+
+    return {
+      message: 'Sesión revocada exitosamente',
+      data: { session_revoked: sessionId }
+    };
   }
 
   // Método auxiliar para convertir duraciones JWT a segundos

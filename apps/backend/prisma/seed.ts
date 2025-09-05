@@ -55,7 +55,31 @@ async function main() {
     update: {},
     create: { name: 'owner', description: 'Propietario de la organización', is_system_role: true },
   });
-  // ... (otros roles)
+  const adminRole = await prisma.roles.upsert({
+    where: { name: 'admin' },
+    update: {},
+    create: { name: 'admin', description: 'Administrador de la organización', is_system_role: true },
+  });
+  const managerRole = await prisma.roles.upsert({
+    where: { name: 'manager' },
+    update: {},
+    create: { name: 'manager', description: 'Gerente de tienda', is_system_role: true },
+  });
+  const supervisorRole = await prisma.roles.upsert({
+    where: { name: 'supervisor' },
+    update: {},
+    create: { name: 'supervisor', description: 'Supervisor de tienda', is_system_role: true },
+  });
+  const employeeRole = await prisma.roles.upsert({
+    where: { name: 'employee' },
+    update: {},
+    create: { name: 'employee', description: 'Empleado de tienda', is_system_role: true },
+  });
+  const customerRole = await prisma.roles.upsert({
+    where: { name: 'customer' },
+    update: {},
+    create: { name: 'customer', description: 'Cliente de la tienda', is_system_role: true },
+  });
 
   // 3. Asignar permisos a roles (lógica simplificada)
   console.log('🔗 Asignando permisos a roles...');
