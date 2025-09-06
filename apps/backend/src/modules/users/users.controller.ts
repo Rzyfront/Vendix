@@ -53,4 +53,18 @@ export class UsersController {
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.remove(id);
   }
+
+  @Post(':id/archive')
+  @Permissions('users:delete')
+  @HttpCode(HttpStatus.OK)
+  archive(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.archive(id);
+  }
+
+  @Post(':id/reactivate')
+  @Permissions('users:update')
+  @HttpCode(HttpStatus.OK)
+  reactivate(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.reactivate(id);
+  }
 }

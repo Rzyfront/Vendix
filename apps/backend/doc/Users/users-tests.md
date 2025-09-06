@@ -84,16 +84,65 @@ PATCH /api/users/{id}
 - ✅ Validación de permisos
 - ✅ Auditoría de cambios
 
-### 2.5 Eliminar Usuario
+### 2.5 Suspender Usuario (Eliminación Lógica)
 ```http
 DELETE /api/users/{id}
 ```
 
+**Comportamiento:**
+- ✅ Usuario pasa a estado `SUSPENDED` (no eliminación física)
+- ✅ Usuario no puede hacer login
+- ✅ Aparece en listados con filtro `state=suspended`
+- ✅ Mantiene todas sus relaciones y permisos
+
 **Validaciones:**
 - ✅ Usuario existe
-- ✅ No eliminar usuario propio
+- ✅ No suspender usuario propio
 - ✅ Permisos de eliminación
-- ✅ Auditoría de eliminación
+- ✅ Auditoría de suspensión
+
+### 2.6 Archivar Usuario Permanentemente
+```http
+POST /api/users/{id}/archive
+```
+
+**Comportamiento:**
+- ✅ Usuario pasa a estado `ARCHIVED`
+- ✅ Usuario no puede hacer login
+- ✅ No aparece en listados normales
+- ✅ Requiere proceso manual para reactivación
+
+**Validaciones:**
+- ✅ Usuario existe y está suspendido
+- ✅ Permisos de archivado
+- ✅ Auditoría de archivado
+
+### 2.7 Reactivar Usuario
+```http
+POST /api/users/{id}/reactivate
+```
+
+**Comportamiento:**
+- ✅ Usuario vuelve a estado `ACTIVE`
+- ✅ Usuario puede hacer login nuevamente
+- ✅ Aparece en todos los listados
+- ✅ Restaura funcionalidad completa
+
+**Validaciones:**
+- ✅ Usuario existe y está suspendido/archivado
+- ✅ Permisos de reactivación
+- ✅ Auditoría de reactivación
+
+### 2.8 Listar Usuarios por Estado
+```http
+GET /api/users?state=suspended
+GET /api/users?state=archived
+```
+
+**Comportamiento:**
+- ✅ Filtra usuarios por estado específico
+- ✅ Paginación y búsqueda funcionan normalmente
+- ✅ Solo usuarios con permisos pueden ver estados especiales
 
 ## ⚠️ Pruebas de Validación
 
@@ -258,6 +307,58 @@ DELETE /api/users/{id}
 **Resultado esperado**: Organización del usuario accesible
 
 ## 📋 Checklist de Ejecución
+
+12. [ ] Pruebas con datos dinámicos
+13. [ ] Pruebas de error handling
+14. [ ] Limpieza de datos de prueba
+
+## 🗂️ **Sistema de Eliminación Lógica**
+
+### ¿Por qué eliminación lógica?
+El sistema VENDIX implementa **eliminación lógica** en lugar de eliminación física para:
+- **Preservar integridad de datos** históricos
+- **Mantener auditoría completa** de todas las operaciones
+- **Permitir recuperación** de usuarios si es necesario
+- **Cumplir con regulaciones** de retención de datos
+
+### Estados de Usuario
+```typescript
+enum UserStatus {
+  ACTIVE = 'active',       // Usuario funcional
+  SUSPENDED = 'suspended', // Suspendido temporalmente
+  ARCHIVED = 'archived'    // Archivado permanentemente
+}
+```
+
+### Comportamiento por Estado
+
+#### Usuarios ACTIVE:
+- ✅ Pueden hacer login
+- ✅ Aparecen en listados normales
+- ✅ Todas las operaciones disponibles
+
+#### Usuarios SUSPENDED:
+- ❌ **No pueden hacer login**
+- ✅ Aparecen en listados con filtro `state=suspended`
+- ✅ Pueden ser reactivados fácilmente
+- ✅ Mantienen todas sus relaciones
+
+#### Usuarios ARCHIVED:
+- ❌ **No pueden hacer login**
+- ❌ No aparecen en listados normales
+- ❌ Requieren proceso manual para reactivación
+- ✅ Mantienen relaciones para auditoría
+
+### Endpoints de Gestión de Estado
+- `DELETE /api/users/{id}` → Suspende usuario
+- `POST /api/users/{id}/archive` → Archiva usuario
+- `POST /api/users/{id}/reactivate` → Reactiva usuario
+
+### Filtros Disponibles
+- `GET /api/users?state=active` → Solo activos
+- `GET /api/users?state=suspended` → Solo suspendidos
+- `GET /api/users?state=archived` → Solo archivados
+- `GET /api/users?include_archived=true` → Todos incluyendo archivados
 
 ### ✅ Pre-Requisitos
 - [ ] Servidor corriendo en puerto 3000

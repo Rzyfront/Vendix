@@ -284,3 +284,144 @@ Content-Type: application/json
 {
   "all_sessions": true
 }
+
+### ============================================
+### NUEVO: PRUEBAS DE USUARIOS SUSPENDED/ARCHIVED
+### ============================================
+
+### Preparar usuario de prueba para suspender
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### Suspender usuario (DELETE lógico)
+DELETE {{baseUrl}}/users/1
+Authorization: Bearer {{suspended_user_token}}
+
+### Intentar login con usuario SUSPENDED - ERROR 401
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### Verificar respuesta esperada
+# Respuesta esperada:
+# {
+#   "statusCode": 401,
+#   "message": "Cuenta suspendida o archivada",
+#   "error": "Unauthorized"
+# }
+
+### ============================================
+### PRUEBAS DE USUARIO ARCHIVED
+### ============================================
+
+### Archivar usuario permanentemente
+POST {{baseUrl}}/users/1/archive
+Authorization: Bearer {{admin_token}}
+
+### Intentar login con usuario ARCHIVED - ERROR 401
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### Verificar respuesta esperada
+# Respuesta esperada:
+# {
+#   "statusCode": 401,
+#   "message": "Cuenta suspendida o archivada",
+#   "error": "Unauthorized"
+# }
+
+### ============================================
+### PRUEBAS DE REACTIVACIÓN
+### ============================================
+
+### Reactivar usuario suspended
+POST {{baseUrl}}/users/1/reactivate
+Authorization: Bearer {{admin_token}}
+
+### Ahora el login debería funcionar nuevamente
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### ============================================
+### PRUEBAS DE DIFERENTES CONTEXTOS CON USUARIOS SUSPENDED
+### ============================================
+
+### Suspender usuario nuevamente
+DELETE {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### Intentar login por organización - ERROR
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "organizationSlug": "test-login-organization"
+}
+
+### Intentar login por tienda - ERROR
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "testlogin@example.com",
+  "password": "TestPass123!",
+  "storeSlug": "test-store"
+}
+
+### ============================================
+### PRUEBAS DE SEGURIDAD ADICIONALES
+### ============================================
+
+### Verificar que usuarios suspended no aparecen en listados
+GET {{baseUrl}}/users
+Authorization: Bearer {{admin_token}}
+
+### Verificar que no se puede obtener usuario suspended por ID
+GET {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+
+### Verificar que no se puede actualizar usuario suspended
+PATCH {{baseUrl}}/users/1
+Authorization: Bearer {{admin_token}}
+Content-Type: application/json
+
+{
+  "first_name": "Updated Name"
+}
+
+### ============================================
+### LIMPIEZA DE DATOS DE PRUEBA
+### ============================================
+
+### Reactivar usuario para limpieza
+POST {{baseUrl}}/users/1/reactivate
+Authorization: Bearer {{admin_token}}
+
+### Eliminar usuario de prueba completamente (si es necesario)
+# DELETE {{baseUrl}}/users/1
+# Authorization: Bearer {{admin_token}}

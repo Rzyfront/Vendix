@@ -27,7 +27,9 @@
 - [x] Endpoint GET /users/:id (obtener específico)
 - [x] Endpoint POST /users (crear usuario)
 - [x] Endpoint PATCH /users/:id (actualizar usuario)
-- [x] Endpoint DELETE /users/:id (eliminar usuario)
+- [x] Endpoint DELETE /users/:id (**suspende usuario - eliminación lógica**)
+- [x] Endpoint POST /users/:id/archive (**archiva usuario permanentemente**)
+- [x] Endpoint POST /users/:id/reactivate (**reactiva usuario suspendido**)
 - [x] Implementación de paginación
 - [x] Implementación de búsqueda y filtros
 - [x] Validación de permisos por operación
@@ -56,7 +58,19 @@
 ### ✅ Fase 6: Integración con Sistema (COMPLETADO)
 - [x] Integración con módulo de autenticación
 - [x] Integración con módulo de roles/permisos
+- [x] Integración con módulo de auditoría
 - [x] Integración con módulo de organizaciones
+
+### ✅ **FASE 7: ELIMINACIÓN LÓGICA IMPLEMENTADA**
+- [x] **Eliminación lógica en lugar de física**: DELETE cambia estado a SUSPENDED
+- [x] **Nuevo endpoint de archivado**: POST /users/:id/archive para estado ARCHIVED
+- [x] **Endpoint de reactivación**: POST /users/:id/reactivate para volver a ACTIVE
+- [x] **Bloqueo de login**: Usuarios suspended/archived no pueden autenticarse
+- [x] **Filtros actualizados**: Soporte para filtrar por estado suspended/archived
+- [x] **Auditoría completa**: Registro de todas las transiciones de estado
+- [x] **Preservación de datos**: Nunca se eliminan usuarios físicamente
+- [x] **Integridad referencial**: Mantiene todas las relaciones intactas
+- [x] **Documentación actualizada**: Manuales reflejan nueva funcionalidad
 - [x] Integración con sistema de auditoría
 - [x] Integración con sistema de email
 - [x] Configuración de guards JWT

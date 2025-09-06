@@ -699,6 +699,12 @@ export class AuthService {
       throw new UnauthorizedException('Credenciales inválidas');
     }
 
+    // ✅ Validar que el usuario no esté suspended o archived
+    if (user.state === 'suspended' || user.state === 'archived') {
+      await this.logLoginAttempt(user.id, false);
+      throw new UnauthorizedException('Cuenta suspendida o archivada');
+    }
+
     // Validar que el usuario pertenezca a la organización o tienda especificada
     let targetOrganizationId: number | null = null;
     let targetStoreId: number | null = null;

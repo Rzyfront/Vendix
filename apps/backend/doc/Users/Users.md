@@ -103,7 +103,9 @@ if (existingUser) {
 - `GET /api/users` - Listar usuarios con filtros y paginación
 - `GET /api/users/:id` - Obtener usuario específico con relaciones
 - `PATCH /api/users/:id` - Actualizar usuario
-- `DELETE /api/users/:id` - Eliminar usuario
+- `DELETE /api/users/:id` - **Suspender usuario (eliminación lógica)**
+- `POST /api/users/:id/archive` - **Archivar usuario permanentemente**
+- `POST /api/users/:id/reactivate` - **Reactivar usuario suspendido**
 
 ### Parámetros de Consulta
 ```typescript
@@ -152,7 +154,79 @@ GET /api/users/123
 # Retorna usuario con organización, roles y tiendas
 ```
 
-## 📈 Métricas y Monitoreo
+## �️ **Eliminación Lógica de Usuarios**
+
+### ¿Por qué eliminación lógica?
+- **Preservación de datos**: Los usuarios nunca se eliminan físicamente de la base de datos
+- **Auditoría completa**: Se mantiene el historial de todas las operaciones
+- **Integridad referencial**: No se pierden relaciones con otras entidades
+- **Recuperación posible**: Los usuarios pueden ser reactivados si es necesario
+
+### Estados de Usuario
+```typescript
+enum UserStatus {
+  ACTIVE = 'active',       // Usuario activo y funcional
+  SUSPENDED = 'suspended', // Usuario suspendido temporalmente
+  ARCHIVED = 'archived'    // Usuario archivado permanentemente
+}
+```
+
+### Operaciones de Eliminación Lógica
+
+#### 1. Suspensión Temporal (DELETE)
+```bash
+DELETE /api/users/123
+# Cambia estado a 'suspended'
+# Usuario no puede hacer login
+# Aparece en listados con filtro correspondiente
+```
+
+#### 2. Archivado Permanente (POST)
+```bash
+POST /api/users/123/archive
+# Cambia estado a 'archived'
+# Usuario no puede hacer login
+# No aparece en listados normales
+```
+
+#### 3. Reactivación (POST)
+```bash
+POST /api/users/123/reactivate
+# Cambia estado a 'active'
+# Usuario puede hacer login nuevamente
+# Aparece en todos los listados
+```
+
+### Comportamiento del Sistema
+
+#### Usuarios SUSPENDED:
+- ❌ **No pueden hacer login** en ningún contexto
+- ✅ **Aparecen en listados** con filtro `state=suspended`
+- ✅ **Pueden ser reactivados** con endpoint `/reactivate`
+- ✅ **Mantienen todas sus relaciones** (roles, tiendas, organización)
+
+#### Usuarios ARCHIVED:
+- ❌ **No pueden hacer login** en ningún contexto
+- ❌ **No aparecen en listados** normales (solo con filtro específico)
+- ❌ **No pueden ser reactivados** fácilmente (requiere proceso manual)
+- ✅ **Mantienen todas sus relaciones** para auditoría
+
+### Filtros de Consulta
+```bash
+# Solo usuarios activos
+GET /api/users?state=active
+
+# Solo usuarios suspendidos
+GET /api/users?state=suspended
+
+# Todos los usuarios (incluyendo archived)
+GET /api/users?include_archived=true
+
+# Búsqueda en usuarios suspendidos
+GET /api/users?state=suspended&search=john
+```
+
+## �📈 Métricas y Monitoreo
 
 ### KPIs del Servicio
 - **Tiempo de respuesta**: < 200ms para operaciones CRUD

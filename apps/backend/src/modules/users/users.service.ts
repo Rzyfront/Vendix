@@ -50,6 +50,8 @@ export class UsersService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.usersWhereInput = {
+      // Excluir usuarios suspended y archived por defecto
+      state: { notIn: ['suspended', 'archived'] },
       ...(search && {
         OR: [
           { first_name: { contains: search, mode: 'insensitive' } },
@@ -85,9 +87,15 @@ export class UsersService {
     };
   }
 
-  async findOne(id: number) {
-    const user = await this.prisma.users.findUnique({
-      where: { id },
+  async findOne(id: number, includeSuspended = false) {
+    const where: Prisma.usersWhereInput = { id };
+
+    if (!includeSuspended) {
+      where.state = { notIn: ['suspended', 'archived'] };
+    }
+
+    const user = await this.prisma.users.findFirst({
+      where,
       include: {
         organizations: true,
         user_roles: { include: { roles: true } },
@@ -113,6 +121,42 @@ export class UsersService {
 
   async remove(id: number) {
     await this.findOne(id);
-    return this.prisma.users.delete({ where: { id } });
+    return this.prisma.users.update({
+      where: { id },
+      data: {
+        state: 'suspended',
+        updated_at: new Date()
+      },
+    });
+  }
+
+  async archive(id: number) {
+    await this.findOne(id);
+    return this.prisma.users.update({
+      where: { id },
+      data: {
+        state: 'archived',
+        updated_at: new Date()
+      },
+    });
+  }
+
+  async reactivate(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    if (user.state !== 'suspended' && user.state !== 'archived') {
+      throw new ConflictException('User is not suspended or archived');
+    }
+    return this.prisma.users.update({
+      where: { id },
+      data: {
+        state: 'active',
+        updated_at: new Date()
+      },
+    });
   }
 }

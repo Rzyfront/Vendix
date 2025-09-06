@@ -2,7 +2,59 @@
 
 ## 📋 Descripción General
 
-El **proceso de gestión de usuarios** es un sistema complejo que maneja la administración completa de identidades, perfiles y relaciones en el sistema multi-tenant de Vendix. Este documento detalla el flujo completo desde la creación hasta la eliminación de usuarios.
+El **proceso de gestión de usuarios** es un sistema complejo que maneja la administración completa de identidades, perfiles y relaciones en el sistema multi-tenant de Vendix. Este documento detalla el flujo completo desde la creación hasta la ## 📊 Estados y Transiciones
+
+### Estados de Usuario
+```mermaid
+graph TD
+    A[Usuario Creado] --> B[Email Verificado]
+    B --> C[Perfil Completado]
+    C --> D[Roles Asignados]
+    D --> E[Usuario Activo]
+    E --> F[Perfil Actualizado]
+    F --> G[Usuario Suspendido]
+    G --> H[Usuario Archivado]
+    H --> I[Usuario Reactivado]
+    I --> E
+
+    A --> J[Usuario Inactivo]
+    B --> J
+    C --> J
+    D --> J
+    E --> J
+    F --> J
+
+    G --> E
+    H --> E
+```
+
+### Descripción de Estados
+
+#### ACTIVE (Activo)
+- Usuario completamente funcional
+- Puede hacer login en todos los contextos
+- Aparece en todos los listados
+- Todas las operaciones disponibles
+
+#### SUSPENDED (Suspendido)
+- Usuario temporalmente inactivo
+- **No puede hacer login** ❌
+- Aparece en listados con filtro correspondiente
+- Puede ser reactivado fácilmente
+- Mantiene todas sus relaciones y permisos
+
+#### ARCHIVED (Archivado)
+- Usuario permanentemente archivado
+- **No puede hacer login** ❌
+- No aparece en listados normales
+- Requiere proceso manual para reactivación
+- Mantiene relaciones para auditoría histórica
+
+#### Transiciones Permitidas
+- `ACTIVE` ↔ `SUSPENDED` (DELETE /reactivate)
+- `SUSPENDED` → `ARCHIVED` (POST /archive)
+- `ARCHIVED` → `ACTIVE` (POST /reactivate - proceso manual)
+- Cualquier estado → `INACTIVE` (desactivación temporal)rios.
 
 ## 🎯 Función Principal
 
@@ -296,11 +348,29 @@ async update(id: number, updateUserDto: UpdateUserDto) {
 - ✅ **Hash de contraseña**: Si se actualiza
 - ✅ **Auditoría**: Registro de cambios
 
-### Eliminación de Usuarios
+### Eliminación de Usuarios (Lógica)
 - ✅ **Autenticación**: JWT token válido
 - ✅ **Autorización**: Permiso `users:delete`
 - ✅ **Existencia**: Usuario debe existir
-- ✅ **Auditoría**: Registro de eliminación
+- ✅ **Cambio de estado**: Usuario pasa a `SUSPENDED` (no eliminación física)
+- ✅ **Auditoría**: Registro de suspensión con timestamp
+- ✅ **Bloqueo de login**: Usuario suspendido no puede acceder al sistema
+
+### Archivado de Usuarios
+- ✅ **Autenticación**: JWT token válido
+- ✅ **Autorización**: Permiso `users:archive`
+- ✅ **Existencia**: Usuario debe existir y estar suspendido
+- ✅ **Cambio de estado**: Usuario pasa a `ARCHIVED`
+- ✅ **Auditoría**: Registro de archivado permanente
+- ✅ **Ocultamiento**: Usuario no aparece en listados normales
+
+### Reactivación de Usuarios
+- ✅ **Autenticación**: JWT token válido
+- ✅ **Autorización**: Permiso `users:reactivate`
+- ✅ **Existencia**: Usuario debe existir y estar suspendido/archivado
+- ✅ **Cambio de estado**: Usuario vuelve a `ACTIVE`
+- ✅ **Auditoría**: Registro de reactivación
+- ✅ **Restauración**: Usuario puede hacer login nuevamente
 
 ## 📊 Estados y Transiciones
 

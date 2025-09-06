@@ -483,8 +483,20 @@ JWT_AUDIENCE=vendix-frontend
                     <tr>
                         <td class="error">DELETE</td>
                         <td>/api/users/:id</td>
-                        <td>Eliminar usuario</td>
+                        <td>Suspender usuario (no eliminar)</td>
                         <td>USERS_DELETE</td>
+                    </tr>
+                    <tr>
+                        <td class="warning">POST</td>
+                        <td>/api/users/:id/archive</td>
+                        <td>Archivar usuario permanentemente</td>
+                        <td>USERS_DELETE</td>
+                    </tr>
+                    <tr>
+                        <td class="success">POST</td>
+                        <td>/api/users/:id/reactivate</td>
+                        <td>Reactivar usuario suspended/archived</td>
+                        <td>USERS_UPDATE</td>
                     </tr>
                 </tbody>
             </table>
@@ -492,20 +504,29 @@ JWT_AUDIENCE=vendix-frontend
             <h3>Validaciones de Seguridad</h3>
             <div class="feature-list">
                 <div class="feature-item">
-                    <h4>📧 Email Único por Organización</h4>
-                    <p>Validación estricta de unicidad de email dentro de cada organización</p>
+                    <h4>📧 Email con Validación Flexible</h4>
+                    <p><strong>Estado:</strong> <span class="success">✅ Implementado</span></p>
+                    <p>Un mismo email puede existir en múltiples organizaciones, siempre y cuando no tenga procesos de onboarding pendientes en ninguna de ellas</p>
                 </div>
                 <div class="feature-item">
                     <h4>👤 Username Único Global</h4>
+                    <p><strong>Estado:</strong> <span class="success">✅ Implementado</span></p>
                     <p>Username único en todo el sistema independientemente de la organización</p>
                 </div>
                 <div class="feature-item">
                     <h4>🔒 Hash de Contraseñas</h4>
+                    <p><strong>Estado:</strong> <span class="success">✅ Implementado</span></p>
                     <p>Bcrypt con salt rounds configurables para máxima seguridad</p>
                 </div>
                 <div class="feature-item">
-                    <h4>🛡️ Protección Anti-eliminación</h4>
-                    <p>Usuario no puede eliminarse a sí mismo</p>
+                    <h4>� Eliminación Lógica</h4>
+                    <p><strong>Estado:</strong> <span class="success">✅ Implementado</span></p>
+                    <p>Los usuarios se marcan como 'suspended' en lugar de eliminarse físicamente. Después de 6 meses suspendidos, un trigger automático en base de datos o servidor los pasa automáticamente a estado 'archived'</p>
+                </div>
+                <div class="feature-item">
+                    <h4>🚷 Bloqueo de Login</h4>
+                    <p><strong>Estado:</strong> <span class="success">✅ Implementado</span></p>
+                    <p>Usuarios suspended/archived no pueden iniciar sesión</p>
                 </div>
             </div>
 
@@ -516,9 +537,9 @@ interface User {
   first_name: string;
   last_name: string;
   username: string;        // Único global
-  email: string;           // Único por organización
+  email: string;           // Puede repetirse en múltiples organizaciones (sin onboardings pendientes)
   password: string;        // Hash bcrypt
-  state: 'active' | 'inactive';
+  state: 'active' | 'inactive' | 'pending_verification' | 'suspended' | 'archived';
   organization_id: string;
   roles: Role[];
   stores: Store[];
@@ -526,6 +547,25 @@ interface User {
   created_at: Date;
   updated_at: Date;
 }
+            </div>
+
+            <h3>Estados de Usuario</h3>
+            <div class="code-block">
+// Estados de usuario en el sistema
+enum user_state_enum {
+  active              // Usuario activo y funcional
+  inactive            // Usuario inactivo temporalmente
+  pending_verification // Usuario pendiente de verificación de email
+  suspended           // ✅ Usuario suspendido (eliminación lógica)
+  archived            // ✅ Usuario archivado permanentemente
+}
+
+// Comportamiento por estado:
+- active: Usuario normal con acceso completo
+- inactive: Usuario inactivo, puede ser reactivado
+- pending_verification: Usuario nuevo, debe verificar email
+- suspended: Usuario suspendido, no puede hacer login, puede ser reactivado. Después de 6 meses, trigger automático lo pasa a 'archived'
+- archived: Usuario archivado permanentemente, no puede hacer login, no aparece en listados normales. Estado final tras 6 meses suspendido
             </div>
         </div>
 
@@ -1199,11 +1239,24 @@ const helmetConfig = {
             <h3>2. Gestión de Usuarios por Admin</h3>
             <ol>
                 <li><strong>Login como Admin</strong> - Autenticación con JWT</li>
-                <li><strong>Listar Usuarios</strong> - Consulta con filtros y paginación</li>
+                <li><strong>Listar Usuarios</strong> - Consulta con filtros y paginación (excluye suspended/archived)</li>
                 <li><strong>Crear Usuario</strong> - Validaciones de unicidad y seguridad</li>
                 <li><strong>Asignar Roles</strong> - Gestión de permisos por usuario</li>
+                <li><strong>Suspender Usuario</strong> - DELETE marca como 'suspended' (no elimina). Trigger automático después de 6 meses → 'archived'</li>
+                <li><strong>Archivar Usuario</strong> - POST /archive marca como 'archived'</li>
+                <li><strong>Reactivar Usuario</strong> - POST /reactivate vuelve a 'active'</li>
                 <li><strong>Auditoría</strong> - Registro automático de todas las operaciones</li>
             </ol>
+
+            <h3>3. Flujo de Suspensión de Usuarios</h3>
+            <div class="flow-diagram">
+                <div class="flow-step">🚨 Incidente</div>
+                <div class="flow-step">🔍 Investigación</div>
+                <div class="flow-step">⚖️ Decisión</div>
+                <div class="flow-step">🚫 Suspender</div>
+                <div class="flow-step">📊 Auditoría</div>
+                <div class="flow-step">🔄 Reactivar (opcional)</div>
+            </div>
 
             <h3>3. Configuración Multi-tenant</h3>
             <div class="code-block">
@@ -1515,6 +1568,18 @@ volumes:
             <div class="highlight">
                 <h4>💡 Conclusión</h4>
                 <p>El sistema VENDIX está diseñado para ser <strong>funcional, seguro y mantenible</strong>. Las funcionalidades no implementadas fueron deliberadamente excluidas para mantener el foco en el core business y evitar la <strong>complejidad innecesaria</strong>. El sistema actual cubre el 100% de los requerimientos identificados y está preparado para extensiones futuras cuando sea necesario.</p>
+            </div>
+
+            <h3>⚡ Mejoras de Infraestructura - Alta Prioridad</h3>
+
+            <div class="feature-list">
+                <div class="feature-item">
+                    <h4>⏰ Trigger Automático de Archivado</h4>
+                    <p><strong>Estado:</strong> <span class="warning">Pendiente de Implementar</span></p>
+                    <p><strong>Descripción:</strong> Implementar trigger en base de datos o job programado en servidor que automáticamente cambie usuarios 'suspended' a 'archived' después de 6 meses de inactividad.</p>
+                    <p><strong>Implementación sugerida:</strong> Job programado (cron) o trigger de base de datos que ejecute: <code>UPDATE users SET state = 'archived' WHERE state = 'suspended' AND updated_at < NOW() - INTERVAL '6 months'</code></p>
+                    <p><strong>Tiempo estimado:</strong> 2-3 días | <strong>Beneficio:</strong> Alto (automatización de limpieza de datos)</p>
+                </div>
             </div>
         </div>
 

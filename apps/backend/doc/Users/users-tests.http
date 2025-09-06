@@ -122,8 +122,24 @@ Content-Type: application/json
   "state": "active"
 }
 
-### 2.13 ELIMINAR USUARIO - ÉXITO
+### 2.13 SUSPENDER USUARIO (ELIMINACIÓN LÓGICA) - ÉXITO
 DELETE {{baseUrl}}/users/13
+Authorization: Bearer {{admin_token}}
+
+### 2.14 ARCHIVAR USUARIO PERMANENTEMENTE
+POST {{baseUrl}}/users/13/archive
+Authorization: Bearer {{admin_token}}
+
+### 2.15 REACTIVAR USUARIO SUSPENDIDO
+POST {{baseUrl}}/users/13/reactivate
+Authorization: Bearer {{admin_token}}
+
+### 2.16 LISTAR USUARIOS SUSPENDIDOS
+GET {{baseUrl}}/users?page=1&limit=10&state=suspended
+Authorization: Bearer {{admin_token}}
+
+### 2.17 LISTAR USUARIOS ARCHIVADOS
+GET {{baseUrl}}/users?page=1&limit=10&state=archived
 Authorization: Bearer {{admin_token}}
 
 ### ============================================
@@ -390,8 +406,16 @@ Authorization: Bearer {{admin_token}}
 ### 13. LIMPIEZA DE DATOS DE PRUEBA
 ### ============================================
 
-### Eliminar usuario de prueba
+### Suspender usuario de prueba (eliminación lógica)
 DELETE {{baseUrl}}/users/{{new_user_id}}
+Authorization: Bearer {{admin_token}}
+
+### Verificar que el usuario suspendido no aparece en listados normales
+GET {{baseUrl}}/users?page=1&limit=10&search=testuser
+Authorization: Bearer {{admin_token}}
+
+### Verificar que aparece en listados de suspendidos
+GET {{baseUrl}}/users?page=1&limit=10&state=suspended&search=testuser
 Authorization: Bearer {{admin_token}}
 
 ### ============================================
