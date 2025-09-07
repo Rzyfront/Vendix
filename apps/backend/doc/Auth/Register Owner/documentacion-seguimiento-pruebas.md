@@ -344,6 +344,25 @@ npm test -- --coverage
 **QA Lead:** qa@vendix.com
 **Product Owner:** po@vendix.com
 
+## 🔧 **MEJORAS RECIENTES AL SEED**
+
+### **Nueva Configuración de Dominio (Septiembre 2025)**
+- ✅ **Agregada configuración de dominio** para `localhost:4200`
+- ✅ **Asociada a Vendix Corp** (organización del super admin)
+- ✅ **Configuración completa incluida:**
+  - URLs de frontend/backend
+  - Features habilitadas (multi-tenant, email verification, onboarding)
+  - Configuración de branding (colores, nombre de empresa)
+  - Configuración de seguridad (CORS, timeouts, límites de login)
+- ✅ **Logs informativos** agregados durante la ejecución del seed
+- ✅ **Configuración por defecto** para entorno de desarrollo
+
+**Comando para ejecutar el seed actualizado:**
+```bash
+cd apps/backend
+npx prisma db seed
+```
+
 ---
 
 **Última Actualización:** Septiembre 2025
