@@ -44,12 +44,27 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Buscar si ya existe un usuario con este email con onboarding incompleto
+    // Buscar si ya existe un OWNER con este email con onboarding incompleto
+    // IMPORTANTE: Solo considerar owners, NO customers u otros roles
     const existingUser = await this.prismaService.users.findFirst({
       where: {
         email,
         onboarding_completed: false,
+        user_roles: {
+          some: {
+            roles: {
+              name: 'owner'
+            }
+          }
+        }
       },
+      include: {
+        user_roles: {
+          include: {
+            roles: true
+          }
+        }
+      }
     });
 
     // Crear organización + usuario + roles en una transacción atómica
@@ -91,6 +106,34 @@ export class AuthService {
         });
         if (existingUserInOrg) {
           throw new ConflictException('Ya existe un usuario con este email en la organización');
+        }
+
+        // Verificar si existe un usuario con mismo email pero como CUSTOMER
+        // En este caso, permitir crear el OWNER (diferente organización)
+        const existingCustomer = await tx.users.findFirst({
+          where: {
+            email,
+            user_roles: {
+              some: {
+                roles: {
+                  name: 'customer'
+                }
+              }
+            }
+          },
+          include: {
+            user_roles: {
+              include: {
+                roles: true
+              }
+            },
+            organizations: true
+          }
+        });
+
+        if (existingCustomer) {
+          // Es un customer en otra organización, permitir crear owner
+          console.log(`Creando owner para email ${email} (customer existente en org: ${existingCustomer.organizations?.name})`);
         }
 
         // Crear nuevo usuario
