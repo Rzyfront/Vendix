@@ -3,11 +3,14 @@ import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { Store } from '../models/business.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class StoreService {
+  private apiUrl = environment.apiUrl;
+
   private currentStore = new BehaviorSubject<Store | null>(null);
   public currentStore$ = this.currentStore.asObservable();
 
@@ -20,14 +23,14 @@ export class StoreService {
    * Get store by subdomain or custom domain
    */
   getStoreByDomain(domain: string): Observable<Store> {
-    return this.http.get<Store>(`/api/stores/by-domain?domain=${domain}`);
+    return this.http.get<Store>(`${this.apiUrl}/api/public/domains/resolve/${domain}`);
   }
 
   /**
    * Get store by slug
    */
   getStoreBySlug(slug: string): Observable<Store> {
-    return this.http.get<Store>(`/api/stores/by-slug/${slug}`);
+    return this.http.get<Store>(`${this.apiUrl}/api/stores/by-slug/${slug}`);
   }
   /**
    * Set current store

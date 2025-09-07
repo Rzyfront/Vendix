@@ -39,7 +39,9 @@ export class App implements OnInit {
 
       // Solo cargar el store por dominio (sin storedTheme ni subdomain)
       const hostname = window.location.hostname;
-      this.loadThemeByDomain(hostname);
+      const port = window.location.port;
+      const domain = port ? `${hostname}:${port}` : hostname;
+      this.loadThemeByDomain(domain);
     } catch (error) {
       console.error('Error initializing app:', error);
       this.error = 'Error loading store configuration';

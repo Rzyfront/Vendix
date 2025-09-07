@@ -19,7 +19,7 @@ import {
  * Controlador público para endpoints que no requieren autenticación
  * Incluye la resolución de dominios para arquitectura multi-tenant
  */
-@Controller('api/public')
+@Controller('public')
 export class PublicController {
   private readonly logger = new Logger(PublicController.name);
 
@@ -44,7 +44,7 @@ export class PublicController {
     @Query('subdomain') subdomain?: string,
     @Headers('x-forwarded-host') forwardedHost?: string,
     @Headers('host') hostHeader?: string,
-  ): Promise<DomainResolutionResponse> {
+  ): Promise<any> {
     try {
       // Validar entrada
       if (!hostname || hostname.trim() === '') {
@@ -69,24 +69,24 @@ export class PublicController {
       );
 
       // Resolver la configuración del dominio
-      const domainConfig =
-        await this.domainResolutionService.resolveDomain(resolvedHostname);
+      const store =
+        await this.domainResolutionService.resolveStoreByDomain(resolvedHostname);
 
-      if (!domainConfig) {
+      if (!store) {
         this.logger.warn(
-          `Domain configuration not found for: ${resolvedHostname}`,
+          `Store not found for: ${resolvedHostname}`,
         );
         throw new NotFoundException(
-          `Domain configuration not found for hostname: ${resolvedHostname}`,
+          `Store not found for hostname: ${resolvedHostname}`,
         );
       }
 
       // Log successful resolution
       this.logger.log(
-        `Successfully resolved domain: ${resolvedHostname} -> Organization: ${domainConfig.organizationId}`,
+        `Successfully resolved domain: ${resolvedHostname} -> Store: ${store.name} (${store.id})`,
       );
 
-      return domainConfig;
+      return store;
     } catch (error) {
       this.logger.error(`Error resolving domain ${hostname}:`, error.message);
 
@@ -154,6 +154,60 @@ export class PublicController {
         configured: false,
         active: false,
       };
+    }
+  }
+
+  /**
+   * Busca una tienda por dominio (endpoint público para compatibilidad con frontend)
+   *
+   * @param domain - El dominio a buscar
+   * @returns Información de la tienda asociada al dominio
+   */
+  @Get('stores/by-domain')
+  @HttpCode(HttpStatus.OK)
+  async findStoreByDomain(@Query('domain') domain: string) {
+    try {
+      if (!domain || domain.trim() === '') {
+        throw new BadRequestException('Domain parameter is required');
+      }
+
+      const normalizedDomain = domain.toLowerCase().trim();
+      this.logger.log(`Finding store for domain: ${normalizedDomain}`);
+
+      // Usar el servicio de resolución de dominios
+      const domainConfig = await this.domainResolutionService.resolveDomain(
+        normalizedDomain,
+      );
+
+      if (!domainConfig || !domainConfig.storeId) {
+        this.logger.warn(`Store not found for domain: ${normalizedDomain}`);
+        throw new NotFoundException('Store not found for this domain');
+      }
+
+      // Aquí podríamos hacer una consulta adicional para obtener los detalles completos de la tienda
+      // Por ahora, devolver la configuración del dominio que incluye la información de la tienda
+      return {
+        id: domainConfig.storeId,
+        name: domainConfig.storeName || 'Store',
+        slug: domainConfig.storeSlug || 'store',
+        domain: normalizedDomain,
+        organization_id: domainConfig.organizationId,
+        is_active: true,
+        store_type: 'online',
+        organizations: {
+          id: domainConfig.organizationId,
+          name: domainConfig.organizationName || 'Organization',
+          slug: domainConfig.organizationSlug || 'org',
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error finding store for domain ${domain}:`, error.message);
+
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+
+      throw new NotFoundException('Store not found for this domain');
     }
   }
 

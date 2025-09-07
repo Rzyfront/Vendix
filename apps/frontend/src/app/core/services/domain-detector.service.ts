@@ -199,7 +199,7 @@ export class DomainDetectorService {
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
     try {
       const response = await this.http
-        .get<{ success: boolean; data: DomainResolution }>(`${this.API_URL}/api/domains/resolve/${hostname}`)
+        .get<{ success: boolean; data: DomainResolution }>(`${this.API_URL}/api/public/domains/resolve/${hostname}`)
         .pipe(
           map(response => response.data),
           catchError(error => {

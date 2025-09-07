@@ -9,6 +9,11 @@ export interface DomainResolutionResponse {
   config: any;
   createdAt: string;
   updatedAt: string;
+  // Additional properties for store and organization details
+  storeName?: string;
+  storeSlug?: string;
+  organizationName?: string;
+  organizationSlug?: string;
 }
 
 @Injectable()
@@ -39,6 +44,26 @@ export class DomainResolutionService {
 
     this.logger.log(`Found domain configuration for: ${hostname}`);
 
+    // Get store and organization details if storeId exists
+    let storeName: string | undefined;
+    let storeSlug: string | undefined;
+    let organizationName: string | undefined;
+    let organizationSlug: string | undefined;
+
+    if (domainConfig.store_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: domainConfig.store_id },
+        include: { organizations: true },
+      });
+
+      if (store) {
+        storeName = store.name;
+        storeSlug = store.slug;
+        organizationName = store.organizations?.name;
+        organizationSlug = store.organizations?.slug;
+      }
+    }
+
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
@@ -47,6 +72,11 @@ export class DomainResolutionService {
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
       updatedAt: domainConfig.updated_at?.toISOString() || '',
+      // Additional properties from separate queries
+      storeName,
+      storeSlug,
+      organizationName,
+      organizationSlug,
     };
   }
 
@@ -58,15 +88,45 @@ export class DomainResolutionService {
       orderBy: { hostname: 'asc' },
     });
 
-    return domains.map((domain) => ({
-      id: domain.id,
-      hostname: domain.hostname,
-      organizationId: domain.organization_id,
-      storeId: domain.store_id || undefined,
-      config: domain.config,
-      createdAt: domain.created_at?.toISOString() || '',
-      updatedAt: domain.updated_at?.toISOString() || '',
-    }));
+    // Get additional details for each domain
+    const results: DomainResolutionResponse[] = [];
+
+    for (const domain of domains) {
+      let storeName: string | undefined;
+      let storeSlug: string | undefined;
+      let organizationName: string | undefined;
+      let organizationSlug: string | undefined;
+
+      if (domain.store_id) {
+        const store = await this.prisma.stores.findUnique({
+          where: { id: domain.store_id },
+          include: { organizations: true },
+        });
+
+        if (store) {
+          storeName = store.name;
+          storeSlug = store.slug;
+          organizationName = store.organizations?.name;
+          organizationSlug = store.organizations?.slug;
+        }
+      }
+
+      results.push({
+        id: domain.id,
+        hostname: domain.hostname,
+        organizationId: domain.organization_id,
+        storeId: domain.store_id || undefined,
+        config: domain.config,
+        createdAt: domain.created_at?.toISOString() || '',
+        updatedAt: domain.updated_at?.toISOString() || '',
+        storeName,
+        storeSlug,
+        organizationName,
+        organizationSlug,
+      });
+    }
+
+    return results;
   }
 
   /**
@@ -87,6 +147,26 @@ export class DomainResolutionService {
       },
     });
 
+    // Get additional details
+    let storeName: string | undefined;
+    let storeSlug: string | undefined;
+    let organizationName: string | undefined;
+    let organizationSlug: string | undefined;
+
+    if (domainConfig.store_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: domainConfig.store_id },
+        include: { organizations: true },
+      });
+
+      if (store) {
+        storeName = store.name;
+        storeSlug = store.slug;
+        organizationName = store.organizations?.name;
+        organizationSlug = store.organizations?.slug;
+      }
+    }
+
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
@@ -95,6 +175,10 @@ export class DomainResolutionService {
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
       updatedAt: domainConfig.updated_at?.toISOString() || '',
+      storeName,
+      storeSlug,
+      organizationName,
+      organizationSlug,
     };
   }
 
@@ -110,6 +194,26 @@ export class DomainResolutionService {
       data: { config },
     });
 
+    // Get additional details
+    let storeName: string | undefined;
+    let storeSlug: string | undefined;
+    let organizationName: string | undefined;
+    let organizationSlug: string | undefined;
+
+    if (domainConfig.store_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: domainConfig.store_id },
+        include: { organizations: true },
+      });
+
+      if (store) {
+        storeName = store.name;
+        storeSlug = store.slug;
+        organizationName = store.organizations?.name;
+        organizationSlug = store.organizations?.slug;
+      }
+    }
+
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
@@ -118,6 +222,10 @@ export class DomainResolutionService {
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
       updatedAt: domainConfig.updated_at?.toISOString() || '',
+      storeName,
+      storeSlug,
+      organizationName,
+      organizationSlug,
     };
   }
 
@@ -130,5 +238,46 @@ export class DomainResolutionService {
     });
 
     this.logger.log(`Domain configuration deleted: ${hostname}`);
+  }
+
+  /**
+   * Resuelve el store para un dominio específico
+   */
+  async resolveStoreByDomain(hostname: string): Promise<any> {
+    this.logger.log(`Resolving store for domain: ${hostname}`);
+
+    const domainConfig = await this.prisma.domain_settings.findUnique({
+      where: {
+        hostname: hostname,
+      },
+    });
+
+    if (!domainConfig) {
+      this.logger.warn(`Domain not found: ${hostname}`);
+      throw new NotFoundException(
+        `Domain configuration not found for hostname: ${hostname}`,
+      );
+    }
+
+    if (!domainConfig.store_id) {
+      this.logger.warn(`No store associated with domain: ${hostname}`);
+      throw new NotFoundException(
+        `No store found for hostname: ${hostname}`,
+      );
+    }
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: domainConfig.store_id },
+      include: { organizations: true },
+    });
+
+    if (!store) {
+      this.logger.warn(`Store not found for domain: ${hostname}`);
+      throw new NotFoundException(
+        `Store not found for hostname: ${hostname}`,
+      );
+    }
+
+    return store;
   }
 }
