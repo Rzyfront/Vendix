@@ -1,6 +1,6 @@
 // Estilos específicos para el dashboard de admin
 .admin-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, var(--primary-color, #667eea), var(--secondary-color, #764ba2));
 }
 
 .stat-card {
@@ -16,7 +16,7 @@
   transition: all 0.2s ease;
   
   &:hover {
-    background-color: #f3f4f6;
+    background-color: var(--background-color, #f3f4f6);
     transform: translateX(4px);
   }
 }
@@ -27,7 +27,7 @@
   transition: border-color 0.2s ease;
   
   &:hover {
-    border-left-color: #4f46e5;
+    border-left-color: var(--primary-color, #4f46e5);
   }
 }
 

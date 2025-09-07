@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../shared/components/card/card.component';
@@ -11,7 +11,49 @@ import { ButtonComponent } from '../../shared/components/button/button.component
   templateUrl: './landing.component.html',
   styleUrls: ['./landing.component.scss']
 })
-export class LandingComponent {
+export class LandingComponent implements OnInit {
+  // Branding colors from domain config
+  brandingColors = {
+    primary: '#7ED7A5',
+    secondary: '#2F6F4E',
+    accent: '#FFFFFF',
+    background: '#F4F4F4',
+    text: '#222222',
+    border: '#B0B0B0'
+  };
+
+  ngOnInit(): void {
+    this.loadBrandingColors();
+  }
+
+  private loadBrandingColors(): void {
+    try {
+      const currentStore = localStorage.getItem('vendix_current_store');
+      if (currentStore) {
+        const storeData = JSON.parse(currentStore);
+
+        if (storeData.domainConfig?.config?.branding) {
+          const branding = storeData.domainConfig.config.branding;
+
+          this.brandingColors = {
+            primary: branding.primary_color || this.brandingColors.primary,
+            secondary: branding.secondary_color || this.brandingColors.secondary,
+            accent: branding.accent_color || this.brandingColors.accent,
+            background: branding.background_color || this.brandingColors.background,
+            text: branding.text_color || this.brandingColors.text,
+            border: branding.border_color || this.brandingColors.border
+          };
+        }
+      }
+    } catch (error) {
+      console.warn('Error loading branding colors:', error);
+      // Keep default colors
+    }
+  }
+
+  getBackgroundGradient(): string {
+    return `linear-gradient(to bottom right, ${this.brandingColors.background}80, ${this.brandingColors.secondary}20)`;
+  }
     plans = [
     {
       name: 'Starter',

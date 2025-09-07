@@ -1,10 +1,11 @@
-<div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
+     [style.background]="getBackgroundGradient()">
   <div class="max-w-md w-full space-y-8">
     <!-- Header -->
     <div class="text-center">
-      <h1 class="text-3xl font-bold text-gray-900 mb-2">Vendix</h1>
-      <h2 class="text-xl text-gray-600">Iniciar Sesión</h2>
-      <p class="mt-2 text-sm text-gray-500">
+      <h1 class="text-3xl font-bold mb-2" [style.color]="brandingColors.primary">Vendix</h1>
+      <h2 class="text-xl" [style.color]="brandingColors.text">Iniciar Sesión</h2>
+      <p class="mt-2 text-sm" [style.color]="brandingColors.secondary">
         Accede a tu cuenta para gestionar tu negocio
       </p>
     </div>
@@ -15,9 +16,10 @@
         
         <!-- Email Field -->
         <div>
-          <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
+          <label for="email" class="block text-sm font-medium mb-2" [style.color]="brandingColors.text">
             Email
-          </label>          <app-input
+          </label>
+          <app-input
             id="email"
             type="email"
             formControlName="email"
@@ -29,9 +31,10 @@
 
         <!-- Password Field -->
         <div>
-          <label for="password" class="block text-sm font-medium text-gray-700 mb-2">
+          <label for="password" class="block text-sm font-medium mb-2" [style.color]="brandingColors.text">
             Contraseña
-          </label>          <app-input
+          </label>
+          <app-input
             id="password"
             type="password"
             formControlName="password"
@@ -55,139 +58,65 @@
 
         <!-- Submit Button -->
         <div>
-          <app-button
+          <button
             type="submit"
-            variant="primary"
-            size="lg"
-            [loading]="isLoading"
-            class="w-full"
+            [disabled]="isLoading"
+            class="w-full px-6 py-3 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed relative inline-flex items-center justify-center gap-2"
+            [style.background-color]="brandingColors.primary"
+            [style.border-color]="brandingColors.primary"
+            [style.color]="brandingColors.accent"
+            [style.border]="`2px solid ${brandingColors.primary}`"
+            style="box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);"
+            onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';"
+            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)';"
           >
-            {{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}
-          </app-button>
+            <!-- Loading spinner -->
+            <svg
+              *ngIf="isLoading"
+              class="animate-spin h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
+            </svg>
+
+            <!-- Button text -->
+            <span>{{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}</span>
+          </button>
         </div>
 
         <!-- Additional Links -->
         <div class="text-center space-y-2">
-          <p class="text-sm text-gray-600">
-            <a href="#" class="text-indigo-600 hover:text-indigo-500 transition-colors">
+          <p class="text-sm" [style.color]="brandingColors.secondary">
+            <a routerLink="/auth/forgot-password" class="transition-colors font-medium cursor-pointer" [style.color]="brandingColors.primary" [style.text-decoration-color]="brandingColors.primary">
               ¿Olvidaste tu contraseña?
             </a>
           </p>
-          <p class="text-sm text-gray-600">
+          <p class="text-sm" [style.color]="brandingColors.secondary">
             ¿No tienes cuenta? 
-            <a routerLink="/auth/register" class="text-indigo-600 hover:text-indigo-500 transition-colors font-medium">
+            <a routerLink="/auth/register" class="transition-colors font-medium" [style.color]="brandingColors.primary" [style.text-decoration-color]="brandingColors.primary">
               Regístrate aquí
             </a>
           </p>
         </div>
       </form>
-    </app-card>    <!-- Demo Credentials -->
-    <app-card class="p-6 bg-blue-50 border-blue-200">
-      <div class="text-center">
-        <h3 class="text-sm font-medium text-blue-800 mb-4">🔑 Credenciales de Prueba</h3>
-        <div class="space-y-3 text-xs">
-          <!-- Super Admin -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-purple-700">Super Admin</span>
-              <button (click)="fillCredentials('sa@vx.com', 'super1')" 
-                      class="px-2 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 transition-colors">
-                Usar
-              </button>
-            </div>            <p class="text-gray-600">Email: <strong>sa&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>super1</strong></p>
-          </div>
-
-          <!-- Owner -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-green-700">Owner</span>
-              <button (click)="fillCredentials('owner@vx.com', 'owner1')" 
-                      class="px-2 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>owner&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>owner1</strong></p>
-          </div>
-          
-          <!-- Admin -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-blue-700">Admin</span>
-              <button (click)="fillCredentials('admin@vx.com', 'admin1')" 
-                      class="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>admin&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>admin1</strong></p>
-          </div>
-
-          <!-- Manager -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-yellow-700">Manager</span>
-              <button (click)="fillCredentials('mgr@vx.com', 'mgr123')" 
-                      class="px-2 py-1 bg-yellow-600 text-white rounded text-xs hover:bg-yellow-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>mgr&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>mgr123</strong></p>
-          </div>
-
-          <!-- Supervisor -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-indigo-700">Supervisor</span>
-              <button (click)="fillCredentials('sup@vx.com', 'sup123')" 
-                      class="px-2 py-1 bg-indigo-600 text-white rounded text-xs hover:bg-indigo-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>sup&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>sup123</strong></p>
-          </div>
-
-          <!-- Employee -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-orange-700">Employee</span>
-              <button (click)="fillCredentials('emp@vx.com', 'emp123')" 
-                      class="px-2 py-1 bg-orange-600 text-white rounded text-xs hover:bg-orange-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>emp&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>emp123</strong></p>
-          </div>
-
-          <!-- Customer -->
-          <div class="bg-white p-3 rounded-lg border border-blue-200 shadow-sm">
-            <div class="flex justify-between items-center mb-2">
-              <span class="font-semibold text-gray-700">Customer</span>
-              <button (click)="fillCredentials('cust@vx.com', 'cust12')" 
-                      class="px-2 py-1 bg-gray-600 text-white rounded text-xs hover:bg-gray-700 transition-colors">
-                Usar
-              </button>
-            </div>
-            <p class="text-gray-600">Email: <strong>cust&#64;vx.com</strong></p>
-            <p class="text-gray-600">Contraseña: <strong>cust12</strong></p>
-          </div>
-        </div>
-        <p class="text-xs text-blue-600 mt-3">
-          💡 Haz clic en "Usar" para autocompletar las credenciales
-        </p>
-        <p class="text-xs text-gray-500 mt-2">
-          ⚠️ Todos los usuarios pueden acceder al dashboard administrativo
-        </p>
-      </div>
     </app-card>
 
     <!-- Back to Home -->
     <div class="text-center">
-      <a routerLink="/" class="text-sm text-gray-500 hover:text-gray-700 transition-colors">
+      <a routerLink="/" class="text-sm transition-colors" [style.color]="brandingColors.secondary" [style.text-decoration-color]="brandingColors.primary">
         ← Volver al inicio
       </a>
     </div>

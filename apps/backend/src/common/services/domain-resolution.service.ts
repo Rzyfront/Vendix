@@ -242,6 +242,7 @@ export class DomainResolutionService {
 
   /**
    * Resuelve el store para un dominio específico
+   * Si no hay store_id, devuelve información de la organización
    */
   async resolveStoreByDomain(hostname: string): Promise<any> {
     this.logger.log(`Resolving store for domain: ${hostname}`);
@@ -259,25 +260,49 @@ export class DomainResolutionService {
       );
     }
 
-    if (!domainConfig.store_id) {
-      this.logger.warn(`No store associated with domain: ${hostname}`);
-      throw new NotFoundException(
-        `No store found for hostname: ${hostname}`,
-      );
+    // Si hay store_id, buscar el store
+    if (domainConfig.store_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: domainConfig.store_id },
+        include: { organizations: true },
+      });
+
+      if (!store) {
+        this.logger.warn(`Store not found for domain: ${hostname}`);
+        throw new NotFoundException(
+          `Store not found for hostname: ${hostname}`,
+        );
+      }
+
+      return store;
     }
 
-    const store = await this.prisma.stores.findUnique({
-      where: { id: domainConfig.store_id },
-      include: { organizations: true },
-    });
+    // Si no hay store_id pero hay organization_id, devolver info de la organización
+    if (domainConfig.organization_id) {
+      const organization = await this.prisma.organizations.findUnique({
+        where: { id: domainConfig.organization_id },
+      });
 
-    if (!store) {
-      this.logger.warn(`Store not found for domain: ${hostname}`);
-      throw new NotFoundException(
-        `Store not found for hostname: ${hostname}`,
-      );
+      if (!organization) {
+        this.logger.warn(`Organization not found for domain: ${hostname}`);
+        throw new NotFoundException(
+          `Organization not found for hostname: ${hostname}`,
+        );
+      }
+
+      // Devolver un objeto similar a store pero con info de organización
+      return {
+        id: null, // No hay store real
+        name: organization.name,
+        slug: organization.slug,
+        organizations: organization, // La organización misma
+        domainConfig: domainConfig, // Incluir la config del dominio
+      };
     }
 
-    return store;
+    this.logger.warn(`No store or organization associated with domain: ${hostname}`);
+    throw new NotFoundException(
+      `No store or organization found for hostname: ${hostname}`,
+    );
   }
 }

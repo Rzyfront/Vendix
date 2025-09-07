@@ -28,16 +28,16 @@ nav::-webkit-scrollbar {
 }
 
 nav::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--background-color, transparent);
 }
 
 nav::-webkit-scrollbar-thumb {
-  background: #e5e7eb;
+  background: var(--border-color, #e5e7eb);
   border-radius: 2px;
 }
 
 nav::-webkit-scrollbar-thumb:hover {
-  background: #d1d5db;
+  background: var(--secondary-color, #d1d5db);
 }
 
 /* Smooth hover effects */

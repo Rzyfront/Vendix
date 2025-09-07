@@ -28,7 +28,17 @@ interface ActivityItem {
 })
 export class AdminDashboardComponent implements OnInit {
   currentUser: any = null;
-  
+
+  // Branding colors from domain config
+  brandingColors = {
+    primary: '#7ED7A5',
+    secondary: '#2F6F4E',
+    accent: '#FFFFFF',
+    background: '#F4F4F4',
+    text: '#222222',
+    border: '#B0B0B0'
+  };
+
   stats: DashboardStats = {
     totalUsers: 1234,
     activeStores: 567,
@@ -71,6 +81,48 @@ export class AdminDashboardComponent implements OnInit {
 
   ngOnInit(): void {
     this.currentUser = this.authService.getCurrentUser();
+    this.loadBrandingColors();
+    this.setBrandingCSSVariables();
+  }
+
+  private setBrandingCSSVariables(): void {
+    if (typeof document !== 'undefined') {
+      const root = document.documentElement;
+      root.style.setProperty('--primary-color', this.brandingColors.primary);
+      root.style.setProperty('--secondary-color', this.brandingColors.secondary);
+      root.style.setProperty('--accent-color', this.brandingColors.accent);
+      root.style.setProperty('--background-color', this.brandingColors.background);
+      root.style.setProperty('--text-color', this.brandingColors.text);
+      root.style.setProperty('--border-color', this.brandingColors.border);
+    }
+  }
+
+  private loadBrandingColors(): void {
+    try {
+      const currentStore = localStorage.getItem('vendix_current_store');
+      if (currentStore) {
+        const storeData = JSON.parse(currentStore);
+
+        if (storeData.domainConfig?.config?.branding) {
+          const branding = storeData.domainConfig.config.branding;
+
+          this.brandingColors = {
+            primary: branding.primary_color || this.brandingColors.primary,
+            secondary: branding.secondary_color || this.brandingColors.secondary,
+            accent: branding.accent_color || this.brandingColors.accent,
+            background: branding.background_color || this.brandingColors.background,
+            text: branding.text_color || this.brandingColors.text,
+            border: branding.border_color || this.brandingColors.border
+          };
+          
+          // Update CSS variables after loading colors
+          this.setBrandingCSSVariables();
+        }
+      }
+    } catch (error) {
+      console.warn('Error loading branding colors:', error);
+      // Keep default colors
+    }
   }
   logout(): void {
     this.authService.logout();

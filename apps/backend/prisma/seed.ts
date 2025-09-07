@@ -118,6 +118,55 @@ async function main() {
     create: { user_id: superAdminUser.id, role_id: superAdminRole.id },
   });
 
+  // 5. Configurar dominio para la corporación del super admin
+  console.log('🌐 Configurando dominio para Vendix Corp...');
+  console.log('   📍 Hostname: localhost:4200');
+  console.log('   🏢 Organización: Vendix Corp');
+  console.log('   ⚙️  Ambiente: Development');
+
+  // Primero eliminar cualquier configuración existente para este hostname
+  await prisma.domain_settings.deleteMany({
+    where: { hostname: 'localhost:4200' }
+  });
+
+  // Crear la nueva configuración
+  await prisma.domain_settings.create({
+    data: {
+      hostname: 'localhost:4200',
+      organization_id: seedOrganization.id,
+      store_id: null, // Configuración a nivel de organización
+      config: {
+        is_default: true,
+        environment: 'development',
+        frontend_url: 'http://localhost:4200',
+        backend_url: 'http://localhost:3000',
+        features: {
+          multi_tenant: true,
+          email_verification: true,
+          onboarding: true,
+          analytics: false
+        },
+        branding: {
+          name: 'Vendix Corp',
+          primary_color: '#7ED7A5',
+          secondary_color: '#2F6F4E',
+          background_color: '#F4F4F4',
+          accent_color: '#FFFFFF',
+          border_color: '#B0B0B0',
+          text_color: '#222222',
+          theme: 'light',
+          logo_url: null,
+          favicon_url: null,
+        },
+        security: {
+          cors_origins: ['http://localhost:4200', 'http://localhost:3000'],
+          session_timeout: 3600000, // 1 hora en ms
+          max_login_attempts: 5
+        }
+      },
+    },
+  });
+
   console.log('✅ Seed completado exitosamente!');
 }
 

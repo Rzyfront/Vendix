@@ -6,6 +6,17 @@ import { Router } from '@angular/router';
 export interface LoginDto {
   email: string;
   password: string;
+  storeSlug?: string;
+  organizationSlug?: string;
+}
+
+export interface RegisterOwnerDto {
+  organizationName: string;
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  phone?: string;
 }
 
 export interface User {
@@ -60,18 +71,22 @@ export class AuthService {
   login(loginDto: LoginDto): Observable<AuthResponse> {
     return this.http.post<AuthResponse>(`${this.API_URL}/login`, loginDto)
       .pipe(
-        tap(response => {
+        tap((response: AuthResponse) => {
           if (response.data) {
             // Store tokens and user data
             localStorage.setItem('access_token', response.data.access_token);
             localStorage.setItem('refresh_token', response.data.refresh_token);
             localStorage.setItem('user', JSON.stringify(response.data.user));
-            
+
             // Update current user subject
             this.currentUserSubject.next(response.data.user);
           }
         })
       );
+  }
+
+  registerOwner(registerData: RegisterOwnerDto): Observable<any> {
+    return this.http.post(`${this.API_URL}/register-owner`, registerData);
   }
 
   logout(): void {
