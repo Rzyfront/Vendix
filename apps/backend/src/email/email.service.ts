@@ -27,7 +27,7 @@ export class EmailService {
       apiKey: this.configService.get<string>('EMAIL_API_KEY'),
       domain: this.configService.get<string>('EMAIL_DOMAIN'),
       fromEmail:
-        this.configService.get<string>('EMAIL_FROM') || 'noreply@vendix.com',
+        this.configService.get<string>('EMAIL_FROM') || 'noreply@vendix.online',
       fromName: this.configService.get<string>('EMAIL_FROM_NAME') || 'Vendix',
       smtp: {
         host: this.configService.get<string>('SMTP_HOST') || '',
