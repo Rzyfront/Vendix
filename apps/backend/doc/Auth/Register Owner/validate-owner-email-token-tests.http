@@ -1,0 +1,55 @@
+### VENDIX - Validar Owner con Token de Email
+### Test para validar el proceso de verificación de email de un owner registrado
+
+@baseUrl = http://localhost:3000/api
+@email_verification_token = 26836330449845bea25532d8c1acb981c127d83bd8b1783f3a105c8c44e4e89b
+
+
+### ============================================
+### 0. HEALTH CHECK - Verificar servidor
+### ============================================
+GET {{baseUrl}}/health
+
+### ============================================
+### 1. REGISTRO DE OWNER PARA TESTING
+### ============================================
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "organizationName": "Test Org Email",
+  "email": "owner.emailtest@example.com",
+  "password": "TestOwner123!",
+  "first_name": "Owner",
+  "last_name": "EmailTest"
+}
+
+### ============================================
+### 2. VERIFICAR EMAIL DEL OWNER CON TOKEN
+### ============================================
+# El token se recibe por email, simular aquí
+POST {{baseUrl}}/auth/verify-email
+Content-Type: application/json
+
+{
+  "token": "{{email_verification_token}}"
+}
+
+### ============================================
+### 3. LOGIN DEL OWNER YA VERIFICADO
+### ============================================
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner.emailtest@example.com",
+  "password": "TestOwner123!",
+  "organizationSlug": "test-org-email"
+}
+
+### ============================================
+### 4. ACCESO A ENDPOINT PROTEGIDO (OPCIONAL)
+### ============================================
+GET {{baseUrl}}/auth/sessions
+Authorization: Bearer {{access_token}}
+

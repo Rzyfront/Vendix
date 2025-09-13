@@ -207,9 +207,9 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Especial",
-  "email": "specialuser@test.com",
-  "password": "Password@123",
-  "first_name": "José María",
-  "last_name": "O'Connor"
+  "organizationName": "balmes_corp",
+  "email": "balmescamilobritovargas@gmail.com",
+  "password": "Balmes123$",
+  "first_name": "balmes",
+  "last_name": "brito"
 }

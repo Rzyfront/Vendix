@@ -26,7 +26,7 @@ import { CurrentUser } from './decorators/current-user.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('register-owner')
   @HttpCode(HttpStatus.CREATED)
@@ -42,7 +42,7 @@ export class AuthController {
       userAgent: userAgent || undefined,
     };
     const result = await this.authService.registerOwner(registerOwnerDto, clientInfo);
-    
+
     if (result.wasExistingUser) {
       throw new ConflictException({
         message: 'Ya tienes un registro pendiente. Completa tu onboarding.',
@@ -51,7 +51,7 @@ export class AuthController {
         data: result,
       });
     }
-    
+
     return {
       message: 'Bienvenido a Vendix! Tu organización ha sido creada.',
       data: result,
@@ -171,15 +171,15 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: { token: string }) {
-    await this.authService.verifyEmail(verifyEmailDto.token);
-    throw new NotImplementedException('La verificación de email aún no está implementada.');
+    const result = await this.authService.verifyEmail(verifyEmailDto.token);
+    return result;
   }
 
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {
-    await this.authService.resendEmailVerification(resendDto.email);
-     throw new NotImplementedException('El reenvío de verificación aún no está implementado.');
+    const result = await this.authService.resendEmailVerification(resendDto.email);
+    return result;
   }
 
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
