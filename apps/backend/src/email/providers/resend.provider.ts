@@ -38,7 +38,7 @@ export class ResendProvider implements EmailProvider {
   ): Promise<EmailResult> {
     try {
       const result = await this.resend.emails.send({
-        from: `${this.config.fromName} <${this.config.fromEmail}>`,
+        from: this.config.fromEmail,
         to: [to],
         subject,
         html,
