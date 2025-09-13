@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import { environment } from '../../../../environments/environment';
 
 export interface RegisterOwnerDto {
   organizationName: string;
@@ -22,7 +23,7 @@ export interface AuthResponse {
   providedIn: 'root'
 })
 export class AuthService {
-  private apiUrl = 'http://localhost:3000/auth'; // Ajustar según la configuración
+  private apiUrl = `${environment.apiUrl}/auth`; // Ajustar según la configuración
 
   constructor(private http: HttpClient) {}
 

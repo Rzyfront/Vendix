@@ -8,13 +8,14 @@ import {
   AppEnvironment, 
   DomainResolution 
 } from '../models/domain-config.interface';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class DomainDetectorService {
-  private readonly API_URL = 'http://localhost:3000';
-  private readonly production = false;
+  private readonly API_URL = environment.apiUrl;
+  private readonly production = environment.production;
 
   constructor(private http: HttpClient) {}
 

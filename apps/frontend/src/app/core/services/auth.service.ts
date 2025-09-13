@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
 import { Router } from '@angular/router';
+import { environment } from '../../../environments/environment';
 
 export interface LoginDto {
   email: string;
@@ -42,7 +43,7 @@ export interface AuthResponse {
   providedIn: 'root'
 })
 export class AuthService {
-  private readonly API_URL = 'http://localhost:3000/api/auth';
+  private readonly API_URL = `${environment.apiUrl}/api/auth`;
   private currentUserSubject = new BehaviorSubject<User | null>(null);
   public currentUser$ = this.currentUserSubject.asObservable();
 

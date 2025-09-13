@@ -4,12 +4,13 @@ import { BehaviorSubject, Observable, of } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 import { TenantConfig, OrganizationConfig, StoreConfig } from '../models/tenant-config.interface';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class TenantConfigService {
-  private readonly API_URL = 'http://localhost:3000';
+  private readonly API_URL = environment.apiUrl;
   
   // Estado global de la configuración del tenant
   private tenantConfigSubject = new BehaviorSubject<TenantConfig | null>(null);
