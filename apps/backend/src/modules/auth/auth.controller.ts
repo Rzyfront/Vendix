@@ -247,8 +247,19 @@ export class AuthController {
   @Get('onboarding/status')
   @UseGuards(JwtAuthGuard)
   async getOnboardingStatus(@CurrentUser() user: any) {
-    await this.authService.startOnboarding(user.id);
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    // Verificar que el usuario sea owner
+    const userWithRoles = await this.authService.validateUser(user.id);
+    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+
+    if (!isOwner) {
+      throw new ConflictException('Solo los propietarios de organización pueden acceder al estado de onboarding.');
+    }
+
+    const status = await this.authService.getOnboardingStatus(user.id);
+    return {
+      message: 'Estado de onboarding obtenido exitosamente',
+      data: status,
+    };
   }
 
   @Post('onboarding/create-organization')
@@ -258,11 +269,22 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() organizationData: any,
   ) {
-    await this.authService.createOrganizationDuringOnboarding(
+    // Verificar que el usuario sea owner
+    const userWithRoles = await this.authService.validateUser(user.id);
+    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+
+    if (!isOwner) {
+      throw new ConflictException('Solo los propietarios de organización pueden crear organizaciones durante el onboarding.');
+    }
+
+    const result = await this.authService.createOrganizationDuringOnboarding(
       user.id,
       organizationData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    return {
+      message: result.message,
+      data: result,
+    };
   }
 
   @Post('onboarding/setup-organization/:organizationId')
@@ -273,12 +295,23 @@ export class AuthController {
     @Param('organizationId') organizationId: string,
     @Body() setupData: any,
   ) {
-    await this.authService.setupOrganization(
+    // Verificar que el usuario sea owner
+    const userWithRoles = await this.authService.validateUser(user.id);
+    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+
+    if (!isOwner) {
+      throw new ConflictException('Solo los propietarios de organización pueden configurar organizaciones durante el onboarding.');
+    }
+
+    const result = await this.authService.setupOrganization(
       user.id,
       parseInt(organizationId),
       setupData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    return {
+      message: result.message,
+      data: result,
+    };
   }
 
   @Post('onboarding/create-store/:organizationId')
@@ -289,12 +322,23 @@ export class AuthController {
     @Param('organizationId') organizationId: string,
     @Body() storeData: any,
   ) {
-    await this.authService.createStoreDuringOnboarding(
+    // Verificar que el usuario sea owner
+    const userWithRoles = await this.authService.validateUser(user.id);
+    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+
+    if (!isOwner) {
+      throw new ConflictException('Solo los propietarios de organización pueden crear tiendas durante el onboarding.');
+    }
+
+    const result = await this.authService.createStoreDuringOnboarding(
       user.id,
       parseInt(organizationId),
       storeData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    return {
+      message: result.message,
+      data: result,
+    };
   }
 
   @Post('onboarding/setup-store/:storeId')
@@ -305,12 +349,23 @@ export class AuthController {
     @Param('storeId') storeId: string,
     @Body() setupData: any,
   ) {
-    await this.authService.setupStore(
+    // Verificar que el usuario sea owner
+    const userWithRoles = await this.authService.validateUser(user.id);
+    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+
+    if (!isOwner) {
+      throw new ConflictException('Solo los propietarios de organización pueden configurar tiendas durante el onboarding.');
+    }
+
+    const result = await this.authService.setupStore(
       user.id,
       parseInt(storeId),
       setupData,
     );
-    throw new NotImplementedException('El onboarding aún no está implementado.');
+    return {
+      message: result.message,
+      data: result,
+    };
   }
 
   @Post('onboarding/complete')
