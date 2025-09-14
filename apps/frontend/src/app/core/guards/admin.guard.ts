@@ -13,12 +13,12 @@ export class AdminGuard implements CanActivate {
     private router: Router
   ) {}
   canActivate(): Observable<boolean> | Promise<boolean> | boolean {
-    // Allow access to any authenticated user
-    if (this.authService.isLoggedIn()) {
+    // Check if user is logged in and has admin role
+    if (this.authService.isLoggedIn() && this.authService.isAdmin()) {
       return true;
     }
 
-    // If not logged in, redirect to login
+    // If not logged in or not admin, redirect to login
     this.router.navigate(['/auth/login']);
     return false;
   }

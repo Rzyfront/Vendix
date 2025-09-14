@@ -11,7 +11,7 @@ export const routes: Routes = [
   // Store/Ecommerce routes (main storefront)
   {
     path: 'store',
-    loadComponent: () => import('./modules/store/pages/storefront/storefront.component').then(c => c.StorefrontComponent)
+    loadChildren: () => import('./modules/store/store.routes').then(r => r.storeRoutes)
   },
     // Authentication routes
   {

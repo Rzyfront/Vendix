@@ -1,8 +1,12 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
 import { Router } from '@angular/router';
+import { isPlatformBrowser } from '@angular/common';
+import { firstValueFrom } from 'rxjs';
+import { filter } from 'rxjs/operators';
 import { DomainDetectorService } from './domain-detector.service';
 import { TenantConfigService } from './tenant-config.service';
 import { ThemeService } from './theme.service';
+import { TenantFacade } from '../store/tenant/tenant.facade';
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 import { TenantConfig } from '../models/tenant-config.interface';
 
@@ -15,7 +19,9 @@ export class AppInitializerService {
     private domainDetector: DomainDetectorService,
     private tenantConfig: TenantConfigService,
     private themeService: ThemeService,
-    private router: Router
+    private tenantFacade: TenantFacade,
+    private router: Router,
+    @Inject(PLATFORM_ID) private platformId: Object
   ) {}
 
   /**
@@ -24,36 +30,39 @@ export class AppInitializerService {
   async initializeApp(): Promise<void> {
     try {
       console.log('[APP INITIALIZER] Starting application initialization...');
-      
+
       // 1. Detectar el dominio actual
       const domainConfig = await this.domainDetector.detectDomain();
       console.log('[APP INITIALIZER] Domain detected:', domainConfig);
-      
-      // 2. Cargar configuración del tenant (si no es Vendix)
-      let tenantConfig: TenantConfig | null = null;
-      
-      if (!this.isVendixCoreEnvironment(domainConfig.environment)) {
-        tenantConfig = await this.tenantConfig.loadTenantConfig(domainConfig);
-        console.log('[APP INITIALIZER] Tenant config loaded:', tenantConfig);
-      } else {
-        // Para Vendix, usar configuración por defecto
-        tenantConfig = await this.tenantConfig.loadTenantConfig(domainConfig);
-      }
-      
-      // 3. Aplicar tema y branding
+
+      // 2. Inicializar tenant a través del store
+      this.tenantFacade.initTenant(domainConfig);
+
+      // 3. Esperar a que se complete la inicialización del tenant
+      await firstValueFrom(
+        this.tenantFacade.initialized$.pipe(
+          filter(initialized => initialized === true)
+        )
+      );
+
+      // 4. Obtener configuración del tenant desde el store
+      const tenantConfig = this.tenantFacade.getCurrentTenantConfig();
+      console.log('[APP INITIALIZER] Tenant config loaded:', tenantConfig);
+
+      // 5. Aplicar tema y branding
       if (tenantConfig) {
         await this.themeService.applyTenantConfiguration(tenantConfig);
         console.log('[APP INITIALIZER] Theme applied successfully');
       }
-      
-      // 4. Configurar rutas dinámicamente
+
+      // 6. Configurar rutas dinámicamente
       await this.configureRoutesForEnvironment(domainConfig);
-      
-      // 5. Inicializar servicios específicos del entorno
+
+      // 7. Inicializar servicios específicos del entorno
       await this.initializeEnvironmentServices(domainConfig);
-      
+
       console.log('[APP INITIALIZER] Application initialization completed successfully');
-      
+
     } catch (error) {
       console.error('[APP INITIALIZER] Error during initialization:', error);
       await this.handleInitializationError(error);
@@ -71,9 +80,9 @@ export class AppInitializerService {
   /**
    * Configura las rutas según el entorno
    */
-  private async configureRoutesForEnvironment(domainConfig: DomainConfig): Promise<void> {
+   private async configureRoutesForEnvironment(domainConfig: DomainConfig): Promise<void> {
     console.log('[APP INITIALIZER] Configuring routes for environment:', domainConfig.environment);
-    
+
     // Las rutas se configurarán dinámicamente según el entorno
     // Por ahora, simplemente logueamos el entorno
     const routeConfig = this.getRouteConfigForEnvironment(domainConfig.environment);
@@ -82,8 +91,11 @@ export class AppInitializerService {
 
   /**
    * Obtiene la configuración de rutas para un entorno específico
+   * Nota: La configuración de rutas ahora viene del domain resolution service
    */
   private getRouteConfigForEnvironment(environment: AppEnvironment): any {
+    // La configuración de rutas se determina basada en el entorno detectado
+    // Esta información ya está disponible en la configuración del dominio
     switch (environment) {
       case AppEnvironment.VENDIX_LANDING:
         return {
@@ -91,42 +103,42 @@ export class AppInitializerService {
           defaultRoute: '/',
           features: ['registration', 'login', 'marketing']
         };
-        
+
       case AppEnvironment.VENDIX_ADMIN:
         return {
           modules: ['admin', 'super-admin', 'organizations', 'analytics'],
           defaultRoute: '/admin/dashboard',
           features: ['user-management', 'system-settings', 'analytics']
         };
-        
+
       case AppEnvironment.ORG_LANDING:
         return {
           modules: ['organization-landing', 'auth'],
           defaultRoute: '/',
           features: ['company-info', 'contact', 'login']
         };
-        
+
       case AppEnvironment.ORG_ADMIN:
         return {
           modules: ['organization', 'stores', 'users', 'reports'],
           defaultRoute: '/dashboard',
           features: ['store-management', 'user-management', 'analytics']
         };
-        
+
       case AppEnvironment.STORE_ADMIN:
         return {
           modules: ['store', 'products', 'orders', 'customers', 'pos'],
           defaultRoute: '/dashboard',
           features: ['inventory', 'sales', 'customer-management', 'pos']
         };
-        
+
       case AppEnvironment.STORE_ECOMMERCE:
         return {
           modules: ['ecommerce', 'products', 'cart', 'checkout'],
           defaultRoute: '/',
           features: ['catalog', 'shopping-cart', 'checkout', 'account']
         };
-        
+
       default:
         return {
           modules: ['error'],
@@ -135,6 +147,63 @@ export class AppInitializerService {
         };
     }
   }
+
+  /**
+   * Configuración de rutas por defecto (fallback)
+   */
+  private getFallbackRouteConfigForEnvironment(environment: AppEnvironment): any {
+    switch (environment) {
+      case AppEnvironment.VENDIX_LANDING:
+        return {
+          modules: ['landing', 'auth', 'onboarding'],
+          defaultRoute: '/',
+          features: ['registration', 'login', 'marketing']
+        };
+
+      case AppEnvironment.VENDIX_ADMIN:
+        return {
+          modules: ['admin', 'super-admin', 'organizations', 'analytics'],
+          defaultRoute: '/admin/dashboard',
+          features: ['user-management', 'system-settings', 'analytics']
+        };
+
+      case AppEnvironment.ORG_LANDING:
+        return {
+          modules: ['organization-landing', 'auth'],
+          defaultRoute: '/',
+          features: ['company-info', 'contact', 'login']
+        };
+
+      case AppEnvironment.ORG_ADMIN:
+        return {
+          modules: ['organization', 'stores', 'users', 'reports'],
+          defaultRoute: '/dashboard',
+          features: ['store-management', 'user-management', 'analytics']
+        };
+
+      case AppEnvironment.STORE_ADMIN:
+        return {
+          modules: ['store', 'products', 'orders', 'customers', 'pos'],
+          defaultRoute: '/dashboard',
+          features: ['inventory', 'sales', 'customer-management', 'pos']
+        };
+
+      case AppEnvironment.STORE_ECOMMERCE:
+        return {
+          modules: ['ecommerce', 'products', 'cart', 'checkout'],
+          defaultRoute: '/',
+          features: ['catalog', 'shopping-cart', 'checkout', 'account']
+        };
+
+      default:
+        return {
+          modules: ['error'],
+          defaultRoute: '/error',
+          features: []
+        };
+    }
+  }
+
 
   /**
    * Inicializa servicios específicos del entorno
@@ -260,7 +329,9 @@ export class AppInitializerService {
     if (error.message?.includes('Domain') && error.message?.includes('not found')) {
       // Dominio no encontrado - redirigir a Vendix
       console.log('[APP INITIALIZER] Redirecting to Vendix due to domain not found');
-      window.location.href = 'https://vendix.com';
+      if (isPlatformBrowser(this.platformId)) {
+        window.location.href = 'https://vendix.com';
+      }
     } else {
       // Otro tipo de error - mostrar página de error
       console.log('[APP INITIALIZER] Navigating to error page');

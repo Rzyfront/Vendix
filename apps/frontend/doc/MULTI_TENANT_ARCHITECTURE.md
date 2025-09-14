@@ -275,28 +275,56 @@ class ThemeService {
 - Detecta tipo de dominio basado en hostname
 - Consulta API para dominios personalizados
 - Retorna configuración de dominio
+- ✅ **SSR Compatible**: Usa PLATFORM_ID para acceso seguro a `window.location`
+- ✅ **Testeado**: Cobertura completa con pruebas unitarias
 
 #### 2. TenantConfigService
 - Carga configuración de organización/tienda
 - Maneja cache de configuraciones
 - Aplica configuración al estado global
+- ✅ **Cache Inteligente**: Evita llamadas API innecesarias
+- ✅ **Testeado**: Pruebas de cache y manejo de errores
 
 #### 3. AppInitializerService
 - Inicializa aplicación según dominio
 - Configura rutas dinámicamente
 - Aplica tema y branding
+- ✅ **SSR Compatible**: Manejo seguro de redirecciones
+- ✅ **Manejo de Errores**: Redirección inteligente en fallos
 
 #### 4. ThemeService
 - Aplica temas personalizados
 - Gestiona CSS variables
 - Carga fuentes dinámicamente
+- ✅ **SSR Compatible**: Verificación de PLATFORM_ID antes de DOM
+
+#### 5. AuthService (Core)
+- Manejo de autenticación JWT
+- Refresh automático de tokens
+- ✅ **SSR Compatible**: localStorage protegido con PLATFORM_ID
+- ✅ **Rotación de Tokens**: Actualiza access y refresh tokens
+- ✅ **Redirecciones por Rol**: Admin vs Usuario regular
+
+#### 6. AuthRegistrationService (Módulo)
+- Servicio específico para registro de usuarios
+- Manejo de errores de registro
+- ✅ **Renombrado**: Anteriormente AuthService del módulo auth
 
 ### Interceptors y Guards
 
 #### AuthInterceptor
-- Añade tokens automáticamente
-- Maneja refresh de tokens
+- Añade tokens automáticamente a requests API
+- Maneja refresh de tokens con rotación completa
+- ✅ **API-Only**: Solo añade Authorization a URLs que empiecen con `environment.apiUrl`
+- ✅ **SSR Compatible**: localStorage protegido con PLATFORM_ID
+- ✅ **Testeado**: Cobertura completa de escenarios de refresh
 - Redirige en caso de 401
+
+#### AdminGuard
+- Valida acceso de administrador
+- Verifica roles de usuario (isLoggedIn + isAdmin)
+- ✅ **Mejorado**: Anteriormente solo verificaba login
+- Redirige a login si no cumple requisitos
 
 #### TenantGuard
 - Valida acceso a tenant específico
@@ -465,21 +493,31 @@ src/
 │   ├── core/
 │   │   ├── services/
 │   │   │   ├── domain-detector.service.ts
+│   │   │   ├── domain-detector.service.spec.ts      # ✅ Nuevo
 │   │   │   ├── tenant-config.service.ts
+│   │   │   ├── tenant-config.service.spec.ts        # ✅ Nuevo
 │   │   │   ├── app-initializer.service.ts
-│   │   │   └── theme.service.ts
+│   │   │   ├── theme.service.ts
+│   │   │   ├── auth.service.ts
+│   │   │   └── store.service.ts
 │   │   ├── guards/
+│   │   │   ├── admin.guard.ts                       # ✅ Mejorado
 │   │   │   ├── tenant.guard.ts
 │   │   │   └── environment.guard.ts
 │   │   ├── interceptors/
-│   │   │   └── tenant.interceptor.ts
+│   │   │   ├── auth.interceptor.ts                  # ✅ Mejorado
+│   │   │   └── auth.interceptor.spec.ts             # ✅ Nuevo
 │   │   └── models/
 │   │       ├── domain-config.interface.ts
 │   │       ├── tenant-config.interface.ts
 │   │       └── environment.enum.ts
 │   ├── modules/
+│   │   ├── auth/
+│   │   │   └── services/
+│   │   │       └── auth-registration.service.ts     # ✅ Renombrado
 │   │   ├── vendix/           # Entorno Vendix
-│   │   ├── organization/     # Entorno Organización  
+│   │   ├── organization/     # Entorno Organización
+│   │   ├── store/            # ✅ Rutas limpiadas
 │   │   ├── store-admin/      # Entorno Admin Tienda
 │   │   └── ecommerce/        # Entorno E-commerce
 │   └── shared/
@@ -498,21 +536,36 @@ src/
 - Verificar configuración DNS
 - Revisar mapeo en environment
 - Comprobar API `/api/domains/resolve`
+- ✅ **SSR**: Verificar que `window.location` no se accede en servidor
 
 #### 2. Tema no se aplica
 - Verificar carga de configuración
 - Revisar CSS variables
 - Comprobar orden de carga
+- ✅ **SSR**: Verificar que DOM no se manipula en servidor
 
 #### 3. Autenticación falla
 - Verificar tokens en localStorage
 - Revisar configuración de CORS
 - Comprobar permisos de usuario
+- ✅ **SSR**: Verificar que localStorage usa PLATFORM_ID
+- ✅ **Tokens**: Verificar rotación completa de access + refresh
 
 #### 4. Desarrollo local no funciona
 - Verificar archivo hosts
 - Comprobar puerto disponible
 - Revisar proxy configuration
+
+#### 5. Errores SSR (Server-Side Rendering)
+- ✅ **Verificar PLATFORM_ID**: Todos los servicios usan `isPlatformBrowser(this.platformId)`
+- ✅ **localStorage/DOM**: No acceder directamente sin verificación
+- ✅ **window.location**: Usar con PLATFORM_ID en DomainDetectorService
+- ✅ **Redirecciones**: Manejar con cuidado en AppInitializerService
+
+#### 6. Tests fallan
+- ✅ **Verificar imports**: Usar RxJS testing utilities
+- ✅ **Mock objects**: Crear objetos completos que cumplan interfaces
+- ✅ **PLATFORM_ID**: Mockear correctamente para SSR tests
 
 ### Logs de Debug
 ```typescript
@@ -575,6 +628,26 @@ class DomainDetectorService {
 
 ---
 
-*Documentación creada el 30 de Junio, 2025*
-*Versión: 1.0*
+## 📋 Estado de Implementación
+
+### ✅ Completado
+- [x] **AdminGuard mejorado** - Validación de roles (isLoggedIn + isAdmin)
+- [x] **Auth core fortalecido** - SSR compatible, rotación de tokens, redirecciones por rol
+- [x] **AuthInterceptor limitado** - Solo API base, SSR compatible
+- [x] **Rutas Store limpiadas** - Lazy loading sin duplicados
+- [x] **AuthService renombrado** - AuthRegistrationService en módulo auth
+- [x] **Higiene SSR completa** - Todos los servicios usan PLATFORM_ID
+- [x] **Tests unitarios críticos** - DomainDetector, TenantConfig, AuthInterceptor
+- [x] **Documentación actualizada** - Arquitectura sincronizada con implementación
+
+### 🔄 Pendiente
+- [ ] NgRx para gestión de estado
+- [ ] Rutas dinámicas por entorno
+- [ ] Overlay de inicialización
+- [ ] Tests E2E de auth y guardias
+
+---
+
+*Documentación actualizada el 14 de Septiembre, 2025*
+*Versión: 1.1*
 *Autor: Equipo Vendix*

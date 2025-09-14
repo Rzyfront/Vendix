@@ -10,6 +10,7 @@ import {
   Query,
   Headers,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   DomainResolutionService,
   DomainResolutionResponse,
@@ -293,5 +294,170 @@ export class PublicController {
         },
       ],
     };
+  }
+
+  /**
+   * Obtiene configuración específica para el frontend (landing page, planes, etc.)
+   * Endpoint público para configuración dinámica del frontend
+   */
+  @Get('config/frontend')
+  @HttpCode(HttpStatus.OK)
+  async getFrontendConfig(
+    @Query('hostname') hostname?: string,
+    @Headers('x-forwarded-host') forwardedHost?: string,
+    @Headers('host') hostHeader?: string,
+  ): Promise<any> {
+    try {
+      // Determinar el hostname a usar
+      let resolvedHostname = hostname || 'localhost';
+
+      if (forwardedHost) {
+        resolvedHostname = forwardedHost.toLowerCase().trim();
+      }
+
+      this.logger.log(`Getting frontend config for hostname: ${resolvedHostname}`);
+
+      // Resolver la configuración del dominio
+      const domainConfig = await this.domainResolutionService.resolveDomain(resolvedHostname);
+
+      if (!domainConfig) {
+        this.logger.warn(`No domain config found for: ${resolvedHostname}`);
+        throw new NotFoundException(`Configuration not found for hostname: ${resolvedHostname}`);
+      }
+
+      // Extraer configuración específica del frontend
+      const config = domainConfig.config || {};
+
+      // Devolver configuración estructurada para el frontend
+      return {
+        branding: config.branding || {},
+        landing: config.landing || {},
+        routes: config.routes || {},
+        features: config.features || {},
+        environment: config.environment || 'production',
+        development_domains: config.development_domains || {},
+        security: {
+          cors_origins: config.security?.cors_origins || [],
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Error getting frontend config for hostname ${hostname}:`, error.message);
+
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new NotFoundException('Unable to load frontend configuration');
+    }
+  }
+
+  /**
+   * Obtiene configuración de planes de precios
+   * Endpoint específico para la página de landing
+   */
+  @Get('config/plans')
+  @HttpCode(HttpStatus.OK)
+  async getPricingPlans(
+    @Query('hostname') hostname?: string,
+    @Headers('x-forwarded-host') forwardedHost?: string,
+  ): Promise<any> {
+    try {
+      let resolvedHostname = hostname || 'localhost';
+
+      if (forwardedHost) {
+        resolvedHostname = forwardedHost.toLowerCase().trim();
+      }
+
+      const domainConfig = await this.domainResolutionService.resolveDomain(resolvedHostname);
+
+      if (!domainConfig?.config?.landing?.plans) {
+        // Devolver configuración por defecto si no hay configuración específica
+        return {
+          plans: [
+            {
+              name: 'Starter',
+              price: '$119.900',
+              period: '/mes',
+              description: 'Perfecto para pequeños negocios',
+              features: ['Hasta 100 productos', 'POS básico', 'Inventario básico'],
+              highlighted: false
+            },
+            {
+              name: 'Professional',
+              price: '$329.900',
+              period: '/mes',
+              description: 'Para negocios en crecimiento',
+              features: ['Productos ilimitados', 'POS avanzado', 'Múltiples tiendas'],
+              highlighted: true
+            },
+            {
+              name: 'Enterprise',
+              price: '$829.900',
+              period: '/mes',
+              description: 'Para grandes organizaciones',
+              features: ['Todo en Professional', 'Usuarios ilimitados', 'Soporte 24/7'],
+              highlighted: false
+            }
+          ]
+        };
+      }
+
+      return {
+        plans: domainConfig.config.landing.plans
+      };
+    } catch (error) {
+      this.logger.error(`Error getting pricing plans:`, error.message);
+      throw new NotFoundException('Unable to load pricing configuration');
+    }
+  }
+
+  /**
+   * Obtiene configuración de características del producto
+   */
+  @Get('config/features')
+  @HttpCode(HttpStatus.OK)
+  async getProductFeatures(
+    @Query('hostname') hostname?: string,
+    @Headers('x-forwarded-host') forwardedHost?: string,
+  ): Promise<any> {
+    try {
+      let resolvedHostname = hostname || 'localhost';
+
+      if (forwardedHost) {
+        resolvedHostname = forwardedHost.toLowerCase().trim();
+      }
+
+      const domainConfig = await this.domainResolutionService.resolveDomain(resolvedHostname);
+
+      if (!domainConfig?.config?.landing?.features) {
+        // Devolver características por defecto
+        return {
+          features: [
+            {
+              icon: '🏪',
+              title: 'POS Inteligente',
+              description: 'Sistema de punto de venta completo'
+            },
+            {
+              icon: '📦',
+              title: 'Gestión de Inventario',
+              description: 'Control total de tu inventario'
+            },
+            {
+              icon: '🛒',
+              title: 'E-commerce Integrado',
+              description: 'Tienda online integrada'
+            }
+          ]
+        };
+      }
+
+      return {
+        features: domainConfig.config.landing.features
+      };
+    } catch (error) {
+      this.logger.error(`Error getting product features:`, error.message);
+      throw new NotFoundException('Unable to load features configuration');
+    }
   }
 }

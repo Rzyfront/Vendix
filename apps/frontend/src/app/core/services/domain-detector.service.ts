@@ -1,12 +1,13 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { 
-  DomainConfig, 
-  DomainType, 
-  AppEnvironment, 
-  DomainResolution 
+import { isPlatformBrowser } from '@angular/common';
+import {
+  DomainConfig,
+  DomainType,
+  AppEnvironment,
+  DomainResolution
 } from '../models/domain-config.interface';
 import { environment } from '../../../environments/environment';
 
@@ -17,13 +18,16 @@ export class DomainDetectorService {
   private readonly API_URL = environment.apiUrl;
   private readonly production = environment.production;
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    @Inject(PLATFORM_ID) private platformId: Object
+  ) {}
 
   /**
    * Detecta la configuración del dominio actual
    */
   async detectDomain(hostname?: string): Promise<DomainConfig> {
-    const currentHostname = hostname || window.location.hostname;
+    const currentHostname = hostname || (isPlatformBrowser(this.platformId) ? window.location.hostname : 'localhost');
     
     console.log(`[DOMAIN DETECTOR] Analyzing hostname: ${currentHostname}`);
 
@@ -59,14 +63,16 @@ export class DomainDetectorService {
   /**
    * Verifica si es un dominio core de Vendix
    */
-  private isVendixCoreDomain(hostname: string): boolean {
+   private isVendixCoreDomain(hostname: string): boolean {
+    // Usar configuración del backend en lugar de valores hardcodeados
+    // Por ahora mantenemos una lista básica, pero esto debería venir del backend
     const vendixDomains = [
       'vendix.com',
       'admin.vendix.com',
       'localhost',
       '127.0.0.1'
     ];
-    
+
     return vendixDomains.includes(hostname) || hostname.endsWith('.vendix.com');
   }
 
@@ -146,12 +152,29 @@ export class DomainDetectorService {
 
   /**
    * Obtiene el mapeo para desarrollo local
+   * Nota: Para desarrollo, usamos configuración simplificada ya que el backend puede no estar disponible
    */
   private getDevelopmentMapping(hostname: string): DomainConfig | null {
-    const port = window.location.port;
+    const port = isPlatformBrowser(this.platformId) ? window.location.port : '';
     const fullHostname = port ? `${hostname}:${port}` : hostname;
-    
-    // Mapeo para desarrollo local
+
+    // Mapeo básico para desarrollo - en producción esto vendría del backend
+    const devMappings: { [key: string]: DomainConfig } = {
+      'localhost:4200': {
+        domainType: DomainType.VENDIX_CORE,
+        environment: AppEnvironment.VENDIX_LANDING,
+        isVendixDomain: true,
+        hostname: fullHostname
+      }
+    };
+
+    return devMappings[fullHostname] || null;
+  }
+
+  /**
+   * Fallback para desarrollo cuando el backend no está disponible
+   */
+  private getFallbackDevelopmentMapping(fullHostname: string): DomainConfig | null {
     const devMappings: { [key: string]: DomainConfig } = {
       'localhost:4200': {
         domainType: DomainType.VENDIX_CORE,

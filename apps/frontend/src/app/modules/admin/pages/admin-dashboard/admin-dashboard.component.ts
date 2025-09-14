@@ -1,8 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
+import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CardComponent } from '../../../../shared/components/card/card.component';
+import { takeUntil } from 'rxjs/operators';
+import { Subject } from 'rxjs';
 
 interface DashboardStats {
   totalUsers: number;
@@ -26,17 +29,18 @@ interface ActivityItem {
   templateUrl: './admin-dashboard.component.html',
   styleUrls: ['./admin-dashboard.component.scss']
 })
-export class AdminDashboardComponent implements OnInit {
+export class AdminDashboardComponent implements OnInit, OnDestroy {
   currentUser: any = null;
+  private destroy$ = new Subject<void>();
 
-  // Branding colors from domain config
+  // Branding colors from domain config - reactive (initialized with neutral defaults)
   brandingColors = {
-    primary: '#7ED7A5',
-    secondary: '#2F6F4E',
-    accent: '#FFFFFF',
-    background: '#F4F4F4',
-    text: '#222222',
-    border: '#B0B0B0'
+    primary: '#3B82F6', // Default blue
+    secondary: '#1E40AF', // Default dark blue
+    accent: '#FFFFFF', // White
+    background: '#F8FAFC', // Light gray
+    text: '#1E293B', // Dark gray
+    border: '#E2E8F0' // Light border
   };
 
   stats: DashboardStats = {
@@ -77,12 +81,34 @@ export class AdminDashboardComponent implements OnInit {
     }
   ];
 
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private tenantFacade: TenantFacade
+  ) {}
 
   ngOnInit(): void {
     this.currentUser = this.authService.getCurrentUser();
-    this.loadBrandingColors();
-    this.setBrandingCSSVariables();
+
+    // Subscribe to tenant branding colors
+    this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
+      if (tenantConfig?.branding?.colors) {
+        const colors = tenantConfig.branding.colors;
+        this.brandingColors = {
+          primary: colors.primary || this.brandingColors.primary,
+          secondary: colors.secondary || this.brandingColors.secondary,
+          accent: colors.accent || this.brandingColors.accent,
+          background: colors.background || this.brandingColors.background,
+          text: colors.text?.primary || this.brandingColors.text,
+          border: colors.surface || this.brandingColors.border
+        };
+        this.setBrandingCSSVariables();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   private setBrandingCSSVariables(): void {
@@ -97,33 +123,6 @@ export class AdminDashboardComponent implements OnInit {
     }
   }
 
-  private loadBrandingColors(): void {
-    try {
-      const currentStore = localStorage.getItem('vendix_current_store');
-      if (currentStore) {
-        const storeData = JSON.parse(currentStore);
-
-        if (storeData.domainConfig?.config?.branding) {
-          const branding = storeData.domainConfig.config.branding;
-
-          this.brandingColors = {
-            primary: branding.primary_color || this.brandingColors.primary,
-            secondary: branding.secondary_color || this.brandingColors.secondary,
-            accent: branding.accent_color || this.brandingColors.accent,
-            background: branding.background_color || this.brandingColors.background,
-            text: branding.text_color || this.brandingColors.text,
-            border: branding.border_color || this.brandingColors.border
-          };
-          
-          // Update CSS variables after loading colors
-          this.setBrandingCSSVariables();
-        }
-      }
-    } catch (error) {
-      console.warn('Error loading branding colors:', error);
-      // Keep default colors
-    }
-  }
   logout(): void {
     this.authService.logout();
   }

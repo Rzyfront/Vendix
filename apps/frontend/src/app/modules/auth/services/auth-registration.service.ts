@@ -22,7 +22,7 @@ export interface AuthResponse {
 @Injectable({
   providedIn: 'root'
 })
-export class AuthService {
+export class AuthRegistrationService {
   private apiUrl = `${environment.apiUrl}/auth`; // Ajustar según la configuración
 
   constructor(private http: HttpClient) {}
@@ -53,7 +53,7 @@ export class AuthService {
       }
     }
 
-    console.error('AuthService Error:', error);
+    console.error('AuthRegistrationService Error:', error);
     return throwError(() => new Error(errorMessage));
   }
 }
