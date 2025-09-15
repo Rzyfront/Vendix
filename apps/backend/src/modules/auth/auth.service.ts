@@ -1519,11 +1519,11 @@ export class AuthService {
       },
     });
 
-    // Asignar el usuario a la organización como propietario
-    // Primero obtenemos el rol de owner
-    const ownerRole = await this.prismaService.roles.findFirst({
-      where: { name: 'owner' },
-    });
+      // Asignar el usuario a la organización como propietario
+      // Primero obtenemos el rol de owner
+      const ownerRole = await this.prismaService.roles.findFirst({
+        where: { name: 'owner' },
+      });
 
     if (!ownerRole) {
       throw new BadRequestException('Rol de propietario no encontrado');
