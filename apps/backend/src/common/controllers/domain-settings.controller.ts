@@ -40,7 +40,7 @@ export class DomainSettingsController {
    * Solo usuarios con permisos de administración pueden crear dominios
    */
   @Post()
-  @Roles('super_admin', 'organization_admin')
+  @Roles('super_admin', 'admin', 'owner')
   @HttpCode(HttpStatus.CREATED)
   async createDomainSetting(
     @Body() createDomainSettingDto: CreateDomainSettingDto,
@@ -60,7 +60,7 @@ export class DomainSettingsController {
    * Obtener todas las configuraciones de dominio con filtros
    */
   @Get()
-  @Roles('super_admin', 'organization_admin', 'store_admin')
+  @Roles('super_admin', 'admin', 'owner')
   async getAllDomainSettings(
     @Query('organizationId') organizationId?: string,
     @Query('storeId') storeId?: string,
@@ -120,7 +120,7 @@ export class DomainSettingsController {
    * Obtener configuración de dominio por hostname
    */
   @Get('hostname/:hostname')
-  @Roles('super_admin', 'organization_admin', 'store_admin', 'store_staff')
+  @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingByHostname(
     @Param('hostname') hostname: string,
     @CurrentUser() user?: any,
@@ -133,7 +133,7 @@ export class DomainSettingsController {
    * Obtener configuración de dominio por ID
    */
   @Get(':id')
-  @Roles('super_admin', 'organization_admin', 'store_admin', 'store_staff')
+  @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingById(
     @Param('id') id: string,
     @CurrentUser() user?: any,
@@ -151,7 +151,7 @@ export class DomainSettingsController {
    * Actualizar configuración de dominio
    */
   @Put('hostname/:hostname')
-  @Roles('super_admin', 'organization_admin', 'store_admin')
+  @Roles('super_admin', 'admin', 'owner')
   async updateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() updateDomainSettingDto: UpdateDomainSettingDto,
@@ -167,7 +167,7 @@ export class DomainSettingsController {
    * Eliminar configuración de dominio
    */
   @Delete('hostname/:hostname')
-  @Roles('super_admin', 'organization_admin')
+  @Roles('super_admin', 'admin', 'owner')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteDomainSetting(
     @Param('hostname') hostname: string,
@@ -183,7 +183,7 @@ export class DomainSettingsController {
    * Duplicar configuración de dominio
    */
   @Post('hostname/:hostname/duplicate')
-  @Roles('super_admin', 'organization_admin')
+  @Roles('super_admin', 'admin', 'owner')
   async duplicateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() duplicateData: DuplicateDomainDto,
@@ -204,7 +204,7 @@ export class DomainSettingsController {
    * Obtener configuraciones de dominio por organización
    */
   @Get('organization/:organizationId')
-  @Roles('super_admin', 'organization_admin', 'store_admin', 'store_staff')
+  @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingsByOrganization(
     @Param('organizationId') organizationId: string,
     @CurrentUser() user?: any,
@@ -225,7 +225,7 @@ export class DomainSettingsController {
    * Obtener configuraciones de dominio por tienda
    */
   @Get('store/:storeId')
-  @Roles('super_admin', 'organization_admin', 'store_admin', 'store_staff')
+  @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingsByStore(
     @Param('storeId') storeId: string,
     @CurrentUser() user?: any,
@@ -244,7 +244,7 @@ export class DomainSettingsController {
    * Validar hostname (endpoint de utilidad)
    */
   @Post('validate-hostname')
-  @Roles('super_admin', 'organization_admin', 'store_admin')
+  @Roles('super_admin', 'admin', 'owner')
   async validateHostname(
     @Body() data: ValidateHostnameDto,
   ): Promise<{ valid: boolean; reason?: string }> {

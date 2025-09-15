@@ -152,6 +152,24 @@ Content-Type: application/json
 Authorization: Bearer {{access_token}}
 
 ### ============================================
+### 7.1. CONFIGURAR DOMINIO PARA ONBOARDING
+### ============================================
+POST {{baseUrl}}/domain-settings
+Content-Type: application/json
+Authorization: Bearer {{access_token}}
+
+{
+  "hostname": "test-organization-onboarding.localhost",
+  "organizationId": {{organization_id}},
+  "config": {
+    "branding": {
+      "primaryColor": "#007bff",
+      "secondaryColor": "#6c757d"
+    }
+  }
+}
+
+### ============================================
 ### 8. COMPLETAR ONBOARDING
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/complete

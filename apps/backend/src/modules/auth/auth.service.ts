@@ -1651,7 +1651,7 @@ export class AuthService {
       data: {
         ...storeData,
         organization_id: organizationId,
-        manager_id: userId,
+        manager_user_id: userId,
         slug: storeData.slug || this.generateSlugFromName(storeData.name),
         is_active: true,
         updated_at: new Date(),
@@ -1709,14 +1709,28 @@ export class AuthService {
       country_code,
       phone,
       email,
+      description,
+      currency_code,
+      track_inventory,
+      allow_backorders,
+      low_stock_threshold,
+      enable_shipping,
+      free_shipping_threshold,
+      enable_cod,
+      enable_online_payments,
       ...storeSettings
     } = setupData;
 
-    // Actualizar configuraciones básicas de la tienda (sin campos de dirección)
+    // Actualizar configuraciones básicas de la tienda (solo campos válidos)
+    const validStoreFields = {
+      timezone: storeSettings.timezone,
+      store_type: storeSettings.store_type,
+    };
+
     await this.prismaService.stores.update({
       where: { id: storeId },
       data: {
-        ...storeSettings,
+        ...validStoreFields,
         updated_at: new Date(),
       },
     });
@@ -1733,7 +1747,7 @@ export class AuthService {
         state_province,
         postal_code,
         country_code,
-        phone,
+        phone_number: phone,
         type: 'store_physical',
         is_primary: true,
       });
@@ -1997,7 +2011,7 @@ export class AuthService {
     });
 
     const settingsToSave = {
-      currency: settingsData.currency,
+      currency: settingsData.currency_code,
       timezone: settingsData.timezone,
       language: settingsData.language,
       track_inventory: settingsData.track_inventory,
@@ -2013,15 +2027,15 @@ export class AuthService {
       return await this.prismaService.store_settings.update({
         where: { id: existingSettings.id },
         data: {
-          ...settingsToSave,
+          settings: settingsToSave,
           updated_at: new Date(),
         },
       });
     } else {
       return await this.prismaService.store_settings.create({
         data: {
-          ...settingsToSave,
           store_id: storeId,
+          settings: settingsToSave,
         },
       });
     }
