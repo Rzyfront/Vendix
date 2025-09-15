@@ -67,7 +67,7 @@ export class DomainResolutionService {
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
-      organizationId: domainConfig.organization_id,
+      organizationId: domainConfig.organization_id!,
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
@@ -114,7 +114,7 @@ export class DomainResolutionService {
       results.push({
         id: domain.id,
         hostname: domain.hostname,
-        organizationId: domain.organization_id,
+        organizationId: domain.organization_id!,
         storeId: domain.store_id || undefined,
         config: domain.config,
         createdAt: domain.created_at?.toISOString() || '',
@@ -170,7 +170,7 @@ export class DomainResolutionService {
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
-      organizationId: domainConfig.organization_id,
+      organizationId: domainConfig.organization_id!,
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
@@ -217,7 +217,7 @@ export class DomainResolutionService {
     return {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
-      organizationId: domainConfig.organization_id,
+      organizationId: domainConfig.organization_id!,
       storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',

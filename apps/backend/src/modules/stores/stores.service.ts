@@ -58,7 +58,6 @@ export class StoresService {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { store_code: { contains: search, mode: 'insensitive' } },
-          { domain: { contains: search, mode: 'insensitive' } },
         ],
       }),
       ...(store_type && { store_type }),

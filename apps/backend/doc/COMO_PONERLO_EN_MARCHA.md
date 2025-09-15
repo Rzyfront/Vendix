@@ -95,3 +95,8 @@ npx prisma db push
 ```bash
 npx prisma migrate resolve --applied
 ```
+### Error: "New Migrations"
+```bash
+npx prisma migrate dev --name schema_updates
+
+npx prisma migrate reset --force

@@ -30,6 +30,7 @@ model users {
   onboarding_completed      Boolean                     @default(false)
   organization_id           Int
   organizations             organizations               @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses                 addresses[]           @relation("user_addresses")
   api_keys                  api_keys[]
   audit_logs                audit_logs[]
   email_verification_tokens email_verification_tokens[]
@@ -206,9 +207,8 @@ model organizations {
   email                 String                  @db.VarChar(255)
   phone                 String?                 @db.VarChar(50)
   website               String?                 @db.VarChar(255)
-  logo_url              String?
   description           String?
-  state                 organization_state_enum @default(active)
+  state                 organization_state_enum @default(draft)
   created_at            DateTime?               @default(now()) @db.Timestamp(6)
   updated_at            DateTime?               @default(now()) @db.Timestamp(6)
   addresses             addresses[]
@@ -216,7 +216,7 @@ model organizations {
   organization_settings organization_settings?
   stores                stores[]
   users                 users[]
-  audit_logs            audit_logs[] // ✅ Nueva relación con audit_logs
+  audit_logs            audit_logs[]
 }
 
 model organization_settings {
@@ -232,16 +232,10 @@ model stores {
   id              Int               @id @default(autoincrement())
   name            String            @db.VarChar(255)
   slug            String            @db.VarChar(255)
-  logo_url        String?
-  color_primary   String?           @db.VarChar(20)
-  color_secondary String?           @db.VarChar(20)
-  domain          String?           @db.VarChar(255)
   created_at      DateTime?         @default(now()) @db.Timestamp(6)
   updated_at      DateTime?         @default(now()) @db.Timestamp(6)
-  currency_code   String?           @db.VarChar(3)
   is_active       Boolean           @default(true)
   manager_user_id Int?
-  operating_hours Json?
   organization_id Int
   store_code      String?           @unique @db.VarChar(20)
   store_type      store_type_enum   @default(physical)
@@ -275,12 +269,12 @@ model store_settings {
 model domain_settings {
   id              Int           @id @default(autoincrement())
   hostname        String        @unique @db.VarChar(255)
-  organization_id Int
+  organization_id Int?
   store_id        Int?
   config          Json
   created_at      DateTime?     @default(now()) @db.Timestamp(6)
   updated_at      DateTime?     @default(now()) @db.Timestamp(6)
-  organization    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  organization    organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store           stores?       @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([hostname])
@@ -290,14 +284,14 @@ model domain_settings {
 
 model addresses {
   id              Int               @id @default(autoincrement())
-  customer_id     Int?
+  user_id         Int?
   store_id        Int?
   address_line1   String
   address_line2   String?
   city            String            @db.VarChar(100)
   state_province  String?           @db.VarChar(100)
   country_code    String            @db.VarChar(3)
-  postal_code     String            @db.VarChar(20)
+  postal_code     String?           @db.VarChar(20)
   phone_number    String?           @db.VarChar(50)
   type            address_type_enum @default(shipping)
   is_primary      Boolean           @default(false)
@@ -309,6 +303,7 @@ model addresses {
   stores                                       stores?        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   orders_orders_billing_address_idToaddresses  orders[]       @relation("orders_billing_address_idToaddresses")
   orders_orders_shipping_address_idToaddresses orders[]       @relation("orders_shipping_address_idToaddresses")
+  users                                        users?         @relation("user_addresses", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 model brands {
@@ -626,6 +621,18 @@ enum address_type_enum {
   warehouse
   legal
   store_physical
+  home
+  work
+  contact
+  mailing
+  residential
+  commercial
+  pickup
+  delivery
+  emergency
+  temporary
+  vacation
+  business
 }
 
 enum category_state_enum {
@@ -732,6 +739,7 @@ enum permission_status_enum {
 }
 
 enum organization_state_enum {
+  draft
   active
   inactive
   suspended

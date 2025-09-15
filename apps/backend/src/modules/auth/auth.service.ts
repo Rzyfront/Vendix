@@ -82,6 +82,7 @@ export class AuthService {
           name: organizationName,
           slug: organizationSlug,
           email: email,
+          state: 'draft', // Organización creada en estado draft hasta completar onboarding
         },
       });
 
@@ -929,7 +930,9 @@ export class AuthService {
             },
           },
         },
-      });      if (!tokenRecord) {
+      });
+
+      if (!tokenRecord) {
         throw new UnauthorizedException('Refresh token inválido o expirado');
       }
 
@@ -1430,7 +1433,7 @@ export class AuthService {
     // Verificar si ya es propietario de alguna organización mediante user_roles
     const isOwner = (user.user_roles || []).some((ur) => ur.roles?.name === 'owner');
 
-    return !isOwner; // Solo puede crear si no es propietario de otra
+    return !isOwner;
   }
 
   async getOnboardingStatus(userId: number): Promise<{
@@ -1577,11 +1580,22 @@ export class AuthService {
       throw new BadRequestException('No tienes permisos para configurar esta organización');
     }
 
-    // Actualizar la organización con los datos de configuración
+    // Separar datos de organización de datos de dirección
+    const {
+      address_line1,
+      address_line2,
+      city,
+      state_province,
+      postal_code,
+      country_code,
+      ...organizationData
+    } = setupData;
+
+    // Actualizar la organización con los datos de configuración (sin campos de dirección)
     const updatedOrg = await this.prismaService.organizations.update({
       where: { id: organizationId },
       data: {
-        ...setupData,
+        ...organizationData,
         updated_at: new Date(),
       },
     });
@@ -1595,7 +1609,7 @@ export class AuthService {
         state_province: setupData.state_province,
         postal_code: setupData.postal_code,
         country_code: setupData.country_code,
-        type: 'business',
+        type: 'headquarters',
         is_primary: true,
       });
     }
@@ -1627,8 +1641,8 @@ export class AuthService {
       throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
     }
 
-    const roleNames2 = user.user_roles.map((ur) => ur.roles?.name);
-    if (!roleNames2.includes('owner') && !roleNames2.includes('admin')) {
+    const roleNames = user.user_roles.map((ur) => ur.roles?.name);
+    if (!roleNames.includes('owner') && !roleNames.includes('admin')) {
       throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
     }
 
@@ -1680,12 +1694,12 @@ export class AuthService {
       throw new BadRequestException('No tienes permisos para configurar esta tienda');
     }
 
-    const roleNames3 = userForStore.user_roles.map((ur) => ur.roles?.name);
-    if (!roleNames3.includes('owner') && !roleNames3.includes('admin')) {
+    const roleNames = userForStore.user_roles.map((ur) => ur.roles?.name);
+    if (!roleNames.includes('owner') && !roleNames.includes('admin')) {
       throw new BadRequestException('No tienes permisos para configurar esta tienda');
     }
 
-    // Actualizar configuraciones básicas de la tienda
+    // Separar datos de tienda de datos de dirección
     const {
       address_line1,
       address_line2,
@@ -1698,6 +1712,7 @@ export class AuthService {
       ...storeSettings
     } = setupData;
 
+    // Actualizar configuraciones básicas de la tienda (sin campos de dirección)
     await this.prismaService.stores.update({
       where: { id: storeId },
       data: {
@@ -1719,7 +1734,7 @@ export class AuthService {
         postal_code,
         country_code,
         phone,
-        type: 'business',
+        type: 'store_physical',
         is_primary: true,
       });
     }
@@ -1753,6 +1768,15 @@ export class AuthService {
       where: { id: userId },
       data: {
         onboarding_completed: true,
+        updated_at: new Date(),
+      },
+    });
+
+    // Cambiar el estado de la organización de draft a active
+    await this.prismaService.organizations.update({
+      where: { id: updatedUser.organization_id },
+      data: {
+        state: 'active',
         updated_at: new Date(),
       },
     });

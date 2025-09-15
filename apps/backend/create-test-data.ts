@@ -25,7 +25,6 @@ async function createTestData() {
           name: 'Test Store',
           slug: 'test-store',
           organization_id: newOrg.id,
-          domain: 'localhost:4200',
           is_active: true,
           store_type: 'online'
         }
@@ -50,7 +49,10 @@ async function createTestData() {
 
       // Verificar si ya existe una tienda para localhost:4200
       const existingStore = await prisma.stores.findFirst({
-        where: { domain: 'localhost:4200' }
+        where: {
+          name: 'Vendix Landing Store',
+          organization_id: org.id
+        }
       });
 
       if (!existingStore) {
@@ -60,7 +62,6 @@ async function createTestData() {
             name: 'Vendix Landing Store',
             slug: 'vendix-landing',
             organization_id: org.id,
-            domain: 'localhost:4200',
             is_active: true,
             store_type: 'online'
           }
@@ -77,7 +78,10 @@ async function createTestData() {
 
       if (!existingDomain) {
         const store = await prisma.stores.findFirst({
-          where: { domain: 'localhost:4200' }
+          where: {
+            name: 'Vendix Landing Store',
+            organization_id: org.id
+          }
         });
 
         if (store) {

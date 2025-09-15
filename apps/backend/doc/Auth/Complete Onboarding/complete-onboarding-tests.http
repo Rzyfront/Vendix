@@ -75,24 +75,9 @@ GET {{baseUrl}}/auth/onboarding/status
 Content-Type: application/json
 Authorization: Bearer non_owner_token
 
-### ============================================
-### 4. CREAR ORGANIZACIÓN DURANTE ONBOARDING
-### ============================================
-POST {{baseUrl}}/auth/onboarding/create-organization
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
-
-{
-  "name": "Mi Empresa S.A.",
-  "description": "Empresa dedicada al comercio electrónico",
-  "email": "contact@miempresa.com",
-  "phone": "+57 300 123 4567",
-  "legal_name": "Mi Empresa S.A.S.",
-  "tax_id": "901234567-8"
-}
 
 ### ============================================
-### 5. SETUP ORGANIZACIÓN
+### 4. SETUP ORGANIZACIÓN - SE USA COMÚNMENTE PORQUE EL REGISTER OWNER YA PRECREA UNA ORGANIZACIÓN
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/setup-organization/{{organization_id}}
 Content-Type: application/json
@@ -111,7 +96,7 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 6. CREAR TIENDA DURANTE ONBOARDING
+### 5. CREAR TIENDA DURANTE ONBOARDING
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/create-store/{{organization_id}}
 Content-Type: application/json
@@ -132,7 +117,7 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 7. SETUP TIENDA
+### 6. SETUP TIENDA
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/setup-store/{{store_id}}
 Content-Type: application/json
@@ -160,14 +145,14 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 8. VERIFICAR ESTADO DESPUÉS DE SETUP
+### 7. VERIFICAR ESTADO DESPUÉS DE SETUP
 ### ============================================
 GET {{baseUrl}}/auth/onboarding/status
 Content-Type: application/json
 Authorization: Bearer {{access_token}}
 
 ### ============================================
-### 9. COMPLETAR ONBOARDING
+### 8. COMPLETAR ONBOARDING
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/complete
 Content-Type: application/json
@@ -176,7 +161,7 @@ Authorization: Bearer {{access_token}}
 {}
 
 ### ============================================
-### 10. VERIFICAR ESTADO FINAL
+### 9. VERIFICAR ESTADO FINAL
 ### ============================================
 GET {{baseUrl}}/auth/onboarding/status
 Content-Type: application/json
