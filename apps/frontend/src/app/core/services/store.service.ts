@@ -1,5 +1,4 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { Store } from '../models/business.model';
@@ -14,10 +13,7 @@ export class StoreService {
   private currentStore = new BehaviorSubject<Store | null>(null);
   public currentStore$ = this.currentStore.asObservable();
 
-  constructor(
-    private http: HttpClient,
-    @Inject(PLATFORM_ID) private platformId: Object
-  ) {}
+  constructor(private http: HttpClient) {}
 
   /**
    * Get store by subdomain or custom domain
@@ -37,9 +33,7 @@ export class StoreService {
    */
   setCurrentStore(store: Store): void {
     this.currentStore.next(store);
-    if (isPlatformBrowser(this.platformId)) {
-      localStorage.setItem('vendix_current_store', JSON.stringify(store));
-    }
+    localStorage.setItem('vendix_current_store', JSON.stringify(store));
   }
 
   /**
@@ -48,14 +42,11 @@ export class StoreService {
   getCurrentStore(): Store | null {
     return this.currentStore.value;
   }
+
   /**
    * Load stored store from localStorage
    */
   loadStoredStore(): Store | null {
-    if (!isPlatformBrowser(this.platformId)) {
-      return null; // Skip localStorage access on server
-    }
-
     const stored = localStorage.getItem('vendix_current_store');
     if (stored) {
       try {
@@ -69,13 +60,12 @@ export class StoreService {
     }
     return null;
   }
+
   /**
    * Clear current store
    */
   clearCurrentStore(): void {
     this.currentStore.next(null);
-    if (isPlatformBrowser(this.platformId)) {
-      localStorage.removeItem('vendix_current_store');
-    }
+    localStorage.removeItem('vendix_current_store');
   }
 }

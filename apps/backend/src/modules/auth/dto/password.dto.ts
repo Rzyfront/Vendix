@@ -9,6 +9,15 @@ export class ForgotPasswordDto {
   @IsEmail()
   @IsNotEmpty()
   email: string;
+
+  @ApiProperty({
+    example: 'mi-organizacion',
+    description: 'Slug de la organización (requerido para multi-tenant)',
+    required: true,
+  })
+  @IsString()
+  @IsNotEmpty()
+  organization_slug: string;
 }
 
 export class ResetPasswordDto {

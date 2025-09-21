@@ -4,25 +4,29 @@ import { RouterModule } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { AuthService } from '../../../../core/services/auth.service';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
-import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { CardComponent } from '../../../../shared/components/card/card.component';
+import { InputComponent } from '../../../../shared/components/input/input.component';
 import { takeUntil, combineLatest } from 'rxjs/operators';
 import { Subject } from 'rxjs';
 
 @Component({
-  selector: 'app-login',
+  selector: 'app-forgot-password',
   standalone: true,
   imports: [
     CommonModule,
     RouterModule,
-    ReactiveFormsModule
+    ReactiveFormsModule,
+    CardComponent,
+    InputComponent
   ],
-  templateUrl: './login.component.html',
-  styleUrls: ['./login.component.scss']
+  templateUrl: './forgot-password.component.html',
+  styleUrls: ['./forgot-password.component.scss']
 })
-export class LoginComponent implements OnInit, OnDestroy {
-  loginForm: FormGroup;
+export class ForgotPasswordComponent implements OnInit, OnDestroy {
+  forgotForm: FormGroup;
   isLoading = false;
   errorMessage = '';
+  successMessage = '';
   private destroy$ = new Subject<void>();
 
   // Branding colors from domain config - reactive (no defaults)
@@ -31,25 +35,14 @@ export class LoginComponent implements OnInit, OnDestroy {
   constructor(
     private fb: FormBuilder,
     private authService: AuthService,
-    private tenantFacade: TenantFacade,
-    private authFacade: AuthFacade
+    private tenantFacade: TenantFacade
   ) {
-    this.loginForm = this.fb.group({
-      email: ['', [Validators.required, Validators.email]],
-      password: ['', [Validators.required, Validators.minLength(6)]]
+    this.forgotForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]]
     });
   }
 
   ngOnInit(): void {
-    // Subscribe to reactive auth state
-    this.authFacade.loading$.pipe(takeUntil(this.destroy$)).subscribe(loading => {
-      this.isLoading = loading;
-    });
-
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
-      this.errorMessage = error || '';
-    });
-
     // Subscribe to tenant branding colors
     this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
       if (tenantConfig?.branding?.colors) {
@@ -70,7 +63,6 @@ export class LoginComponent implements OnInit, OnDestroy {
     this.destroy$.next();
     this.destroy$.complete();
   }
-
 
   getBackgroundGradient(): string {
     const background = this.brandingColors?.background || '#F4F4F4';
@@ -94,52 +86,66 @@ export class LoginComponent implements OnInit, OnDestroy {
   get textColor(): string {
     return this.brandingColors?.text || '#222222';
   }
+
+  get borderColor(): string {
+    return this.brandingColors?.border || '#B0B0B0';
+  }
+
   onSubmit(): void {
-    if (this.loginForm.valid && !this.isLoading) {
+    if (this.forgotForm.valid && !this.isLoading) {
       this.errorMessage = '';
+      this.successMessage = '';
 
-      const { email, password } = this.loginForm.value;
+      const { email } = this.forgotForm.value;
 
-      // Get tenant information from reactive state
-      let storeSlug: string | undefined;
+      // Get organization slug from current domain
       let organizationSlug: string | undefined;
-
-      const currentStore = this.tenantFacade.getCurrentStore();
-      const currentOrganization = this.tenantFacade.getCurrentOrganization();
-
-      if (currentStore?.slug) {
-        storeSlug = currentStore.slug;
-      } else if (currentOrganization?.slug) {
-        organizationSlug = currentOrganization.slug;
+      const currentDomain = this.tenantFacade.getCurrentDomainConfig();
+      if (currentDomain?.organizationSlug) {
+        organizationSlug = currentDomain.organizationSlug;
       }
 
-      this.authFacade.login(email, password, storeSlug, organizationSlug);
+      if (!organizationSlug) {
+        this.errorMessage = 'No se pudo determinar la organización para este dominio';
+        return;
+      }
+
+      this.isLoading = true;
+
+      this.authService.forgotPassword(email, organizationSlug).subscribe({
+        next: (response) => {
+          this.isLoading = false;
+          this.successMessage = response.message || 'Se ha enviado un enlace de recuperación a tu correo electrónico';
+          this.forgotForm.reset();
+        },
+        error: (error) => {
+          this.isLoading = false;
+          this.errorMessage = error.error?.message || 'Error al enviar el correo de recuperación';
+        }
+      });
     } else {
       // Mark all fields as touched to show validation errors
-      Object.keys(this.loginForm.controls).forEach(key => {
-        this.loginForm.get(key)?.markAsTouched();
+      Object.keys(this.forgotForm.controls).forEach(key => {
+        this.forgotForm.get(key)?.markAsTouched();
       });
     }
   }
 
   getFieldError(fieldName: string): string {
-    const field = this.loginForm.get(fieldName);
+    const field = this.forgotForm.get(fieldName);
     if (field?.errors && field?.touched) {
       if (field.errors['required']) {
-        return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
+        return 'El email es requerido';
       }
       if (field.errors['email']) {
         return 'Debe ser un email válido';
-      }
-      if (field.errors['minlength']) {
-        return 'La contraseña debe tener al menos 6 caracteres';
       }
     }
     return '';
   }
 
   hasFieldError(fieldName: string): boolean {
-    const field = this.loginForm.get(fieldName);
+    const field = this.forgotForm.get(fieldName);
     return !!(field?.errors && field?.touched);
   }
 }

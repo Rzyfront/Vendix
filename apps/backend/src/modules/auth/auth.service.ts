@@ -1196,16 +1196,33 @@ export class AuthService {
 
   // ===== FUNCIONES DE RECUPERACIÓN DE CONTRASEÑA =====
 
-  async forgotPassword(email: string): Promise<{ message: string }> {
+  async forgotPassword(email: string, organizationSlug: string): Promise<{ message: string }> {
+    // Validar que la organización existe
+    const organization = await this.prismaService.organizations.findUnique({
+      where: { slug: organizationSlug },
+    });
+
+    if (!organization) {
+      // Por seguridad, devolvemos el mismo mensaje genérico
+      return {
+        message:
+          'Si el email y organización existen, recibirás instrucciones para restablecer tu contraseña',
+      };
+    }
+
+    // Buscar usuario específico en la organización
     const user = await this.prismaService.users.findFirst({
-      where: { email },
+      where: {
+        email,
+        organization_id: organization.id,
+      },
     });
 
     // Por seguridad, siempre devolvemos el mismo mensaje
     if (!user) {
       return {
         message:
-          'Si el email existe, recibirás instrucciones para restablecer tu contraseña',
+          'Si el email y organización existen, recibirás instrucciones para restablecer tu contraseña',
       };
     }
 

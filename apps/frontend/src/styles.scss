@@ -7,12 +7,12 @@
 /* CSS Variables for Theme Support */
 :root {
   /* Default Theme */
-  --color-background: #FFFFFF;
-  --color-primary: #10B981;
-  --color-secondary: #3B82F6;
-  --color-text-primary: #1F2937;
-  --color-text-secondary: #6B7280;
-  --color-border: #E5E7EB;
+  --color-background: #f8f9fa; /* Light Gray */
+  --color-primary: #4f46e5; /* Indigo */
+  --color-secondary: #10b981; /* Emerald */
+  --color-text-primary: #111827; /* Dark Gray */
+  --color-text-secondary: #6b7280; /* Medium Gray */
+  --color-border: #d1d5db; /* Light Gray */
   --font-base: 'Inter', system-ui, -apple-system, sans-serif;
   --button-radius: 0.5rem;
 }

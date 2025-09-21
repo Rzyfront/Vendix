@@ -1,8 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, Renderer2 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { CardComponent } from '../../shared/components/card/card.component';
-import { ButtonComponent } from '../../shared/components/button/button.component';
 import { TenantFacade } from '../../core/store/tenant/tenant.facade';
 import { takeUntil } from 'rxjs/operators';
 import { Subject } from 'rxjs';
@@ -11,22 +9,12 @@ import { HttpClient } from '@angular/common/http';
 @Component({
   selector: 'app-landing',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ButtonComponent],
+  imports: [CommonModule, RouterModule],
   templateUrl: './landing.component.html',
   styleUrls: ['./landing.component.scss']
 })
 export class LandingComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
-
-  // Branding colors from domain config - reactive (initialized with neutral defaults)
-  brandingColors = {
-    primary: '#3B82F6', // Default blue
-    secondary: '#1E40AF', // Default dark blue
-    accent: '#FFFFFF', // White
-    background: '#F8FAFC', // Light gray
-    text: '#1E293B', // Dark gray
-    border: '#E2E8F0' // Light border
-  };
 
   // Dynamic data from backend
   plans: any[] = [];
@@ -36,24 +24,18 @@ export class LandingComponent implements OnInit, OnDestroy {
 
   constructor(
     private tenantFacade: TenantFacade,
-    private http: HttpClient
+    private http: HttpClient,
+    private el: ElementRef,
+    private renderer: Renderer2
   ) {}
 
   ngOnInit(): void {
     // Subscribe to tenant configuration (includes branding and domain config)
     this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
       if (tenantConfig) {
-        // Update branding colors
+        // Update branding colors via CSS variables
         if (tenantConfig.branding?.colors) {
-          const colors = tenantConfig.branding.colors;
-          this.brandingColors = {
-            primary: colors.primary || this.brandingColors.primary,
-            secondary: colors.secondary || this.brandingColors.secondary,
-            accent: colors.accent || this.brandingColors.accent,
-            background: colors.background || this.brandingColors.background,
-            text: colors.text?.primary || this.brandingColors.text,
-            border: colors.surface || this.brandingColors.border
-          };
+          this.updateCssVariables(tenantConfig.branding.colors);
         }
 
         // Load dynamic content from tenant config if available
@@ -67,9 +49,19 @@ export class LandingComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  private updateCssVariables(colors: any): void {
+    const root = this.el.nativeElement;
+    if (colors.primary) this.renderer.setStyle(root, '--color-primary', colors.primary);
+    if (colors.secondary) this.renderer.setStyle(root, '--color-secondary', colors.secondary);
+    if (colors.background) this.renderer.setStyle(root, '--color-background', colors.background);
+    if (colors.text?.primary || colors.text) this.renderer.setStyle(root, '--color-text-primary', colors.text?.primary || colors.text);
+    if (colors.text?.secondary) this.renderer.setStyle(root, '--color-text-secondary', colors.text?.secondary);
+    if (colors.surface) this.renderer.setStyle(root, '--color-border', colors.surface);
+  }
 
   getBackgroundGradient(): string {
-    return `linear-gradient(to bottom right, ${this.brandingColors.background}80, ${this.brandingColors.secondary}20)`;
+    // This will now use the CSS variables if they are set, otherwise it will use the defaults from :root
+    return `linear-gradient(to bottom right, var(--color-background) 0%, var(--color-secondary) 100%)`;
   }
 
   /**
@@ -108,7 +100,7 @@ export class LandingComponent implements OnInit, OnDestroy {
     this.plans = [
       {
         name: 'Starter',
-        price: '$119.900',
+        price: '$49.900',
         period: '/mes',
         description: 'Perfecto para pequeños negocios',
         features: [
@@ -124,7 +116,7 @@ export class LandingComponent implements OnInit, OnDestroy {
       },
       {
         name: 'Professional',
-        price: '$329.900',
+        price: '$149.900',
         period: '/mes',
         description: 'Para negocios en crecimiento',
         features: [
@@ -142,7 +134,7 @@ export class LandingComponent implements OnInit, OnDestroy {
       },
       {
         name: 'Enterprise',
-        price: '$829.900',
+        price: '$399.900',
         period: '/mes',
         description: 'Para grandes organizaciones',
         features: [

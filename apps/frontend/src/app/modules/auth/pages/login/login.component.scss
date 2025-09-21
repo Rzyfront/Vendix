@@ -1,38 +1,26 @@
 // Estilos específicos para el componente de login
-.login-container {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+// El diseño principal ahora usa Tailwind CSS
+
+// Animación de carga para el botón
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.form-group {
-  margin-bottom: 1.5rem;
+.animate-spin {
+  animation: spin 1s linear infinite;
 }
 
-.error-message {
-  animation: shake 0.5s ease-in-out;
-}
-
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-5px); }
-  75% { transform: translateX(5px); }
-}
-
-.demo-credentials {
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-// Focus states
-.form-input:focus {
-  outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+// Efectos hover para el botón
+.login-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
 // Responsive adjustments
 @media (max-width: 640px) {
-  .login-card {
+  .login-container {
     margin: 1rem;
   }
 }

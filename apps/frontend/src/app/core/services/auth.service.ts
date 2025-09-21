@@ -1,8 +1,11 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, tap } from 'rxjs';
+import { Observable, tap } from 'rxjs';
 import { Router } from '@angular/router';
-import { isPlatformBrowser } from '@angular/common';
+import { Store } from '@ngrx/store';
+import { AuthFacade } from '../store/auth/auth.facade';
+import { TenantFacade } from '../store/tenant/tenant.facade';
+import * as AuthActions from '../store/auth/auth.actions';
 import { environment } from '../../../environments/environment';
 
 export interface LoginDto {
@@ -19,6 +22,23 @@ export interface RegisterOwnerDto {
   first_name: string;
   last_name: string;
   phone?: string;
+}
+
+export interface RegisterStaffDto {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  role: 'manager' | 'supervisor' | 'employee';
+  store_id?: number;
+}
+
+export interface RegisterCustomerDto {
+  email: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  storeId: number;
 }
 
 export interface User {
@@ -45,102 +65,143 @@ export interface AuthResponse {
 })
 export class AuthService {
   private readonly API_URL = `${environment.apiUrl}/api/auth`;
-  private currentUserSubject = new BehaviorSubject<User | null>(null);
-  public currentUser$ = this.currentUserSubject.asObservable();
 
   constructor(
     private http: HttpClient,
     private router: Router,
-    @Inject(PLATFORM_ID) private platformId: Object
-  ) {
-    // Check if user is already logged in
-    this.checkStoredAuth();
-  }
+    private store: Store,
+    private authFacade: AuthFacade,
+    private tenantFacade: TenantFacade
+  ) {}
 
-  private checkStoredAuth(): void {
-    if (!isPlatformBrowser(this.platformId)) return;
+  // Login - auto-populates organizationSlug/storeSlug from current domain
+  login(loginDto: LoginDto): Observable<AuthResponse> {
+    // Auto-populate organizationSlug/storeSlug from current domain if not provided
+    const enrichedLoginDto = { ...loginDto };
 
-    const token = localStorage.getItem('access_token');
-    const user = localStorage.getItem('user');
-
-    if (token && user) {
-      try {
-        const parsedUser = JSON.parse(user);
-        this.currentUserSubject.next(parsedUser);
-      } catch (error) {
-        this.logout();
+    if (!enrichedLoginDto.organizationSlug && !enrichedLoginDto.storeSlug) {
+      const currentDomain = this.tenantFacade.getCurrentDomainConfig();
+      if (currentDomain) {
+        enrichedLoginDto.organizationSlug = currentDomain.organizationSlug;
+        enrichedLoginDto.storeSlug = currentDomain.storeSlug;
       }
     }
-  }
 
-  login(loginDto: LoginDto): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.API_URL}/login`, loginDto)
+    return this.http.post<AuthResponse>(`${this.API_URL}/login`, enrichedLoginDto)
       .pipe(
         tap((response: AuthResponse) => {
-          if (response.data && isPlatformBrowser(this.platformId)) {
+          if (response.data) {
             // Store tokens and user data
             localStorage.setItem('access_token', response.data.access_token);
             localStorage.setItem('refresh_token', response.data.refresh_token);
             localStorage.setItem('user', JSON.stringify(response.data.user));
 
-            // Update current user subject
-            this.currentUserSubject.next(response.data.user);
+            // Update auth store
+            this.store.dispatch(AuthActions.loginSuccess({
+              user: response.data.user,
+              tokens: {
+                accessToken: response.data.access_token,
+                refreshToken: response.data.refresh_token
+              }
+            }));
           }
         })
       );
   }
 
+  // Register Owner
   registerOwner(registerData: RegisterOwnerDto): Observable<any> {
     return this.http.post(`${this.API_URL}/register-owner`, registerData);
   }
 
-  logout(): void {
-    // Clear local storage
-    if (isPlatformBrowser(this.platformId)) {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      localStorage.removeItem('user');
-    }
-
-    // Update current user subject
-    this.currentUserSubject.next(null);
-
-    // Redirect to landing page
-    this.router.navigate(['/']);
+  // Register Staff
+  registerStaff(registerData: RegisterStaffDto): Observable<any> {
+    return this.http.post(`${this.API_URL}/register-staff`, registerData);
   }
 
+  // Register Customer
+  registerCustomer(registerData: RegisterCustomerDto): Observable<any> {
+    return this.http.post(`${this.API_URL}/register-customer`, registerData);
+  }
+
+  // Logout - now handled by NgRx effects
+  logout(allSessions = false): Observable<any> {
+    const refreshToken = this.getRefreshToken();
+    return this.http.post(`${this.API_URL}/logout`, {
+      all_sessions: allSessions,
+      refresh_token: refreshToken
+    });
+  }
+
+  // Refresh Token
   refreshToken(): Observable<any> {
-    if (!isPlatformBrowser(this.platformId)) {
-      return this.http.post(`${this.API_URL}/refresh`, { refresh_token: null });
-    }
-    const refreshToken = localStorage.getItem('refresh_token');
+    const refreshToken = this.getRefreshToken();
     return this.http.post(`${this.API_URL}/refresh`, { refresh_token: refreshToken });
   }
 
-  getCurrentUser(): User | null {
-    return this.currentUserSubject.value;
+  // Verify Email
+  verifyEmail(token: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/verify-email`, { token });
   }
 
+  // Resend Verification
+  resendVerification(email: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/resend-verification`, { email });
+  }
+
+  // Forgot Password
+  forgotPassword(email: string, organizationSlug: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/forgot-password`, { email, organization_slug: organizationSlug });
+  }
+
+  // Reset Password
+  resetPassword(token: string, newPassword: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/reset-password`, { token, newPassword });
+  }
+
+  // Get current user from store
+  getCurrentUser(): any {
+    return this.authFacade.getCurrentUser();
+  }
+
+  // Check if user is logged in
   isLoggedIn(): boolean {
-    return this.currentUserSubject.value !== null;
+    return this.authFacade.isLoggedIn();
   }
 
+  // Check if user is admin
   isAdmin(): boolean {
-    const user = this.getCurrentUser();
-    return user?.roles?.includes('ADMIN') || false;
+    return this.authFacade.isAdmin();
   }
 
+  // Get access token
   getToken(): string | null {
-    if (!isPlatformBrowser(this.platformId)) return null;
     return localStorage.getItem('access_token');
   }
+
+  // Get refresh token
+  getRefreshToken(): string | null {
+    return localStorage.getItem('refresh_token');
+  }
+
+  // Redirect after login based on user role
   redirectAfterLogin(): void {
     const user = this.getCurrentUser();
-    if (user?.roles?.includes('ADMIN')) {
+    if (user?.roles?.includes('ADMIN') || user?.roles?.includes('SUPER_ADMIN')) {
       this.router.navigate(['/admin/dashboard']);
+    } else if (user?.roles?.includes('OWNER') || user?.roles?.includes('MANAGER')) {
+      this.router.navigate(['/organization']);
+    } else if (user?.roles?.includes('STORE_MANAGER') || user?.roles?.includes('EMPLOYEE')) {
+      this.router.navigate(['/store']);
     } else {
-      // For regular users, redirect to store or landing
-      this.router.navigate(['/']);
+      // For customers or unknown roles, redirect to store/ecommerce
+      this.router.navigate(['/store']);
     }
+  }
+
+  // Clear stored tokens
+  private clearTokens(): void {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
   }
 }

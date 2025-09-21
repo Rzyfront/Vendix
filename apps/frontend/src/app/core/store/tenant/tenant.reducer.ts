@@ -88,6 +88,8 @@ export const tenantReducer = createReducer(
   on(TenantActions.setDomainConfig, (state, { domainConfig }) => ({
     ...state,
     domainConfig,
-    environment: domainConfig.environment
+    environment: domainConfig.environment,
+    initialized: true,
+    error: null
   }))
 );

@@ -4,8 +4,8 @@
 <div *ngIf="isLoading" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
-      <app-spinner size="lg" text="Loading Store Configuration..." [center]="true"></app-spinner>
-      <p class="text-text-secondary mt-4">Please wait while we prepare your store</p>
+      <app-spinner size="lg" text="Loading Application..." [center]="true"></app-spinner>
+      <p class="text-text-secondary mt-4">Please wait while we prepare your application</p>
     </div>
   </app-card>
 </div>
@@ -15,15 +15,8 @@
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
       <div class="text-6xl mb-4">⚠️</div>
-      <h2 class="text-xl font-semibold text-text-primary mb-2">Store Not Available</h2>
+      <h2 class="text-xl font-semibold text-text-primary mb-2">Application Error</h2>
       <p class="text-text-secondary mb-6">{{ error }}</p>
-      <app-button 
-        variant="primary" 
-        (clicked)="initializeApp()"
-        class="w-full"
-      >
-        Try Again
-      </app-button>
     </div>
   </app-card>
 </div>
@@ -31,7 +24,7 @@
 <!-- Main Application Content -->
 <div *ngIf="!isLoading && !error" class="app-container">
   <!-- Header with dynamic branding will be added here -->
-  
+
   <!-- Main Router Content -->
   <router-outlet></router-outlet>
 </div>

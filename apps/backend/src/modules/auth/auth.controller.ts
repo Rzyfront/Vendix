@@ -21,6 +21,7 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ForgotPasswordDto } from './dto/password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 
@@ -186,8 +187,8 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body() forgotDto: { email: string }) {
-    const result = await this.authService.forgotPassword(forgotDto.email);
+  async forgotPassword(@Body() forgotDto: ForgotPasswordDto) {
+    const result = await this.authService.forgotPassword(forgotDto.email, forgotDto.organization_slug);
     return result;
   }
 

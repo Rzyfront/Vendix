@@ -21,15 +21,8 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
   pageTitle = 'Dashboard';
   private destroy$ = new Subject<void>();
 
-  // Branding colors from domain config - reactive (initialized with neutral defaults)
-  brandingColors = {
-    primary: '#3B82F6', // Default blue
-    secondary: '#1E40AF', // Default dark blue
-    accent: '#FFFFFF', // White
-    background: '#F8FAFC', // Light gray
-    text: '#1E293B', // Dark gray
-    border: '#E2E8F0' // Light border
-  };
+  // Branding colors from domain config - reactive (no defaults)
+  brandingColors: any = {};
 
   private pageTitles: { [key: string]: string } = {
     '/admin/dashboard': 'Dashboard',
@@ -58,12 +51,12 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
       if (tenantConfig?.branding?.colors) {
         const colors = tenantConfig.branding.colors;
         this.brandingColors = {
-          primary: colors.primary || this.brandingColors.primary,
-          secondary: colors.secondary || this.brandingColors.secondary,
-          accent: colors.accent || this.brandingColors.accent,
-          background: colors.background || this.brandingColors.background,
-          text: colors.text.primary || this.brandingColors.text,
-          border: colors.surface || this.brandingColors.border
+          primary: colors.primary,
+          secondary: colors.secondary,
+          accent: colors.accent,
+          background: colors.background,
+          text: colors.text?.primary || colors.text,
+          border: colors.surface
         };
         this.setBrandingCSSVariables();
       }
@@ -92,13 +85,38 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
   private setBrandingCSSVariables(): void {
     if (typeof document !== 'undefined') {
       const root = document.documentElement;
-      root.style.setProperty('--primary-color', this.brandingColors.primary);
-      root.style.setProperty('--secondary-color', this.brandingColors.secondary);
-      root.style.setProperty('--accent-color', this.brandingColors.accent);
-      root.style.setProperty('--background-color', this.brandingColors.background);
-      root.style.setProperty('--text-color', this.brandingColors.text);
-      root.style.setProperty('--border-color', this.brandingColors.border);
+      root.style.setProperty('--primary-color', this.primaryColor);
+      root.style.setProperty('--secondary-color', this.secondaryColor);
+      root.style.setProperty('--accent-color', this.accentColor);
+      root.style.setProperty('--background-color', this.backgroundColor);
+      root.style.setProperty('--text-color', this.textColor);
+      root.style.setProperty('--border-color', this.borderColor);
     }
+  }
+
+  // Helper methods for template colors with defaults
+  get primaryColor(): string {
+    return this.brandingColors?.primary || '#7ED7A5';
+  }
+
+  get secondaryColor(): string {
+    return this.brandingColors?.secondary || '#2F6F4E';
+  }
+
+  get accentColor(): string {
+    return this.brandingColors?.accent || '#FFFFFF';
+  }
+
+  get backgroundColor(): string {
+    return this.brandingColors?.background || '#F4F4F4';
+  }
+
+  get textColor(): string {
+    return this.brandingColors?.text || '#222222';
+  }
+
+  get borderColor(): string {
+    return this.brandingColors?.border || '#B0B0B0';
   }
 
 

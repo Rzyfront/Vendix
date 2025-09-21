@@ -28,8 +28,10 @@ export interface DomainConfig {
 export interface DomainResolution {
   id: string;
   hostname: string;
-  type: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
-  purpose: 'landing' | 'admin' | 'ecommerce';
+  type?: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
+  domainType?: string; // Alternative field used by API
+  purpose?: 'landing' | 'admin' | 'ecommerce';
+  app?: string; // App environment identifier (VENDIX_LANDING, VENDIX_ADMIN, etc.)
   organizationId: string;
   organizationSlug: string;
   storeId?: string;

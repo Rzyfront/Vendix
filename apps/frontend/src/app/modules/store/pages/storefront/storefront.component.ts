@@ -1,5 +1,5 @@
-import { Component, Inject, PLATFORM_ID } from '@angular/core';
-import { CommonModule, isPlatformBrowser } from '@angular/common';
+import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 
@@ -18,8 +18,8 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
           <p class="text-xl md:text-2xl mb-8 opacity-90">
             Discover amazing products at great prices
           </p>
-          <app-button 
-            variant="secondary" 
+          <app-button
+            variant="secondary"
             size="lg"
             (clicked)="scrollToProducts()"
           >
@@ -34,11 +34,11 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
           <h2 class="text-3xl font-bold text-center mb-12 text-text-primary">
             Featured Products
           </h2>
-          
+
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             <!-- Sample Product Cards -->
-            <app-card 
-              *ngFor="let product of sampleProducts" 
+            <app-card
+              *ngFor="let product of sampleProducts"
               [title]="product.name"
               [subtitle]="'$' + product.price"
               shadow="md"
@@ -48,7 +48,7 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
                 <span class="text-4xl">{{ product.emoji }}</span>
               </div>
               <p class="text-text-secondary mb-4">{{ product.description }}</p>
-              
+
               <div slot="footer" class="flex gap-2">
                 <app-button variant="primary" size="sm" class="flex-1">
                   Add to Cart
@@ -75,7 +75,6 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
   `
 })
 export class StorefrontComponent {
-  constructor(@Inject(PLATFORM_ID) private platformId: Object) {}
 
   sampleProducts = [
     {
@@ -116,12 +115,9 @@ export class StorefrontComponent {
     }
   ];
   scrollToProducts(): void {
-    // Only execute scroll in browser environment
-    if (isPlatformBrowser(this.platformId)) {
-      window.scrollTo({
-        top: 600,
-        behavior: 'smooth'
-      });
-    }
+    window.scrollTo({
+      top: 600,
+      behavior: 'smooth'
+    });
   }
 }

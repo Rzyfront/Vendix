@@ -1,249 +1,727 @@
-<div class="min-h-screen" [style.background]="getBackgroundGradient()">
+<div class="min-h-screen bg-background" [style.background]="getBackgroundGradient()">
   <!-- Navigation Header -->
-  <nav class="bg-white shadow-sm sticky top-0 z-50 border-b" [style.border-color]="brandingColors.border">
+  <nav class="bg-white/95 backdrop-blur-md shadow-lg sticky top-0 z-50 border-b border-gray-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex justify-between items-center h-16">
+      <div class="flex justify-between items-center h-20">
         <div class="flex items-center">
-          <h1 class="text-2xl font-bold" [style.color]="brandingColors.primary">Vendix</h1>
+          <div class="flex items-center space-x-2">
+            <img src="/vlogo.png" alt="Vendix Logo" class="w-10 h-10 rounded-xl">
+            <h1 class="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">Vendix</h1>
+          </div>
         </div>
-        <div class="flex items-center space-x-4">
-          <button (click)="scrollToFeatures()" class="transition-colors font-medium" [style.color]="brandingColors.text" [style.text-decoration-color]="brandingColors.primary">
-            Características
+        <div class="hidden md:flex items-center space-x-8">
+          <button (click)="scrollToFeatures()" class="relative px-4 py-2 text-gray-700 hover:text-primary transition-all duration-300 font-medium group">
+            Features
+            <span class="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-primary to-secondary transition-all duration-300 group-hover:w-full"></span>
           </button>
-          <button (click)="scrollToPlans()" class="transition-colors font-medium" [style.color]="brandingColors.text" [style.text-decoration-color]="brandingColors.primary">
-            Precios
+          <button (click)="scrollToPlans()" class="relative px-4 py-2 text-gray-700 hover:text-primary transition-all duration-300 font-medium group">
+            Pricing
+            <span class="absolute bottom-0 left-0 w-0 h-0.5 bg-gradient-to-r from-primary to-secondary transition-all duration-300 group-hover:w-full"></span>
           </button>
-          <app-button variant="outline" routerLink="/auth/login" [style.border-color]="brandingColors.primary" [style.color]="brandingColors.primary">
-            Iniciar Sesión
-          </app-button>
-          <app-button variant="primary" routerLink="/auth/register" [style.background-color]="brandingColors.primary" [style.color]="brandingColors.accent">
-            Registrarse
-          </app-button>
+          <button routerLink="/auth/login" class="px-6 py-2.5 text-primary font-medium hover:bg-primary/10 rounded-xl transition-all duration-300">
+            Login
+          </button>
+          <button routerLink="/auth/register" class="px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-white font-medium rounded-xl hover:shadow-lg hover:scale-105 transition-all duration-300">
+            Get Started
+          </button>
+        </div>
+        <!-- Mobile menu button -->
+        <div class="md:hidden">
+          <button class="p-2 text-gray-700 hover:text-primary transition-colors">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+          </button>
         </div>
       </div>
     </div>
   </nav>
 
   <!-- Hero Section -->
-  <section class="relative py-20 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-7xl mx-auto text-center">
-      <h1 class="text-5xl sm:text-6xl font-bold mb-6" [style.color]="brandingColors.text">
-        {{ hero.title || 'La Plataforma Todo-en-Uno para tu Negocio' }}
+  <section class="relative min-h-screen flex items-center justify-center overflow-hidden">
+    <!-- Background Elements -->
+    <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-white to-emerald-50"></div>
+    <div class="absolute top-20 left-10 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-pulse"></div>
+    <div class="absolute bottom-20 right-10 w-96 h-96 bg-secondary/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+    
+    <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-32 text-center">
+      <!-- Badge -->
+      <div class="inline-flex items-center px-4 py-2 bg-white/80 backdrop-blur-sm rounded-full border border-gray-200 mb-8">
+        <span class="text-primary font-medium">✨ Nuevo</span>
+        <span class="ml-2 text-gray-600">Dashboard mejorado disponible</span>
+      </div>
+      
+      <!-- Main Heading -->
+      <h1 class="text-6xl sm:text-7xl lg:text-8xl font-black mb-8 leading-tight">
+        <span class="bg-gradient-to-r from-gray-900 via-primary to-secondary bg-clip-text text-transparent">
+          {{ hero.title || 'La Plataforma' }}
+        </span>
+        <br>
+        <span class="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+          Todo-en-Uno
+        </span>
       </h1>
-      <p class="text-xl mb-8 max-w-3xl mx-auto" [style.color]="brandingColors.secondary">
-        {{ hero.subtitle || 'Combina POS, E-commerce y gestión de inventario en una sola plataforma.' }}
+      
+      <!-- Subtitle -->
+      <p class="text-xl sm:text-2xl mb-12 max-w-4xl mx-auto text-gray-600 leading-relaxed">
+        {{ hero.subtitle || 'Revoluciona tu negocio con nuestra plataforma que combina POS, E-commerce y gestión de inventario en una experiencia perfecta.' }}
       </p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      
+      <!-- CTA Buttons -->
+      <div class="flex flex-col sm:flex-row gap-6 justify-center mb-16">
         <button
           routerLink="/auth/register"
-          class="px-8 py-4 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          [style.background-color]="brandingColors.primary"
-          [style.border-color]="brandingColors.primary"
-          [style.color]="brandingColors.accent"
+          class="group px-10 py-5 bg-gradient-to-r from-primary to-secondary text-white text-xl font-semibold rounded-2xl shadow-2xl hover:shadow-primary/25 transform hover:scale-105 transition-all duration-300"
         >
-          {{ hero.cta_primary || 'Prueba Gratis por 14 Días' }}
+          <span class="flex items-center justify-center space-x-2">
+            <span>{{ hero.cta_primary || 'Comenzar Gratis' }}</span>
+            <svg class="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+            </svg>
+          </span>
         </button>
+        
         <button
           (click)="scrollToFeatures()"
-          class="px-8 py-4 text-lg font-medium rounded-lg transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 border-2 hover:bg-opacity-10"
-          [style.border-color]="brandingColors.primary"
-          [style.color]="brandingColors.primary"
-          [style.background-color]="'transparent'"
+          class="group px-10 py-5 bg-white/80 backdrop-blur-sm text-gray-700 text-xl font-semibold rounded-2xl border-2 border-gray-200 hover:border-primary/50 hover:bg-white transition-all duration-300"
         >
-          {{ hero.cta_secondary || 'Ver Características' }}
+          <span class="flex items-center justify-center space-x-2">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h6"></path>
+            </svg>
+            <span>{{ hero.cta_secondary || 'Ver Demo' }}</span>
+          </span>
         </button>
       </div>
       
-      <!-- Hero Image/Demo -->
-      <div class="mt-16">
-        <app-card class="max-w-4xl mx-auto p-8">
-          <div class="bg-gray-100 rounded-lg h-96 flex items-center justify-center">
-            <div class="text-center">
-              <div class="text-6xl mb-4">🖥️</div>
-              <h3 class="text-2xl font-semibold text-gray-700">Dashboard de Vendix</h3>
-              <p class="text-gray-500 mt-2">Vista previa de tu centro de control</p>
+      <!-- Hero Visual -->
+      <div class="relative max-w-6xl mx-auto">
+        <div class="relative bg-white/80 backdrop-blur-sm rounded-3xl shadow-2xl border border-gray-200 overflow-hidden">
+          <!-- Mock browser header -->
+          <div class="flex items-center px-6 py-4 bg-gray-50 border-b border-gray-200">
+            <div class="flex space-x-2">
+              <div class="w-3 h-3 bg-red-400 rounded-full"></div>
+              <div class="w-3 h-3 bg-yellow-400 rounded-full"></div>
+              <div class="w-3 h-3 bg-green-400 rounded-full"></div>
+            </div>
+            <div class="flex-1 text-center">
+              <div class="bg-white rounded-lg px-4 py-1 text-sm text-gray-500 inline-block">vendix.app/dashboard</div>
             </div>
           </div>
-        </app-card>
+          
+          <!-- Dashboard preview -->
+          <div class="bg-gradient-to-br from-indigo-50 to-emerald-50 h-96 flex items-center justify-center relative overflow-hidden">
+            <!-- Background pattern -->
+            <div class="absolute inset-0 opacity-20">
+              <div class="grid grid-cols-8 grid-rows-6 h-full w-full">
+                <div class="bg-primary/20 m-1 rounded"></div>
+                <div class="bg-secondary/20 m-1 rounded"></div>
+                <div class="bg-primary/10 m-1 rounded"></div>
+                <div class="bg-secondary/10 m-1 rounded"></div>
+                <div class="bg-primary/30 m-1 rounded"></div>
+                <div class="bg-secondary/30 m-1 rounded"></div>
+                <div class="bg-primary/15 m-1 rounded"></div>
+                <div class="bg-secondary/25 m-1 rounded"></div>
+              </div>
+            </div>
+            
+            <div class="relative text-center z-10">
+              <div class="w-24 h-24 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-2xl">
+                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+              </div>
+              <h3 class="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent mb-2">Dashboard Vendix</h3>
+              <p class="text-gray-600 text-lg">Tu centro de control empresarial</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Floating elements -->
+        <div class="absolute -top-4 -left-4 w-20 h-20 bg-primary/20 rounded-2xl rotate-12 animate-bounce delay-300"></div>
+        <div class="absolute -bottom-4 -right-4 w-16 h-16 bg-secondary/20 rounded-2xl -rotate-12 animate-bounce delay-700"></div>
       </div>
     </div>
   </section>
 
   <!-- Features Section -->
-  <section id="features" class="py-20 bg-white">
+  <section id="features" class="py-32 bg-gradient-to-b from-white to-gray-50">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center mb-16">
-        <h2 class="text-4xl font-bold mb-4" [style.color]="brandingColors.text">
-          Todo lo que necesitas para hacer crecer tu negocio
+      <!-- Section Header -->
+      <div class="text-center mb-20">
+        <div class="inline-flex items-center px-4 py-2 bg-primary/10 rounded-full mb-6">
+          <span class="text-primary font-semibold">🚀 Características</span>
+        </div>
+        <h2 class="text-5xl sm:text-6xl font-black mb-6">
+          <span class="bg-gradient-to-r from-gray-900 to-primary bg-clip-text text-transparent">
+            Todo lo que necesitas
+          </span>
+          <br>
+          <span class="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+            para crecer
+          </span>
         </h2>
-        <p class="text-xl max-w-2xl mx-auto" [style.color]="brandingColors.secondary">
-          Desde pequeñas tiendas hasta grandes cadenas, Vendix se adapta a tus necesidades
+        <p class="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
+          Desde pequeñas tiendas hasta grandes cadenas, Vendix se adapta perfectamente a las necesidades de tu negocio
         </p>
       </div>
 
+      <!-- Features Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        <app-card *ngFor="let feature of features" class="p-6 feature-card" [style.border-color]="brandingColors.border">
-          <div class="text-center">
-            <div class="text-4xl mb-4">{{ feature.icon }}</div>
-            <h3 class="text-xl font-semibold mb-3" [style.color]="brandingColors.text">{{ feature.title }}</h3>
-            <p [style.color]="brandingColors.secondary">{{ feature.description }}</p>
+        <!-- Default features if none provided -->
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-1.8 5M7 13l-1.8 5m0 0h4.4m-4.4 0a2 2 0 102 2 2 0 00-2-2zm10 0a2 2 0 102 2 2 0 00-2-2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">POS Inteligente</h3>
+            <p class="text-gray-600 leading-relaxed">Sistema de punto de venta moderno con procesamiento rápido y gestión completa de transacciones.</p>
           </div>
-        </app-card>
+        </div>
+
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0-9v9"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">E-commerce Integrado</h3>
+            <p class="text-gray-600 leading-relaxed">Vende online sin complicaciones con nuestra plataforma e-commerce totalmente integrada.</p>
+          </div>
+        </div>
+
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">Gestión de Inventario</h3>
+            <p class="text-gray-600 leading-relaxed">Control total de tu stock con alertas inteligentes y seguimiento en tiempo real.</p>
+          </div>
+        </div>
+
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">Analíticas Avanzadas</h3>
+            <p class="text-gray-600 leading-relaxed">Reportes detallados y métricas en tiempo real para tomar mejores decisiones de negocio.</p>
+          </div>
+        </div>
+
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">Gestión de Clientes</h3>
+            <p class="text-gray-600 leading-relaxed">CRM integrado para mantener relaciones sólidas y programas de fidelidad efectivos.</p>
+          </div>
+        </div>
+
+        <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">Seguridad Total</h3>
+            <p class="text-gray-600 leading-relaxed">Protección avanzada de datos y transacciones con cumplimiento total de normativas.</p>
+          </div>
+        </div>
+
+        <!-- Dynamic features -->
+        <div *ngFor="let feature of features" class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
+          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+          <div class="relative">
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 text-4xl group-hover:scale-110 transition-transform duration-300">
+              {{ feature.icon }}
+            </div>
+            <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">{{ feature.title }}</h3>
+            <p class="text-gray-600 leading-relaxed">{{ feature.description }}</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- Pricing Section -->
-  <section id="plans" class="py-20" [style.background-color]="brandingColors.background">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center mb-16">
-        <h2 class="text-4xl font-bold mb-4" [style.color]="brandingColors.text">
-          Planes que se adaptan a tu negocio
+  <section id="plans" class="py-32 bg-gradient-to-b from-gray-50 to-white relative overflow-hidden">
+    <!-- Background decoration -->
+    <div class="absolute top-0 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl"></div>
+    <div class="absolute bottom-0 right-1/4 w-96 h-96 bg-secondary/5 rounded-full blur-3xl"></div>
+    
+    <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <!-- Section Header -->
+      <div class="text-center mb-20">
+        <div class="inline-flex items-center px-4 py-2 bg-primary/10 rounded-full mb-6">
+          <span class="text-primary font-semibold">💰 Precios</span>
+        </div>
+        <h2 class="text-5xl sm:text-6xl font-black mb-6">
+          <span class="bg-gradient-to-r from-gray-900 to-primary bg-clip-text text-transparent">
+            Planes que se adaptan
+          </span>
+          <br>
+          <span class="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+            a tu negocio
+          </span>
         </h2>
-        <p class="text-xl" [style.color]="brandingColors.secondary">
-          Elige el plan perfecto para tu tamaño de negocio. Siempre puedes cambiar más tarde.
+        <p class="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
+          Elige el plan perfecto para el tamaño de tu negocio. Siempre puedes cambiar más tarde.
         </p>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <app-card
-          *ngFor="let plan of plans"
-          [class]="'relative p-8 plan-card ' + (plan.highlighted ? 'highlighted' : '')"
-          [style.border-color]="plan.highlighted ? brandingColors.primary : brandingColors.border"
-        >
-          <!-- Popular Badge -->
-          <div *ngIf="plan.highlighted" class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <span class="px-4 py-1 rounded-full text-sm font-medium"
-                  [style.background-color]="brandingColors.primary"
-                  [style.color]="brandingColors.accent">
-              Más Popular
-            </span>
-          </div>
-
+      <!-- Pricing Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-5xl mx-auto">
+        <!-- Starter Plan -->
+        <div class="relative bg-white rounded-3xl p-8 shadow-xl border border-gray-200 hover:shadow-2xl transition-all duration-300 group">
           <div class="text-center">
-            <h3 class="text-2xl font-bold mb-2" [style.color]="brandingColors.text">{{ plan.name }}</h3>
-            <p class="mb-6" [style.color]="brandingColors.secondary">{{ plan.description }}</p>
-
+            <div class="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <svg class="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-2 text-gray-900">Inicial</h3>
+            <p class="text-gray-600 mb-6">Perfecto para empezar</p>
+            
             <div class="mb-8">
-              <span class="text-4xl font-bold" [style.color]="brandingColors.text">{{ plan.price }}</span>
-              <span [style.color]="brandingColors.secondary">{{ plan.period }}</span>
+              <span class="text-5xl font-black text-gray-900">$19.900</span>
+              <span class="text-gray-600 text-lg">/mes</span>
             </div>
 
-            <ul class="space-y-3 mb-8 text-left">
-              <li *ngFor="let feature of plan.features" class="flex items-center">
-                <span class="mr-3" [style.color]="brandingColors.primary">✓</span>
-                <span [style.color]="brandingColors.text">{{ feature }}</span>
+            <ul class="space-y-4 mb-8 text-left">
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">Hasta 1,000 productos</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">POS básico</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">Soporte por email</span>
               </li>
             </ul>
 
-            <button
-              routerLink="/auth/register"
-              class="w-full px-6 py-3 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              [style.background-color]="plan.highlighted ? brandingColors.primary : 'transparent'"
-              [style.border-color]="plan.highlighted ? brandingColors.primary : brandingColors.border"
-              [style.color]="plan.highlighted ? brandingColors.accent : brandingColors.primary"
-              [style.border]="plan.highlighted ? `2px solid ${brandingColors.primary}` : `2px solid ${brandingColors.border}`"
-              style="box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);"
-              onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';"
-              onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)';"
-            >
-              Registrarse
+            <button routerLink="/auth/register" class="w-full px-6 py-4 bg-gray-900 text-white font-semibold rounded-2xl hover:bg-gray-800 transition-all duration-300 group-hover:shadow-lg">
+              Comenzar Ahora
             </button>
           </div>
-        </app-card>
+        </div>
+
+        <!-- Popular Plan -->
+        <div class="relative bg-gradient-to-br from-primary to-secondary rounded-3xl p-8 shadow-2xl transform scale-105 group">
+          <!-- Popular Badge -->
+          <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
+            <div class="bg-yellow-400 text-yellow-900 px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+              ⭐ Más Popular
+            </div>
+          </div>
+          
+          <div class="text-center">
+            <div class="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-2 text-white">Profesional</h3>
+            <p class="text-indigo-100 mb-6">Para negocios en crecimiento</p>
+            
+            <div class="mb-8">
+              <span class="text-5xl font-black text-white">$59.900</span>
+              <span class="text-indigo-100 text-lg">/mes</span>
+            </div>
+
+            <ul class="space-y-4 mb-8 text-left">
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-white">Productos ilimitados</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-white">POS + E-commerce</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-white">Analíticas avanzadas</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-white">Soporte prioritario</span>
+              </li>
+            </ul>
+
+            <button routerLink="/auth/register" class="w-full px-6 py-4 bg-white text-primary font-semibold rounded-2xl hover:bg-gray-50 transition-all duration-300 shadow-lg hover:shadow-xl">
+              Comenzar Ahora
+            </button>
+          </div>
+        </div>
+
+        <!-- Enterprise Plan -->
+        <div class="relative bg-white rounded-3xl p-8 shadow-xl border border-gray-200 hover:shadow-2xl transition-all duration-300 group">
+          <div class="text-center">
+            <div class="w-16 h-16 bg-gradient-to-br from-purple-100 to-purple-200 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold mb-2 text-gray-900">Empresarial</h3>
+            <p class="text-gray-600 mb-6">Para grandes operaciones</p>
+            
+            <div class="mb-8">
+              <span class="text-5xl font-black text-gray-900">$99.900</span>
+              <span class="text-gray-600 text-lg">/mes</span>
+            </div>
+
+            <ul class="space-y-4 mb-8 text-left">
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">Todo lo de Profesional</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">Multi-tienda</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">API personalizada</span>
+              </li>
+              <li class="flex items-center">
+                <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center mr-3 flex-shrink-0">
+                  <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                </div>
+                <span class="text-gray-700">Soporte 24/7</span>
+              </li>
+            </ul>
+
+            <button routerLink="/auth/register" class="w-full px-6 py-4 bg-purple-600 text-white font-semibold rounded-2xl hover:bg-purple-700 transition-all duration-300 group-hover:shadow-lg">
+              Contactar Ventas
+            </button>
+          </div>
+        </div>
+
+        <!-- Dynamic plans -->
+        <div *ngFor="let plan of plans" class="relative bg-white rounded-3xl p-8 shadow-xl border border-gray-200 hover:shadow-2xl transition-all duration-300 group"
+             [class.bg-gradient-to-br]="plan.highlighted"
+             [class.from-primary]="plan.highlighted"
+             [class.to-secondary]="plan.highlighted"
+             [class.transform]="plan.highlighted"
+             [class.scale-105]="plan.highlighted">
+          
+          <div *ngIf="plan.highlighted" class="absolute -top-4 left-1/2 transform -translate-x-1/2">
+            <div class="bg-yellow-400 text-yellow-900 px-6 py-2 rounded-full text-sm font-bold shadow-lg">
+              ⭐ {{ plan.badge || 'Más Popular' }}
+            </div>
+          </div>
+
+          <div class="text-center">
+            <h3 class="text-2xl font-bold mb-2" [class.text-white]="plan.highlighted" [class.text-gray-900]="!plan.highlighted">{{ plan.name }}</h3>
+            <p class="mb-6" [class.text-indigo-100]="plan.highlighted" [class.text-gray-600]="!plan.highlighted">{{ plan.description }}</p>
+
+            <div class="mb-8">
+              <span class="text-5xl font-black" [class.text-white]="plan.highlighted" [class.text-gray-900]="!plan.highlighted">{{ plan.price }}</span>
+              <span [class.text-indigo-100]="plan.highlighted" [class.text-gray-600]="!plan.highlighted">{{ plan.period }}</span>
+            </div>
+
+            <ul class="space-y-4 mb-8 text-left">
+              <ng-container *ngFor="let feature of plan.features">
+                <li class="flex items-center">
+                  <div class="w-5 h-5 rounded-full flex items-center justify-center mr-3 flex-shrink-0" [ngClass]="plan.highlighted ? 'bg-white/20' : 'bg-green-100'">
+                    <svg class="w-3 h-3" [class.text-white]="plan.highlighted" [class.text-green-600]="!plan.highlighted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                  </div>
+                  <span [class.text-white]="plan.highlighted" [class.text-gray-700]="!plan.highlighted">{{ feature }}</span>
+                </li>
+              </ng-container>
+            </ul>
+
+            <button routerLink="/auth/register" 
+                    class="w-full px-6 py-4 font-semibold rounded-2xl transition-all duration-300"
+                    [class.bg-white]="plan.highlighted"
+                    [class.text-primary]="plan.highlighted"
+                    [class.hover:bg-gray-50]="plan.highlighted"
+                    [class.bg-gray-900]="!plan.highlighted"
+                    [class.text-white]="!plan.highlighted"
+                    [class.hover:bg-gray-800]="!plan.highlighted">
+              Comenzar Ahora
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div class="text-center mt-12">
-        <p class="mb-4" [style.color]="brandingColors.secondary">¿Necesitas algo más personalizado?</p>
-        <button
-          routerLink="/auth/register"
-          class="px-6 py-3 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 border-2"
-          [style.border-color]="brandingColors.primary"
-          [style.color]="brandingColors.primary"
-          [style.background-color]="'transparent'"
-          onmouseover="this.style.backgroundColor=brandingColors.primary; this.style.color=brandingColors.accent;"
-          onmouseout="this.style.backgroundColor='transparent'; this.style.color=brandingColors.primary;"
-        >
-          Contactar a Ventas
-        </button>
+      <!-- Custom plan CTA -->
+      <div class="text-center mt-16">
+        <div class="bg-white/80 backdrop-blur-sm rounded-3xl p-8 border border-gray-200 max-w-2xl mx-auto">
+          <h3 class="text-2xl font-bold mb-4 text-gray-900">¿Necesitas algo más personalizado?</h3>
+          <p class="text-gray-600 mb-6">Contáctanos para crear un plan a medida de tu negocio</p>
+          <button routerLink="/auth/register" 
+                  class="px-8 py-4 bg-gradient-to-r from-primary to-secondary text-white font-semibold rounded-2xl hover:shadow-lg transition-all duration-300">
+            Contactar a Ventas
+          </button>
+        </div>
       </div>
-    </div>
+      <!-- Close container started above -->
+      </div>
   </section>
 
   <!-- CTA Section -->
-  <section class="py-20" [style.background-color]="brandingColors.primary">
-    <div class="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
-      <h2 class="text-4xl font-bold mb-4" [style.color]="brandingColors.accent">
-        ¿Listo para transformar tu negocio?
+  <section class="py-32 bg-gradient-to-br from-primary via-primary to-secondary relative overflow-hidden">
+    <!-- Background decoration -->
+    <div class="absolute inset-0 opacity-20">
+      <div class="grid grid-cols-12 grid-rows-8 h-full w-full gap-1">
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+        <div class="bg-white/10 rounded-sm"></div>
+        <div class="bg-white/5 rounded-sm"></div>
+      </div>
+    </div>
+    <div class="absolute top-10 left-10 w-32 h-32 bg-white/10 rounded-full blur-2xl animate-pulse"></div>
+    <div class="absolute bottom-10 right-10 w-48 h-48 bg-white/10 rounded-full blur-3xl animate-pulse delay-1000"></div>
+    
+    <div class="relative max-w-6xl mx-auto text-center px-4 sm:px-6 lg:px-8">
+      <!-- Stats -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-16">
+        <div class="text-center">
+          <div class="text-4xl font-black text-white mb-2">10,000+</div>
+          <div class="text-indigo-100">Negocios activos</div>
+        </div>
+        <div class="text-center">
+          <div class="text-4xl font-black text-white mb-2">99.9%</div>
+          <div class="text-indigo-100">Tiempo de actividad</div>
+        </div>
+        <div class="text-center">
+          <div class="text-4xl font-black text-white mb-2">24/7</div>
+          <div class="text-indigo-100">Soporte disponible</div>
+        </div>
+      </div>
+      
+      <!-- Main CTA -->
+      <h2 class="text-5xl sm:text-6xl font-black mb-8 text-white leading-tight">
+        ¿Listo para transformar
+        <br>
+        <span class="bg-gradient-to-r from-yellow-300 to-yellow-100 bg-clip-text text-transparent">
+          tu negocio?
+        </span>
       </h2>
-      <p class="text-xl mb-8" style="color: rgba(255, 255, 255, 0.9);">
-        Únete a miles de empresas que ya confían en Vendix para gestionar sus ventas
+      
+      <p class="text-xl sm:text-2xl mb-12 text-indigo-100 max-w-3xl mx-auto leading-relaxed">
+        Únete a miles de empresas que ya confían en Vendix para gestionar y hacer crecer sus ventas
       </p>
-      <div class="flex flex-col sm:flex-row gap-4 justify-center">
+      
+      <!-- CTA Buttons -->
+      <div class="flex flex-col sm:flex-row gap-6 justify-center">
         <button
           routerLink="/auth/register"
-          class="px-8 py-4 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2"
-          [style.background-color]="brandingColors.accent"
-          [style.color]="brandingColors.primary"
+          class="group px-10 py-5 bg-white text-primary text-xl font-bold rounded-2xl shadow-2xl hover:shadow-white/25 hover:scale-105 transition-all duration-300"
         >
-          Comenzar Prueba Gratuita
+          <span class="flex items-center justify-center space-x-2">
+            <span>Comenzar Prueba Gratuita</span>
+            <svg class="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+            </svg>
+          </span>
         </button>
+        
         <button
-          routerLink="/auth/register"
-          class="px-8 py-4 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 border-2"
-          [style.border-color]="brandingColors.accent"
-          [style.color]="brandingColors.accent"
-          [style.background-color]="'transparent'"
-          onmouseover="this.style.backgroundColor=brandingColors.accent; this.style.color=brandingColors.primary;"
-          onmouseout="this.style.backgroundColor='transparent'; this.style.color=brandingColors.accent;"
+          routerLink="/contact"
+          class="group px-10 py-5 bg-white/10 backdrop-blur-sm text-white text-xl font-bold rounded-2xl border-2 border-white/20 hover:bg-white/20 transition-all duration-300"
         >
-          Agendar Demo
+          <span class="flex items-center justify-center space-x-2">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+            <span>Agendar Demo</span>
+          </span>
         </button>
+      </div>
+      
+      <!-- Trust indicators -->
+      <div class="mt-16 pt-12 border-t border-white/20">
+        <p class="text-indigo-100 mb-6">Confiado por empresas líderes</p>
+        <div class="flex justify-center items-center space-x-8 opacity-60">
+          <div class="w-24 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold">Logo</span>
+          </div>
+          <div class="w-24 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold">Logo</span>
+          </div>
+          <div class="w-24 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold">Logo</span>
+          </div>
+          <div class="w-24 h-12 bg-white/20 rounded-lg flex items-center justify-center">
+            <span class="text-white font-bold">Logo</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- Footer -->
-  <footer class="py-12" [style.background-color]="brandingColors.secondary" [style.color]="brandingColors.accent">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-        <div>
-          <h3 class="text-2xl font-bold mb-4" [style.color]="brandingColors.primary">{{ footer.company_name || 'Vendix' }}</h3>
-          <p style="color: rgba(255, 255, 255, 0.8);">
-            {{ footer.description || 'La plataforma todo-en-uno para modernizar tu negocio' }}
-          </p>
-        </div>
+  <footer class="bg-gray-900 text-white relative overflow-hidden">
+    <!-- Background decoration -->
+    <div class="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"></div>
+    <div class="absolute top-0 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl"></div>
+    
+    <div class="relative">
+      <!-- Main footer -->
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-12">
+          <!-- Brand section -->
+          <div class="lg:col-span-2">
+            <div class="flex items-center space-x-3 mb-6">
+              <div class="w-12 h-12 bg-gradient-to-br from-primary to-secondary rounded-xl flex items-center justify-center">
+                <span class="text-white font-bold text-xl">V</span>
+              </div>
+              <h3 class="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+                {{ footer.company_name || 'Vendix' }}
+              </h3>
+            </div>
+            <p class="text-gray-400 text-lg leading-relaxed mb-8 max-w-md">
+              {{ footer.description || 'La plataforma todo-en-uno para modernizar y hacer crecer tu negocio en la era digital.' }}
+            </p>
+            
+            <!-- Social links -->
+            <div class="flex space-x-4">
+              <a href="#" class="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center hover:bg-primary transition-colors duration-300 group">
+                <svg class="w-5 h-5 text-gray-400 group-hover:text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M24 4.557c-.883.392-1.832.656-2.828.775 1.017-.609 1.798-1.574 2.165-2.724-.951.564-2.005.974-3.127 1.195-.897-.957-2.178-1.555-3.594-1.555-3.179 0-5.515 2.966-4.797 6.045-4.091-.205-7.719-2.165-10.148-5.144-1.29 2.213-.669 5.108 1.523 6.574-.806-.026-1.566-.247-2.229-.616-.054 2.281 1.581 4.415 3.949 4.89-.693.188-1.452.232-2.224.084.626 1.956 2.444 3.379 4.6 3.419-2.07 1.623-4.678 2.348-7.29 2.04 2.179 1.397 4.768 2.212 7.548 2.212 9.142 0 14.307-7.721 13.995-14.646.962-.695 1.797-1.562 2.457-2.549z"/>
+                </svg>
+              </a>
+              <a href="#" class="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center hover:bg-primary transition-colors duration-300 group">
+                <svg class="w-5 h-5 text-gray-400 group-hover:text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M22.46 6c-.77.35-1.6.58-2.46.69.88-.53 1.56-1.37 1.88-2.38-.83.5-1.75.85-2.72 1.05C18.37 4.5 17.26 4 16 4c-2.35 0-4.27 1.92-4.27 4.29 0 .34.04.67.11.98C8.28 9.09 5.11 7.38 3 4.79c-.37.63-.58 1.37-.58 2.15 0 1.49.75 2.81 1.91 3.56-.71 0-1.37-.2-1.95-.5v.03c0 2.08 1.48 3.82 3.44 4.21a4.22 4.22 0 0 1-1.93.07 4.28 4.28 0 0 0 4 2.98 8.521 8.521 0 0 1-5.33 1.84c-.34 0-.68-.02-1.02-.06C3.44 20.29 5.7 21 8.12 21 16 21 20.33 14.46 20.33 8.79c0-.19 0-.37-.01-.56.84-.6 1.56-1.36 2.14-2.23z"/>
+                </svg>
+              </a>
+              <a href="#" class="w-12 h-12 bg-gray-800 rounded-xl flex items-center justify-center hover:bg-primary transition-colors duration-300 group">
+                <svg class="w-5 h-5 text-gray-400 group-hover:text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+                </svg>
+              </a>
+            </div>
+          </div>
 
-        <div>
-          <h4 class="font-semibold mb-4" [style.color]="brandingColors.accent">Producto</h4>
-          <ul class="space-y-2" style="color: rgba(255, 255, 255, 0.7);">
-            <li *ngFor="let link of footer.links?.product || ['POS', 'E-commerce', 'Inventario', 'Reportes']">
-              <a href="#" class="transition-colors hover:!text-white">{{ link }}</a>
-            </li>
-          </ul>
-        </div>
+          <!-- Links sections -->
+          <div>
+            <h4 class="font-bold mb-6 text-white text-lg">Producto</h4>
+            <ul class="space-y-4">
+              <li *ngFor="let link of footer.links?.product || ['POS', 'E-commerce', 'Inventario', 'Reportes', 'Integraciones']">
+                <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300 flex items-center group">
+                  <span class="w-2 h-2 bg-primary rounded-full mr-3 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+                  {{ link }}
+                </a>
+              </li>
+            </ul>
+          </div>
 
-        <div>
-          <h4 class="font-semibold mb-4" [style.color]="brandingColors.accent">Soporte</h4>
-          <ul class="space-y-2" style="color: rgba(255, 255, 255, 0.7);">
-            <li *ngFor="let link of footer.links?.support || ['Centro de Ayuda', 'Documentación', 'Contacto', 'Estado del Sistema']">
-              <a href="#" class="transition-colors hover:!text-white">{{ link }}</a>
-            </li>
-          </ul>
-        </div>
+          <div>
+            <h4 class="font-bold mb-6 text-white text-lg">Soporte</h4>
+            <ul class="space-y-4">
+              <li *ngFor="let link of footer.links?.support || ['Centro de Ayuda', 'Documentación', 'Contacto', 'Estado del Sistema', 'Comunidad']">
+                <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300 flex items-center group">
+                  <span class="w-2 h-2 bg-secondary rounded-full mr-3 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+                  {{ link }}
+                </a>
+              </li>
+            </ul>
+          </div>
 
-        <div>
-          <h4 class="font-semibold mb-4" [style.color]="brandingColors.accent">Empresa</h4>
-          <ul class="space-y-2" style="color: rgba(255, 255, 255, 0.7);">
-            <li *ngFor="let link of footer.links?.company || ['Acerca de', 'Blog', 'Carreras', 'Prensa']">
-              <a href="#" class="transition-colors hover:!text-white">{{ link }}</a>
-            </li>
-          </ul>
+          <div>
+            <h4 class="font-bold mb-6 text-white text-lg">Empresa</h4>
+            <ul class="space-y-4">
+              <li *ngFor="let link of footer.links?.company || ['Acerca de', 'Blog', 'Carreras', 'Prensa', 'Socios']">
+                <a href="#" class="text-gray-400 hover:text-white transition-colors duration-300 flex items-center group">
+                  <span class="w-2 h-2 bg-primary rounded-full mr-3 opacity-0 group-hover:opacity-100 transition-opacity"></span>
+                  {{ link }}
+                </a>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
 
-      <div class="border-t mt-8 pt-8 text-center" style="border-color: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6);">
-        <p>{{ footer.copyright || '© 2025 Vendix. Todos los derechos reservados.' }}</p>
+      <!-- Bottom bar -->
+      <div class="border-t border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div class="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+            <p class="text-gray-500 text-center md:text-left">
+              {{ footer.copyright || '© 2025 Vendix. Todos los derechos reservados.' }}
+            </p>
+            <div class="flex space-x-8 text-sm">
+              <a href="#" class="text-gray-500 hover:text-white transition-colors">Política de Privacidad</a>
+              <a href="#" class="text-gray-500 hover:text-white transition-colors">Términos de Servicio</a>
+              <a href="#" class="text-gray-500 hover:text-white transition-colors">Cookies</a>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </footer>

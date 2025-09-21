@@ -1,123 +1,105 @@
-<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
-     [style.background]="getBackgroundGradient()">
-  <div class="max-w-md w-full space-y-8">
-    <!-- Header -->
+<div class="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-emerald-50 flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-lg w-full space-y-8">
+    <!-- Header con logo -->
     <div class="text-center">
-      <h1 class="text-3xl font-bold mb-2" [style.color]="brandingColors.primary">Vendix</h1>
-      <h2 class="text-xl" [style.color]="brandingColors.text">Iniciar Sesión</h2>
-      <p class="mt-2 text-sm" [style.color]="brandingColors.secondary">
+      <div class="flex justify-center items-center mb-6 space-x-4">
+        <img src="/vlogo.png" alt="Vendix Logo" class="w-12 h-12 rounded-xl shadow-lg">
+        <h1 class="text-4xl font-black bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent">
+          Vendix
+        </h1>
+      </div>
+      <h2 class="text-2xl font-bold text-gray-800 mb-2">Iniciar Sesión</h2>
+      <p class="text-gray-600 max-w-sm mx-auto leading-relaxed">
         Accede a tu cuenta para gestionar tu negocio
       </p>
     </div>
 
-    <!-- Login Form -->
-    <app-card class="p-8">
-      <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-6">
-        
-        <!-- Email Field -->
-        <div>
-          <label for="email" class="block text-sm font-medium mb-2" [style.color]="brandingColors.text">
-            Email
+    <div class="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 relative overflow-hidden">
+      <!-- Decorative background -->
+      <div class="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full blur-3xl"></div>
+      <div class="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-secondary/10 to-primary/10 rounded-full blur-3xl"></div>
+
+      <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-6 relative">
+        <!-- Email -->
+        <div class="relative">
+          <label for="email" class="block text-sm font-semibold text-gray-700 mb-2">
+            Correo Electrónico
           </label>
-          <app-input
+          <input
             id="email"
             type="email"
             formControlName="email"
-            placeholder="tu@email.com"
-            [error]="getFieldError('email')"
-            class="w-full"
-          ></app-input>
+            class="w-full px-4 py-3 bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 hover:shadow-md"
+            placeholder="usuario@email.com"
+            [class.border-red-300]="hasFieldError('email')"
+            [ngClass]="{'bg-red-50/50': hasFieldError('email')}"
+          />
+          <p *ngIf="hasFieldError('email')" class="mt-2 text-sm text-red-500">
+            {{ getFieldError('email') }}
+          </p>
         </div>
 
-        <!-- Password Field -->
-        <div>
-          <label for="password" class="block text-sm font-medium mb-2" [style.color]="brandingColors.text">
+        <!-- Contraseña -->
+        <div class="relative">
+          <label for="password" class="block text-sm font-semibold text-gray-700 mb-2">
             Contraseña
           </label>
-          <app-input
+          <input
             id="password"
             type="password"
             formControlName="password"
-            placeholder="Tu contraseña"
-            [error]="getFieldError('password')"
-            class="w-full"
-          ></app-input>
+            class="w-full px-4 py-3 bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 hover:shadow-md"
+            placeholder="••••••••"
+            [class.border-red-300]="hasFieldError('password')"
+            [ngClass]="{'bg-red-50/50': hasFieldError('password')}"
+          />
+          <p *ngIf="hasFieldError('password')" class="mt-2 text-sm text-red-500">
+            {{ getFieldError('password') }}
+          </p>
         </div>
 
-        <!-- Error Message -->
-        <div *ngIf="errorMessage" class="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div class="flex">
-            <div class="flex-shrink-0">
-              <span class="text-red-400">⚠️</span>
-            </div>
-            <div class="ml-3">
-              <p class="text-sm text-red-700">{{ errorMessage }}</p>
-            </div>
-          </div>
+        <!-- Mensaje de error general -->
+        <div *ngIf="errorMessage" class="p-4 bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-2xl shadow-sm">
+          <p class="text-sm text-red-600 font-medium">{{ errorMessage }}</p>
         </div>
 
-        <!-- Submit Button -->
-        <div>
+        <!-- Botón de login -->
+        <div class="pt-2">
           <button
             type="submit"
             [disabled]="isLoading"
-            class="w-full px-6 py-3 text-lg font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed relative inline-flex items-center justify-center gap-2"
-            [style.background-color]="brandingColors.primary"
-            [style.border-color]="brandingColors.primary"
-            [style.color]="brandingColors.accent"
-            [style.border]="`2px solid ${brandingColors.primary}`"
-            style="box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);"
-            onmouseover="this.style.transform='translateY(-1px)'; this.style.boxShadow='0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)';"
-            onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)';"
+            class="w-full px-6 py-4 bg-gradient-to-r from-primary to-secondary text-white font-bold text-lg rounded-2xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 relative overflow-hidden group"
           >
-            <!-- Loading spinner -->
-            <svg
-              *ngIf="isLoading"
-              class="animate-spin h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-
-            <!-- Button text -->
-            <span>{{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}</span>
+            <!-- Efecto de brillo -->
+            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+            <span class="relative flex items-center justify-center space-x-2">
+              <span *ngIf="isLoading" class="animate-spin">⏳</span>
+              <span>{{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}</span>
+            </span>
           </button>
         </div>
-
-        <!-- Additional Links -->
-        <div class="text-center space-y-2">
-          <p class="text-sm" [style.color]="brandingColors.secondary">
-            <a routerLink="/auth/forgot-password" class="transition-colors font-medium cursor-pointer" [style.color]="brandingColors.primary" [style.text-decoration-color]="brandingColors.primary">
-              ¿Olvidaste tu contraseña?
-            </a>
-          </p>
-          <p class="text-sm" [style.color]="brandingColors.secondary">
-            ¿No tienes cuenta? 
-            <a routerLink="/auth/register" class="transition-colors font-medium" [style.color]="brandingColors.primary" [style.text-decoration-color]="brandingColors.primary">
-              Regístrate aquí
-            </a>
-          </p>
-        </div>
       </form>
-    </app-card>
+    </div>
 
-    <!-- Back to Home -->
-    <div class="text-center">
-      <a routerLink="/" class="text-sm transition-colors" [style.color]="brandingColors.secondary" [style.text-decoration-color]="brandingColors.primary">
-        ← Volver al inicio
+    <!-- Links adicionales -->
+    <div class="text-center space-y-4">
+      <div class="bg-white/60 backdrop-blur-sm rounded-2xl p-4 border border-white/30">
+        <p class="text-sm text-gray-600">
+          <a routerLink="/auth/forgot-password" class="text-primary hover:text-secondary font-bold transition-colors duration-300 hover:underline">
+            ¿Olvidaste tu contraseña?
+          </a>
+        </p>
+        <p class="text-sm text-gray-600 mt-2">
+          ¿No tienes cuenta?
+          <a routerLink="/auth/register" class="text-primary hover:text-secondary font-bold transition-colors duration-300 hover:underline">
+            Regístrate aquí
+          </a>
+        </p>
+      </div>
+
+      <a routerLink="/" class="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-primary transition-all duration-300 hover:scale-105">
+        <span>←</span>
+        <span>Volver al inicio</span>
       </a>
     </div>
   </div>

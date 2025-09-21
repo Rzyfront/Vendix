@@ -69,25 +69,25 @@ export class PublicController {
         `Resolving domain configuration for: ${resolvedHostname}`,
       );
 
-      // Resolver la configuración del dominio
-      const store =
-        await this.domainResolutionService.resolveStoreByDomain(resolvedHostname);
+      // Resolver la configuración del dominio con información detallada de store/organización
+      const domainConfig =
+        await this.domainResolutionService.resolveDomain(resolvedHostname);
 
-      if (!store) {
+      if (!domainConfig) {
         this.logger.warn(
-          `Store not found for: ${resolvedHostname}`,
+          `Domain config not found for: ${resolvedHostname}`,
         );
         throw new NotFoundException(
-          `Store not found for hostname: ${resolvedHostname}`,
+          `Domain configuration not found for hostname: ${resolvedHostname}`,
         );
       }
 
       // Log successful resolution
       this.logger.log(
-        `Successfully resolved domain: ${resolvedHostname} -> Store: ${store.name} (${store.id})`,
+        `Successfully resolved domain config: ${resolvedHostname} -> Org: ${domainConfig.organizationId} Store: ${domainConfig.storeId}`,
       );
 
-      return store;
+      return domainConfig;
     } catch (error) {
       this.logger.error(`Error resolving domain ${hostname}:`, error.message);
 

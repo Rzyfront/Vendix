@@ -14,6 +14,8 @@ export interface DomainResolutionResponse {
   storeSlug?: string;
   organizationName?: string;
   organizationSlug?: string;
+  // Type of domain
+  domainType: 'organization' | 'store';
 }
 
 @Injectable()
@@ -21,6 +23,41 @@ export class DomainResolutionService {
   private readonly logger = new Logger(DomainResolutionService.name);
 
   constructor(private prisma: PrismaService) {}
+
+  /**
+   * Resuelve la configuración de un dominio por hostname para uso público
+   * Solo devuelve la configuración del dominio sin información detallada de store/organización
+   */
+  async resolveDomainConfig(hostname: string): Promise<any> {
+    this.logger.log(`Resolving domain config for public access: ${hostname}`);
+
+    const domainConfig = await this.prisma.domain_settings.findUnique({
+      where: {
+        hostname: hostname,
+      },
+    });
+
+    if (!domainConfig) {
+      this.logger.warn(`Domain config not found: ${hostname}`);
+      throw new NotFoundException(
+        `Domain configuration not found for hostname: ${hostname}`,
+      );
+    }
+
+    this.logger.log(`Found domain configuration for: ${hostname}`);
+
+    return {
+      id: domainConfig.id,
+      hostname: domainConfig.hostname,
+      organizationId: domainConfig.organization_id,
+      storeId: domainConfig.store_id || null,
+      config: domainConfig.config,
+      createdAt: domainConfig.created_at?.toISOString() || '',
+      updatedAt: domainConfig.updated_at?.toISOString() || '',
+      // Indicar el tipo de dominio basado en si tiene store_id
+      domainType: domainConfig.store_id ? 'store' : 'organization'
+    };
+  }
 
   /**
    * Resuelve la configuración de un dominio por hostname
@@ -49,6 +86,7 @@ export class DomainResolutionService {
     let storeSlug: string | undefined;
     let organizationName: string | undefined;
     let organizationSlug: string | undefined;
+    let domainType: 'organization' | 'store' = 'organization'; // default
 
     if (domainConfig.store_id) {
       const store = await this.prisma.stores.findUnique({
@@ -61,7 +99,19 @@ export class DomainResolutionService {
         storeSlug = store.slug;
         organizationName = store.organizations?.name;
         organizationSlug = store.organizations?.slug;
+        domainType = 'store';
       }
+    } else {
+      // Only organization, no store
+      const organization = await this.prisma.organizations.findUnique({
+        where: { id: domainConfig.organization_id! },
+      });
+
+      if (organization) {
+        organizationName = organization.name;
+        organizationSlug = organization.slug;
+      }
+      domainType = 'organization';
     }
 
     return {
@@ -77,6 +127,7 @@ export class DomainResolutionService {
       storeSlug,
       organizationName,
       organizationSlug,
+      domainType,
     };
   }
 
@@ -96,6 +147,7 @@ export class DomainResolutionService {
       let storeSlug: string | undefined;
       let organizationName: string | undefined;
       let organizationSlug: string | undefined;
+      let domainType: 'organization' | 'store' = 'organization'; // default
 
       if (domain.store_id) {
         const store = await this.prisma.stores.findUnique({
@@ -108,7 +160,19 @@ export class DomainResolutionService {
           storeSlug = store.slug;
           organizationName = store.organizations?.name;
           organizationSlug = store.organizations?.slug;
+          domainType = 'store';
         }
+      } else {
+        // Only organization, no store
+        const organization = await this.prisma.organizations.findUnique({
+          where: { id: domain.organization_id! },
+        });
+
+        if (organization) {
+          organizationName = organization.name;
+          organizationSlug = organization.slug;
+        }
+        domainType = 'organization';
       }
 
       results.push({
@@ -123,6 +187,7 @@ export class DomainResolutionService {
         storeSlug,
         organizationName,
         organizationSlug,
+        domainType,
       });
     }
 
@@ -152,6 +217,7 @@ export class DomainResolutionService {
     let storeSlug: string | undefined;
     let organizationName: string | undefined;
     let organizationSlug: string | undefined;
+    let domainType: 'organization' | 'store' = 'organization'; // default
 
     if (domainConfig.store_id) {
       const store = await this.prisma.stores.findUnique({
@@ -164,7 +230,19 @@ export class DomainResolutionService {
         storeSlug = store.slug;
         organizationName = store.organizations?.name;
         organizationSlug = store.organizations?.slug;
+        domainType = 'store';
       }
+    } else {
+      // Only organization, no store
+      const organization = await this.prisma.organizations.findUnique({
+        where: { id: domainConfig.organization_id! },
+      });
+
+      if (organization) {
+        organizationName = organization.name;
+        organizationSlug = organization.slug;
+      }
+      domainType = 'organization';
     }
 
     return {
@@ -179,6 +257,7 @@ export class DomainResolutionService {
       storeSlug,
       organizationName,
       organizationSlug,
+      domainType,
     };
   }
 
@@ -199,6 +278,7 @@ export class DomainResolutionService {
     let storeSlug: string | undefined;
     let organizationName: string | undefined;
     let organizationSlug: string | undefined;
+    let domainType: 'organization' | 'store' = 'organization'; // default
 
     if (domainConfig.store_id) {
       const store = await this.prisma.stores.findUnique({
@@ -211,7 +291,19 @@ export class DomainResolutionService {
         storeSlug = store.slug;
         organizationName = store.organizations?.name;
         organizationSlug = store.organizations?.slug;
+        domainType = 'store';
       }
+    } else {
+      // Only organization, no store
+      const organization = await this.prisma.organizations.findUnique({
+        where: { id: domainConfig.organization_id! },
+      });
+
+      if (organization) {
+        organizationName = organization.name;
+        organizationSlug = organization.slug;
+      }
+      domainType = 'organization';
     }
 
     return {
@@ -226,6 +318,7 @@ export class DomainResolutionService {
       storeSlug,
       organizationName,
       organizationSlug,
+      domainType,
     };
   }
 
@@ -274,7 +367,11 @@ export class DomainResolutionService {
         );
       }
 
-      return store;
+      return {
+        ...store,
+        domainType: 'store',
+        domainConfig: domainConfig
+      };
     }
 
     // Si no hay store_id pero hay organization_id, devolver info de la organización
@@ -297,6 +394,7 @@ export class DomainResolutionService {
         slug: organization.slug,
         organizations: organization, // La organización misma
         domainConfig: domainConfig, // Incluir la config del dominio
+        domainType: 'organization'
       };
     }
 

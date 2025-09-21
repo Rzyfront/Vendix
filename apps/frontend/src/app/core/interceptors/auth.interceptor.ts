@@ -1,8 +1,7 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpInterceptor, HttpRequest, HttpHandler, HttpEvent, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError, BehaviorSubject } from 'rxjs';
 import { catchError, filter, take, switchMap } from 'rxjs/operators';
-import { isPlatformBrowser } from '@angular/common';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../services/auth.service';
 
@@ -11,10 +10,7 @@ export class AuthInterceptor implements HttpInterceptor {
   private isRefreshing = false;
   private refreshTokenSubject: BehaviorSubject<string | null> = new BehaviorSubject<string | null>(null);
 
-  constructor(
-    private authService: AuthService,
-    @Inject(PLATFORM_ID) private platformId: Object
-  ) {}
+  constructor(private authService: AuthService) {}
 
   intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
     // Add auth token to request if available and URL starts with API base
@@ -47,36 +43,34 @@ export class AuthInterceptor implements HttpInterceptor {
       this.isRefreshing = true;
       this.refreshTokenSubject.next(null);
 
-      if (isPlatformBrowser(this.platformId)) {
-        const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = localStorage.getItem('refresh_token');
 
-        if (refreshToken) {
-          return this.authService.refreshToken().pipe(
-            switchMap((response: any) => {
-              this.isRefreshing = false;
-              const newToken = response.data?.access_token;
-              const newRefreshToken = response.data?.refresh_token;
+      if (refreshToken) {
+        return this.authService.refreshToken().pipe(
+          switchMap((response: any) => {
+            this.isRefreshing = false;
+            const newToken = response.data?.access_token;
+            const newRefreshToken = response.data?.refresh_token;
 
-              if (newToken) {
-                localStorage.setItem('access_token', newToken);
-                if (newRefreshToken) {
-                  localStorage.setItem('refresh_token', newRefreshToken);
-                }
-                this.refreshTokenSubject.next(newToken);
-                return next.handle(this.addTokenToRequest(request, newToken));
+            if (newToken) {
+              localStorage.setItem('access_token', newToken);
+              if (newRefreshToken) {
+                localStorage.setItem('refresh_token', newRefreshToken);
               }
+              this.refreshTokenSubject.next(newToken);
+              return next.handle(this.addTokenToRequest(request, newToken));
+            }
 
-              // If refresh failed, logout user
-              this.authService.logout();
-              return throwError(() => new Error('Token refresh failed'));
-            }),
-            catchError((error) => {
-              this.isRefreshing = false;
-              this.authService.logout();
-              return throwError(() => error);
-            })
-          );
-        }
+            // If refresh failed, logout user
+            this.authService.logout();
+            return throwError(() => new Error('Token refresh failed'));
+          }),
+          catchError((error) => {
+            this.isRefreshing = false;
+            this.authService.logout();
+            return throwError(() => error);
+          })
+        );
       }
     }
 

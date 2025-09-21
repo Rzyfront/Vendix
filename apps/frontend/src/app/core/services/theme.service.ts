@@ -1,5 +1,4 @@
-import { Injectable, Inject, DOCUMENT, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { Injectable, Inject, DOCUMENT } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { TenantConfig, BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
 
@@ -9,23 +8,16 @@ import { TenantConfig, BrandingConfig, ThemeConfig } from '../models/tenant-conf
 export class ThemeService {
   private currentThemeSubject = new BehaviorSubject<ThemeConfig | null>(null);
   public currentTheme$ = this.currentThemeSubject.asObservable();
-  
+
   private loadedFonts = new Set<string>();
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
 
-  constructor(
-    @Inject(DOCUMENT) private document: Document,
-    @Inject(PLATFORM_ID) private platformId: Object
-  ) {}
+  constructor(@Inject(DOCUMENT) private document: Document) {}
 
   /**
    * Aplica la configuración completa del tenant
    */
   async applyTenantConfiguration(tenantConfig: TenantConfig): Promise<void> {
-    if (!isPlatformBrowser(this.platformId)) {
-      return; // No aplicar temas en el servidor
-    }
-
     try {
       console.log('[THEME SERVICE] Applying tenant configuration:', tenantConfig);
       

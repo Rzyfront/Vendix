@@ -1,5 +1,4 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { Injectable } from '@angular/core';
 import { ActionReducer, MetaReducer } from '@ngrx/store';
 import { TenantState } from './tenant/tenant.reducer';
 import { AuthState } from './auth/auth.reducer';
@@ -35,16 +34,9 @@ const DEFAULT_CONFIG: PersistenceConfig = {
   providedIn: 'root'
 })
 export class StorePersistenceService {
-  private isBrowser: boolean;
-
-  constructor(@Inject(PLATFORM_ID) platformId: Object) {
-    this.isBrowser = isPlatformBrowser(platformId);
-  }
 
   // Save state to localStorage
   saveState(key: string, state: any): void {
-    if (!this.isBrowser) return;
-
     try {
       const serializedState = JSON.stringify(state);
       localStorage.setItem(key, serializedState);
@@ -55,8 +47,6 @@ export class StorePersistenceService {
 
   // Load state from localStorage
   loadState(key: string): any {
-    if (!this.isBrowser) return null;
-
     try {
       const serializedState = localStorage.getItem(key);
       if (serializedState) {
@@ -70,8 +60,6 @@ export class StorePersistenceService {
 
   // Clear persisted state
   clearState(key: string): void {
-    if (!this.isBrowser) return;
-
     try {
       localStorage.removeItem(key);
     } catch (error) {
@@ -95,8 +83,8 @@ export function tenantPersistenceMetaReducer(
     return (state, action) => {
       const newState = reducer(state, action);
 
-      // Only persist if enabled and in browser
-      if (config.tenant.enabled && persistenceService['isBrowser']) {
+      // Only persist if enabled
+      if (config.tenant.enabled) {
         const stateToPersist: Partial<TenantState> = {};
 
         config.tenant.keys.forEach(key => {
@@ -122,8 +110,8 @@ export function authPersistenceMetaReducer(
     return (state, action) => {
       const newState = reducer(state, action);
 
-      // Only persist if enabled and in browser
-      if (config.auth.enabled && persistenceService['isBrowser']) {
+      // Only persist if enabled
+      if (config.auth.enabled) {
         const stateToPersist: Partial<AuthState> = {};
 
         config.auth.keys.forEach(key => {

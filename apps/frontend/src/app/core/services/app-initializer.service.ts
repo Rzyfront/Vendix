@@ -1,6 +1,5 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { Router } from '@angular/router';
-import { isPlatformBrowser } from '@angular/common';
 import { firstValueFrom } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import { DomainDetectorService } from './domain-detector.service';
@@ -14,14 +13,14 @@ import { TenantConfig } from '../models/tenant-config.interface';
   providedIn: 'root'
 })
 export class AppInitializerService {
-  
+  private initializationError: any = null;
+
   constructor(
     private domainDetector: DomainDetectorService,
     private tenantConfig: TenantConfigService,
     private themeService: ThemeService,
     private tenantFacade: TenantFacade,
-    private router: Router,
-    @Inject(PLATFORM_ID) private platformId: Object
+    private router: Router
   ) {}
 
   /**
@@ -31,28 +30,21 @@ export class AppInitializerService {
     try {
       console.log('[APP INITIALIZER] Starting application initialization...');
 
+      // Reset any previous error
+      this.initializationError = null;
+
       // 1. Detectar el dominio actual
       const domainConfig = await this.domainDetector.detectDomain();
       console.log('[APP INITIALIZER] Domain detected:', domainConfig);
 
-      // 2. Inicializar tenant a través del store
-      this.tenantFacade.initTenant(domainConfig);
+      // 2. Store domain config in tenant store (but don't load tenant config yet)
+      this.tenantFacade.setDomainConfig(domainConfig);
 
-      // 3. Esperar a que se complete la inicialización del tenant
-      await firstValueFrom(
-        this.tenantFacade.initialized$.pipe(
-          filter(initialized => initialized === true)
-        )
-      );
-
-      // 4. Obtener configuración del tenant desde el store
-      const tenantConfig = this.tenantFacade.getCurrentTenantConfig();
-      console.log('[APP INITIALIZER] Tenant config loaded:', tenantConfig);
-
-      // 5. Aplicar tema y branding
-      if (tenantConfig) {
-        await this.themeService.applyTenantConfiguration(tenantConfig);
-        console.log('[APP INITIALIZER] Theme applied successfully');
+      // 3. Apply basic theme from domain config if available
+      if (domainConfig.customConfig?.branding) {
+        const transformedBranding = this.transformApiBranding(domainConfig.customConfig.branding);
+        await this.themeService.applyBranding(transformedBranding);
+        console.log('[APP INITIALIZER] Basic branding applied from domain config');
       }
 
       // 6. Configurar rutas dinámicamente
@@ -65,7 +57,8 @@ export class AppInitializerService {
 
     } catch (error) {
       console.error('[APP INITIALIZER] Error during initialization:', error);
-      await this.handleInitializationError(error);
+      this.initializationError = error;
+      // Don't throw - let the app handle the error state
     }
   }
 
@@ -316,29 +309,17 @@ export class AppInitializerService {
   }
 
   /**
-   * Maneja errores durante la inicialización
+   * Obtiene el error de inicialización si ocurrió
    */
-  private async handleInitializationError(error: any): Promise<void> {
-    console.error('[APP INITIALIZER] Initialization failed:', error);
-    
-    // Dependiendo del tipo de error, podríamos:
-    // 1. Mostrar página de error
-    // 2. Redirigir a Vendix principal
-    // 3. Mostrar mensaje de mantenimiento
-    
-    if (error.message?.includes('Domain') && error.message?.includes('not found')) {
-      // Dominio no encontrado - redirigir a Vendix
-      console.log('[APP INITIALIZER] Redirecting to Vendix due to domain not found');
-      if (isPlatformBrowser(this.platformId)) {
-        window.location.href = 'https://vendix.com';
-      }
-    } else {
-      // Otro tipo de error - mostrar página de error
-      console.log('[APP INITIALIZER] Navigating to error page');
-      this.router.navigate(['/error'], { 
-        queryParams: { message: 'Initialization failed' } 
-      });
-    }
+  getInitializationError(): any {
+    return this.initializationError;
+  }
+
+  /**
+   * Verifica si la inicialización falló
+   */
+  hasInitializationError(): boolean {
+    return this.initializationError !== null;
   }
 
   /**
@@ -373,11 +354,40 @@ export class AppInitializerService {
 
   /**
    * Verifica si la aplicación está completamente inicializada
+   * Ahora solo verifica domain config, no tenant config (se carga después del login)
    */
   isAppInitialized(): boolean {
-    const domainConfig = this.tenantConfig.getCurrentDomainConfig();
-    const tenantConfig = this.tenantConfig.getCurrentTenantConfig();
-    
-    return !!(domainConfig && tenantConfig);
+    const domainConfig = this.tenantFacade.getCurrentDomainConfig();
+    return !!domainConfig;
+  }
+
+  /**
+   * Transforma el branding de la API al formato esperado por ThemeService
+   */
+  private transformApiBranding(apiBranding: any): any {
+    return {
+      logo: {
+        url: apiBranding.logo_url,
+        alt: apiBranding.name || 'Logo'
+      },
+      colors: {
+        primary: apiBranding.primary_color,
+        secondary: apiBranding.secondary_color,
+        accent: apiBranding.accent_color,
+        background: apiBranding.background_color,
+        surface: apiBranding.background_color, // Using background as surface
+        text: {
+          primary: apiBranding.text_color,
+          secondary: apiBranding.text_color,
+          muted: apiBranding.text_color
+        }
+      },
+      fonts: {
+        primary: 'Inter, sans-serif', // Default font
+        secondary: 'Inter, sans-serif'
+      },
+      customCSS: undefined,
+      favicon: apiBranding.favicon_url
+    };
   }
 }

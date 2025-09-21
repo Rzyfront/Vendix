@@ -1,8 +1,8 @@
-import { Injectable, Inject, PLATFORM_ID } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { isPlatformBrowser } from '@angular/common';
+import { Store } from '@ngrx/store';
 import {
   DomainConfig,
   DomainType,
@@ -10,6 +10,7 @@ import {
   DomainResolution
 } from '../models/domain-config.interface';
 import { environment } from '../../../environments/environment';
+import * as TenantActions from '../store/tenant/tenant.actions';
 
 @Injectable({
   providedIn: 'root'
@@ -17,42 +18,46 @@ import { environment } from '../../../environments/environment';
 export class DomainDetectorService {
   private readonly API_URL = environment.apiUrl;
   private readonly production = environment.production;
+  private readonly DOMAIN_CONFIG_KEY = 'vendix_domain_config';
 
   constructor(
     private http: HttpClient,
-    @Inject(PLATFORM_ID) private platformId: Object
+    private store: Store
   ) {}
 
   /**
    * Detecta la configuración del dominio actual
    */
   async detectDomain(hostname?: string): Promise<DomainConfig> {
-    const currentHostname = hostname || (isPlatformBrowser(this.platformId) ? window.location.hostname : 'localhost');
-    
+    const currentHostname = hostname || window.location.hostname;
+
     console.log(`[DOMAIN DETECTOR] Analyzing hostname: ${currentHostname}`);
 
     try {
-      // 1. Verificar si es dominio de Vendix
-      if (this.isVendixCoreDomain(currentHostname)) {
-        return this.handleVendixDomain(currentHostname);
+      // Check if we have cached domain config
+      const cachedConfig = this.getCachedDomainConfig();
+      if (cachedConfig && cachedConfig.hostname === currentHostname) {
+        console.log('[DOMAIN DETECTOR] Using cached domain config:', cachedConfig);
+        this.store.dispatch(TenantActions.setDomainConfig({ domainConfig: cachedConfig }));
+        return cachedConfig;
       }
 
-      // 2. Para desarrollo local, usar mapeo
-      if (this.isDevelopmentEnvironment()) {
-        const devConfig = this.getDevelopmentMapping(currentHostname);
-        if (devConfig) {
-          return devConfig;
-        }
-      }
-
-      // 3. Consultar API para dominios personalizados
+      // Consultar API para resolver el dominio
       const domainInfo = await this.resolveDomainFromAPI(currentHostname);
-      
+
       if (!domainInfo) {
         throw new Error(`Domain ${currentHostname} not found or not configured`);
       }
 
-      return this.buildDomainConfig(currentHostname, domainInfo);
+      const domainConfig = this.buildDomainConfig(currentHostname, domainInfo);
+
+      // Cache the domain config
+      this.cacheDomainConfig(domainConfig);
+
+      // Store in NgRx state
+      this.store.dispatch(TenantActions.setDomainConfig({ domainConfig }));
+
+      return domainConfig;
 
     } catch (error) {
       console.error('[DOMAIN DETECTOR] Error detecting domain:', error);
@@ -61,160 +66,38 @@ export class DomainDetectorService {
   }
 
   /**
-   * Verifica si es un dominio core de Vendix
+   * Cache domain config in localStorage
    */
-   private isVendixCoreDomain(hostname: string): boolean {
-    // Usar configuración del backend en lugar de valores hardcodeados
-    // Por ahora mantenemos una lista básica, pero esto debería venir del backend
-    const vendixDomains = [
-      'vendix.com',
-      'admin.vendix.com',
-      'localhost',
-      '127.0.0.1'
-    ];
-
-    return vendixDomains.includes(hostname) || hostname.endsWith('.vendix.com');
-  }
-
-  /**
-   * Maneja dominios de Vendix
-   */
-  private handleVendixDomain(hostname: string): DomainConfig {
-    console.log(`[DOMAIN DETECTOR] Handling Vendix domain: ${hostname}`);
-
-    // Vendix principal
-    if (hostname === 'vendix.com' || hostname === 'localhost' || hostname === '127.0.0.1') {
-      return {
-        domainType: DomainType.VENDIX_CORE,
-        environment: AppEnvironment.VENDIX_LANDING,
-        isVendixDomain: true,
-        hostname
-      };
+  private cacheDomainConfig(config: DomainConfig): void {
+    try {
+      localStorage.setItem(this.DOMAIN_CONFIG_KEY, JSON.stringify(config));
+    } catch (error) {
+      console.warn('[DOMAIN DETECTOR] Failed to cache domain config:', error);
     }
+  }
 
-    // Admin de Vendix
-    if (hostname === 'admin.vendix.com') {
-      return {
-        domainType: DomainType.VENDIX_CORE,
-        environment: AppEnvironment.VENDIX_ADMIN,
-        isVendixDomain: true,
-        hostname
-      };
+  /**
+   * Get cached domain config from localStorage
+   */
+  private getCachedDomainConfig(): DomainConfig | null {
+    try {
+      const cached = localStorage.getItem(this.DOMAIN_CONFIG_KEY);
+      return cached ? JSON.parse(cached) : null;
+    } catch (error) {
+      console.warn('[DOMAIN DETECTOR] Failed to get cached domain config:', error);
+      return null;
     }
+  }
 
-    // Subdominios de Vendix (organizaciones sin dominio propio)
-    if (hostname.endsWith('.vendix.com')) {
-      const subdomain = hostname.replace('.vendix.com', '');
-      
-      // admin-{store}.vendix.com
-      if (subdomain.startsWith('admin-')) {
-        const storeSlug = subdomain.replace('admin-', '');
-        return {
-          domainType: DomainType.STORE_SUBDOMAIN,
-          environment: AppEnvironment.STORE_ADMIN,
-          storeSlug,
-          isVendixDomain: true,
-          hostname
-        };
-      }
-      
-      // store-{store}.vendix.com
-      if (subdomain.startsWith('store-')) {
-        const storeSlug = subdomain.replace('store-', '');
-        return {
-          domainType: DomainType.STORE_SUBDOMAIN,
-          environment: AppEnvironment.STORE_ECOMMERCE,
-          storeSlug,
-          isVendixDomain: true,
-          hostname
-        };
-      }
-      
-      // {org}.vendix.com
-      return {
-        domainType: DomainType.ORGANIZATION_SUBDOMAIN,
-        environment: AppEnvironment.ORG_ADMIN,
-        organizationSlug: subdomain,
-        isVendixDomain: true,
-        hostname
-      };
+  /**
+   * Clear cached domain config
+   */
+  clearCache(): void {
+    try {
+      localStorage.removeItem(this.DOMAIN_CONFIG_KEY);
+    } catch (error) {
+      console.warn('[DOMAIN DETECTOR] Failed to clear domain config cache:', error);
     }
-
-    throw new Error(`Unrecognized Vendix domain: ${hostname}`);
-  }
-
-  /**
-   * Verifica si estamos en entorno de desarrollo
-   */
-  private isDevelopmentEnvironment(): boolean {
-    return !this.production;
-  }
-
-  /**
-   * Obtiene el mapeo para desarrollo local
-   * Nota: Para desarrollo, usamos configuración simplificada ya que el backend puede no estar disponible
-   */
-  private getDevelopmentMapping(hostname: string): DomainConfig | null {
-    const port = isPlatformBrowser(this.platformId) ? window.location.port : '';
-    const fullHostname = port ? `${hostname}:${port}` : hostname;
-
-    // Mapeo básico para desarrollo - en producción esto vendría del backend
-    const devMappings: { [key: string]: DomainConfig } = {
-      'localhost:4200': {
-        domainType: DomainType.VENDIX_CORE,
-        environment: AppEnvironment.VENDIX_LANDING,
-        isVendixDomain: true,
-        hostname: fullHostname
-      }
-    };
-
-    return devMappings[fullHostname] || null;
-  }
-
-  /**
-   * Fallback para desarrollo cuando el backend no está disponible
-   */
-  private getFallbackDevelopmentMapping(fullHostname: string): DomainConfig | null {
-    const devMappings: { [key: string]: DomainConfig } = {
-      'localhost:4200': {
-        domainType: DomainType.VENDIX_CORE,
-        environment: AppEnvironment.VENDIX_LANDING,
-        isVendixDomain: true,
-        hostname: fullHostname
-      },
-      'mordoc.localhost:4200': {
-        domainType: DomainType.ORGANIZATION_ROOT,
-        environment: AppEnvironment.ORG_LANDING,
-        organizationSlug: 'mordoc',
-        isVendixDomain: false,
-        hostname: fullHostname
-      },
-      'app.mordoc.localhost:4200': {
-        domainType: DomainType.ORGANIZATION_SUBDOMAIN,
-        environment: AppEnvironment.ORG_ADMIN,
-        organizationSlug: 'mordoc',
-        isVendixDomain: false,
-        hostname: fullHostname
-      },
-      'luda.mordoc.localhost:4200': {
-        domainType: DomainType.STORE_SUBDOMAIN,
-        environment: AppEnvironment.STORE_ECOMMERCE,
-        organizationSlug: 'mordoc',
-        storeSlug: 'luda',
-        isVendixDomain: false,
-        hostname: fullHostname
-      },
-      'admin.luda.localhost:4200': {
-        domainType: DomainType.STORE_SUBDOMAIN,
-        environment: AppEnvironment.STORE_ADMIN,
-        organizationSlug: 'mordoc',
-        storeSlug: 'luda',
-        isVendixDomain: false,
-        hostname: fullHostname
-      }
-    };
-
-    return devMappings[fullHostname] || null;
   }
 
   /**
@@ -223,9 +106,8 @@ export class DomainDetectorService {
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
     try {
       const response = await this.http
-        .get<{ success: boolean; data: DomainResolution }>(`${this.API_URL}/api/public/domains/resolve/${hostname}`)
+        .get<DomainResolution>(`${this.API_URL}/api/public/domains/resolve/${hostname}`)
         .pipe(
-          map(response => response.data),
           catchError(error => {
             console.warn(`[DOMAIN DETECTOR] API resolution failed for ${hostname}:`, error);
             return of(null);
@@ -244,41 +126,62 @@ export class DomainDetectorService {
    * Construye la configuración de dominio basada en la respuesta de la API
    */
   private buildDomainConfig(hostname: string, domainInfo: DomainResolution): DomainConfig {
-    console.log(`[DOMAIN DETECTOR] Building config for custom domain:`, domainInfo);
+    console.log(`[DOMAIN DETECTOR] Building config for domain:`, domainInfo);
 
-    let environment: AppEnvironment;
+    // Map domain type from API to enum
     let domainType: DomainType;
-
-    // Determinar el tipo de dominio y entorno
     switch (domainInfo.type) {
       case 'organization_root':
         domainType = DomainType.ORGANIZATION_ROOT;
-        environment = domainInfo.environmentConfig?.showLanding 
-          ? AppEnvironment.ORG_LANDING 
-          : AppEnvironment.ORG_ADMIN;
         break;
-        
       case 'organization_subdomain':
         domainType = DomainType.ORGANIZATION_SUBDOMAIN;
-        environment = AppEnvironment.ORG_ADMIN;
         break;
-        
       case 'store_subdomain':
         domainType = DomainType.STORE_SUBDOMAIN;
-        environment = domainInfo.purpose === 'admin' 
-          ? AppEnvironment.STORE_ADMIN 
-          : AppEnvironment.STORE_ECOMMERCE;
         break;
-        
       case 'store_custom':
         domainType = DomainType.STORE_CUSTOM;
-        environment = domainInfo.purpose === 'admin' 
-          ? AppEnvironment.STORE_ADMIN 
-          : AppEnvironment.STORE_ECOMMERCE;
         break;
-        
       default:
-        throw new Error(`Unknown domain type: ${domainInfo.type}`);
+        // Handle cases where domainType is provided directly (like "organization")
+        switch (domainInfo.domainType) {
+          case 'organization':
+            domainType = DomainType.ORGANIZATION_ROOT;
+            break;
+          default:
+            throw new Error(`Unknown domain type: ${domainInfo.type || domainInfo.domainType}`);
+        }
+    }
+
+    // Map environment from API response - use config.app field
+    let environment: AppEnvironment;
+    if (domainInfo.config?.app) {
+      const appType = domainInfo.config.app;
+      switch (appType) {
+        case 'VENDIX_LANDING':
+          environment = AppEnvironment.VENDIX_LANDING;
+          break;
+        case 'VENDIX_ADMIN':
+          environment = AppEnvironment.VENDIX_ADMIN;
+          break;
+        case 'ORG_LANDING':
+          environment = AppEnvironment.ORG_LANDING;
+          break;
+        case 'ORG_ADMIN':
+          environment = AppEnvironment.ORG_ADMIN;
+          break;
+        case 'STORE_ADMIN':
+          environment = AppEnvironment.STORE_ADMIN;
+          break;
+        case 'STORE_ECOMMERCE':
+          environment = AppEnvironment.STORE_ECOMMERCE;
+          break;
+        default:
+          throw new Error(`Unknown app type: ${appType}`);
+      }
+    } else {
+      throw new Error('No app environment information provided in domain resolution config');
     }
 
     return {

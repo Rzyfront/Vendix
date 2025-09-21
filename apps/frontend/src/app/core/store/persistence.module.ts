@@ -1,5 +1,4 @@
-import { inject, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { inject } from '@angular/core';
 import { MetaReducer } from '@ngrx/store';
 import { StorePersistenceService, tenantPersistenceMetaReducer, authPersistenceMetaReducer, getPersistedTenantState, getPersistedAuthState } from './persistence';
 import { tenantReducer, initialTenantState, TenantState } from './tenant/tenant.reducer';
@@ -18,22 +17,12 @@ export function createAuthMetaReducers(): MetaReducer<AuthState> {
 
 // Hydrate initial state from localStorage
 export function hydrateTenantState(): TenantState {
-  const platformId = inject(PLATFORM_ID);
-  if (!isPlatformBrowser(platformId)) {
-    return initialTenantState;
-  }
-
   const persistenceService = inject(StorePersistenceService);
   const persistedState = getPersistedTenantState(persistenceService);
   return persistedState ? { ...initialTenantState, ...persistedState } : initialTenantState;
 }
 
 export function hydrateAuthState(): AuthState {
-  const platformId = inject(PLATFORM_ID);
-  if (!isPlatformBrowser(platformId)) {
-    return initialAuthState;
-  }
-
   const persistenceService = inject(StorePersistenceService);
   const persistedState = getPersistedAuthState(persistenceService);
   return persistedState ? { ...initialAuthState, ...persistedState } : initialAuthState;
