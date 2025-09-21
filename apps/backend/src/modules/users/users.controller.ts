@@ -11,34 +11,56 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { UsersService } from './users.service';
 import { CreateUserDto, UpdateUserDto, UserQueryDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Post()
   @Permissions('users:create')
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  async create(@Body() createUserDto: CreateUserDto, @Req() request: Request) {
+    const user = await this.usersService.create(createUserDto);
+    return this.responseService.created(
+      user,
+      'User created successfully',
+      request.url,
+    );
   }
 
   @Get()
   @Permissions('users:read')
-  findAll(@Query() query: UserQueryDto) {
-    return this.usersService.findAll(query);
+  async findAll(@Query() query: UserQueryDto, @Req() request: Request) {
+    const result = await this.usersService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta,
+      'Users retrieved successfully',
+      request.url,
+    );
   }
 
   @Get(':id')
   @Permissions('users:read')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.usersService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number, @Req() request: Request) {
+    const user = await this.usersService.findOne(id);
+    return this.responseService.success(
+      user,
+      'User retrieved successfully',
+      request.url,
+    );
   }
 
   @Patch(':id')
