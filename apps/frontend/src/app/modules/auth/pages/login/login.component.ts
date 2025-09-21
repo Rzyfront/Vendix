@@ -50,6 +50,17 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.errorMessage = error || '';
     });
 
+    // Subscribe to authentication success to redirect
+    this.authFacade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe(isAuth => {
+      if (isAuth) {
+        console.log('User authenticated, redirecting to admin dashboard...');
+        // Small delay to ensure the auth state is fully updated
+        setTimeout(() => {
+          this.authService.redirectAfterLogin();
+        }, 100);
+      }
+    });
+
     // Subscribe to tenant branding colors
     this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
       if (tenantConfig?.branding?.colors) {

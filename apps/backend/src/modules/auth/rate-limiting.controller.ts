@@ -63,7 +63,7 @@ export class RateLimitingController {
       endpoints: [
         {
           path: 'POST /auth/login',
-          limit: 3,
+          limit: 1000,
           window: '15 minutes',
           status: 'active',
         },

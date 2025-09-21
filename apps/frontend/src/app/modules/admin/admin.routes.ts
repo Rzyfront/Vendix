@@ -32,7 +32,26 @@ export const adminRoutes: Routes = [
       },
       {
         path: 'settings',
-        loadComponent: () => import('./pages/settings/settings.component').then(c => c.SettingsComponent)
+        loadComponent: () => import('./pages/settings/settings.component').then(c => c.SettingsComponent),
+        children: [
+          {
+            path: '',
+            redirectTo: 'general',
+            pathMatch: 'full'
+          },
+          {
+            path: 'general',
+            loadComponent: () => import('./pages/settings/general-settings.component').then(c => c.GeneralSettingsComponent)
+          },
+          {
+            path: 'roles',
+            loadComponent: () => import('./pages/roles/roles.component').then(c => c.RolesComponent)
+          },
+          {
+            path: 'roles/:id/permissions',
+            loadComponent: () => import('./pages/permissions/permissions.component').then(c => c.PermissionsComponent)
+          }
+        ]
       },
       {
         path: '**',

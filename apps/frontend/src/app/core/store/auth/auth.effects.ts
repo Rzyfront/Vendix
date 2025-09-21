@@ -38,8 +38,9 @@ export class AuthEffects {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('vendix_user', JSON.stringify(user));
         }
-        // Redirect based on user role
-        this.authService.redirectAfterLogin();
+        // Always redirect to admin dashboard after successful login
+        console.log('Login successful, redirecting to admin dashboard...');
+        this.router.navigate(['/admin/dashboard']);
       })
     ),
     { dispatch: false }

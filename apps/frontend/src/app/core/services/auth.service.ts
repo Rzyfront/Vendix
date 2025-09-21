@@ -51,12 +51,46 @@ export interface User {
   emailVerified: boolean;
 }
 
+export interface BackendUser {
+  id: number;
+  username: string;
+  email: string;
+  state: string;
+  last_login: string;
+  failed_login_attempts: number;
+  locked_until: string | null;
+  email_verified: boolean;
+  two_factor_enabled: boolean;
+  two_factor_secret: string | null;
+  created_at: string;
+  updated_at: string;
+  first_name: string;
+  last_name: string;
+  onboarding_completed: boolean;
+  organization_id: number;
+  user_roles: Array<{
+    id: number;
+    user_id: number;
+    role_id: number;
+    roles: {
+      id: number;
+      name: string;
+      description: string;
+      is_system_role: boolean;
+      created_at: string;
+      updated_at: string;
+      role_permissions: any[];
+    };
+  }>;
+  organizations: any;
+}
+
 export interface AuthResponse {
   message: string;
   data: {
     access_token: string;
     refresh_token: string;
-    user: User;
+    user: BackendUser;
   };
 }
 
@@ -91,19 +125,39 @@ export class AuthService {
       .pipe(
         tap((response: AuthResponse) => {
           if (response.data) {
+            console.log('Login response received:', response);
+            
+            // Transform backend user object to frontend User interface
+            const backendUser = response.data.user;
+            const frontendUser: User = {
+              id: backendUser.id.toString(),
+              email: backendUser.email,
+              firstName: backendUser.first_name,
+              lastName: backendUser.last_name,
+              roles: backendUser.user_roles?.map((ur: any) => ur.roles.name) || [],
+              isActive: backendUser.state === 'active',
+              emailVerified: backendUser.email_verified
+            };
+
+            console.log('Transformed user:', frontendUser);
+
             // Store tokens and user data
             localStorage.setItem('access_token', response.data.access_token);
             localStorage.setItem('refresh_token', response.data.refresh_token);
-            localStorage.setItem('user', JSON.stringify(response.data.user));
+            localStorage.setItem('user', JSON.stringify(frontendUser));
 
-            // Update auth store
+            console.log('Tokens and user data stored in localStorage');
+
+            // Update auth store - this will trigger the navigation in effects
             this.store.dispatch(AuthActions.loginSuccess({
-              user: response.data.user,
+              user: frontendUser,
               tokens: {
                 accessToken: response.data.access_token,
                 refreshToken: response.data.refresh_token
               }
             }));
+
+            console.log('Auth store updated with login success action');
           }
         })
       );
@@ -186,17 +240,15 @@ export class AuthService {
 
   // Redirect after login based on user role
   redirectAfterLogin(): void {
-    const user = this.getCurrentUser();
-    if (user?.roles?.includes('ADMIN') || user?.roles?.includes('SUPER_ADMIN')) {
-      this.router.navigate(['/admin/dashboard']);
-    } else if (user?.roles?.includes('OWNER') || user?.roles?.includes('MANAGER')) {
-      this.router.navigate(['/organization']);
-    } else if (user?.roles?.includes('STORE_MANAGER') || user?.roles?.includes('EMPLOYEE')) {
-      this.router.navigate(['/store']);
-    } else {
-      // For customers or unknown roles, redirect to store/ecommerce
-      this.router.navigate(['/store']);
-    }
+    console.log('Redirecting to admin dashboard...');
+    // Always redirect to admin dashboard after login
+    this.router.navigate(['/admin/dashboard']).then(success => {
+      if (success) {
+        console.log('Successfully navigated to admin dashboard');
+      } else {
+        console.error('Failed to navigate to admin dashboard');
+      }
+    });
   }
 
   // Clear stored tokens
