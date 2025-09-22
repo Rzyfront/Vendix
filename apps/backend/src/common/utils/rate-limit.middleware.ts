@@ -14,7 +14,7 @@ export class RateLimitMiddleware implements NestMiddleware {
     const key = req.ip || req.connection.remoteAddress || 'unknown';
     const now = Date.now();
     const windowMs = 15 * 60 * 1000; // 15 minutos
-    const maxAttempts = 5;
+    const maxAttempts = 10;
 
     const record = this.attempts.get(key);
 
@@ -46,7 +46,7 @@ export class LoginRateLimitMiddleware implements NestMiddleware {
     const key = req.ip || req.connection.remoteAddress || 'unknown';
     const now = Date.now();
     const windowMs = 15 * 60 * 1000; // 15 minutos
-    const maxAttempts = 3;
+    const maxAttempts = 10;
 
     const record = this.attempts.get(key);
 
