@@ -24,10 +24,14 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ForgotPasswordDto } from './dto/password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(
+    private readonly authService: AuthService,
+    private readonly responseService: ResponseService,
+  ) { }
 
   @Post('register-owner')
   @HttpCode(HttpStatus.CREATED)
@@ -74,10 +78,11 @@ export class AuthController {
     };
 
     const result = await this.authService.registerCustomer(registerCustomerDto, clientInfo);
-    return {
-      message: 'Cliente registrado exitosamente en la tienda.',
-      data: result,
-    };
+    return this.responseService.created(
+      result,
+      'Cliente registrado exitosamente en la tienda.',
+      request.url,
+    );
   }
 
   @Post('register-staff')
@@ -86,12 +91,14 @@ export class AuthController {
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
     @CurrentUser() user: any,
+    @Req() request: Request,
   ) {
     const result = await this.authService.registerStaff(registerStaffDto, user.id);
-    return {
-      message: result.message,
-      data: result.user,
-    };
+    return this.responseService.created(
+      result.user,
+      result.message,
+      request.url,
+    );
   }
 
   @Post('register')
@@ -113,10 +120,11 @@ export class AuthController {
     };
 
     const result = await this.authService.login(loginDto, clientInfo);
-    return {
-      message: 'Login exitoso',
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      'Login exitoso',
+      request.url,
+    );
   }
 
   @Post('refresh')
@@ -139,12 +147,13 @@ export class AuthController {
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  async getProfile(@CurrentUser() user: any) {
+  async getProfile(@CurrentUser() user: any, @Req() request: Request) {
     const profile = await this.authService.getProfile(user.id);
-    return {
-      message: 'Perfil obtenido exitosamente',
-      data: profile,
-    };
+    return this.responseService.success(
+      profile,
+      'Perfil obtenido exitosamente',
+      request.url,
+    );
   }
 
   @Post('logout')
