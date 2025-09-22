@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
@@ -7,6 +7,7 @@ import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { takeUntil, combineLatest } from 'rxjs/operators';
 import { Subject } from 'rxjs';
+import { ToastService } from '../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-login',
@@ -28,6 +29,8 @@ export class LoginComponent implements OnInit, OnDestroy {
   // Branding colors from domain config - reactive (no defaults)
   brandingColors: any = {};
 
+  private toast = inject(ToastService);
+
   constructor(
     private fb: FormBuilder,
     private authService: AuthService,
@@ -48,12 +51,16 @@ export class LoginComponent implements OnInit, OnDestroy {
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
       this.errorMessage = error || '';
+      if (error) {
+        this.toast.error(error || 'Error de autenticación');
+      }
     });
 
     // Subscribe to authentication success to redirect
     this.authFacade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe(isAuth => {
       if (isAuth) {
         console.log('User authenticated, redirecting to admin dashboard...');
+        this.toast.success('Bienvenido de nuevo');
         // Small delay to ensure the auth state is fully updated
         setTimeout(() => {
           this.authService.redirectAfterLogin();

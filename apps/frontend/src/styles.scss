@@ -4,17 +4,55 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CSS Variables for Theme Support */
+/* Design Tokens (light) */
 :root {
-  /* Default Theme */
-  --color-background: #f8f9fa; /* Light Gray */
+  --color-background: #ffffff;
+  --color-foreground: #111827;
   --color-primary: #4f46e5; /* Indigo */
   --color-secondary: #10b981; /* Emerald */
-  --color-text-primary: #111827; /* Dark Gray */
-  --color-text-secondary: #6b7280; /* Medium Gray */
-  --color-border: #d1d5db; /* Light Gray */
+  --color-accent: #f3f4f6; /* Gray-100 */
+  --color-accent-foreground: #111827;
+  --color-muted: #f9fafb; /* Gray-50 */
+  --color-muted-foreground: #6b7280; /* Gray-500 */
+  --color-ring: rgba(79,70,229,0.5);
+  --color-border: #e5e7eb; /* Gray-200 */
+  --color-input: #e5e7eb; /* Gray-200 */
+  --color-destructive: #ef4444; /* Red-500 */
+  --color-destructive-foreground: #ffffff;
+
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+
   --font-base: 'Inter', system-ui, -apple-system, sans-serif;
-  --button-radius: 0.5rem;
+
+  --radius-button: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-input: 0.5rem;
+  --shadow-card: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+}
+
+/* Design Tokens (dark) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: #0b0f1a;
+    --color-foreground: #e5e7eb;
+    --color-primary: #6366f1;
+    --color-secondary: #34d399;
+    --color-accent: #111827;
+    --color-accent-foreground: #e5e7eb;
+    --color-muted: #0f172a;
+    --color-muted-foreground: #9ca3af;
+    --color-ring: rgba(99,102,241,0.5);
+    --color-border: #1f2937;
+    --color-input: #374151;
+    --color-destructive: #f87171;
+    --color-destructive-foreground: #111827;
+
+    --color-text-primary: #e5e7eb;
+    --color-text-secondary: #9ca3af;
+
+    --shadow-card: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  }
 }
 
 /* Global Styles */
@@ -33,3 +71,54 @@ body {
 
 /* Loading Inter Font */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* Dialog (CDK Overlay) base styles */
+.app-dialog-backdrop {
+  background-color: rgba(0, 0, 0, 0.5);
+  animation: backdrop-in 150ms ease-out;
+}
+
+.app-dialog-panel {
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--color-border);
+  max-width: 42rem; /* ~lg */
+  width: calc(100vw - 2rem);
+  padding: 1rem; /* let inner components decide spacing */
+  animation: dialog-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Exit state for dialog (added via class) */
+.app-dialog-backdrop.closing {
+  animation: backdrop-out 150ms ease-in forwards;
+}
+.app-dialog-panel.closing {
+  animation: dialog-out 140ms ease-in forwards;
+}
+
+@keyframes backdrop-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes backdrop-out { from { opacity: 1 } to { opacity: 0 } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(4px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+@keyframes dialog-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-4px) scale(0.98) } }
+
+/* Toast animations */
+.toast-item {
+  will-change: transform, opacity;
+}
+.toast-enter {
+  animation: toast-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.toast-leave {
+  animation: toast-out 140ms ease-in forwards;
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+@keyframes toast-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-6px) scale(0.98) } }
+
+/* Progress bar drains left-to-right over toast duration */
+.toast-progress {
+  animation: toast-progress var(--toast-duration, 3500ms) linear forwards;
+  transform-origin: left center;
+}
+@keyframes toast-progress { from { transform: scaleX(1) } to { transform: scaleX(0) } }

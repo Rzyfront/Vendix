@@ -30,6 +30,12 @@ export const routes: Routes = [
     path: 'organization',
     loadChildren: () => import('./modules/organization/organization.routes').then(r => r.organizationRoutes)
   },
+
+  // Playground (UI demos)
+  {
+    path: 'playground',
+    loadComponent: () => import('./modules/playground/playground.component').then(c => c.PlaygroundComponent)
+  },
   
   // Wildcard route - 404 page
   {

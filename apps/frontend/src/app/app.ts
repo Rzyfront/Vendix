@@ -7,10 +7,11 @@ import { CardComponent } from './shared/components/card/card.component';
 // Import shared components
 // Removed ButtonComponent and CardComponent (not used directly in App template)
 import { SpinnerComponent } from './shared/components/spinner/spinner.component';
+import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
 
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, CommonModule, CardComponent, SpinnerComponent],
+  imports: [RouterOutlet, CommonModule, CardComponent, SpinnerComponent, ToastContainerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

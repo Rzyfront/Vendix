@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
+import { IconComponent } from '../../../../shared/components';
 
 interface SubmenuItem {
   id: string;
@@ -12,7 +13,7 @@ interface SubmenuItem {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   template: `
     <div class="flex h-screen bg-gray-50">
       <!-- Main Content -->
@@ -49,7 +50,7 @@ interface SubmenuItem {
             routerLinkActive="active"
             class="submenu-item w-full flex items-center space-x-3 p-3 rounded-lg cursor-pointer transition-all duration-200"
           >
-            <i [class]="'fas fa-' + item.icon + ' w-4 text-gray-600'"></i>
+            <app-icon [name]="item.icon" class="text-gray-600" [size]="16"></app-icon>
             <span class="font-medium text-sm">{{ item.label }}</span>
           </button>
         </nav>
@@ -58,16 +59,16 @@ interface SubmenuItem {
         <div class="p-4 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-xl">
           <h4 class="font-semibold text-text-primary mb-3">Acciones Rápidas</h4>
           <div class="space-y-2">
-            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200">
-              <i class="fas fa-save w-4 mr-2"></i>
+            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200 flex items-center">
+              <app-icon name="save" class="mr-2" [size]="16"></app-icon>
               Guardar configuración
             </button>
-            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200">
-              <i class="fas fa-undo w-4 mr-2"></i>
+            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200 flex items-center">
+              <app-icon name="undo" class="mr-2" [size]="16"></app-icon>
               Restaurar por defecto
             </button>
-            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200">
-              <i class="fas fa-file-export w-4 mr-2"></i>
+            <button class="w-full text-left p-2 text-sm text-text-secondary hover:bg-white hover:shadow-sm rounded-lg transition-all duration-200 flex items-center">
+              <app-icon name="file-export" class="mr-2" [size]="16"></app-icon>
               Exportar configuración
             </button>
           </div>
