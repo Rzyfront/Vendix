@@ -1,15 +1,16 @@
-import { Component, OnInit, OnDestroy, ElementRef, Renderer2 } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, Renderer2, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { TenantFacade } from '../../core/store/tenant/tenant.facade';
 import { takeUntil } from 'rxjs/operators';
 import { Subject } from 'rxjs';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http'; 
+import { IconComponent } from '../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-landing',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   templateUrl: './landing.component.html',
   styleUrls: ['./landing.component.scss']
 })
@@ -42,6 +43,10 @@ export class LandingComponent implements OnInit, OnDestroy {
         this.loadContentFromTenantConfig(tenantConfig);
       }
     });
+  }
+
+  ngAfterViewInit(): void {
+    // Initial render of lucide icons
   }
 
   ngOnDestroy(): void {
@@ -196,6 +201,8 @@ export class LandingComponent implements OnInit, OnDestroy {
       copyright: '© 2025 Vendix. Todos los derechos reservados.'
     };
   }
+
+  // Removed lucide runtime icon rendering
   scrollToPlans() {
     const plansSection = document.getElementById('plans');
     plansSection?.scrollIntoView({ behavior: 'smooth' });

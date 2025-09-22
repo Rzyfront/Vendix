@@ -75,9 +75,7 @@
         >
           <span class="flex items-center justify-center space-x-2">
             <span>{{ hero.cta_primary || 'Comenzar Gratis' }}</span>
-            <svg class="w-6 h-6 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
-            </svg>
+            <app-icon name="arrow-right" class="w-6 h-6 group-hover:translate-x-1 transition-transform"></app-icon>
           </span>
         </button>
         
@@ -86,9 +84,7 @@
           class="group px-10 py-5 bg-white/80 backdrop-blur-sm text-gray-700 text-xl font-semibold rounded-2xl border-2 border-gray-200 hover:border-primary/50 hover:bg-white transition-all duration-300"
         >
           <span class="flex items-center justify-center space-x-2">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1m4 0h1m-6 4h6"></path>
-            </svg>
+            <app-icon name="message" class="w-6 h-6"></app-icon>
             <span>{{ hero.cta_secondary || 'Ver Demo' }}</span>
           </span>
         </button>
@@ -127,9 +123,7 @@
             
             <div class="relative text-center z-10">
               <div class="w-24 h-24 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 mx-auto shadow-2xl">
-                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                </svg>
+                <app-icon name="bar-chart" class="w-12 h-12 text-white"></app-icon>
               </div>
               <h3 class="text-3xl font-bold bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent mb-2">Dashboard Vendix</h3>
               <p class="text-gray-600 text-lg">Tu centro de control empresarial</p>
@@ -172,10 +166,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0l-1.8 5M7 13l-1.8 5m0 0h4.4m-4.4 0a2 2 0 102 2 2 0 00-2-2zm10 0a2 2 0 102 2 2 0 00-2-2z"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="cart" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">POS Inteligente</h3>
             <p class="text-gray-600 leading-relaxed">Sistema de punto de venta moderno con procesamiento rápido y gestión completa de transacciones.</p>
@@ -185,10 +177,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9v-9m0-9v9"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="globe" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">E-commerce Integrado</h3>
             <p class="text-gray-600 leading-relaxed">Vende online sin complicaciones con nuestra plataforma e-commerce totalmente integrada.</p>
@@ -198,10 +188,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="boxes" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">Gestión de Inventario</h3>
             <p class="text-gray-600 leading-relaxed">Control total de tu stock con alertas inteligentes y seguimiento en tiempo real.</p>
@@ -211,10 +199,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="bar-chart" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">Analíticas Avanzadas</h3>
             <p class="text-gray-600 leading-relaxed">Reportes detallados y métricas en tiempo real para tomar mejores decisiones de negocio.</p>
@@ -224,10 +210,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-primary to-secondary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="users" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-primary transition-colors">Gestión de Clientes</h3>
             <p class="text-gray-600 leading-relaxed">CRM integrado para mantener relaciones sólidas y programas de fidelidad efectivos.</p>
@@ -237,10 +221,8 @@
         <div class="group relative bg-white rounded-3xl p-8 shadow-lg hover:shadow-2xl transition-all duration-500 transform hover:-translate-y-2 border border-gray-100">
           <div class="absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           <div class="relative">
-            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-              <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
-              </svg>
+            <div class="w-16 h-16 bg-gradient-to-br from-secondary to-primary rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300 text-white">
+              <app-icon name="user-shield" class="w-8 h-8"></app-icon>
             </div>
             <h3 class="text-2xl font-bold mb-4 text-gray-900 group-hover:text-secondary transition-colors">Seguridad Total</h3>
             <p class="text-gray-600 leading-relaxed">Protección avanzada de datos y transacciones con cumplimiento total de normativas.</p>
