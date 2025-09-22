@@ -6,7 +6,7 @@ import { AuthFacade } from '../store/auth/auth.facade';
 @Injectable({
   providedIn: 'root'
 })
-export class AdminGuard implements CanActivate {
+export class SuperAdminGuard implements CanActivate {
 
   constructor(
     private authFacade: AuthFacade,
@@ -17,10 +17,7 @@ export class AdminGuard implements CanActivate {
     const isLoggedIn = this.authFacade.isLoggedIn();
     const userRole = this.authFacade.getCurrentUserRole();
 
-    // Allow admin roles: ADMIN, OWNER, MANAGER, etc.
-    const adminRoles = ['ADMIN', 'OWNER', 'MANAGER', 'SUPERVISOR'];
-
-    if (isLoggedIn && userRole && adminRoles.includes(userRole)) {
+    if (isLoggedIn && userRole === 'SUPER_ADMIN') {
       return true;
     }
 

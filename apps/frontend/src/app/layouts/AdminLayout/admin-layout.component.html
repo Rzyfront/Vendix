@@ -41,8 +41,9 @@
           <span *ngIf="!sidebarCollapsed">Dashboard</span>
         </a>
 
-        <!-- Organizations -->
-        <a routerLink="/admin/organizations" 
+        <!-- Organizations - Only for ADMIN and OWNER -->
+        <a *ngIf="currentUser?.roles?.includes('ADMIN') || currentUser?.roles?.includes('OWNER')"
+           routerLink="/admin/organizations"
            routerLinkActive="border-r-2"
            [style.border-color]="brandingColors.primary"
            [style.background-color]="brandingColors.accent"
@@ -54,8 +55,9 @@
           <span *ngIf="!sidebarCollapsed">Organizaciones</span>
         </a>
 
-        <!-- Stores -->
-        <a routerLink="/admin/stores" 
+        <!-- Stores - Only for ADMIN, OWNER, MANAGER -->
+        <a *ngIf="currentUser?.roles?.includes('ADMIN') || currentUser?.roles?.includes('OWNER') || currentUser?.roles?.includes('MANAGER')"
+           routerLink="/admin/stores"
            routerLinkActive="border-r-2"
            [style.border-color]="brandingColors.primary"
            [style.background-color]="brandingColors.accent"

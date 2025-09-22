@@ -1,9 +1,8 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
-import { AuthService } from '../../../core/services/auth.service';
-import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
-import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { TenantFacade } from '../../core/store/tenant/tenant.facade';
+import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { filter, map, combineLatest } from 'rxjs/operators';
 import { takeUntil } from 'rxjs/operators';
 import { Subject } from 'rxjs';
@@ -34,7 +33,6 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
   };
 
   constructor(
-    private authService: AuthService,
     private router: Router,
     private tenantFacade: TenantFacade,
     private authFacade: AuthFacade
@@ -42,12 +40,12 @@ export class AdminLayoutComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // Subscribe to reactive auth state
-    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe(user => {
+    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe((user: any) => {
       this.currentUser = user;
     });
 
     // Subscribe to tenant branding colors
-    this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
+    this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe((tenantConfig: any) => {
       if (tenantConfig?.branding?.colors) {
         const colors = tenantConfig.branding.colors;
         this.brandingColors = {

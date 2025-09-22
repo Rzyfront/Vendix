@@ -1,0 +1,18 @@
+.super-admin-layout {
+  background: var(--background-color, #f4f4f4);
+}
+
+header {
+  background: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+nav a {
+  color: var(--text-color, #222);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+nav a:hover {
+  color: var(--primary-color, #7ed7a5);
+}

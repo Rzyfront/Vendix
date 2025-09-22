@@ -158,6 +158,7 @@ async function main() {
         // VENDIX_ADMIN: Gestión global de organizaciones
         // ORG_LANDING: Landing personalizado de organización
         // ORG_ADMIN: Dashboard organizacional
+        // STORE_LANDING: Tienda online pública
         // STORE_ADMIN: Gestión de tienda (productos, pedidos, etc.)
         // STORE_ECOMMERCE: Tienda online con carrito y checkout
       },

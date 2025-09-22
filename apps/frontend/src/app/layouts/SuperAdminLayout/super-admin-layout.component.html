@@ -1,0 +1,19 @@
+<div class="super-admin-layout min-h-screen bg-gray-50" [style.background-color]="backgroundColor">
+  <header class="bg-white shadow-sm p-4">
+    <div class="flex justify-between items-center">
+      <div class="logo">
+        <img src="/vlogo.png" alt="Vendix Super Admin" class="h-8 w-auto">
+        <span class="ml-2 text-xl font-bold" [style.color]="primaryColor">Super Admin</span>
+      </div>
+      <nav class="space-x-4">
+        <a href="#" class="text-gray-600 hover:text-gray-900">Tenants</a>
+        <a href="#" class="text-gray-600 hover:text-gray-900">Billing</a>
+        <a href="#" class="text-gray-600 hover:text-gray-900">Analytics</a>
+        <a href="#" class="text-gray-600 hover:text-gray-900">Security</a>
+      </nav>
+    </div>
+  </header>
+  <main class="p-6">
+    <router-outlet></router-outlet>
+  </main>
+</div>

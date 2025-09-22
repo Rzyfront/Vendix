@@ -1,0 +1,11 @@
+<div class="auth-layout min-h-screen flex items-center justify-center bg-gray-50" [style.background-color]="backgroundColor">
+  <div class="auth-container max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-md">
+    <div class="logo text-center">
+      <img src="/vlogo.png" alt="Vendix Logo" class="mx-auto h-12 w-auto" [style.color]="primaryColor">
+      <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900" [style.color]="textColor">
+        Vendix
+      </h2>
+    </div>
+    <router-outlet></router-outlet>
+  </div>
+</div>

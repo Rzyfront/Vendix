@@ -6,7 +6,7 @@ import { AuthFacade } from '../store/auth/auth.facade';
 @Injectable({
   providedIn: 'root'
 })
-export class AdminGuard implements CanActivate {
+export class POSGuard implements CanActivate {
 
   constructor(
     private authFacade: AuthFacade,
@@ -17,14 +17,14 @@ export class AdminGuard implements CanActivate {
     const isLoggedIn = this.authFacade.isLoggedIn();
     const userRole = this.authFacade.getCurrentUserRole();
 
-    // Allow admin roles: ADMIN, OWNER, MANAGER, etc.
-    const adminRoles = ['ADMIN', 'OWNER', 'MANAGER', 'SUPERVISOR'];
+    // Allow roles that can access POS: CASHIER, EMPLOYEE, MANAGER, etc.
+    const allowedRoles = ['CASHIER', 'EMPLOYEE', 'MANAGER', 'SUPERVISOR', 'OWNER', 'ADMIN'];
 
-    if (isLoggedIn && userRole && adminRoles.includes(userRole)) {
+    if (isLoggedIn && userRole && allowedRoles.includes(userRole)) {
       return true;
     }
 
-    // If not authorized, redirect to login
+    // If not authorized, redirect to login or dashboard
     this.router.navigate(['/auth/login']);
     return false;
   }
