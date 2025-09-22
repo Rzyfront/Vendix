@@ -36,7 +36,7 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npx prisma migrate deploy && npx prisma db push && npm run start:dev"
+    command: sh -c "npx prisma db push --force-reset && npm run db:seed && npm run start:dev"
 
   frontend:
     build:
