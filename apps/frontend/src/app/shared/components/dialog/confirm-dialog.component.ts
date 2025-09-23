@@ -17,11 +17,11 @@ export interface ConfirmData {
   imports: [CommonModule, ButtonComponent],
   template: `
     <div class="p-4">
-      <h2 class="text-lg font-semibold mb-2">{{ data?.title || 'Confirmar' }}</h2>
-      <p class="text-text-secondary mb-4">{{ data?.message || '¿Estás seguro?' }}</p>
+      <h2 class="text-lg font-semibold mb-2">{{ data.title || 'Confirmar' }}</h2>
+      <p class="text-text-secondary mb-4">{{ data.message || '¿Estás seguro?' }}</p>
       <div class="flex gap-2 justify-end">
-        <app-button variant="ghost" (clicked)="close(false)">{{ data?.cancelText || 'Cancelar' }}</app-button>
-        <app-button (clicked)="close(true)">{{ data?.confirmText || 'Confirmar' }}</app-button>
+        <app-button variant="ghost" (clicked)="close(false)">{{ data.cancelText || 'Cancelar' }}</app-button>
+        <app-button (clicked)="close(true)">{{ data.confirmText || 'Confirmar' }}</app-button>
       </div>
     </div>
   `,

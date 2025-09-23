@@ -20,16 +20,16 @@ export interface PromptData {
   imports: [CommonModule, FormsModule, ButtonComponent],
   template: `
     <div class="p-4">
-      <h2 class="text-lg font-semibold mb-2">{{ data?.title || 'Ingresar dato' }}</h2>
-      <p class="text-text-secondary mb-4" *ngIf="data?.message">{{ data?.message }}</p>
+      <h2 class="text-lg font-semibold mb-2">{{ data.title || 'Ingresar dato' }}</h2>
+      <p class="text-text-secondary mb-4" *ngIf="data.message">{{ data.message }}</p>
       <input
         class="block w-full border rounded-lg px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary border-border"
-        [placeholder]="data?.placeholder || 'Escribe aquí'"
+        [placeholder]="data.placeholder || 'Escribe aquí'"
         [(ngModel)]="value"
       />
       <div class="flex gap-2 justify-end">
-        <app-button variant="ghost" (clicked)="close(undefined)">{{ data?.cancelText || 'Cancelar' }}</app-button>
-        <app-button (clicked)="close(value)">{{ data?.okText || 'Aceptar' }}</app-button>
+        <app-button variant="ghost" (clicked)="close(undefined)">{{ data.cancelText || 'Cancelar' }}</app-button>
+        <app-button (clicked)="close(value)">{{ data.okText || 'Aceptar' }}</app-button>
       </div>
     </div>
   `,
@@ -37,7 +37,7 @@ export interface PromptData {
 export class PromptDialogComponent {
   value = '';
   constructor(public ref: DialogRef<string | undefined>, @Inject(DIALOG_DATA) public data: PromptData) {
-    this.value = data?.initialValue ?? '';
+    this.value = data.initialValue ?? '';
   }
   close(result: string | undefined) { this.ref.close(result); }
 }

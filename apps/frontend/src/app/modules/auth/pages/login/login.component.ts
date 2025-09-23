@@ -95,6 +95,9 @@ export class LoginComponent implements OnInit, OnDestroy {
           text: colors.text?.primary || colors.text,
           border: colors.surface
         };
+
+        // Update CSS custom properties for dynamic branding
+        this.updateBrandingCSSVariables(colors);
       }
     });
   }
@@ -328,14 +331,19 @@ export class LoginComponent implements OnInit, OnDestroy {
   // Field interaction methods
   getFieldClass(fieldName: string): string {
     const field = this.loginForm.get(fieldName);
-    const baseClasses = 'w-full px-4 py-3 rounded-xl border-2 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50 text-gray-900 placeholder-gray-500';
+    const baseClasses = 'w-full px-4 py-3 rounded-md border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
+    const borderWidth = 'var(--border-width)';
+    const borderColor = 'var(--border)';
+    const surfaceColor = 'var(--surface)';
+    const primaryColor = 'var(--primary)';
+    const radius = 'var(--radius-sm)';
 
     if (field?.invalid && field?.touched) {
-      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500`;
+      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500/50`;
     } else if (field?.valid && field?.touched && field?.value) {
-      return `${baseClasses} border-green-300 bg-green-50 focus:border-green-500`;
+      return `${baseClasses} border-green-300 bg-green-50 focus:border-green-500 focus:ring-green-500/50`;
     } else {
-      return `${baseClasses} border-gray-300 bg-white focus:border-primary`;
+      return `${baseClasses} border-gray-300 bg-white focus:border-primary focus:ring-primary/50`;
     }
   }
 
@@ -405,5 +413,41 @@ export class LoginComponent implements OnInit, OnDestroy {
   hasFieldError(fieldName: string): boolean {
     const field = this.loginForm.get(fieldName);
     return !!(field?.errors && field?.touched);
+  }
+
+  private updateBrandingCSSVariables(colors: any): void {
+    if (!colors) return;
+
+    const root = document.documentElement;
+
+    // Update primary and secondary colors for branding
+    if (colors.primary) {
+      root.style.setProperty('--primary', colors.primary);
+      root.style.setProperty('--color-primary', colors.primary);
+    }
+
+    if (colors.secondary) {
+      root.style.setProperty('--color-secondary', colors.secondary);
+    }
+
+    // Update other branding colors if available
+    if (colors.accent) {
+      root.style.setProperty('--accent', colors.accent);
+    }
+
+    if (colors.background) {
+      root.style.setProperty('--bg', colors.background);
+      root.style.setProperty('--color-background', colors.background);
+    }
+
+    if (colors.surface) {
+      root.style.setProperty('--surface', colors.surface);
+    }
+
+    if (colors.text?.primary || colors.text) {
+      const textColor = colors.text?.primary || colors.text;
+      root.style.setProperty('--text', textColor);
+      root.style.setProperty('--color-text-primary', textColor);
+    }
   }
 }

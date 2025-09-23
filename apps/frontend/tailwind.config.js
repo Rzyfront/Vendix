@@ -5,12 +5,23 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+      },
       colors: {
-        primary: 'var(--color-primary)',
-        secondary: 'var(--color-secondary)',
+        primary: {
+          500: '#7ED7A5',
+          600: '#2F6F4E',
+          700: '#2F6F4E',
+          DEFAULT: 'var(--primary)',
+        },
+        muted: '#94A3B8',
+        surface: '#ffffff',
+        bg: '#f8fafc',
+        // Legacy color mappings for backward compatibility
         background: 'var(--color-background)',
         foreground: 'var(--color-foreground)',
-        muted: 'var(--color-muted)',
+        secondary: 'var(--color-secondary)',
         'muted-foreground': 'var(--color-muted-foreground)',
         accent: 'var(--color-accent)',
         'accent-foreground': 'var(--color-accent-foreground)',
@@ -22,16 +33,31 @@ module.exports = {
         'text-primary': 'var(--color-text-primary)',
         'text-secondary': 'var(--color-text-secondary)'
       },
-      fontFamily: {
-        base: 'var(--font-base)'
-      },
       borderRadius: {
-        button: 'var(--radius-button, 0.5rem)',
-        card: 'var(--radius-card, 0.75rem)',
-        input: 'var(--radius-input, 0.5rem)'
+        sm: '6px',
+        md: '10px',
+        lg: '14px',
+        pill: '9999px',
+        // Legacy mappings
+        button: 'var(--radius-button)',
+        card: 'var(--radius-card)',
+        input: 'var(--radius-input)'
       },
       boxShadow: {
-        card: 'var(--shadow-card, 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px -1px rgba(0,0,0,0.1))'
+        xs: '0 1px 2px rgba(2,6,23,0.04)',
+        sm: '0 4px 8px rgba(15,23,42,0.06)',
+        md: '0 10px 30px rgba(15,23,42,0.08)',
+        lg: '0 20px 50px rgba(2,6,23,0.10)',
+        // Legacy mapping
+        card: 'var(--shadow-card)'
+      },
+      spacing: {
+        sm: '6px',
+        md: '12px',
+        lg: '20px',
+      },
+      transitionDuration: {
+        DEFAULT: '160',
       }
     },
   },
