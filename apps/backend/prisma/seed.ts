@@ -94,7 +94,7 @@ async function main() {
 
   // 4. Crear usuarios de prueba
   console.log('👤 Creando usuarios de prueba...');
-  const hashedPassword = await bcrypt.hash('password123', 10);
+  const hashedPassword = await bcrypt.hash('1125634q', 10);
 
   const superAdminUser = await prisma.users.upsert({
     where: { username: 'superadmin' },

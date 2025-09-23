@@ -38,7 +38,7 @@ export const authReducer = createReducer(
   on(AuthActions.loginFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.message || 'Login failed',
+    error: error?.error?.message || error?.message || 'Error de autenticación',
     isAuthenticated: false
   })),
 
@@ -66,7 +66,7 @@ export const authReducer = createReducer(
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.message || 'Token refresh failed',
+    error: error?.error?.message || error?.message || 'Error al refrescar token',
     isAuthenticated: false
   })),
 
@@ -85,7 +85,7 @@ export const authReducer = createReducer(
   on(AuthActions.loadUserFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.message || 'Failed to load user'
+    error: error?.error?.message || error?.message || 'Error al cargar usuario'
   })),
 
   on(AuthActions.updateUser, (state, { user }) => ({

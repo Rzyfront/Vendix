@@ -14,7 +14,32 @@
       </p>
     </div>
 
-    <div class="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 relative overflow-hidden">
+    <div class="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 relative overflow-hidden"
+         [ngClass]="{
+           'ring-2 ring-green-300': loginState === 'success',
+           'ring-2 ring-red-300': hasError,
+           'ring-2 ring-blue-300': isLoading
+         }">
+
+      <!-- Success overlay -->
+      <div *ngIf="loginState === 'success'" class="absolute inset-0 bg-green-50/90 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
+        <div class="text-center">
+          <div class="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+            ✅
+          </div>
+          <h3 class="text-lg font-semibold text-green-800">¡Inicio de sesión exitoso!</h3>
+          <p class="text-sm text-green-600 mt-1">Redirigiendo al panel de administración...</p>
+        </div>
+      </div>
+
+      <!-- Loading overlay -->
+      <div *ngIf="isLoading" class="absolute inset-0 bg-blue-50/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
+        <div class="text-center">
+          <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p class="text-sm text-primary font-medium">Verificando credenciales...</p>
+        </div>
+      </div>
+
       <!-- Decorative background -->
       <div class="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full blur-3xl"></div>
       <div class="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-secondary/10 to-primary/10 rounded-full blur-3xl"></div>
@@ -25,17 +50,24 @@
           <label for="email" class="block text-sm font-semibold text-gray-700 mb-2">
             Correo Electrónico
           </label>
-          <input
-            id="email"
-            type="email"
-            formControlName="email"
-            class="w-full px-4 py-3 bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 hover:shadow-md"
-            placeholder="usuario@email.com"
-            [class.border-red-300]="hasFieldError('email')"
-            [ngClass]="{'bg-red-50/50': hasFieldError('email')}"
-          />
-          <p *ngIf="hasFieldError('email')" class="mt-2 text-sm text-red-500">
-            {{ getFieldError('email') }}
+          <div class="relative">
+            <input
+              id="email"
+              type="email"
+              formControlName="email"
+              [ngClass]="getFieldClass('email')"
+              placeholder="usuario@email.com"
+              (blur)="onFieldBlur('email')"
+              (input)="onFieldInput('email')"
+            />
+            <!-- Status icon -->
+            <div *ngIf="getFieldStatusIcon('email')" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-lg">
+              {{ getFieldStatusIcon('email') }}
+            </div>
+          </div>
+          <p *ngIf="hasFieldError('email')" class="mt-2 text-sm text-red-500 flex items-center space-x-1">
+            <span>⚠️</span>
+            <span>{{ getFieldError('email') }}</span>
           </p>
         </div>
 
@@ -44,39 +76,147 @@
           <label for="password" class="block text-sm font-semibold text-gray-700 mb-2">
             Contraseña
           </label>
-          <input
-            id="password"
-            type="password"
-            formControlName="password"
-            class="w-full px-4 py-3 bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 hover:shadow-md"
-            placeholder="••••••••"
-            [class.border-red-300]="hasFieldError('password')"
-            [ngClass]="{'bg-red-50/50': hasFieldError('password')}"
-          />
-          <p *ngIf="hasFieldError('password')" class="mt-2 text-sm text-red-500">
-            {{ getFieldError('password') }}
+          <div class="relative">
+            <input
+              id="password"
+              type="password"
+              formControlName="password"
+              [ngClass]="getFieldClass('password')"
+              placeholder="••••••••"
+              (blur)="onFieldBlur('password')"
+              (input)="onFieldInput('password')"
+            />
+            <!-- Status icon -->
+            <div *ngIf="getFieldStatusIcon('password')" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-lg">
+              {{ getFieldStatusIcon('password') }}
+            </div>
+          </div>
+          <p *ngIf="hasFieldError('password')" class="mt-2 text-sm text-red-500 flex items-center space-x-1">
+            <span>⚠️</span>
+            <span>{{ getFieldError('password') }}</span>
           </p>
         </div>
 
         <!-- Mensaje de error general -->
-        <div *ngIf="errorMessage" class="p-4 bg-red-50/80 backdrop-blur-sm border border-red-200/50 rounded-2xl shadow-sm">
-          <p class="text-sm text-red-600 font-medium">{{ errorMessage }}</p>
+        <div *ngIf="hasError" class="p-4 rounded-2xl shadow-sm border relative overflow-hidden"
+             [ngClass]="{
+               'bg-red-50/80 backdrop-blur-sm border-red-200/50': loginState === 'error',
+               'bg-orange-50/80 backdrop-blur-sm border-orange-200/50': loginState === 'network_error',
+               'bg-yellow-50/80 backdrop-blur-sm border-yellow-200/50': loginState === 'rate_limited' || loginState === 'too_many_attempts',
+               'bg-blue-50/80 backdrop-blur-sm border-blue-200/50': loginState === 'email_not_verified',
+               'bg-gray-50/80 backdrop-blur-sm border-gray-200/50': loginState === 'account_locked' || loginState === 'account_suspended' || loginState === 'password_expired'
+             }">
+          <!-- Icon based on error type -->
+          <div class="flex items-start space-x-3">
+            <div class="flex-shrink-0">
+              <div *ngIf="loginState === 'network_error'" class="w-6 h-6 text-orange-500">
+                📶
+              </div>
+              <div *ngIf="loginState === 'rate_limited' || loginState === 'too_many_attempts'" class="w-6 h-6 text-yellow-500">
+                ⏱️
+              </div>
+              <div *ngIf="loginState === 'account_locked' || loginState === 'account_suspended'" class="w-6 h-6 text-gray-500">
+                🔒
+              </div>
+              <div *ngIf="loginState === 'email_not_verified'" class="w-6 h-6 text-blue-500">
+                📧
+              </div>
+              <div *ngIf="loginState === 'password_expired'" class="w-6 h-6 text-purple-500">
+                🔑
+              </div>
+              <div *ngIf="loginState === 'error'" class="w-6 h-6 text-red-500">
+                ⚠️
+              </div>
+            </div>
+            <div class="flex-1">
+              <p class="text-sm font-medium" [ngClass]="{
+                'text-red-600': loginState === 'error',
+                'text-orange-600': loginState === 'network_error',
+                'text-yellow-600': loginState === 'rate_limited' || loginState === 'too_many_attempts',
+                'text-blue-600': loginState === 'email_not_verified',
+                'text-gray-600': loginState === 'account_locked' || loginState === 'account_suspended' || loginState === 'password_expired'
+              }">{{ errorMessage }}</p>
+
+              <!-- Retry countdown -->
+              <p *ngIf="retryCountdown > 0" class="text-xs mt-1 text-gray-500">
+                Podrás reintentar en {{ retryCountdown }} segundos
+              </p>
+
+              <!-- Error details -->
+              <p *ngIf="errorDetails" class="text-xs mt-1 text-gray-500">
+                {{ errorDetails }}
+              </p>
+
+              <!-- Action buttons based on error type -->
+              <div class="mt-3 flex space-x-2">
+                <!-- Retry button -->
+                <button *ngIf="canRetry && retryCountdown === 0"
+                        (click)="retryLogin()"
+                        class="px-3 py-1 text-xs bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors">
+                  Reintentar
+                </button>
+
+                <!-- Resend verification email -->
+                <button *ngIf="loginState === 'email_not_verified'"
+                        (click)="resendVerificationEmail()"
+                        class="px-3 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
+                  Reenviar verificación
+                </button>
+
+                <!-- Reset form -->
+                <button *ngIf="loginState === 'too_many_attempts' || loginState === 'account_locked'"
+                        (click)="resetForm()"
+                        class="px-3 py-1 text-xs bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
+                  Reiniciar
+                </button>
+
+                <!-- Forgot password -->
+                <button *ngIf="loginState === 'password_expired'"
+                        (click)="navigateToForgotPassword()"
+                        class="px-3 py-1 text-xs bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors">
+                  Cambiar contraseña
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Botón de login -->
         <div class="pt-2">
           <button
             type="submit"
-            [disabled]="isLoading"
+            [disabled]="!isFormValid"
             class="w-full px-6 py-4 bg-gradient-to-r from-primary to-secondary text-white font-bold text-lg rounded-2xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 relative overflow-hidden group"
+            [ngClass]="{
+              'animate-pulse': isLoading,
+              'cursor-not-allowed': !isFormValid
+            }"
           >
             <!-- Efecto de brillo -->
             <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
             <span class="relative flex items-center justify-center space-x-2">
               <span *ngIf="isLoading" class="animate-spin">⏳</span>
-              <span>{{ isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión' }}</span>
+              <span *ngIf="!isLoading">{{ loginState === 'success' ? '¡Éxito!' : 'Iniciar Sesión' }}</span>
+              <span *ngIf="isLoading">Iniciando sesión...</span>
             </span>
           </button>
+
+          <!-- Login attempts counter -->
+          <div *ngIf="loginAttempts > 0" class="text-xs text-center mt-2 flex items-center justify-center space-x-2">
+            <span class="text-gray-500">Intento {{ loginAttempts }} de {{ maxAttempts }}</span>
+            <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
+              <div class="h-full bg-gradient-to-r from-yellow-400 to-red-500 transition-all duration-300"
+                   [style.width.%]="(loginAttempts / maxAttempts) * 100"></div>
+            </div>
+          </div>
+
+          <!-- Security notice for high attempt counts -->
+          <div *ngIf="loginAttempts >= maxAttempts * 0.7" class="mt-2 p-2 bg-yellow-50/80 rounded-lg border border-yellow-200/50">
+            <p class="text-xs text-yellow-700 text-center flex items-center justify-center space-x-1">
+              <span>🛡️</span>
+              <span>Por seguridad, evita múltiples intentos fallidos</span>
+            </p>
+          </div>
         </div>
       </form>
     </div>
@@ -95,6 +235,24 @@
             Regístrate aquí
           </a>
         </p>
+      </div>
+
+      <!-- Status information -->
+      <div class="bg-white/40 backdrop-blur-sm rounded-xl p-3 border border-white/20">
+        <div class="flex items-center justify-center space-x-4 text-xs text-gray-500">
+          <span class="flex items-center space-x-1">
+            <span [ngClass]="{'text-green-500': !hasError, 'text-red-500': hasError}">●</span>
+            <span>{{ hasError ? 'Error' : 'Listo' }}</span>
+          </span>
+          <span class="flex items-center space-x-1">
+            <span class="text-blue-500">🔒</span>
+            <span>Conexión segura</span>
+          </span>
+          <span class="flex items-center space-x-1">
+            <span class="text-gray-400">⏱️</span>
+            <span>{{ loginState }}</span>
+          </span>
+        </div>
       </div>
 
       <a routerLink="/" class="inline-flex items-center space-x-2 text-sm text-gray-500 hover:text-primary transition-all duration-300 hover:scale-105">

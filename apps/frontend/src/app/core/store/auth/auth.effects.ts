@@ -38,11 +38,11 @@ export class AuthEffects {
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('vendix_user', JSON.stringify(user));
         }
-        // Always redirect to admin dashboard after successful login
-        console.log('Login successful, redirecting to admin dashboard...');
+        // Navigate directly to admin dashboard for successful login
+        console.log('Login successful, navigating to admin dashboard...');
         // Add a small delay to ensure the auth state is properly updated
         setTimeout(() => {
-          this.router.navigate(['/admin/dashboard']).then(success => {
+          this.router.navigate(['/admin']).then(success => {
             if (success) {
               console.log('Successfully navigated to admin dashboard');
             } else {

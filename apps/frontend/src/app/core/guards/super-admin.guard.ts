@@ -17,7 +17,10 @@ export class SuperAdminGuard implements CanActivate {
     const isLoggedIn = this.authFacade.isLoggedIn();
     const userRole = this.authFacade.getCurrentUserRole();
 
-    if (isLoggedIn && userRole === 'SUPER_ADMIN') {
+    // Allow super admin roles (both backend and frontend naming conventions)
+    const superAdminRoles = ['super_admin', 'SUPER_ADMIN'];
+
+    if (isLoggedIn && userRole && superAdminRoles.includes(userRole)) {
       return true;
     }
 

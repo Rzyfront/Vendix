@@ -2,14 +2,17 @@
   "name": "vendix",
   "version": "0.0.0",
   "scripts": {
+    "// ----- DEVELOPMENT -----": "",
     "ng": "ng",
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
+    "// ----- PRODUCTION -----": "",
     "build:prod": "ng build --configuration production",
-    "docker:build": "npm run build:prod",
-    "health": "curl -f http://localhost:4200 || exit 1"
+    "// ----- CODE QUALITY -----": "",
+    "lint": "ng lint --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\""
   },
   "private": true,
   "dependencies": {

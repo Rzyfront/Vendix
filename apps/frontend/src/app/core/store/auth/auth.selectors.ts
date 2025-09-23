@@ -44,6 +44,7 @@ export const selectUserRole = createSelector(
     console.log('selectUserRole - user object:', user);
     console.log('selectUserRole - user.roles:', user?.roles);
     console.log('selectUserRole - user.role:', user?.role);
+    console.log('selectUserRole - user.user_roles:', user?.user_roles);
     
     // Handle both role (string) and roles (array) formats
     if (user?.role) {
@@ -54,6 +55,12 @@ export const selectUserRole = createSelector(
       console.log('selectUserRole - returning user.roles[0]:', user.roles[0]);
       // Return the first role or the highest priority role
       return user.roles[0];
+    }
+    // Handle user_roles structure from backend
+    if (user?.user_roles && Array.isArray(user.user_roles) && user.user_roles.length > 0) {
+      const firstRole = user.user_roles[0]?.roles?.name;
+      console.log('selectUserRole - returning user.user_roles[0].roles.name:', firstRole);
+      return firstRole;
     }
     console.log('selectUserRole - returning null');
     return null;

@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { AuthService } from '../../../../core/services/auth.service';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
@@ -8,6 +8,16 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { takeUntil, combineLatest } from 'rxjs/operators';
 import { Subject } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
+
+export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
+
+export interface LoginError {
+  type: LoginState;
+  message: string;
+  canRetry: boolean;
+  retryAfter?: number;
+  details?: string;
+}
 
 @Component({
   selector: 'app-login',
@@ -23,7 +33,13 @@ import { ToastService } from '../../../../shared/components/toast/toast.service'
 export class LoginComponent implements OnInit, OnDestroy {
   loginForm: FormGroup;
   isLoading = false;
-  errorMessage = '';
+  loginState: LoginState = 'idle';
+  loginError: LoginError | null = null;
+  loginAttempts = 0;
+  maxAttempts = 5;
+  lockoutTime = 180; // 3 minutes in seconds
+  retryCountdown = 0;
+  retryTimer: any;
   private destroy$ = new Subject<void>();
 
   // Branding colors from domain config - reactive (no defaults)
@@ -35,7 +51,8 @@ export class LoginComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private authService: AuthService,
     private tenantFacade: TenantFacade,
-    private authFacade: AuthFacade
+    private authFacade: AuthFacade,
+    private router: Router
   ) {
     this.loginForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
@@ -45,14 +62,15 @@ export class LoginComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // Subscribe to reactive auth state
+    // Subscribe to reactive auth state
     this.authFacade.loading$.pipe(takeUntil(this.destroy$)).subscribe(loading => {
-      this.isLoading = loading;
+      this.loginState = loading ? 'loading' : 'idle';
     });
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
-      this.errorMessage = error || '';
+      console.log('Login component - Error received:', error);
       if (error) {
-        this.toast.error(error || 'Error de autenticación');
+        this.handleLoginError(error);
       }
     });
 
@@ -81,9 +99,150 @@ export class LoginComponent implements OnInit, OnDestroy {
     });
   }
 
+  private handleLoginError(error: any): void {
+    console.log('handleLoginError called with:', error);
+    this.loginAttempts++;
+    const errorMessage = error?.message || error?.error?.message || error?.error || 'Error de autenticación';
+    console.log('Extracted error message:', errorMessage);
+
+    // Determine error type based on status code and message
+    if (error?.status === 0 || error?.status === -1) {
+      // Network error
+      this.setLoginError({
+        type: 'network_error',
+        message: 'Error de conexión. Verifica tu conexión a internet.',
+        canRetry: true
+      });
+    } else if (error?.status === 429) {
+      // Rate limited
+      const retryAfter = error?.error?.retryAfter || 60;
+      this.setLoginError({
+        type: 'rate_limited',
+        message: 'Demasiados intentos. Inténtalo más tarde.',
+        canRetry: true,
+        retryAfter
+      });
+    } else if (error?.status === 423) {
+      // Account locked
+      this.setLoginError({
+        type: 'account_locked',
+        message: 'Cuenta bloqueada temporalmente.',
+        canRetry: false
+      });
+    } else if (errorMessage.toLowerCase().includes('email not verified') || errorMessage.toLowerCase().includes('verificar email')) {
+      this.setLoginError({
+        type: 'email_not_verified',
+        message: 'Email no verificado. Revisa tu bandeja de entrada.',
+        canRetry: false
+      });
+    } else if (errorMessage.toLowerCase().includes('too many') || errorMessage.toLowerCase().includes('demasiados')) {
+      this.setLoginError({
+        type: 'too_many_attempts',
+        message: 'Demasiados intentos fallidos. Espera unos minutos.',
+        canRetry: true,
+        retryAfter: this.lockoutTime
+      });
+    } else if (errorMessage.toLowerCase().includes('suspended') || errorMessage.toLowerCase().includes('suspendida')) {
+      this.setLoginError({
+        type: 'account_suspended',
+        message: 'Cuenta suspendida. Contacta al administrador.',
+        canRetry: false
+      });
+    } else if (errorMessage.toLowerCase().includes('expired') || errorMessage.toLowerCase().includes('expirada')) {
+      this.setLoginError({
+        type: 'password_expired',
+        message: 'Contraseña expirada. Debes cambiarla.',
+        canRetry: false
+      });
+    } else if (this.loginAttempts >= this.maxAttempts) {
+      // Local lockout after max attempts
+      this.setLoginError({
+        type: 'too_many_attempts',
+        message: `Demasiados intentos fallidos. Espera ${this.lockoutTime / 60} minutos.`,
+        canRetry: true,
+        retryAfter: this.lockoutTime
+      });
+    } else {
+      // Generic error
+      this.setLoginError({
+        type: 'error',
+        message: errorMessage,
+        canRetry: true
+      });
+    }
+  }
+
+  private setLoginError(error: LoginError): void {
+    this.loginState = error.type;
+    this.loginError = error;
+
+    if (error.retryAfter) {
+      this.startRetryCountdown(error.retryAfter);
+    }
+
+    // Show toast notification
+    switch (error.type) {
+      case 'network_error':
+        this.toast.error('Error de conexión');
+        break;
+      case 'rate_limited':
+      case 'too_many_attempts':
+        this.toast.warning(error.message);
+        break;
+      case 'account_locked':
+      case 'account_suspended':
+        this.toast.error(error.message);
+        break;
+      case 'email_not_verified':
+        this.toast.info(error.message);
+        break;
+      default:
+        this.toast.error(error.message);
+    }
+  }
+
+  private startRetryCountdown(seconds: number): void {
+    this.retryCountdown = seconds;
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+    }
+
+    this.retryTimer = setInterval(() => {
+      this.retryCountdown--;
+      if (this.retryCountdown <= 0) {
+        clearInterval(this.retryTimer);
+        this.retryTimer = undefined;
+        this.clearError();
+      }
+    }, 1000);
+  }
+
+  private clearError(): void {
+    this.loginState = 'idle';
+    this.loginError = null;
+    this.retryCountdown = 0;
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
+    if (this.retryTimer) {
+      clearInterval(this.retryTimer);
+    }
+  }
+
+  retryLogin(): void {
+    if (this.canRetry && this.retryCountdown === 0) {
+      this.clearError();
+      this.onSubmit();
+    }
+  }
+
+  resetForm(): void {
+    this.clearError();
+    this.loginForm.reset();
+    this.loginAttempts = 0;
+    localStorage.removeItem('login_lockout_until');
   }
 
 
@@ -109,9 +268,31 @@ export class LoginComponent implements OnInit, OnDestroy {
   get textColor(): string {
     return this.brandingColors?.text || '#222222';
   }
+
+  // Computed properties for template
+  get hasError(): boolean {
+    return this.loginState !== 'idle' && this.loginState !== 'loading' && this.loginState !== 'success';
+  }
+
+  get canRetry(): boolean {
+    return this.loginError?.canRetry || false;
+  }
+
+  get isFormValid(): boolean {
+    return this.loginForm.valid && this.loginState !== 'loading' && !this.hasError;
+  }
+
+  get errorMessage(): string {
+    return this.loginError?.message || '';
+  }
+
+  get errorDetails(): string {
+    return this.loginError?.details || '';
+  }
+
   onSubmit(): void {
-    if (this.loginForm.valid && !this.isLoading) {
-      this.errorMessage = '';
+    if (this.loginForm.valid && this.loginState !== 'loading' && !this.hasError) {
+      this.clearError();
 
       const { email, password } = this.loginForm.value;
 
@@ -134,7 +315,72 @@ export class LoginComponent implements OnInit, OnDestroy {
       Object.keys(this.loginForm.controls).forEach(key => {
         this.loginForm.get(key)?.markAsTouched();
       });
+
+      if (this.hasError) {
+        this.toast.warning('Corrige los errores antes de continuar');
+      }
     }
+  }
+
+  // Field interaction methods
+  getFieldClass(fieldName: string): string {
+    const field = this.loginForm.get(fieldName);
+    const baseClasses = 'w-full px-4 py-3 rounded-xl border-2 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-primary/50 text-gray-900 placeholder-gray-500';
+
+    if (field?.invalid && field?.touched) {
+      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500`;
+    } else if (field?.valid && field?.touched && field?.value) {
+      return `${baseClasses} border-green-300 bg-green-50 focus:border-green-500`;
+    } else {
+      return `${baseClasses} border-gray-300 bg-white focus:border-primary`;
+    }
+  }
+
+  onFieldBlur(fieldName: string): void {
+    const field = this.loginForm.get(fieldName);
+    field?.markAsTouched();
+  }
+
+  onFieldInput(fieldName: string): void {
+    // Optional: Add real-time validation logic here if needed
+    // For now, just ensure the field is marked as dirty
+    const field = this.loginForm.get(fieldName);
+    if (field) {
+      field.markAsDirty();
+    }
+  }
+
+  getFieldStatusIcon(fieldName: string): string {
+    const field = this.loginForm.get(fieldName);
+    if (!field?.touched) return '';
+
+    if (field.valid && field.value) {
+      return '✅'; // Valid
+    } else if (field.invalid) {
+      return '❌'; // Invalid
+    }
+    return '';
+  }
+
+  resendVerificationEmail(): void {
+    const email = this.loginForm.get('email')?.value;
+    if (email && this.loginForm.get('email')?.valid) {
+      this.authService.resendVerification(email).subscribe({
+        next: () => {
+          this.toast.success('Email de verificación reenviado');
+        },
+        error: (error) => {
+          this.toast.error('Error al reenviar email de verificación');
+          console.error('Resend verification error:', error);
+        }
+      });
+    } else {
+      this.toast.warning('Ingresa un email válido primero');
+    }
+  }
+
+  navigateToForgotPassword(): void {
+    this.router.navigate(['/auth/forgot-password']);
   }
 
   getFieldError(fieldName: string): string {

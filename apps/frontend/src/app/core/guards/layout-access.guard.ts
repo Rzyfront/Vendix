@@ -25,6 +25,12 @@ export class LayoutAccessGuard implements CanActivate {
     const roles: string[] = Array.isArray((user as any)?.roles)
       ? (user as any).roles
       : ((user as any)?.role ? [(user as any).role] : []);
+    
+    // Handle user_roles structure from backend
+    if ((user as any)?.user_roles && Array.isArray((user as any).user_roles) && (user as any).user_roles.length > 0) {
+      const backendRoles = (user as any).user_roles.map((ur: any) => ur.roles?.name).filter(Boolean);
+      roles.push(...backendRoles);
+    }
 
     if (!requiredLayout) {
       // Si no se especifica layout, permitir y confiar en guards existentes
