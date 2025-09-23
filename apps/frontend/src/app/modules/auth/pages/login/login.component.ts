@@ -180,24 +180,24 @@ export class LoginComponent implements OnInit, OnDestroy {
       this.startRetryCountdown(error.retryAfter);
     }
 
-    // Show toast notification
+    // Show toast notification with more descriptive messages
     switch (error.type) {
       case 'network_error':
-        this.toast.error('Error de conexión');
+        this.toast.error('Error de conexión. Verifica tu conexión a internet.', 'Error de red', 5000);
         break;
       case 'rate_limited':
       case 'too_many_attempts':
-        this.toast.warning(error.message);
+        this.toast.warning(error.message, 'Demasiados intentos', 5000);
         break;
       case 'account_locked':
       case 'account_suspended':
-        this.toast.error(error.message);
+        this.toast.error(error.message, 'Cuenta no disponible', 5000);
         break;
       case 'email_not_verified':
-        this.toast.info(error.message);
+        this.toast.info(error.message, 'Verificación requerida', 5000);
         break;
       default:
-        this.toast.error(error.message);
+        this.toast.error(error.message, 'Error de inicio de sesión', 5000);
     }
   }
 
@@ -235,6 +235,9 @@ export class LoginComponent implements OnInit, OnDestroy {
     if (this.canRetry && this.retryCountdown === 0) {
       this.clearError();
       this.onSubmit();
+    } else if (this.retryCountdown > 0) {
+      // Show a notification that they need to wait
+      this.toast.info(`Espera ${this.retryCountdown} segundos antes de reintentar`, 'Tiempo de espera');
     }
   }
 

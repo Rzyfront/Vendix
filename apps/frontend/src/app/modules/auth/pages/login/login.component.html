@@ -98,7 +98,7 @@
         </div>
 
         <!-- Mensaje de error general -->
-        <div *ngIf="hasError" class="p-4 rounded-2xl shadow-sm border relative overflow-hidden"
+        <div *ngIf="hasError" class="p-4 rounded-2xl shadow-sm border relative overflow-hidden animate-fade-in"
              [ngClass]="{
                'bg-red-50/80 backdrop-blur-sm border-red-200/50': loginState === 'error',
                'bg-orange-50/80 backdrop-blur-sm border-orange-200/50': loginState === 'network_error',
@@ -148,33 +148,37 @@
               </p>
 
               <!-- Action buttons based on error type -->
-              <div class="mt-3 flex space-x-2">
+              <div class="mt-3 flex flex-wrap gap-2">
                 <!-- Retry button -->
                 <button *ngIf="canRetry && retryCountdown === 0"
                         (click)="retryLogin()"
-                        class="px-3 py-1 text-xs bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors">
-                  Reintentar
+                        class="px-3 py-1 text-xs bg-primary text-white rounded-lg hover:bg-primary/80 transition-colors flex items-center space-x-1">
+                  <span>↻</span>
+                  <span>Reintentar</span>
                 </button>
 
                 <!-- Resend verification email -->
                 <button *ngIf="loginState === 'email_not_verified'"
                         (click)="resendVerificationEmail()"
-                        class="px-3 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors">
-                  Reenviar verificación
+                        class="px-3 py-1 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-1">
+                  <span>📧</span>
+                  <span>Reenviar verificación</span>
                 </button>
 
                 <!-- Reset form -->
                 <button *ngIf="loginState === 'too_many_attempts' || loginState === 'account_locked'"
                         (click)="resetForm()"
-                        class="px-3 py-1 text-xs bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors">
-                  Reiniciar
+                        class="px-3 py-1 text-xs bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors flex items-center space-x-1">
+                  <span>🔄</span>
+                  <span>Reiniciar</span>
                 </button>
 
                 <!-- Forgot password -->
                 <button *ngIf="loginState === 'password_expired'"
                         (click)="navigateToForgotPassword()"
-                        class="px-3 py-1 text-xs bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors">
-                  Cambiar contraseña
+                        class="px-3 py-1 text-xs bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors flex items-center space-x-1">
+                  <span>🔑</span>
+                  <span>Cambiar contraseña</span>
                 </button>
               </div>
             </div>

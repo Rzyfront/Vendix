@@ -33,7 +33,7 @@ ALTER TYPE "public"."address_type_enum" ADD VALUE 'vacation';
 ALTER TYPE "public"."address_type_enum" ADD VALUE 'business';
 
 -- AlterEnum
-ALTER TYPE "public"."organization_state_enum" ADD VALUE 'draft';
+-- NOTE: The 'draft' value for organization_state_enum is now added in a prior migration
 
 -- AlterTable
 ALTER TABLE "public"."addresses" DROP COLUMN "customer_id",
