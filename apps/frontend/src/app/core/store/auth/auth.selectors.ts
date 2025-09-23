@@ -15,12 +15,12 @@ export const selectTokens = createSelector(
 
 export const selectAccessToken = createSelector(
   selectTokens,
-  (tokens) => tokens?.accessToken || null
+  (tokens: any) => tokens?.accessToken || null
 );
 
 export const selectRefreshToken = createSelector(
   selectTokens,
-  (tokens) => tokens?.refreshToken || null
+  (tokens: any) => tokens?.refreshToken || null
 );
 
 export const selectIsAuthenticated = createSelector(
@@ -40,54 +40,71 @@ export const selectAuthError = createSelector(
 
 export const selectUserRole = createSelector(
   selectUser,
-  (user) => user?.role || null
+  (user: any) => {
+    console.log('selectUserRole - user object:', user);
+    console.log('selectUserRole - user.roles:', user?.roles);
+    console.log('selectUserRole - user.role:', user?.role);
+    
+    // Handle both role (string) and roles (array) formats
+    if (user?.role) {
+      console.log('selectUserRole - returning user.role:', user.role);
+      return user.role;
+    }
+    if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
+      console.log('selectUserRole - returning user.roles[0]:', user.roles[0]);
+      // Return the first role or the highest priority role
+      return user.roles[0];
+    }
+    console.log('selectUserRole - returning null');
+    return null;
+  }
 );
 
 export const selectUserId = createSelector(
   selectUser,
-  (user) => user?.id || null
+  (user: any) => user?.id || null
 );
 
 export const selectUserEmail = createSelector(
   selectUser,
-  (user) => user?.email || null
+  (user: any) => user?.email || null
 );
 
 export const selectUserName = createSelector(
   selectUser,
-  (user) => user?.name || null
+  (user: any) => user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user?.name || null
 );
 
 export const selectIsAdmin = createSelector(
   selectUserRole,
-  (role) => role === 'SUPER_ADMIN' || role === 'ADMIN'
+  (role: string) => role === 'super_admin' || role === 'admin' || role === 'SUPER_ADMIN' || role === 'ADMIN'
 );
 
 export const selectIsOwner = createSelector(
   selectUserRole,
-  (role) => role === 'OWNER'
+  (role: string) => role === 'owner' || role === 'OWNER'
 );
 
 export const selectIsManager = createSelector(
   selectUserRole,
-  (role) => role === 'MANAGER'
+  (role: string) => role === 'manager' || role === 'MANAGER'
 );
 
 export const selectIsEmployee = createSelector(
   selectUserRole,
-  (role) => role === 'EMPLOYEE' || role === 'CASHIER'
+  (role: string) => role === 'employee' || role === 'cashier' || role === 'EMPLOYEE' || role === 'CASHIER'
 );
 
 export const selectIsCustomer = createSelector(
   selectUserRole,
-  (role) => role === 'CUSTOMER' || role === 'VIEWER'
+  (role: string) => role === 'customer' || role === 'viewer' || role === 'CUSTOMER' || role === 'VIEWER'
 );
 
 export const selectAuthInfo = createSelector(
   selectUser,
   selectIsAuthenticated,
   selectAuthLoading,
-  (user, isAuthenticated, loading) => ({
+  (user: any, isAuthenticated: boolean, loading: boolean) => ({
     user,
     isAuthenticated,
     loading

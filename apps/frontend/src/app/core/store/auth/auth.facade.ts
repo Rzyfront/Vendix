@@ -62,6 +62,20 @@ export class AuthFacade {
   getCurrentUser(): any {
     let result: any = null;
     this.user$.subscribe(user => result = user).unsubscribe();
+    
+    // Fallback to localStorage if NgRx state is empty
+    if (!result) {
+      try {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          result = JSON.parse(storedUser);
+          console.log('getCurrentUser: Loaded user from localStorage:', result);
+        }
+      } catch (error) {
+        console.warn('Failed to load user from localStorage:', error);
+      }
+    }
+    
     return result;
   }
 

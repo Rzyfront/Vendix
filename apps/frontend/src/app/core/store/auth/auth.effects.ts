@@ -40,7 +40,16 @@ export class AuthEffects {
         }
         // Always redirect to admin dashboard after successful login
         console.log('Login successful, redirecting to admin dashboard...');
-        this.router.navigate(['/admin/dashboard']);
+        // Add a small delay to ensure the auth state is properly updated
+        setTimeout(() => {
+          this.router.navigate(['/admin/dashboard']).then(success => {
+            if (success) {
+              console.log('Successfully navigated to admin dashboard');
+            } else {
+              console.log('Failed to navigate to admin dashboard');
+            }
+          });
+        }, 200);
       })
     ),
     { dispatch: false }

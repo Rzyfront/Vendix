@@ -129,6 +129,9 @@ export class AuthService {
             
             // Transform backend user object to frontend User interface
             const backendUser = response.data.user;
+            console.log('Backend user object:', backendUser);
+            console.log('Backend user_roles:', backendUser.user_roles);
+            
             const frontendUser: User = {
               id: backendUser.id.toString(),
               email: backendUser.email,

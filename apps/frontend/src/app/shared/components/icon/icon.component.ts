@@ -224,7 +224,6 @@ const ICONS: Record<string, IconNode> = {
 export class IconComponent {
   @Input({ required: true }) name!: string;
   @Input() size: number | string = 16;
-  @Input() size?: number | string;
   @Input() color?: string;
   @Input('class') cls = '';
 
@@ -232,13 +231,14 @@ export class IconComponent {
     const key = (this.name || '').toLowerCase();
     return ICONS[key] ?? null;
   });
-        [attr.width]="size ?? null"
-        [attr.height]="size ?? null"
+
+  children(): any[] {
     // Lucide's IconNode is an array of [tag, attrs] tuples representing SVG children
     // Example: IconNode = [["path", { d: "..." }], ["circle", { cx: 12, cy: 12, r: 10 }]]
     // So we should iterate over the node itself, not n[2].
     return (this.node() as unknown as any[]) ?? [];
   }
+
   attrs(c: any): any {
     return (c && c[1]) || {};
   }

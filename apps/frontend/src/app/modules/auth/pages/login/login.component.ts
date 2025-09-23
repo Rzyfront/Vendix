@@ -56,15 +56,12 @@ export class LoginComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Subscribe to authentication success to redirect
+    // Subscribe to authentication success to show success message
     this.authFacade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe(isAuth => {
       if (isAuth) {
         console.log('User authenticated, redirecting to admin dashboard...');
-        this.toast.success('Bienvenido de nuevo');
-        // Small delay to ensure the auth state is fully updated
-        setTimeout(() => {
-          this.authService.redirectAfterLogin();
-        }, 100);
+        this.toast.success('¡Bienvenido a Vendix!');
+        // Navigation is now handled exclusively by auth.effects.ts
       }
     });
 
