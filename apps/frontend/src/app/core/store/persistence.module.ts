@@ -17,15 +17,29 @@ export function createAuthMetaReducers(): MetaReducer<AuthState> {
 
 // Hydrate initial state from localStorage
 export function hydrateTenantState(): TenantState {
-  const persistenceService = inject(StorePersistenceService);
-  const persistedState = getPersistedTenantState(persistenceService);
-  return persistedState ? { ...initialTenantState, ...persistedState } : initialTenantState;
+  try {
+    const serializedState = localStorage.getItem('vendix_tenant_state');
+    if (serializedState) {
+      const persistedState = JSON.parse(serializedState);
+      return { ...initialTenantState, ...persistedState };
+    }
+  } catch (error) {
+    console.warn(`Failed to load tenant state from localStorage:`, error);
+  }
+  return initialTenantState;
 }
 
 export function hydrateAuthState(): AuthState {
-  const persistenceService = inject(StorePersistenceService);
-  const persistedState = getPersistedAuthState(persistenceService);
-  return persistedState ? { ...initialAuthState, ...persistedState } : initialAuthState;
+  try {
+    const serializedState = localStorage.getItem('vendix_auth_state');
+    if (serializedState) {
+      const persistedState = JSON.parse(serializedState);
+      return { ...initialAuthState, ...persistedState };
+    }
+  } catch (error) {
+    console.warn(`Failed to load auth state from localStorage:`, error);
+  }
+  return initialAuthState;
 }
 
 // Provider for StorePersistenceService

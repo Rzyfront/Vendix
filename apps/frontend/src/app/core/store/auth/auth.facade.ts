@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { take } from 'rxjs/operators';
 import * as AuthActions from './auth.actions';
 import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
@@ -13,12 +14,15 @@ export class AuthFacade {
 
   // State observables
   readonly user$ = this.store.select(AuthSelectors.selectUser);
+  readonly tokens$ = this.store.select(AuthSelectors.selectTokens);
   readonly isAuthenticated$ = this.store.select(AuthSelectors.selectIsAuthenticated);
   readonly loading$ = this.store.select(AuthSelectors.selectAuthLoading);
   readonly error$ = this.store.select(AuthSelectors.selectAuthError);
 
   // Role-based observables
   readonly userRole$ = this.store.select(AuthSelectors.selectUserRole);
+  readonly userRoles$ = this.store.select(AuthSelectors.selectRoles);
+  readonly userPermissions$ = this.store.select(AuthSelectors.selectPermissions);
   readonly isAdmin$ = this.store.select(AuthSelectors.selectIsAdmin);
   readonly isOwner$ = this.store.select(AuthSelectors.selectIsOwner);
   readonly isManager$ = this.store.select(AuthSelectors.selectIsManager);
@@ -58,54 +62,95 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.clearAuthState());
   }
 
+  restoreAuthState(user: any, tokens: { accessToken: string; refreshToken: string }): void {
+    this.store.dispatch(AuthActions.restoreAuthState({ user, tokens }));
+  }
+
   // Synchronous getters for templates
   getCurrentUser(): any {
     let result: any = null;
-    this.user$.subscribe(user => result = user).unsubscribe();
-    
-    // Fallback to localStorage if NgRx state is empty
-    if (!result) {
-      try {
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          result = JSON.parse(storedUser);
-          console.log('getCurrentUser: Loaded user from localStorage:', result);
-        }
-      } catch (error) {
-        console.warn('Failed to load user from localStorage:', error);
-      }
-    }
-    
+    this.user$.pipe(take(1)).subscribe(user => result = user);
     return result;
   }
 
   getCurrentUserRole(): string | null {
     let result: string | null = null;
-    this.userRole$.subscribe(role => result = role).unsubscribe();
+    this.userRole$.pipe(take(1)).subscribe(role => result = role);
     return result;
   }
 
   isLoggedIn(): boolean {
     let result = false;
-    this.isAuthenticated$.subscribe(auth => result = auth).unsubscribe();
+    this.isAuthenticated$.pipe(take(1)).subscribe(auth => result = auth);
     return result;
   }
 
   isAdmin(): boolean {
     let result = false;
-    this.isAdmin$.subscribe(admin => result = admin).unsubscribe();
+    this.isAdmin$.pipe(take(1)).subscribe(admin => result = admin);
     return result;
   }
 
   isLoading(): boolean {
     let result = false;
-    this.loading$.subscribe(loading => result = loading).unsubscribe();
+    this.loading$.pipe(take(1)).subscribe(loading => result = loading);
     return result;
   }
 
   getError(): string | null {
     let result: string | null = null;
-    this.error$.subscribe(error => result = error).unsubscribe();
+    this.error$.pipe(take(1)).subscribe(error => result = error);
+    return result;
+  }
+
+  getTokens(): { accessToken: string; refreshToken: string } | null {
+    let result: { accessToken: string; refreshToken: string } | null = null;
+    this.tokens$.pipe(take(1)).subscribe(tokens => result = tokens);
+    return result;
+  }
+
+  // Permission methods
+  hasPermission(permission: string): boolean {
+    let result = false;
+    this.userPermissions$.pipe(take(1)).subscribe(permissions => {
+      result = permissions.includes(permission);
+    });
+    return result;
+  }
+
+  hasAnyPermission(permissions: string[]): boolean {
+    let result = false;
+    this.userPermissions$.pipe(take(1)).subscribe(userPermissions => {
+      result = permissions.some(permission => userPermissions.includes(permission));
+    });
+    return result;
+  }
+
+  hasRole(role: string): boolean {
+    let result = false;
+    this.userRoles$.pipe(take(1)).subscribe(roles => {
+      result = roles.includes(role);
+    });
+    return result;
+  }
+
+  hasAnyRole(roles: string[]): boolean {
+    let result = false;
+    this.userRoles$.pipe(take(1)).subscribe(userRoles => {
+      result = roles.some(role => userRoles.includes(role));
+    });
+    return result;
+  }
+
+  getPermissions(): string[] {
+    let result: string[] = [];
+    this.userPermissions$.pipe(take(1)).subscribe(permissions => result = permissions);
+    return result;
+  }
+
+  getRoles(): string[] {
+    let result: string[] = [];
+    this.userRoles$.pipe(take(1)).subscribe(roles => result = roles);
     return result;
   }
 }

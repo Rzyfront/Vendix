@@ -10,9 +10,6 @@ import {
   ParseIntPipe,
   UseGuards,
   Request,
-  BadRequestException,
-  NotFoundException,
-  ConflictException,
 } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import {
@@ -35,91 +32,69 @@ export class OrganizationsController {
 
   @Post()
   @Permissions('organizations:create')
-  async create(@Body() createOrganizationDto: CreateOrganizationDto, @Request() req) {
+  async create(@Body() createOrganizationDto: CreateOrganizationDto) {
     try {
       const result = await this.organizationsService.create(createOrganizationDto);
-      return this.responseService.created(
+      return this.responseService.success(
         result,
         'Organización creada exitosamente',
-        req.url,
       );
     } catch (error) {
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al crear la organización',
         error.message,
-        req.url,
       );
     }
   }
 
   @Get()
   @Permissions('organizations:read')
-  async findAll(@Query() query: OrganizationQueryDto, @Request() req) {
+  async findAll(@Query() query: OrganizationQueryDto) {
     try {
       const result = await this.organizationsService.findAll(query);
-      return this.responseService.paginated(
+      return this.responseService.success(
         result.data,
-        result.meta,
         'Organizaciones obtenidas exitosamente',
-        req.url,
+        result.meta,
       );
     } catch (error) {
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener las organizaciones',
         error.message,
-        req.url,
       );
     }
   }
 
   @Get(':id')
   @Permissions('organizations:read')
-  async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.organizationsService.findOne(id);
       return this.responseService.success(
         result,
         'Organización obtenida exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Organización no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener la organización',
         error.message,
-        req.url,
       );
     }
   }
 
   @Get('slug/:slug')
   @Permissions('organizations:read')
-  async findBySlug(@Param('slug') slug: string, @Request() req) {
+  async findBySlug(@Param('slug') slug: string) {
     try {
       const result = await this.organizationsService.findBySlug(slug);
       return this.responseService.success(
         result,
         'Organización obtenida exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Organización no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener la organización',
         error.message,
-        req.url,
       );
     }
   }
@@ -128,75 +103,35 @@ export class OrganizationsController {
   @Permissions('organizations:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateOrganizationDto: UpdateOrganizationDto,
-    @Request() req
+    @Body() updateOrganizationDto: UpdateOrganizationDto
   ) {
     try {
       const result = await this.organizationsService.update(id, updateOrganizationDto);
       return this.responseService.success(
         result,
         'Organización actualizada exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Organización no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ConflictException) {
-        throw this.responseService.conflict(
-          'Ya existe una organización con este nombre o slug',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al actualizar la organización',
         error.message,
-        req.url,
       );
     }
   }
 
   @Delete(':id')
   @Permissions('organizations:delete')
-  async remove(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.organizationsService.remove(id);
       return this.responseService.success(
         result,
         'Organización eliminada exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Organización no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'No se puede eliminar la organización',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al eliminar la organización',
         error.message,
-        req.url,
       );
     }
   }

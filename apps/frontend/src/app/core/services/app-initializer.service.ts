@@ -6,6 +6,7 @@ import { DomainDetectorService } from './domain-detector.service';
 import { TenantConfigService } from './tenant-config.service';
 import { ThemeService } from './theme.service';
 import { TenantFacade } from '../store/tenant/tenant.facade';
+import { AuthFacade } from '../store/auth/auth.facade';
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 import { TenantConfig } from '../models/tenant-config.interface';
 
@@ -20,6 +21,7 @@ export class AppInitializerService {
     private tenantConfig: TenantConfigService,
     private themeService: ThemeService,
     private tenantFacade: TenantFacade,
+    private authFacade: AuthFacade,
     private router: Router
   ) {}
 
@@ -33,25 +35,35 @@ export class AppInitializerService {
       // Reset any previous error
       this.initializationError = null;
 
-      // 1. Detectar el dominio actual
+      // 1. Check if user is already authenticated from persisted state FIRST
+      const isAuthenticated = this.checkPersistedAuth();
+      console.log('[APP INITIALIZER] Persisted auth check:', isAuthenticated);
+
+      // 2. Detectar el dominio actual
       const domainConfig = await this.domainDetector.detectDomain();
       console.log('[APP INITIALIZER] Domain detected:', domainConfig);
 
-      // 2. Store domain config in tenant store (but don't load tenant config yet)
+      // 3. Store domain config in tenant store (but don't load tenant config yet)
       this.tenantFacade.setDomainConfig(domainConfig);
 
-      // 3. Apply basic theme from domain config if available
+      // 4. Apply basic theme from domain config if available
       if (domainConfig.customConfig?.branding) {
         const transformedBranding = this.transformApiBranding(domainConfig.customConfig.branding);
         await this.themeService.applyBranding(transformedBranding);
         console.log('[APP INITIALIZER] Basic branding applied from domain config');
       }
 
-      // 6. Configurar rutas dinámicamente
+      // 5. Configurar rutas dinámicamente
       await this.configureRoutesForEnvironment(domainConfig);
 
-      // 7. Inicializar servicios específicos del entorno
+      // 6. Inicializar servicios específicos del entorno
       await this.initializeEnvironmentServices(domainConfig);
+
+      // 7. If user is authenticated, redirect to appropriate environment
+      if (isAuthenticated) {
+        console.log('[APP INITIALIZER] User is authenticated, redirecting...');
+        await this.redirectAuthenticatedUser();
+      }
 
       console.log('[APP INITIALIZER] Application initialization completed successfully');
 
@@ -59,6 +71,74 @@ export class AppInitializerService {
       console.error('[APP INITIALIZER] Error during initialization:', error);
       this.initializationError = error;
       // Don't throw - let the app handle the error state
+    }
+  }
+
+  /**
+   * Verifica si hay un usuario autenticado en el estado persistido
+   */
+  private checkPersistedAuth(): boolean {
+    try {
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (authState) {
+        const parsedState = JSON.parse(authState);
+        const hasUser = !!parsedState.user;
+        const hasTokens = !!parsedState.tokens?.accessToken;
+        
+        console.log('[APP INITIALIZER] Checking persisted auth:', { hasUser, hasTokens, user: parsedState.user?.email });
+        
+        if (hasUser && hasTokens) {
+          // Dispatch action to restore auth state immediately
+          this.authFacade.restoreAuthState(parsedState.user, parsedState.tokens);
+          return true;
+        }
+      }
+    } catch (error) {
+      console.warn('[APP INITIALIZER] Error checking persisted auth:', error);
+    }
+    return false;
+  }
+
+  /**
+   * Redirige al usuario autenticado a su entorno apropiado
+   */
+  private async redirectAuthenticatedUser(): Promise<void> {
+    try {
+      // Wait a bit for the auth state to be restored
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      const user = this.authFacade.getCurrentUser();
+      const userRole = this.authFacade.getCurrentUserRole();
+      const isAuthenticated = this.authFacade.isLoggedIn();
+      
+      console.log('[APP INITIALIZER] Redirecting authenticated user:', {
+        user: user?.email,
+        userRole,
+        isAuthenticated,
+        currentPath: this.router.url
+      });
+      
+      if (user && userRole && isAuthenticated) {
+        // Only redirect if we're not already in the admin area
+        if (!this.router.url.startsWith('/admin')) {
+          // Determine redirect path based on user role
+          let redirectPath = '/admin/dashboard'; // default
+          
+          const adminRoles = ['super_admin', 'admin', 'owner', 'manager', 'supervisor'];
+          if (adminRoles.includes(userRole.toLowerCase())) {
+            redirectPath = '/admin/dashboard';
+          }
+          
+          console.log('[APP INITIALIZER] Redirecting to:', redirectPath);
+          this.router.navigate([redirectPath]);
+        } else {
+          console.log('[APP INITIALIZER] User already in admin area, no redirect needed');
+        }
+      } else {
+        console.log('[APP INITIALIZER] Auth state not fully restored, skipping redirect');
+      }
+    } catch (error) {
+      console.error('[APP INITIALIZER] Error redirecting authenticated user:', error);
     }
   }
 

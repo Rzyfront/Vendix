@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-gradient-primary flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8">
+<div class="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-emerald-50 flex items-center justify-center py-8 px-4 sm:px-6 lg:px-8">
   <div class="max-w-lg w-full space-y-8">
     <!-- Header con logo -->
     <div class="text-center">
@@ -14,16 +14,15 @@
       </p>
     </div>
 
-    <div class="backdrop-blur-xl border border-white/20 p-8 relative overflow-hidden"
+    <div class="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 relative overflow-hidden"
          [ngClass]="{
-           'bg-surface/80 rounded-card shadow-card': true,
            'ring-2 ring-green-300': loginState === 'success',
            'ring-2 ring-red-300': hasError,
            'ring-2 ring-blue-300': isLoading
          }">
 
       <!-- Success overlay -->
-      <div *ngIf="loginState === 'success'" class="absolute inset-0 bg-green-50/90 backdrop-blur-sm flex items-center justify-center z-10 rounded-card">
+      <div *ngIf="loginState === 'success'" class="absolute inset-0 bg-green-50/90 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
         <div class="text-center">
           <div class="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
             ✅
@@ -34,7 +33,7 @@
       </div>
 
       <!-- Loading overlay -->
-      <div *ngIf="isLoading" class="absolute inset-0 bg-blue-50/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-card">
+      <div *ngIf="isLoading" class="absolute inset-0 bg-blue-50/50 backdrop-blur-sm flex items-center justify-center z-10 rounded-3xl">
         <div class="text-center">
           <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p class="text-sm text-primary font-medium">Verificando credenciales...</p>
@@ -99,7 +98,7 @@
         </div>
 
         <!-- Mensaje de error general -->
-        <div *ngIf="hasError" class="p-4 rounded-card shadow-sm border relative overflow-hidden animate-fade-in"
+        <div *ngIf="hasError" class="p-4 rounded-2xl shadow-sm border relative overflow-hidden animate-fade-in"
              [ngClass]="{
                'bg-red-50/80 backdrop-blur-sm border-red-200/50': loginState === 'error',
                'bg-orange-50/80 backdrop-blur-sm border-orange-200/50': loginState === 'network_error',
@@ -191,9 +190,8 @@
           <button
             type="submit"
             [disabled]="!isFormValid"
-            class="w-full px-6 py-4 text-white font-bold text-lg shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 relative overflow-hidden group"
+            class="w-full px-6 py-4 bg-gradient-to-r from-primary to-secondary text-white font-bold text-lg rounded-2xl shadow-xl hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 relative overflow-hidden group"
             [ngClass]="{
-              'bg-gradient-to-r from-primary to-secondary rounded-button': true,
               'animate-pulse': isLoading,
               'cursor-not-allowed': !isFormValid
             }"
@@ -217,7 +215,7 @@
           </div>
 
           <!-- Security notice for high attempt counts -->
-          <div *ngIf="loginAttempts >= maxAttempts * 0.7" class="mt-2 p-2 bg-yellow-50/80 rounded-button border border-yellow-200/50">
+          <div *ngIf="loginAttempts >= maxAttempts * 0.7" class="mt-2 p-2 bg-yellow-50/80 rounded-lg border border-yellow-200/50">
             <p class="text-xs text-yellow-700 text-center flex items-center justify-center space-x-1">
               <span>🛡️</span>
               <span>Por seguridad, evita múltiples intentos fallidos</span>
@@ -229,7 +227,7 @@
 
     <!-- Links adicionales -->
     <div class="text-center space-y-4">
-      <div class="bg-white/60 backdrop-blur-sm rounded-card p-4 border border-white/30">
+      <div class="bg-white/60 backdrop-blur-sm rounded-2xl p-4 border border-white/30">
         <p class="text-sm text-gray-600">
           <a routerLink="/auth/forgot-password" class="text-primary hover:text-secondary font-bold transition-colors duration-300 hover:underline">
             ¿Olvidaste tu contraseña?
@@ -244,7 +242,7 @@
       </div>
 
       <!-- Status information -->
-      <div class="bg-white/40 backdrop-blur-sm rounded-card p-3 border border-white/20">
+      <div class="bg-white/40 backdrop-blur-sm rounded-xl p-3 border border-white/20">
         <div class="flex items-center justify-center space-x-4 text-xs text-gray-500">
           <span class="flex items-center space-x-1">
             <span [ngClass]="{'text-green-500': !hasError, 'text-red-500': hasError}">●</span>

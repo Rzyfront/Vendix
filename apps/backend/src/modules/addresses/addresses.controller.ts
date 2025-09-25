@@ -12,10 +12,6 @@ import {
   HttpStatus,
   HttpCode,
   Request,
-  BadRequestException,
-  NotFoundException,
-  ForbiddenException,
-  ConflictException,
 } from '@nestjs/common';
 import { AddressesService } from './addresses.service';
 import {
@@ -46,37 +42,14 @@ export class AddressesController {
   ) {
     try {
       const result = await this.addressesService.create(createAddressDto, user);
-      return this.responseService.created(
+      return this.responseService.success(
         result,
         'Dirección creada exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof ConflictException) {
-        throw this.responseService.conflict(
-          'Ya existe una dirección con estos datos',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para crear esta dirección',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al crear la dirección',
         error.message,
-        req.url,
       );
     }
   }
@@ -92,17 +65,9 @@ export class AddressesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para ver estas direcciones',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener las direcciones',
         error.message,
-        req.url,
       );
     }
   }
@@ -122,24 +87,9 @@ export class AddressesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para ver estas direcciones',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Tienda no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener las direcciones',
         error.message,
-        req.url,
       );
     }
   }
@@ -159,24 +109,9 @@ export class AddressesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Dirección no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para ver esta dirección',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener la dirección',
         error.message,
-        req.url,
       );
     }
   }
@@ -197,31 +132,9 @@ export class AddressesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Dirección no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para actualizar esta dirección',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al actualizar la dirección',
         error.message,
-        req.url,
       );
     }
   }
@@ -236,36 +149,14 @@ export class AddressesController {
   ) {
     try {
       const result = await this.addressesService.remove(id, user);
-      return this.responseService.deleted(
+      return this.responseService.success(
+        null,
         'Dirección eliminada exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Dirección no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'No se puede eliminar la dirección',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ForbiddenException) {
-        throw this.responseService.forbidden(
-          'No tienes permisos para eliminar esta dirección',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al eliminar la dirección',
         error.message,
-        req.url,
       );
     }
   }

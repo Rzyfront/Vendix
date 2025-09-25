@@ -27,30 +27,14 @@ export class RolesController {
   async create(@Body() createRoleDto: CreateRoleDto, @Request() req) {
     try {
       const result = await this.rolesService.create(createRoleDto, req.user.id);
-      return this.responseService.created(
+      return this.responseService.success(
         result,
         'Rol creado exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof ConflictException) {
-        throw this.responseService.conflict(
-          'Ya existe un rol con este nombre',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
-        'Error interno del servidor',
+      return this.responseService.error(
+        'Error al crear el rol',
         error.message,
-        req.url,
       );
     }
   }
@@ -68,10 +52,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener los roles',
         error.message,
-        req.url,
       );
     }
   }
@@ -90,17 +73,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener el rol',
         error.message,
-        req.url,
       );
     }
   }
@@ -125,31 +100,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ConflictException) {
-        throw this.responseService.conflict(
-          'Ya existe un rol con este nombre',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al actualizar el rol',
         error.message,
-        req.url,
       );
     }
   }
@@ -169,24 +122,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'No se puede eliminar el rol',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al eliminar el rol',
         error.message,
-        req.url,
       );
     }
   }
@@ -212,24 +150,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al asignar permisos',
         error.message,
-        req.url,
       );
     }
   }
@@ -253,24 +176,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al remover permisos',
         error.message,
-        req.url,
       );
     }
   }
@@ -287,37 +195,14 @@ export class RolesController {
   async assignRoleToUser(@Body() assignRoleToUserDto: AssignRoleToUserDto, @Request() req) {
     try {
       const result = await this.rolesService.assignRoleToUser(assignRoleToUserDto, req.user.id);
-      return this.responseService.created(
+      return this.responseService.success(
         result,
         'Rol asignado exitosamente',
-        req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Usuario o rol no encontrado',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof ConflictException) {
-        throw this.responseService.conflict(
-          'El usuario ya tiene este rol',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al asignar el rol al usuario',
         error.message,
-        req.url,
       );
     }
   }
@@ -337,24 +222,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw this.responseService.notFound(
-          'Relación no encontrada',
-          error.message,
-          req.url,
-        );
-      }
-      if (error instanceof BadRequestException) {
-        throw this.responseService.badRequest(
-          'Datos inválidos',
-          error.message,
-          req.url,
-        );
-      }
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al remover el rol del usuario',
         error.message,
-        req.url,
       );
     }
   }
@@ -374,10 +244,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener los permisos del usuario',
         error.message,
-        req.url,
       );
     }
   }
@@ -395,10 +264,9 @@ export class RolesController {
         req.url,
       );
     } catch (error) {
-      throw this.responseService.internalServerError(
+      return this.responseService.error(
         'Error al obtener los roles del usuario',
         error.message,
-        req.url,
       );
     }
   }

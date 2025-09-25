@@ -21,6 +21,7 @@ import { PublicModule } from './common/public/public.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { DomainSettingsModule } from './common/modules/domain-settings.module'; // ✅ Agregar import faltante
 import { RolesModule } from './modules/roles/roles.module';
+import { PermissionsModule } from './modules/permissions/permissions.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { RolesModule } from './modules/roles/roles.module';
     DomainSettingsModule, // Módulo para configuración de dominios
     AuditModule, // Módulo de auditoría
     RolesModule, // Módulo de roles y permisos
+    PermissionsModule, // Módulo de permisos
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -9,8 +9,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  NotImplementedException,
-  ConflictException,
 } from '@nestjs/common';
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -49,18 +47,16 @@ export class AuthController {
     const result = await this.authService.registerOwner(registerOwnerDto, clientInfo);
 
     if (result.wasExistingUser) {
-      throw new ConflictException({
-        message: 'Ya tienes un registro pendiente. Completa tu onboarding.',
-        nextStep: 'complete_onboarding',
-        organizationId: result.user.organization_id,
-        data: result,
-      });
+      return this.responseService.error(
+        'Ya tienes un registro pendiente. Completa tu onboarding.',
+        'Existing user registration pending',
+      );
     }
 
-    return {
-      message: 'Bienvenido a Vendix! Tu organización ha sido creada.',
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      'Bienvenido a Vendix! Tu organización ha sido creada.',
+    );
   }
 
   @Post('register-customer')
@@ -78,10 +74,9 @@ export class AuthController {
     };
 
     const result = await this.authService.registerCustomer(registerCustomerDto, clientInfo);
-    return this.responseService.created(
+    return this.responseService.success(
       result,
       'Cliente registrado exitosamente en la tienda.',
-      request.url,
     );
   }
 
@@ -91,21 +86,22 @@ export class AuthController {
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
     @CurrentUser() user: any,
-    @Req() request: Request,
   ) {
     const result = await this.authService.registerStaff(registerStaffDto, user.id);
-    return this.responseService.created(
+    return this.responseService.success(
       result.user,
       result.message,
-      request.url,
     );
   }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() registerDto: RegisterDto, @Req() request: Request) {
+  async register(@Body() registerDto: RegisterDto) {
     await this.authService.register(registerDto);
-    throw new NotImplementedException('Esta ruta está obsoleta. Utilice "register-owner" o "register-customer".');
+    return this.responseService.error(
+      'Esta ruta está obsoleta. Utilice "register-owner" o "register-customer".',
+      'Route deprecated',
+    );
   }
 
   @Post('login')
@@ -119,12 +115,18 @@ export class AuthController {
       userAgent: userAgent || undefined,
     };
 
-    const result = await this.authService.login(loginDto, clientInfo);
-    return this.responseService.success(
-      result,
-      'Login exitoso',
-      request.url,
-    );
+    try {
+      const result = await this.authService.login(loginDto, clientInfo);
+      return this.responseService.success(
+        result,
+        'Login exitoso',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Credenciales inválidas',
+        'Invalid credentials',
+      );
+    }
   }
 
   @Post('refresh')
@@ -139,20 +141,19 @@ export class AuthController {
     };
 
     const result = await this.authService.refreshToken(refreshTokenDto, clientInfo);
-    return {
-      message: 'Token refrescado exitosamente',
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      'Token refrescado exitosamente',
+    );
   }
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  async getProfile(@CurrentUser() user: any, @Req() request: Request) {
+  async getProfile(@CurrentUser() user: any) {
     const profile = await this.authService.getProfile(user.id);
     return this.responseService.success(
       profile,
       'Perfil obtenido exitosamente',
-      request.url,
     );
   }
 
@@ -161,19 +162,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(@CurrentUser() user: any, @Body() body?: { refresh_token?: string; all_sessions?: boolean }) {
     const result = await this.authService.logout(user.id, body?.refresh_token, body?.all_sessions);
-    return {
-      message: result.message,
-      data: result.data
-    };
+    return this.responseService.success(
+      result.data,
+      result.message,
+    );
   }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async getCurrentUser(@CurrentUser() user: any) {
-    return {
-      message: 'Usuario actual obtenido exitosamente',
-      data: user,
-    };
+    return this.responseService.success(
+      user,
+      'Usuario actual obtenido exitosamente',
+    );
   }
 
   // ===== RUTAS DE VERIFICACIÓN DE EMAIL =====
@@ -232,10 +233,10 @@ export class AuthController {
   @Get('sessions')
   async getUserSessions(@CurrentUser() user: any) {
     const sessions = await this.authService.getUserSessions(user.id);
-    return {
-      message: 'Sesiones obtenidas exitosamente',
-      data: sessions,
-    };
+    return this.responseService.success(
+      sessions,
+      'Sesiones obtenidas exitosamente',
+    );
   }
 
   @Delete('sessions/:sessionId')
@@ -246,10 +247,10 @@ export class AuthController {
     @Param('sessionId') sessionId: string,
   ) {
     const result = await this.authService.revokeUserSession(user.id, parseInt(sessionId));
-    return {
-      message: result.message,
-      data: result.data,
-    };
+    return this.responseService.success(
+      result.data,
+      result.message,
+    );
   }
 
   // ===== RUTAS DE ONBOARDING =====
@@ -262,14 +263,17 @@ export class AuthController {
     const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
 
     if (!isOwner) {
-      throw new ConflictException('Solo los propietarios de organización pueden acceder al estado de onboarding.');
+      return this.responseService.error(
+        'Solo los propietarios de organización pueden acceder al estado de onboarding.',
+        'Access denied',
+      );
     }
 
     const status = await this.authService.getOnboardingStatus(user.id);
-    return {
-      message: 'Estado de onboarding obtenido exitosamente',
-      data: status,
-    };
+    return this.responseService.success(
+      status,
+      'Estado de onboarding obtenido exitosamente',
+    );
   }
 
   @Post('onboarding/create-organization')
@@ -284,17 +288,20 @@ export class AuthController {
     const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
 
     if (!isOwner) {
-      throw new ConflictException('Solo los propietarios de organización pueden crear organizaciones durante el onboarding.');
+      return this.responseService.error(
+        'Solo los propietarios de organización pueden crear organizaciones durante el onboarding.',
+        'Access denied',
+      );
     }
 
     const result = await this.authService.createOrganizationDuringOnboarding(
       user.id,
       organizationData,
     );
-    return {
-      message: result.message,
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      result.message,
+    );
   }
 
   @Post('onboarding/setup-organization/:organizationId')
@@ -310,7 +317,10 @@ export class AuthController {
     const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
 
     if (!isOwner) {
-      throw new ConflictException('Solo los propietarios de organización pueden configurar organizaciones durante el onboarding.');
+      return this.responseService.error(
+        'Solo los propietarios de organización pueden configurar organizaciones durante el onboarding.',
+        'Access denied',
+      );
     }
 
     const result = await this.authService.setupOrganization(
@@ -318,10 +328,10 @@ export class AuthController {
       parseInt(organizationId),
       setupData,
     );
-    return {
-      message: result.message,
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      result.message,
+    );
   }
 
   @Post('onboarding/create-store/:organizationId')
@@ -337,7 +347,10 @@ export class AuthController {
     const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
 
     if (!isOwner) {
-      throw new ConflictException('Solo los propietarios de organización pueden crear tiendas durante el onboarding.');
+      return this.responseService.error(
+        'Solo los propietarios de organización pueden crear tiendas durante el onboarding.',
+        'Access denied',
+      );
     }
 
     const result = await this.authService.createStoreDuringOnboarding(
@@ -345,10 +358,10 @@ export class AuthController {
       parseInt(organizationId),
       storeData,
     );
-    return {
-      message: result.message,
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      result.message,
+    );
   }
 
   @Post('onboarding/setup-store/:storeId')
@@ -364,7 +377,10 @@ export class AuthController {
     const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
 
     if (!isOwner) {
-      throw new ConflictException('Solo los propietarios de organización pueden configurar tiendas durante el onboarding.');
+      return this.responseService.error(
+        'Solo los propietarios de organización pueden configurar tiendas durante el onboarding.',
+        'Access denied',
+      );
     }
 
     const result = await this.authService.setupStore(
@@ -372,10 +388,10 @@ export class AuthController {
       parseInt(storeId),
       setupData,
     );
-    return {
-      message: result.message,
-      data: result,
-    };
+    return this.responseService.success(
+      result,
+      result.message,
+    );
   }
 
   @Post('onboarding/complete')

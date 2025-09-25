@@ -112,6 +112,12 @@ export class SettingsComponent {
       label: 'Roles y Permisos',
       icon: 'user-shield',
       route: './roles'
+    },
+    {
+      id: 'permissions',
+      label: 'Gestión de Permisos',
+      icon: 'shield-check',
+      route: './permissions'
     }
   ];
 }

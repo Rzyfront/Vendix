@@ -713,11 +713,15 @@ export class UsersComponent implements OnInit, OnDestroy {
     this.pageSize = limit;
 
     const state = (filters.state || undefined) as 'active' | 'inactive' | 'suspended' | 'archived' | undefined;
+    const organizationId = this.tenantFacade.getCurrentOrganization()?.id;
+    const organization_id = organizationId ? Number(organizationId) : undefined;
+
     this.userService.getUsers({
       page: this.currentPage,
       limit,
       search: filters.search || undefined,
-      state
+      state,
+      organization_id
     }).subscribe({
       next: (response) => {
         this.users = response.data;

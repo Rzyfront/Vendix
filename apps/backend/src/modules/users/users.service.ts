@@ -7,10 +7,15 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto, UserQueryDto } from './dto';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { EmailService } from '../../email/email.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private emailService: EmailService,
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     const { organization_id, email, password, ...rest } = createUserDto;
@@ -24,7 +29,7 @@ export class UsersService {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    return this.prisma.users.create({
+    const user = await this.prisma.users.create({
       data: {
         ...rest,
         email,
@@ -43,6 +48,24 @@ export class UsersService {
         state: true,
       },
     });
+
+    // Generate email verification token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    await this.prisma.email_verification_tokens.create({
+      data: {
+        user_id: user.id,
+        token,
+        expires_at: expiresAt,
+      },
+    });
+
+    // Send verification email after user creation
+    const fullName = `${user.first_name} ${user.last_name}`.trim();
+    await this.emailService.sendVerificationEmail(user.email, token, fullName);
+
+    return user;
   }
 
   async findAll(query: UserQueryDto) {
@@ -76,6 +99,11 @@ export class UsersService {
           email: true,
           state: true,
           organizations: { select: { id: true, name: true } },
+          user_roles: {
+            include: {
+              roles: true,
+            },
+          },
         },
       }),
       this.prisma.users.count({ where }),

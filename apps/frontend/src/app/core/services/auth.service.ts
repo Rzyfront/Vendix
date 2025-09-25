@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap } from 'rxjs';
+import { Observable, tap, map } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthFacade } from '../store/auth/auth.facade';
@@ -86,12 +86,15 @@ export interface BackendUser {
 }
 
 export interface AuthResponse {
+  success: boolean;
   message: string;
   data: {
     access_token: string;
     refresh_token: string;
     user: BackendUser;
-  };
+  } | null;
+  error: string;
+  meta?: any;
 }
 
 @Injectable({
@@ -121,17 +124,18 @@ export class AuthService {
       }
     }
 
-    return this.http.post<AuthResponse>(`${this.API_URL}/login`, enrichedLoginDto)
+    return this.http.post<any>(`${this.API_URL}/login`, enrichedLoginDto)
       .pipe(
-        tap((response: AuthResponse) => {
+        map((response: any) => {
+          // Check if response has success: false (error case)
+          if (response.success === false) {
+            throw new Error(response.message || 'Login failed');
+          }
+
           if (response.data) {
-            console.log('Login response received:', response);
-            
             // Transform backend user object to frontend User interface
             const backendUser = response.data.user;
-            console.log('Backend user object:', backendUser);
-            console.log('Backend user_roles:', backendUser.user_roles);
-            
+
             const frontendUser: User = {
               id: backendUser.id.toString(),
               email: backendUser.email,
@@ -142,14 +146,10 @@ export class AuthService {
               emailVerified: backendUser.email_verified
             };
 
-            console.log('Transformed user:', frontendUser);
-
-            // Store tokens and user data
-            localStorage.setItem('access_token', response.data.access_token);
-            localStorage.setItem('refresh_token', response.data.refresh_token);
-            localStorage.setItem('user', JSON.stringify(frontendUser));
-
-            console.log('Tokens and user data stored in localStorage');
+            // Extract permissions and roles from JWT token
+            const decodedToken = this.decodeJwtToken(response.data.access_token);
+            const permissions = decodedToken?.permissions || [];
+            const roles = decodedToken?.roles || [];
 
             // Update auth store - this will trigger the navigation in effects
             this.store.dispatch(AuthActions.loginSuccess({
@@ -157,11 +157,20 @@ export class AuthService {
               tokens: {
                 accessToken: response.data.access_token,
                 refreshToken: response.data.refresh_token
-              }
+              },
+              permissions,
+              roles
             }));
 
-            console.log('Auth store updated with login success action');
+            // Set tokens in localStorage for interceptor
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('access_token', response.data.access_token);
+              localStorage.setItem('refresh_token', response.data.refresh_token);
+            }
+
           }
+
+          return response;
         })
       );
   }
@@ -233,12 +242,14 @@ export class AuthService {
 
   // Get access token
   getToken(): string | null {
-    return localStorage.getItem('access_token');
+    const tokens = this.authFacade.getTokens();
+    return tokens?.accessToken || null;
   }
 
   // Get refresh token
   getRefreshToken(): string | null {
-    return localStorage.getItem('refresh_token');
+    const tokens = this.authFacade.getTokens();
+    return tokens?.refreshToken || null;
   }
 
   // Redirect after login based on user role
@@ -258,5 +269,17 @@ export class AuthService {
   private clearTokens(): void {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+  }
+
+  // Decode JWT token to extract payload
+  private decodeJwtToken(token: string): any {
+    try {
+      const payload = token.split('.')[1];
+      const decodedPayload = atob(payload);
+      return JSON.parse(decodedPayload);
+    } catch (error) {
+      console.error('Error decoding JWT token:', error);
+      return null;
+    }
   }
 }

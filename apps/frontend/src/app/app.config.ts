@@ -36,8 +36,8 @@ export const appConfig: ApplicationConfig = {
         strictActionTypeUniqueness: true
       }
     }),
-    provideState('tenant', tenantReducer),
-    provideState('auth', authReducer),
+    provideState('tenant', tenantReducer, { initialState: hydrateTenantState() }),
+    provideState('auth', authReducer, { initialState: hydrateAuthState() }),
     provideEffects([TenantEffects, AuthEffects]),
     provideStoreDevtools({
       maxAge: 25,

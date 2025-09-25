@@ -1,9 +1,12 @@
 import { createReducer, on } from '@ngrx/store';
 import * as AuthActions from './auth.actions';
+import { extractApiErrorMessage } from '../../utils/api-error-handler';
 
 export interface AuthState {
   user: any | null;
   tokens: { accessToken: string; refreshToken: string } | null;
+  permissions: string[];
+  roles: string[];
   loading: boolean;
   error: string | null;
   isAuthenticated: boolean;
@@ -12,6 +15,8 @@ export interface AuthState {
 export const initialAuthState: AuthState = {
   user: null,
   tokens: null,
+  permissions: [],
+  roles: [],
   loading: false,
   error: null,
   isAuthenticated: false
@@ -26,10 +31,12 @@ export const authReducer = createReducer(
     error: null
   })),
 
-  on(AuthActions.loginSuccess, (state, { user, tokens }) => ({
+  on(AuthActions.loginSuccess, (state, { user, tokens, permissions, roles }) => ({
     ...state,
     user,
     tokens,
+    permissions: permissions || [],
+    roles: roles || [],
     loading: false,
     error: null,
     isAuthenticated: true
@@ -38,7 +45,7 @@ export const authReducer = createReducer(
   on(AuthActions.loginFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.error?.message || error?.message || 'Error de autenticación',
+    error: extractApiErrorMessage(error),
     isAuthenticated: false
   })),
 
@@ -66,7 +73,7 @@ export const authReducer = createReducer(
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.error?.message || error?.message || 'Error al refrescar token',
+    error: extractApiErrorMessage(error),
     isAuthenticated: false
   })),
 
@@ -85,7 +92,7 @@ export const authReducer = createReducer(
   on(AuthActions.loadUserFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: error?.error?.message || error?.message || 'Error al cargar usuario'
+    error: extractApiErrorMessage(error)
   })),
 
   on(AuthActions.updateUser, (state, { user }) => ({
@@ -105,5 +112,16 @@ export const authReducer = createReducer(
   on(AuthActions.setError, (state, { error }) => ({
     ...state,
     error
+  })),
+
+  on(AuthActions.restoreAuthState, (state, { user, tokens, permissions, roles }) => ({
+    ...state,
+    user,
+    tokens,
+    permissions: permissions || [],
+    roles: roles || [],
+    isAuthenticated: true,
+    loading: false,
+    error: null
   }))
 );

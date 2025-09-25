@@ -31,35 +31,32 @@ export class UsersController {
 
   @Post()
   @Permissions('users:create')
-  async create(@Body() createUserDto: CreateUserDto, @Req() request: Request) {
+  async create(@Body() createUserDto: CreateUserDto) {
     const user = await this.usersService.create(createUserDto);
-    return this.responseService.created(
+    return this.responseService.success(
       user,
       'User created successfully',
-      request.url,
     );
   }
 
   @Get()
   @Permissions('users:read')
-  async findAll(@Query() query: UserQueryDto, @Req() request: Request) {
+  async findAll(@Query() query: UserQueryDto) {
     const result = await this.usersService.findAll(query);
-    return this.responseService.paginated(
+    return this.responseService.success(
       result.data,
-      result.meta,
       'Users retrieved successfully',
-      request.url,
+      result.meta,
     );
   }
 
   @Get(':id')
   @Permissions('users:read')
-  async findOne(@Param('id', ParseIntPipe) id: number, @Req() request: Request) {
+  async findOne(@Param('id', ParseIntPipe) id: number) {
     const user = await this.usersService.findOne(id);
     return this.responseService.success(
       user,
       'User retrieved successfully',
-      request.url,
     );
   }
 

@@ -46,6 +46,10 @@ export const adminRoutes: Routes = [
       {
         path: 'roles/:id/permissions',
         loadComponent: () => import('./pages/permissions/permissions.component').then(c => c.PermissionsComponent)
+      },
+      {
+        path: 'permissions',
+        loadComponent: () => import('./pages/settings/permissions-management.component').then(c => c.PermissionsManagementComponent)
       }
     ]
   },

@@ -1,13 +1,9 @@
 export interface StandardResponse<T = any> {
   success: boolean;
   message: string;
-  data?: T;
-  error?: {
-    code?: string;
-    details?: any;
-  };
-  timestamp?: string;
-  path?: string;
+  data: T;
+  error: string;
+  meta?: any;
 }
 
 export interface PaginationMeta {

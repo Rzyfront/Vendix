@@ -168,3 +168,20 @@ body {
   transform-origin: left center;
 }
 @keyframes toast-progress { from { transform: scaleX(1) } to { transform: scaleX(0) } }
+
+/* Utility classes for consistent styling */
+.bg-gradient-primary {
+  background: linear-gradient(to bottom right, #f0f9ff, #ecfdf5);
+}
+
+.rounded-card {
+  border-radius: var(--radius-card);
+}
+
+.rounded-button {
+  border-radius: var(--radius-button);
+}
+
+.shadow-card {
+  box-shadow: var(--shadow-card);
+}

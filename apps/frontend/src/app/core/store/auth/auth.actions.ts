@@ -7,7 +7,7 @@ export const login = createAction(
 
 export const loginSuccess = createAction(
   '[Auth] Login Success',
-  props<{ user: any; tokens: { accessToken: string; refreshToken: string } }>()
+  props<{ user: any; tokens: { accessToken: string; refreshToken: string }; permissions?: string[]; roles?: string[] }>()
 );
 
 export const loginFailure = createAction(
@@ -54,6 +54,11 @@ export const updateUser = createAction(
 export const clearAuthState = createAction('[Auth] Clear Auth State');
 
 export const checkAuthStatus = createAction('[Auth] Check Auth Status');
+
+export const restoreAuthState = createAction(
+  '[Auth] Restore Auth State',
+  props<{ user: any; tokens: { accessToken: string; refreshToken: string }; permissions?: string[]; roles?: string[] }>()
+);
 
 export const setLoading = createAction(
   '[Auth] Set Loading',

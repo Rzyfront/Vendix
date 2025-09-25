@@ -32,7 +32,6 @@ export interface LoginError {
 })
 export class LoginComponent implements OnInit, OnDestroy {
   loginForm: FormGroup;
-  isLoading = false;
   loginState: LoginState = 'idle';
   loginError: LoginError | null = null;
   loginAttempts = 0;
@@ -108,37 +107,30 @@ export class LoginComponent implements OnInit, OnDestroy {
     const errorMessage = error?.message || error?.error?.message || error?.error || 'Error de autenticación';
     console.log('Extracted error message:', errorMessage);
 
-    // Determine error type based on status code and message
-    if (error?.status === 0 || error?.status === -1) {
-      // Network error
-      this.setLoginError({
-        type: 'network_error',
-        message: 'Error de conexión. Verifica tu conexión a internet.',
-        canRetry: true
-      });
-    } else if (error?.status === 429) {
-      // Rate limited
-      const retryAfter = error?.error?.retryAfter || 60;
-      this.setLoginError({
-        type: 'rate_limited',
-        message: 'Demasiados intentos. Inténtalo más tarde.',
-        canRetry: true,
-        retryAfter
-      });
-    } else if (error?.status === 423) {
-      // Account locked
-      this.setLoginError({
-        type: 'account_locked',
-        message: 'Cuenta bloqueada temporalmente.',
-        canRetry: false
-      });
+    // Since we now return standardized responses, check message content for error types
+    if (errorMessage.toLowerCase().includes('credenciales inválidas') || errorMessage.toLowerCase().includes('invalid credentials')) {
+      // Invalid credentials
+      if (this.loginAttempts >= this.maxAttempts) {
+        this.setLoginError({
+          type: 'too_many_attempts',
+          message: `Demasiados intentos fallidos. Espera ${this.lockoutTime / 60} minutos.`,
+          canRetry: true,
+          retryAfter: this.lockoutTime
+        });
+      } else {
+        this.setLoginError({
+          type: 'error',
+          message: 'Credenciales inválidas. Verifica tu email y contraseña.',
+          canRetry: true
+        });
+      }
     } else if (errorMessage.toLowerCase().includes('email not verified') || errorMessage.toLowerCase().includes('verificar email')) {
       this.setLoginError({
         type: 'email_not_verified',
         message: 'Email no verificado. Revisa tu bandeja de entrada.',
         canRetry: false
       });
-    } else if (errorMessage.toLowerCase().includes('too many') || errorMessage.toLowerCase().includes('demasiados')) {
+    } else if (errorMessage.toLowerCase().includes('too many') || errorMessage.toLowerCase().includes('demasiados') || errorMessage.toLowerCase().includes('cuenta bloqueada')) {
       this.setLoginError({
         type: 'too_many_attempts',
         message: 'Demasiados intentos fallidos. Espera unos minutos.',
@@ -157,13 +149,12 @@ export class LoginComponent implements OnInit, OnDestroy {
         message: 'Contraseña expirada. Debes cambiarla.',
         canRetry: false
       });
-    } else if (this.loginAttempts >= this.maxAttempts) {
-      // Local lockout after max attempts
+    } else if (errorMessage.toLowerCase().includes('conexión') || errorMessage.toLowerCase().includes('connection')) {
+      // Network error
       this.setLoginError({
-        type: 'too_many_attempts',
-        message: `Demasiados intentos fallidos. Espera ${this.lockoutTime / 60} minutos.`,
-        canRetry: true,
-        retryAfter: this.lockoutTime
+        type: 'network_error',
+        message: 'Error de conexión. Verifica tu conexión a internet.',
+        canRetry: true
       });
     } else {
       // Generic error
@@ -284,6 +275,10 @@ export class LoginComponent implements OnInit, OnDestroy {
     return this.loginError?.canRetry || false;
   }
 
+  get isLoading(): boolean {
+    return this.loginState === 'loading';
+  }
+
   get isFormValid(): boolean {
     return this.loginForm.valid && this.loginState !== 'loading' && !this.hasError;
   }
@@ -297,7 +292,7 @@ export class LoginComponent implements OnInit, OnDestroy {
   }
 
   onSubmit(): void {
-    if (this.loginForm.valid && this.loginState !== 'loading' && !this.hasError) {
+    if (this.loginForm.valid && this.loginState !== 'loading') {
       this.clearError();
 
       const { email, password } = this.loginForm.value;
@@ -331,13 +326,8 @@ export class LoginComponent implements OnInit, OnDestroy {
   // Field interaction methods
   getFieldClass(fieldName: string): string {
     const field = this.loginForm.get(fieldName);
-    const baseClasses = 'w-full px-4 py-3 rounded-md border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
-    const borderWidth = 'var(--border-width)';
-    const borderColor = 'var(--border)';
-    const surfaceColor = 'var(--surface)';
-    const primaryColor = 'var(--primary)';
-    const radius = 'var(--radius-sm)';
-
+    const baseClasses = 'w-full px-4 py-3 rounded-input border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
+    
     if (field?.invalid && field?.touched) {
       return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500/50`;
     } else if (field?.valid && field?.touched && field?.value) {
