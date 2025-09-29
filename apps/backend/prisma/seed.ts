@@ -125,13 +125,13 @@ async function main() {
 
   // Primero eliminar cualquier configuración existente para este hostname
   await prisma.domain_settings.deleteMany({
-    where: { hostname: 'localhost' }
+    where: { hostname: 'vendix.com' }
   });
 
   // Crear la nueva configuración con datos completos del frontend
   await prisma.domain_settings.create({
     data: {
-      hostname: 'localhost',
+      hostname: 'vendix.com',
       organization_id: seedOrganization.id,
       store_id: null, // Configuración a nivel de organización
       config: {
@@ -148,7 +148,7 @@ async function main() {
           favicon_url: null,
         },
         security: {
-          cors_origins: ['http://localhost:4200', 'http://localhost:3000'],
+          cors_origins: ['http://vendix.com', 'http://api.vendix.com'],
           session_timeout: 3600000, // 1 hora en ms
           max_login_attempts: 5
         },
