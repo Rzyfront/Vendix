@@ -272,12 +272,25 @@ model domain_settings {
   organization_id Int?
   store_id        Int?
   config          Json
+  // --- Nuevos campos multi-tenant ---
+  domain_type     domain_type_enum    @default(organization_root)
+  status          domain_status_enum  @default(active)
+  ssl_status      ssl_status_enum     @default(none)
+  is_primary      Boolean             @default(false)
+  verification_token String?          @unique @db.VarChar(100)
+  last_verified_at DateTime?          @db.Timestamp(6)
+  last_error      String?             @db.VarChar(255)
+  // ----------------------------------------------------
   created_at      DateTime?     @default(now()) @db.Timestamp(6)
   updated_at      DateTime?     @default(now()) @db.Timestamp(6)
   organization    organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store           stores?       @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([hostname])
+  @@index([organization_id])
+  @@index([store_id])
+  @@index([status])
+  @@index([domain_type])
 }
 
 // Modulo de productos
@@ -759,4 +772,28 @@ enum api_key_status_enum {
   inactive
   revoked
   expired
+}
+
+// Nuevos enums para gestión de dominios multi-tenant
+enum domain_type_enum {
+  vendix_core
+  organization_root
+  organization_subdomain
+  store_subdomain
+  store_custom
+}
+
+enum domain_status_enum {
+  pending_dns
+  pending_ssl
+  active
+  disabled
+}
+
+enum ssl_status_enum {
+  none
+  pending
+  issued
+  error
+  revoked
 }

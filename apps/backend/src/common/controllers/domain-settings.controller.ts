@@ -26,6 +26,8 @@ import {
   UpdateDomainSettingDto,
   ValidateHostnameDto,
   DuplicateDomainDto,
+  VerifyDomainDto,
+  VerifyDomainResult,
 } from '../dto/domain-settings.dto';
 
 @Controller('domain-settings')
@@ -259,5 +261,19 @@ export class DomainSettingsController {
       }
       return { valid: false, reason: 'Invalid hostname format' };
     }
+  }
+
+  /**
+   * Verificar configuración DNS de un dominio custom
+   */
+  @Post('hostname/:hostname/verify')
+  @Roles('super_admin', 'admin', 'owner')
+  async verifyDomain(
+    @Param('hostname') hostname: string,
+    @Body() body: VerifyDomainDto,
+    @CurrentUser() user?: any,
+  ): Promise<VerifyDomainResult> {
+    this.logger.log(`Verifying domain DNS for hostname: ${hostname}`);
+    return this.domainSettingsService.verify(hostname, body);
   }
 }

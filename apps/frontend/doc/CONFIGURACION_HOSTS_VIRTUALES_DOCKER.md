@@ -1,5 +1,63 @@
 # Configuración de Hosts Virtuales para Desarrollo con Docker
 
+> ACTUALIZACIÓN (Arquitectura Multi‑Tenant Escalable)  
+> Este documento ha sido ampliado para reflejar un enfoque progresivo: **entorno de desarrollo simple** + **ruta clara hacia producción escalable y segura** para soportar miles de organizaciones, tiendas y dominios personalizados.
+
+## 🚀 Objetivo General
+Vendix es una plataforma SaaS multi‑tenant donde:
+1. Un usuario se registra en `www.vendix.com` → crea Organización inicial + primera Tienda.
+2. La organización recibe automáticamente un subdominio: `orgslug.vendix.com`.
+3. Cada tienda puede tener:
+  - Subdominio propio bajo vendix: `store.orgslug.vendix.com` (opcional).
+  - Dominio personalizado: `midominio.com` (apuntado por DNS del cliente).
+4. El backend resuelve contexto (org / store / entorno) a partir del `Host` + cabeceras auxiliares.
+
+## 🧱 Principios de Diseño
+| Principio | Dev | Producción |
+|-----------|-----|------------|
+| Simplicidad | Un único Nginx, sin TLS | TLS, caché, compresión, seguridad |
+| Resolución de tenant | Lógica central en backend | Igual (evitar recargar Nginx) |
+| Escalabilidad de dominios | Regex + cabeceras | Wildcards + gestor certificados dinámico |
+| Evolución futura | Fácil migrar a Traefik/Caddy | Opcional: Traefik/Caddy para certificados |
+
+## 🗂️ Archivos Nuevos Clave
+| Archivo | Propósito |
+|---------|-----------|
+| `nginx.dev.conf` | Config simplificada multi‑tenant para desarrollo (sin TLS). |
+| `nginx.prod.example.conf` | Plantilla base endurecida para despliegue productivo. |
+
+En desarrollo seguirás usando `docker-compose` pero podrás cambiar a `nginx.dev.conf` sin tocar lógica interna.
+
+## 🔄 Flujo de Resolución (Backend)
+1. Nginx solo enruta: Frontend vs `/api/`.
+2. Cabeceras añadidas (ejemplo): `X-Org-Candidate`, `X-Store-Candidate`, `X-Custom-Domain`.
+3. Servicio de resolución valida en BD:
+  - Tabla `domains`: (`hostname`, `type`, `organizationId`, `storeId`, `status`, `ssl_state`).
+  - Estados: `pending_dns`, `pending_ssl`, `active`, `disabled`.
+4. Cache local (in‑memory) + invalidación por evento (ej. Redis pub/sub) en producción.
+
+## 🛣️ Camino hacia Producción
+1. Empezar con `nginx.dev.conf` (ya añadido).
+2. Añadir build frontend y usar `nginx.prod.example.conf`.
+3. Integrar certificados:
+  - Opción rápida: Traefik (labels en servicios) con wildcard + on-demand.
+  - Alternativa: Certbot + wildcard `*.vendix.com` (DNS-01) y emisión individual para dominios custom.
+4. Añadir observabilidad: logs estructurados + OpenTelemetry en backend.
+5. Endurecer seguridad (rate limiting, WAF opcional, CSP ajustada).
+
+## ✅ Prioridad Recomendada (Iteraciones)
+1. (Hecho) Simplificar y limpiar configuración dev.
+2. Backend: centralizar DomainResolution + cache.
+3. Tabla `domains` + endpoints para onboarding de dominios custom.
+4. Script verificación DNS: esperar registro A/CNAME correcto.
+5. Generación automática de certificados (Traefik/Caddy o worker interno + Certbot).
+6. Migrar Angular dev server → build estático en entornos de staging/prod.
+7. Añadir métricas (tiempo resolución dominio, latencias por tenant).
+8. Implementar límites (requests/min por IP + por token).
+
+---
+
+
 Este documento explica cómo configurar hosts virtuales para probar dominios reales como `www.vendix.com`, `app.vendix.com`, etc., en un entorno de desarrollo con Docker.
 
 ## 1. Prerrequisitos
@@ -39,7 +97,7 @@ sudo nano /etc/hosts
 ## 3. Modificación del docker-compose.yml
 
 Actualiza tu archivo `docker-compose.yml` para incluir un servicio Nginx:
-
+csdfs
 ```yaml
 version: '3.8'
 

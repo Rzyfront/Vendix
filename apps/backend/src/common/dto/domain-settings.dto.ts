@@ -593,6 +593,38 @@ export class CreateDomainSettingDto {
   @IsNotEmpty()
   hostname: string;
 
+  @ApiPropertyOptional({
+    example: 'store_subdomain',
+    description: 'Tipo de dominio (si no se especifica se infiere). Valores: vendix_core | organization_root | organization_subdomain | store_subdomain | store_custom',
+  })
+  @IsOptional()
+  @IsIn(['vendix_core','organization_root','organization_subdomain','store_subdomain','store_custom'])
+  domainType?: string;
+
+  @ApiPropertyOptional({
+    example: 'pending_dns',
+    description: 'Estado del dominio. Valores: pending_dns | pending_ssl | active | disabled (normalmente se gestiona automáticamente)',
+  })
+  @IsOptional()
+  @IsIn(['pending_dns','pending_ssl','active','disabled'])
+  status?: string;
+
+  @ApiPropertyOptional({
+    example: 'none',
+    description: 'Estado SSL. Valores: none | pending | issued | error | revoked',
+  })
+  @IsOptional()
+  @IsIn(['none','pending','issued','error','revoked'])
+  sslStatus?: string;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Indica si es el dominio primario dentro del alcance (organización o tienda)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+
   @ApiProperty({ example: 1, description: 'ID de la organización' })
   @IsNumber()
   @IsNotEmpty()
@@ -626,6 +658,26 @@ export class UpdateDomainSettingDto {
   @ValidateNested()
   @Type(() => CreateDomainConfigDto)
   config?: CreateDomainConfigDto;
+
+  @ApiPropertyOptional({ description: 'Actualizar tipo de dominio (no recomendado salvo ajustes administrativos)' })
+  @IsOptional()
+  @IsIn(['vendix_core','organization_root','organization_subdomain','store_subdomain','store_custom'])
+  domainType?: string;
+
+  @ApiPropertyOptional({ description: 'Actualizar estado del dominio' })
+  @IsOptional()
+  @IsIn(['pending_dns','pending_ssl','active','disabled'])
+  status?: string;
+
+  @ApiPropertyOptional({ description: 'Actualizar estado SSL del dominio' })
+  @IsOptional()
+  @IsIn(['none','pending','issued','error','revoked'])
+  sslStatus?: string;
+
+  @ApiPropertyOptional({ description: 'Marcar / desmarcar como primario' })
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
 }
 
 export class ValidateHostnameDto {
@@ -646,4 +698,46 @@ export class DuplicateDomainDto {
   @IsString()
   @IsNotEmpty()
   newHostname: string;
+}
+
+export class VerifyDomainDto {
+  @ApiPropertyOptional({ description: 'Lista de checks a ejecutar (por defecto: txt,cname o a)' })
+  @IsOptional()
+  @IsArray()
+  @IsIn(['txt','cname','a','aaaa'], { each: true })
+  checks?: ('txt'|'cname'|'a'|'aaaa')[];
+
+  @ApiPropertyOptional({ description: 'Forzar verificación aunque ya esté activo' })
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
+
+  @ApiPropertyOptional({ description: 'CNAME esperado (override, útil en dev)' })
+  @IsOptional()
+  @IsString()
+  expectedCname?: string;
+
+  @ApiPropertyOptional({ description: 'Listado de IPs A esperadas (si se valida A)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  expectedA?: string[];
+
+  @ApiPropertyOptional({ description: 'Modo verificación (dns|http|auto) - reservado' })
+  @IsOptional()
+  @IsString()
+  mode?: string;
+}
+
+export interface VerifyDomainResult {
+  hostname: string;
+  statusBefore: string;
+  statusAfter: string;
+  sslStatus: string;
+  verified: boolean;
+  nextAction?: string;
+  checks: Record<string, any>;
+  suggestedFixes?: string[];
+  timestamp: string;
+  errorCode?: string;
 }

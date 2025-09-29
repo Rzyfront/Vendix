@@ -1,4 +1,5 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, OnModuleInit } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface DomainResolutionResponse {
@@ -16,13 +17,54 @@ export interface DomainResolutionResponse {
   organizationSlug?: string;
   // Type of domain
   domainType: 'organization' | 'store';
+  // Extended fields from new schema
+  rawDomainType?: string;
+  status?: string;
+  sslStatus?: string;
+  isPrimary?: boolean;
 }
 
 @Injectable()
-export class DomainResolutionService {
+export class DomainResolutionService implements OnModuleInit {
   private readonly logger = new Logger(DomainResolutionService.name);
+  private cache = new Map<string, { expires: number; data: DomainResolutionResponse }>();
+  private CACHE_TTL_MS = 60_000; // 60s dev TTL
 
-  constructor(private prisma: PrismaService) {}
+  private getFromCache(host: string): DomainResolutionResponse | null {
+    const entry = this.cache.get(host);
+    if (!entry) return null;
+    if (Date.now() > entry.expires) {
+      this.cache.delete(host);
+      return null;
+    }
+    return entry.data;
+  }
+
+  private saveInCache(host: string, data: DomainResolutionResponse): void {
+    this.cache.set(host, { expires: Date.now() + this.CACHE_TTL_MS, data });
+  }
+
+  constructor(private prisma: PrismaService, private eventEmitter: EventEmitter2) {}
+
+  onModuleInit() {
+    this.eventEmitter.on('domain.cache.invalidate', (payload: any) => {
+      if (payload?.hostname) {
+        if (this.cache.delete(payload.hostname)) {
+          this.logger.debug(`Cache invalidated via event for host=${payload.hostname}`);
+        }
+      }
+    });
+  }
+
+  public clearCache(): void {
+    this.cache.clear();
+    this.logger.debug('Domain resolution cache cleared manually');
+  }
+
+  public clearOne(hostname: string): void {
+    this.cache.delete(hostname);
+    this.logger.debug(`Domain resolution cache entry cleared manually for ${hostname}`);
+  }
 
   /**
    * Resuelve la configuración de un dominio por hostname para uso público
@@ -30,6 +72,9 @@ export class DomainResolutionService {
    */
   async resolveDomainConfig(hostname: string): Promise<any> {
     this.logger.log(`Resolving domain config for public access: ${hostname}`);
+
+    const cached = this.getFromCache(hostname);
+    if (cached) return cached;
 
     const domainConfig = await this.prisma.domain_settings.findUnique({
       where: {
@@ -46,17 +91,22 @@ export class DomainResolutionService {
 
     this.logger.log(`Found domain configuration for: ${hostname}`);
 
-    return {
+    const response: DomainResolutionResponse = {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
-      organizationId: domainConfig.organization_id,
-      storeId: domainConfig.store_id || null,
+      organizationId: domainConfig.organization_id || 0,
+      storeId: domainConfig.store_id || undefined,
       config: domainConfig.config,
       createdAt: domainConfig.created_at?.toISOString() || '',
       updatedAt: domainConfig.updated_at?.toISOString() || '',
-      // Indicar el tipo de dominio basado en si tiene store_id
-      domainType: domainConfig.store_id ? 'store' : 'organization'
+      domainType: domainConfig.store_id ? 'store' : 'organization',
+      rawDomainType: (domainConfig as any).domain_type,
+      status: (domainConfig as any).status,
+      sslStatus: (domainConfig as any).ssl_status,
+      isPrimary: (domainConfig as any).is_primary,
     };
+    this.saveInCache(hostname, response);
+    return response;
   }
 
   /**
@@ -65,6 +115,9 @@ export class DomainResolutionService {
    */
   async resolveDomain(hostname: string): Promise<DomainResolutionResponse> {
     this.logger.log(`Resolving domain: ${hostname}`);
+
+    const cached = this.getFromCache(hostname);
+    if (cached) return cached;
 
     const domainConfig = await this.prisma.domain_settings.findUnique({
       where: {
@@ -114,7 +167,7 @@ export class DomainResolutionService {
       domainType = 'organization';
     }
 
-    return {
+    const response: DomainResolutionResponse = {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
       organizationId: domainConfig.organization_id!,
@@ -128,7 +181,13 @@ export class DomainResolutionService {
       organizationName,
       organizationSlug,
       domainType,
+      rawDomainType: (domainConfig as any).domain_type,
+      status: (domainConfig as any).status,
+      sslStatus: (domainConfig as any).ssl_status,
+      isPrimary: (domainConfig as any).is_primary,
     };
+    this.saveInCache(hostname, response);
+    return response;
   }
 
   /**
@@ -188,6 +247,10 @@ export class DomainResolutionService {
         organizationName,
         organizationSlug,
         domainType,
+        rawDomainType: (domain as any).domain_type,
+        status: (domain as any).status,
+        sslStatus: (domain as any).ssl_status,
+        isPrimary: (domain as any).is_primary,
       });
     }
 
@@ -245,7 +308,7 @@ export class DomainResolutionService {
       domainType = 'organization';
     }
 
-    return {
+    const response: DomainResolutionResponse = {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
       organizationId: domainConfig.organization_id!,
@@ -258,7 +321,13 @@ export class DomainResolutionService {
       organizationName,
       organizationSlug,
       domainType,
+      rawDomainType: (domainConfig as any).domain_type,
+      status: (domainConfig as any).status,
+      sslStatus: (domainConfig as any).ssl_status,
+      isPrimary: (domainConfig as any).is_primary,
     };
+    this.saveInCache(data.hostname, response);
+    return response;
   }
 
   /**
@@ -306,7 +375,7 @@ export class DomainResolutionService {
       domainType = 'organization';
     }
 
-    return {
+    const response: DomainResolutionResponse = {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
       organizationId: domainConfig.organization_id!,
@@ -319,7 +388,13 @@ export class DomainResolutionService {
       organizationName,
       organizationSlug,
       domainType,
+      rawDomainType: (domainConfig as any).domain_type,
+      status: (domainConfig as any).status,
+      sslStatus: (domainConfig as any).ssl_status,
+      isPrimary: (domainConfig as any).is_primary,
     };
+    this.saveInCache(hostname, response);
+    return response;
   }
 
   /**
@@ -404,3 +479,5 @@ export class DomainResolutionService {
     );
   }
 }
+
+// (Cache helpers integrados arriba en la clase)

@@ -1,5 +1,4 @@
 # 🏗️ ARQUITECTURA MULTI-TENANT VENDIX
-
 ## 📋 Tabla de Contenidos
 1. [Conceptos Generales](#conceptos-generales)
 2. [Tipos de Dominios](#tipos-de-dominios)
