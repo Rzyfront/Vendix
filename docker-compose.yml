@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=development
-      - BACKEND_URL=http://vendix_backend:3000
+      - BACKEND_URL=http://api.vendix.com
     depends_on:
       - backend
     ports:
@@ -56,16 +56,18 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npm i && npx ng serve"
+    command: sh -c "npm i && npx ng serve --host 0.0.0.0"
 
   nginx:
     image: nginx:alpine
     container_name: vendix_nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
       - ./pages:/usr/share/nginx/html/pages
+      - ./certs:/etc/ssl/certs
     depends_on:
       - backend
       - frontend

@@ -24,6 +24,10 @@ async function bootstrap() {
       'http://localhost',
       'http://app.vendix.com',
       'http://api.vendix.com',
+      // Add HTTPS production origins so browser requests from vendix.com are allowed
+      'https://vendix.com',
+      'https://www.vendix.com',
+      'https://api.vendix.com',
     ],
     credentials: true,
   });

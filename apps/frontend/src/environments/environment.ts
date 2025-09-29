@@ -1,6 +1,8 @@
 export const environment = {
   production: false,
-  apiUrl: 'http://localhost:3000',
+  // apiUrl is forced to the production API endpoint. This ensures the frontend
+  // always calls the correct backend when served in Docker/nginx.
+  apiUrl: 'https://api.vendix.com',
   vendixDomain: 'vendix.com',
 
   // Configuración para desarrollo
