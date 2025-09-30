@@ -195,6 +195,7 @@ export class DomainDetectorService {
     };
   }
 
+
   /**
    * Obtiene información adicional del dominio
    */
@@ -206,42 +207,42 @@ export class DomainDetectorService {
           type: 'Landing Principal',
           description: 'Página principal de Vendix'
         };
-        
+
       case AppEnvironment.VENDIX_ADMIN:
         return {
           displayName: 'Vendix Admin',
           type: 'Super Administración',
           description: 'Panel de administración de Vendix'
         };
-        
+
       case AppEnvironment.ORG_LANDING:
         return {
           displayName: config.organizationSlug || 'Organización',
           type: 'Landing Organizacional',
           description: 'Página principal de la organización'
         };
-        
+
       case AppEnvironment.ORG_ADMIN:
         return {
           displayName: config.organizationSlug || 'Organización',
           type: 'Admin Organizacional',
           description: 'Panel de administración organizacional'
         };
-        
+
       case AppEnvironment.STORE_ADMIN:
         return {
           displayName: config.storeSlug || 'Tienda',
           type: 'Admin Tienda',
           description: 'Panel de administración de tienda'
         };
-        
+
       case AppEnvironment.STORE_ECOMMERCE:
         return {
           displayName: config.storeSlug || 'Tienda',
           type: 'E-commerce',
           description: 'Tienda online'
         };
-        
+
       default:
         return {
           displayName: 'Desconocido',
