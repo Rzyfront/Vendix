@@ -150,8 +150,8 @@ export class InputComponent implements ControlValueAccessor {
 
     // State classes
     const stateClasses = this.error 
-      ? ['border-red-300', 'focus:border-red-500', 'focus:ring-red-200']
-      : ['border-border', 'hover:border-gray-400'];
+      ? ['border-destructive', 'focus:border-destructive', 'focus:ring-destructive/30']
+      : ['border-border', 'hover:border-border'];
 
     // Padding adjustments for icons
     const iconPadding = [];

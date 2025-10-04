@@ -19,7 +19,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
     >
       <!-- Backdrop overlay -->
       <div 
-        class="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        class="fixed inset-0 bg-surface bg-opacity-80 transition-opacity"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
       ></div>
@@ -55,7 +55,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
             <button 
               *ngIf="showCloseButton"
               type="button"
-              class="text-text-secondary hover:text-text-primary transition-colors p-1 rounded-md hover:bg-gray-100"
+              class="text-text-secondary hover:text-text-primary transition-colors p-1 rounded-md hover:bg-surface"
               (click)="close()"
             >
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -72,7 +72,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
           <!-- Footer -->
           <div 
             *ngIf="hasFooter" 
-            class="px-6 py-4 border-t border-border bg-gray-50"
+            class="px-6 py-4 border-t border-border bg-surface"
           >
             <ng-content select="[slot=footer]"></ng-content>
           </div>
