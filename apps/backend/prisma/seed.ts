@@ -19,6 +19,21 @@ async function main() {
     },
   });
 
+  // 1.5 Crear tienda de prueba asociada a la organización principal
+  console.log('🏬 Creando tienda de prueba...');
+  const seedStore = await prisma.stores.upsert({
+    where: { organization_id_slug: { organization_id: seedOrganization.id, slug: 'tienda-prueba' } },
+    update: {},
+    create: {
+      name: 'Tienda Prueba',
+      slug: 'tienda-prueba',
+      organization_id: seedOrganization.id,
+      is_active: true,
+      // agrega otros campos requeridos por tu modelo stores si es necesario
+    },
+  });
+
+
   // 1. Crear permisos
   console.log('📝 Creando permisos...');
   const permissions = [

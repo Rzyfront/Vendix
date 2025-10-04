@@ -12,5 +12,7 @@ logs/
 *.log
 # VSCode
 .vscode/
+# Certificados locales
+certs/
 # OS
 Thumbs.db
