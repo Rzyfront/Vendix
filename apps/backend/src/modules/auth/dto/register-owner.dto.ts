@@ -36,6 +36,9 @@ export class RegisterOwnerDto {
   @Matches(/[^A-Za-z0-9]/, {
     message: 'La contraseña debe contener al menos un carácter especial',
   })
+  @Matches(/[A-Z]/, {
+  message: 'La contraseña debe contener al menos una letra mayúscula',
+  })
   password: string;
 
   @ApiProperty({ example: 'Juan', description: 'Nombre del usuario' })

@@ -19,7 +19,7 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { ForgotPasswordDto } from './dto/password.dto';
+import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ResponseService } from '../../common/responses/response.service';
@@ -205,11 +205,11 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(
-    @Body() resetDto: { token: string; newPassword: string },
+    @Body() resetDto: ResetPasswordDto,
   ) {
     const result = await this.authService.resetPassword(
       resetDto.token,
-      resetDto.newPassword,
+      resetDto.new_password,
     );
     return result;
   }
@@ -219,12 +219,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: any,
-    @Body() changeDto: { currentPassword: string; newPassword: string },
+    @Body() changeDto: ChangePasswordDto,
   ) {
     const result = await this.authService.changePassword(
       user.id,
-      changeDto.currentPassword,
-      changeDto.newPassword,
+      changeDto.current_password,
+      changeDto.new_password,
     );
     return result;
   }
