@@ -66,6 +66,28 @@ export class AuthService {
         }
       }
     });
+    if (existingUser){
+      const existingOrganization = await
+      this.prismaService.organizations.findUnique({
+        where:{id: existingUser.organization_id},
+        select:{
+          id:true,
+          name:true,
+          slug:true,
+          email:true,
+          state:true,
+          created_at:true,
+        },
+
+      });
+
+      //Retornar mesaje con informacion del onboarding pendiente 
+      throw new ConflictException({
+        message:'ya tienes un onboarding pendiente',
+        pendingOnboarding: existingOrganization,
+        user:existingUser
+      })
+    }
 
     // Crear organización + usuario + roles en una transacción atómica
     const result = await this.prismaService.$transaction(async (tx) => {
@@ -89,18 +111,6 @@ export class AuthService {
       let user;
       let wasExistingUser = false;
 
-      if (existingUser) {
-        // Actualizar usuario existente: asignar organización y rol owner
-        user = await tx.users.update({
-          where: { id: existingUser.id },
-          data: {
-            organization_id: organization.id,
-            password: hashedPassword, // Actualizar contraseña si se proporciona nueva
-            onboarding_completed: false, // Reset si estaba incompleto
-          },
-        });
-        wasExistingUser = true;
-      } else {
         // Verificar si ya existe usuario en esta organización (doble check)
         const existingUserInOrg = await tx.users.findFirst({
           where: { email, organization_id: organization.id },
@@ -150,7 +160,6 @@ export class AuthService {
             onboarding_completed: false,
           },
         });
-      }
 
       // Asignar rol owner al usuario (si no lo tiene ya)
       const existingUserRole = await tx.user_roles.findFirst({
