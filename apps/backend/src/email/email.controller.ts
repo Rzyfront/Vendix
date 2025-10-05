@@ -1,6 +1,5 @@
-import { Controller, Get, Post, Body, UseGuards, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { EmailService } from './email.service';
-import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
 
 @Controller('email')
@@ -8,7 +7,6 @@ export class EmailController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get('config')
-  @UseGuards(JwtAuthGuard)
   async getEmailConfig(@CurrentUser() user: any) {
     // Solo admins pueden ver la configuración
     if (!user.roles?.includes('admin')) {
@@ -26,7 +24,6 @@ export class EmailController {
   }
 
   @Post('test')
-  @UseGuards(JwtAuthGuard)
   async testEmailService(@CurrentUser() user: any) {
     // Solo admins pueden testear el servicio
     if (!user.roles?.includes('admin')) {
@@ -42,7 +39,6 @@ export class EmailController {
   }
 
   @Post('test-template')
-  @UseGuards(JwtAuthGuard)
   async testEmailTemplate(
     @CurrentUser() user: any,
     @Body()
@@ -100,7 +96,6 @@ export class EmailController {
   }
 
   @Post('switch-provider')
-  @UseGuards(JwtAuthGuard)
   async switchProvider(
     @CurrentUser() user: any,
     @Body()

@@ -4,17 +4,14 @@ import {
   Post,
   Put,
   Delete,
-  UseGuards,
   HttpStatus,
   Query,
   Body,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('Rate Limiting')
 @Controller('rate-limiting')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class RateLimitingController {
   constructor() {}

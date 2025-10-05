@@ -1,5 +1,4 @@
 import { Controller, Get, UseGuards, Post, Body } from '@nestjs/common';
-import { JwtAuthGuard } from '../modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../modules/auth/guards/roles.guard';
 import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
 import { Roles } from '../modules/auth/decorators/roles.decorator';
@@ -71,7 +70,6 @@ export class TestController {
   }
 
   @Get('protected')
-  @UseGuards(JwtAuthGuard)
   getProtectedData(@CurrentUser() user: any) {
     return {
       message: 'Este endpoint requiere autenticación',
@@ -84,7 +82,7 @@ export class TestController {
   }
 
   @Get('admin-only')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('admin')
   getAdminData(@CurrentUser() user: any) {
     return {
@@ -98,7 +96,7 @@ export class TestController {
   }
 
   @Get('users-permission')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @UseGuards(PermissionsGuard)
   @RequirePermissions('users.read')
   getUsersData(@CurrentUser() user: any) {
     return {
@@ -112,7 +110,7 @@ export class TestController {
   }
 
   @Get('manager-or-admin')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
   getManagerData(@CurrentUser() user: any) {
     return {

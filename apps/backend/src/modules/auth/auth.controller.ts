@@ -4,7 +4,6 @@ import {
   Get,
   Delete,
   Body,
-  UseGuards,
   Req,
   HttpCode,
   HttpStatus,
@@ -20,7 +19,6 @@ import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
@@ -81,7 +79,6 @@ export class AuthController {
   }
 
   @Post('register-staff')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
@@ -94,15 +91,6 @@ export class AuthController {
     );
   }
 
-  @Post('register')
-  @HttpCode(HttpStatus.CREATED)
-  async register(@Body() registerDto: RegisterDto) {
-    await this.authService.register(registerDto);
-    return this.responseService.error(
-      'Esta ruta está obsoleta. Utilice "register-owner" o "register-customer".',
-      'Route deprecated',
-    );
-  }
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -148,7 +136,6 @@ export class AuthController {
   }
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard)
   async getProfile(@CurrentUser() user: any) {
     const profile = await this.authService.getProfile(user.id);
     return this.responseService.success(
@@ -158,7 +145,6 @@ export class AuthController {
   }
 
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async logout(@CurrentUser() user: any, @Body() body?: { refresh_token?: string; all_sessions?: boolean }) {
     const result = await this.authService.logout(user.id, body?.refresh_token, body?.all_sessions);
@@ -169,7 +155,6 @@ export class AuthController {
   }
 
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   async getCurrentUser(@CurrentUser() user: any) {
     return this.responseService.success(
       user,
@@ -215,7 +200,6 @@ export class AuthController {
   }
 
   @Post('change-password')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: any,
@@ -229,7 +213,6 @@ export class AuthController {
     return result;
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get('sessions')
   async getUserSessions(@CurrentUser() user: any) {
     const sessions = await this.authService.getUserSessions(user.id);
@@ -240,7 +223,6 @@ export class AuthController {
   }
 
   @Delete('sessions/:sessionId')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async revokeSession(
     @CurrentUser() user: any,
@@ -256,7 +238,6 @@ export class AuthController {
   // ===== RUTAS DE ONBOARDING =====
 
   @Get('onboarding/status')
-  @UseGuards(JwtAuthGuard)
   async getOnboardingStatus(@CurrentUser() user: any) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
@@ -277,7 +258,6 @@ export class AuthController {
   }
 
   @Post('onboarding/create-organization')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async createOrganizationOnboarding(
     @CurrentUser() user: any,
@@ -305,7 +285,6 @@ export class AuthController {
   }
 
   @Post('onboarding/setup-organization/:organizationId')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async setupOrganization(
     @CurrentUser() user: any,
@@ -335,7 +314,6 @@ export class AuthController {
   }
 
   @Post('onboarding/create-store/:organizationId')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async createStoreOnboarding(
     @CurrentUser() user: any,
@@ -365,7 +343,6 @@ export class AuthController {
   }
 
   @Post('onboarding/setup-store/:storeId')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async setupStore(
     @CurrentUser() user: any,
@@ -395,7 +372,6 @@ export class AuthController {
   }
 
   @Post('onboarding/complete')
-  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Completar onboarding del usuario',

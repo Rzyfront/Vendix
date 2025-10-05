@@ -17,12 +17,11 @@ import {
   StoreQueryDto,
   UpdateStoreSettingsDto,
 } from './dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @Controller('stores')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 export class StoresController {
   constructor(private readonly storesService: StoresService) {}
 

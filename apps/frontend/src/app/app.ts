@@ -25,12 +25,10 @@ export class App implements OnInit {
   ngOnInit(): void {
     // Check if app is already initialized via APP_INITIALIZER
     if (this.appInitializer.isAppInitialized()) {
-      console.log('[APP] App already initialized via APP_INITIALIZER');
       this.isLoading = false;
     } else if (this.appInitializer.hasInitializationError()) {
       // Check if there was an initialization error
       const error = this.appInitializer.getInitializationError();
-      console.error('[APP] App initialization failed:', error);
 
       // Show user-friendly error message
       if (error?.message?.includes('Domain') && error?.message?.includes('not found')) {
@@ -41,7 +39,6 @@ export class App implements OnInit {
       this.isLoading = false;
     } else {
       // If not initialized and no error, show generic error
-      console.error('[APP] App not properly initialized');
       this.error = 'Application initialization failed';
       this.isLoading = false;
     }

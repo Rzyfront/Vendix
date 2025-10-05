@@ -13,7 +13,6 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../modules/auth/guards/roles.guard';
 import { Roles } from '../../modules/auth/decorators/roles.decorator';
 import { CurrentUser } from '../../modules/auth/decorators/current-user.decorator';
@@ -31,7 +30,7 @@ import {
 } from '../dto/domain-settings.dto';
 
 @Controller('domain-settings')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(RolesGuard)
 export class DomainSettingsController {
   private readonly logger = new Logger(DomainSettingsController.name);
 

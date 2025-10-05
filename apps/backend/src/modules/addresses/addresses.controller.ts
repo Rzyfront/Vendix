@@ -19,14 +19,13 @@ import {
   UpdateAddressDto,
   AddressQueryDto,
 } from './dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('addresses')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 export class AddressesController {
   constructor(
     private readonly addressesService: AddressesService,

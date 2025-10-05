@@ -1,17 +1,14 @@
 import {
   Controller,
   Get,
-  UseGuards,
   HttpStatus,
   Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuditService, AuditAction } from '../audit/audit.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('Security Logs')
 @Controller('security-logs')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class SecurityLogsController {
   constructor(private readonly auditService: AuditService) {}

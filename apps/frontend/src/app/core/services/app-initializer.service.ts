@@ -30,8 +30,6 @@ export class AppInitializerService {
    */
   async initializeApp(): Promise<void> {
     try {
-      console.log('[APP INITIALIZER] Starting application initialization...');
-
       // Reset any previous error
       this.initializationError = null;
 

@@ -17,13 +17,12 @@ import {
   UpdateOrganizationDto,
   OrganizationQueryDto,
 } from './dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('organizations')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 export class OrganizationsController {
   constructor(
     private readonly organizationsService: OrganizationsService,

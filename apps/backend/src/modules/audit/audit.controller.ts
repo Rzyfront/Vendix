@@ -7,12 +7,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OrganizationAuditGuard } from './guards/organization-audit.guard'; // ✅ Importar guard
 
 @ApiTags('Audit')
 @Controller('audit')
-@UseGuards(JwtAuthGuard, OrganizationAuditGuard) // ✅ Aplicar guard de organización
+@UseGuards(OrganizationAuditGuard) // ✅ Aplicar guard de organización
 @ApiBearerAuth()
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

@@ -237,7 +237,7 @@ export class AuthService {
     );
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles);
+    const tokens = await this.generateTokens(userWithRoles, { organizationId: result.organization.id, storeId: null });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ipAddress: clientInfo?.ipAddress || '127.0.0.1',
       userAgent: clientInfo?.userAgent || 'Registration-Device',
@@ -368,7 +368,7 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles);
+    const tokens = await this.generateTokens(userWithRoles, { organizationId: store.organization_id, storeId: null });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ipAddress: clientInfo?.ipAddress || '127.0.0.1',
       userAgent: clientInfo?.userAgent || 'Registration-Device',
@@ -600,123 +600,7 @@ export class AuthService {
     };
   }
 
-  async register(registerDto: RegisterDto) {
-    const { email, password, first_name, last_name, organization_id } = registerDto;
 
-    // Verificar si el usuario ya existe en la organización
-    const existingUser = await this.prismaService.users.findFirst({
-      where: {
-        email,
-        organization_id: organization_id ?? undefined,
-      },
-    });
-    if (existingUser) {
-      throw new ConflictException('El usuario con este email ya existe en esta organización');
-    }
-
-    // Hash de la contraseña
-    const hashedPassword = await bcrypt.hash(password, 12);
-
-    // Buscar rol por defecto (customer)
-    const defaultRole = await this.prismaService.roles.findFirst({
-      where: { name: 'customer' },
-    });
-
-    if (!defaultRole) {
-      throw new BadRequestException('Rol por defecto no encontrado');
-    }
-
-    // Crear usuario
-    const user = await this.prismaService.users.create({
-      data: {
-        email,
-        password: hashedPassword,
-        first_name,
-        last_name,
-        username: await this.generateUniqueUsername(email), // Usar la parte antes del @ como username
-        email_verified: false,
-        organization_id: organization_id ?? 1, // fallback temporal si no se provee (mejor pasar explícito)
-      },
-    });
-
-    // Asignar rol por defecto al usuario
-    await this.prismaService.user_roles.create({
-      data: {
-        user_id: user.id,
-        role_id: defaultRole.id,
-      },
-    });
-
-    // Si se registró desde una tienda (organization_id implicado por store), no hay store_id en users;
-    // la relación con tiendas se realiza en `store_users` cuando corresponde.
-
-    // Obtener usuario con roles incluidos
-    const userWithRoles = await this.prismaService.users.findUnique({
-      where: { id: user.id },
-      include: {
-        user_roles: {
-          include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!userWithRoles) {
-      throw new BadRequestException('Error al crear usuario');
-    }
-
-    // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles); // Crear refresh token en la base de datos con información del dispositivo
-    await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
-      ipAddress: '127.0.0.1', // TODO: Obtener IP real del request
-      userAgent: 'Registration-Device', // TODO: Obtener User-Agent real del request
-    });
-
-    // Registrar intento de login exitoso
-    await this.logLoginAttempt(userWithRoles.id, true);
-
-    // Generar token de verificación de email
-    const verificationToken = this.generateRandomToken();
-
-    // Guardar token de verificación en la base de datos
-    await this.prismaService.email_verification_tokens.create({
-      data: {
-        user_id: userWithRoles.id,
-        token: verificationToken,
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 horas
-      },
-    });
-
-    // Enviar email de verificación
-    try {
-      await this.emailService.sendVerificationEmail(
-        userWithRoles.email,
-        verificationToken,
-        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
-      );
-      console.log(`✅ Email de verificación enviado a: ${userWithRoles.email}`);
-    } catch (error) {
-      console.error('❌ Error enviando email de verificación:', error);
-      // No fallar el registro si el email no se puede enviar
-    }
-
-    // Remover password del response
-    const { password: _, ...userWithoutPassword } = userWithRoles;
-
-    return {
-      user: userWithoutPassword,
-      ...tokens,
-    };
-  }
 
   async login(loginDto: LoginDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
     const { email, password, organizationSlug, storeSlug } = loginDto;
@@ -847,7 +731,7 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(user);
+    const tokens = await this.generateTokens(user, { organizationId: targetOrganizationId!, storeId: targetStoreId });
 
     // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(user.id, tokens.refresh_token, {
@@ -949,7 +833,10 @@ export class AuthService {
       await this.validateRefreshTokenSecurity(tokenRecord, clientInfo);
 
       // Generar nuevos tokens
-      const tokens = await this.generateTokens(tokenRecord.users);
+      const tokens = await this.generateTokens(tokenRecord.users, {
+        organizationId: payload.organizationId,
+        storeId: payload.storeId,
+      });
 
       // El password no está incluido en esta consulta por seguridad
       const userWithoutPassword = tokenRecord.users;
@@ -2082,48 +1969,40 @@ export class AuthService {
     return require('crypto').randomBytes(32).toString('hex');
   }
 
-  private async generateTokens(user: any) {
-    // Extraer roles y permisos del usuario
-    const roles = user.user_roles.map((ur: any) => ur.roles.name);
-    const permissions = user.user_roles.flatMap((ur: any) =>
-      ur.roles.role_permissions.map((rp: any) => rp.permissions.name),
-    );
-
+  private async generateTokens(
+    user: any,
+    scope: { organizationId: number; storeId?: number | null },
+  ): Promise<{
+    access_token: string;
+    refresh_token: string;
+    token_type: string;
+    expires_in: number;
+  }> {
     const payload = {
       sub: user.id,
       email: user.email,
-      roles: roles,
-      permissions: permissions,
+      roles: user.user_roles.map((r) => r.roles.name),
+      permissions: this.getPermissionsFromRoles(user.user_roles),
+      organizationId: scope.organizationId,
+      storeId: scope.storeId,
     };
 
-    // Obtener configuraciones del entorno con valores por defecto
-    const accessTokenExpiry =
-      this.configService.get<string>('JWT_EXPIRES_IN') || '15m';
-    const refreshTokenExpiry =
-      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
-    const refreshSecret =
-      this.configService.get<string>('JWT_REFRESH_SECRET') ||
-      this.configService.get<string>('JWT_SECRET') ||
-      'your-super-secret-jwt-key';
-
-    const [access_token, refresh_token] = await Promise.all([
-      // Access token con configuración del entorno
-      this.jwtService.signAsync(payload, { expiresIn: accessTokenExpiry }),
-      // Refresh token con secret separado y configuración del entorno
-      this.jwtService.signAsync(payload, {
-        expiresIn: refreshTokenExpiry,
-        secret: refreshSecret,
-      }),
-    ]);
-
-    // Calcular expires_in en segundos basado en la configuración
-    const expiresInSeconds = this.parseExpiryToSeconds(accessTokenExpiry);
+    const accessToken = this.jwtService.sign(payload);
+    const refreshToken = this.jwtService.sign(payload, {
+      secret:
+        this.configService.get<string>('JWT_REFRESH_SECRET') ||
+        this.configService.get<string>('JWT_SECRET'),
+      expiresIn:
+        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d',
+    });
 
     return {
-      access_token,
-      refresh_token,
+      access_token: accessToken,
+      refresh_token: refreshToken,
       token_type: 'Bearer',
-      expires_in: expiresInSeconds,
+      expires_in: this.parseExpiryToMilliseconds(
+        this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
+      ),
     };
   }
   private async createUserSession(
@@ -2630,5 +2509,22 @@ export class AuthService {
       return 'Tablet';
     }
     return 'Desktop';
+  }
+
+  // Método auxiliar para obtener permisos de roles
+  private getPermissionsFromRoles(userRoles: any[]): string[] {
+    const permissions = new Set<string>();
+
+    for (const userRole of userRoles) {
+      if (userRole.roles?.role_permissions) {
+        for (const rolePermission of userRole.roles.role_permissions) {
+          if (rolePermission.permissions?.name) {
+            permissions.add(rolePermission.permissions.name);
+          }
+        }
+      }
+    }
+
+    return Array.from(permissions);
   }
 }

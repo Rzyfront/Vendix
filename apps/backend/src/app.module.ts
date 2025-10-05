@@ -22,6 +22,9 @@ import { AuditModule } from './modules/audit/audit.module';
 import { DomainSettingsModule } from './common/modules/domain-settings.module'; // ✅ Agregar import faltante
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { ScopeGuard } from './modules/auth/guards/scope.guard';
 
 @Module({
   imports: [
@@ -51,6 +54,16 @@ import { PermissionsModule } from './modules/permissions/permissions.module';
     PermissionsModule, // Módulo de permisos
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ScopeGuard,
+    },
+  ],
 })
 export class AppModule {}
