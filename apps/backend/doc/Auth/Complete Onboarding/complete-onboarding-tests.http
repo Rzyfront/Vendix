@@ -12,7 +12,7 @@
 GET {{baseUrl}}/health
 
 ### ============================================
-### 1. REGISTRO DE USUARIO OWNER PARA TESTING
+### PASO 1: REGISTRO OWNER (PRE-CREA ORGANIZACIÓN) YA RECIBE ACCESS TOKEN
 ### ============================================
 POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
@@ -26,58 +26,13 @@ Content-Type: application/json
 }
 
 ### ============================================
-### 2. LOGIN PARA OBTENER TOKEN
+### PASO 2: VERIFICAR EMAIL
 ### ============================================
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "testonboarding@example.com",
-  "password": "TestPass123!",
-  "organizationSlug": "test-organization-onboarding"
-}
-
-### ============================================
-### 3. VERIFICAR EMAIL (SIMULAR VERIFICACIÓN)
-### ============================================
-# UPDATE users SET email_verified = true WHERE email = 'testonboarding@example.com';
-
-### ============================================
-### ONBOARDING FLOW - PASO A PASO
-### ============================================
-
-### ============================================
-### 3.1. CHECK ONBOARDING STATUS - GET
-### ============================================
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
-
-### ============================================
-### 3.2. INTENTO SIN AUTENTICACIÓN - 401
-### ============================================
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-
-### ============================================
-### 3.3. INTENTO CON TOKEN INVÁLIDO - 401
-### ============================================
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-Authorization: Bearer invalid_token
-
-### ============================================
-### 3.4. INTENTO CON USUARIO NO OWNER - 409
-### ============================================
-# NOTA: Para probar este caso, usa un token de un usuario que no sea owner
-
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-Authorization: Bearer non_owner_token
+# Simular verificación: UPDATE users SET email_verified = true WHERE email = 'testonboarding@example.com';
 
 
 ### ============================================
-### 4. SETUP ORGANIZACIÓN - SE USA COMÚNMENTE PORQUE EL REGISTER OWNER YA PRECREA UNA ORGANIZACIÓN
+### PASO 3: SETUP ORGANIZACIÓN
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/setup-organization/{{organization_id}}
 Content-Type: application/json
@@ -96,7 +51,7 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 5. CREAR TIENDA DURANTE ONBOARDING
+### PASO 4: CREAR Y CONFIGURAR TIENDA COMPLETA
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/create-store/{{organization_id}}
 Content-Type: application/json
@@ -104,29 +59,8 @@ Authorization: Bearer {{access_token}}
 
 {
   "name": "Tienda Principal",
-  "description": "Tienda principal de la empresa",
   "phone": "+57 301 987 6543",
   "email": "tienda@miempresa.com",
-  "address_line1": "Carrera 45 #123-45",
-  "city": "Bogotá",
-  "state_province": "Cundinamarca",
-  "postal_code": "110111",
-  "country_code": "CO",
-  "currency_code": "COP",
-  "timezone": "America/Bogota"
-}
-
-### ============================================
-### 6. SETUP TIENDA
-### ============================================
-POST {{baseUrl}}/auth/onboarding/setup-store/{{store_id}}
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
-
-{
-  "description": "Tienda principal con productos de calidad",
-  "phone": "+57 301 987 6543",
-  "email": "ventas@miempresa.com",
   "address_line1": "Carrera 45 #123-45",
   "address_line2": "Local 1",
   "city": "Bogotá",
@@ -145,14 +79,7 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 7. VERIFICAR ESTADO DESPUÉS DE SETUP
-### ============================================
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
-
-### ============================================
-### 7.1. CONFIGURAR DOMINIO PARA ONBOARDING
+### PASO 5: CONFIGURAR DOMINIO
 ### ============================================
 POST {{baseUrl}}/domain-settings
 Content-Type: application/json
@@ -170,7 +97,7 @@ Authorization: Bearer {{access_token}}
 }
 
 ### ============================================
-### 8. COMPLETAR ONBOARDING
+### PASO 6: COMPLETAR ONBOARDING
 ### ============================================
 POST {{baseUrl}}/auth/onboarding/complete
 Content-Type: application/json
@@ -179,7 +106,7 @@ Authorization: Bearer {{access_token}}
 {}
 
 ### ============================================
-### 9. VERIFICAR ESTADO FINAL
+### VERIFICAR ESTADO FINAL
 ### ============================================
 GET {{baseUrl}}/auth/onboarding/status
 Content-Type: application/json
@@ -258,53 +185,3 @@ Authorization: Bearer {{access_token}}
 # LEFT JOIN organizations o ON u.organization_id = o.id
 # LEFT JOIN stores s ON s.organization_id = o.id
 # WHERE u.email = 'testonboarding@example.com';
-
-### ============================================
-### 17. LIMPIEZA - Reset para próximos tests
-### ============================================
-# UPDATE users SET onboarding_completed = false WHERE email = 'testonboarding@example.com';
-# DELETE FROM stores WHERE organization_id = (SELECT id FROM organizations WHERE name = 'Mi Empresa S.A.');
-# DELETE FROM organizations WHERE name = 'Mi Empresa S.A.';
-# DELETE FROM users WHERE email = 'testonboarding@example.com';
-
-### ============================================
-### TESTING CON USUARIO CUSTOMER (DEBE FALLAR)
-### ============================================
-
-### ============================================
-### 18. REGISTRO DE USUARIO CUSTOMER
-### ============================================
-POST {{baseUrl}}/auth/register-customer
-Content-Type: application/json
-
-{
-  "email": "testcustomer@example.com",
-  "password": "TestPass123!",
-  "first_name": "Test",
-  "last_name": "Customer",
-  "storeId": 1
-}
-
-### ============================================
-### 19. LOGIN CUSTOMER
-### ============================================
-POST {{baseUrl}}/auth/login
-Content-Type: application/json
-
-{
-  "email": "testcustomer@example.com",
-  "password": "TestPass123!",
-  "storeSlug": "test-store"
-}
-
-### ============================================
-### 20. INTENTO ACCEDER A ONBOARDING CON CUSTOMER - 409
-### ============================================
-GET {{baseUrl}}/auth/onboarding/status
-Content-Type: application/json
-Authorization: Bearer {{access_token}}
-
-### ============================================
-### 21. LIMPIEZA CUSTOMER TEST
-### ============================================
-# DELETE FROM users WHERE email = 'testcustomer@example.com';

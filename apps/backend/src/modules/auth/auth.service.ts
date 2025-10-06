@@ -11,7 +11,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../../email/email.service';
 import * as bcrypt from 'bcrypt'; // ✅ Agregar import de bcrypt
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
@@ -1559,10 +1558,32 @@ export class AuthService {
       throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
     }
 
-    // Crear la tienda
+    // Separar datos de tienda de datos de configuración y dirección
+    const {
+      address_line1,
+      address_line2,
+      city,
+      state_province,
+      postal_code,
+      country_code,
+      phone,
+      email,
+      description,
+      currency_code,
+      track_inventory,
+      allow_backorders,
+      low_stock_threshold,
+      enable_shipping,
+      free_shipping_threshold,
+      enable_cod,
+      enable_online_payments,
+      ...storeFields
+    } = storeData;
+
+    // Crear la tienda con campos básicos (sin description que no existe en schema)
     const store = await this.prismaService.stores.create({
       data: {
-        ...storeData,
+        ...storeFields,
         organization_id: organizationId,
         manager_user_id: userId,
         slug: storeData.slug || this.generateSlugFromName(storeData.name),
@@ -1571,11 +1592,29 @@ export class AuthService {
       },
     });
 
+    // Crear configuraciones de la tienda
+    await this.createOrUpdateStoreSettings(store.id, storeData);
+
+    // Si hay datos de dirección, crear/actualizar la dirección
+    if (address_line1) {
+      await this.createOrUpdateStoreAddress(store.id, {
+        address_line1,
+        address_line2,
+        city,
+        state_province,
+        postal_code,
+        country_code,
+        phone_number: phone,
+        type: 'store_physical',
+        is_primary: true,
+      });
+    }
+
     return {
       success: true,
-      message: 'Tienda creada exitosamente',
+      message: 'Tienda creada y configurada exitosamente',
       store,
-      nextStep: 'setup_store',
+      nextStep: 'complete',
     };
   }
 
