@@ -8,6 +8,8 @@ export interface JwtPayload {
   sub: number; // user id
   email: string;
   roles: string[];
+  organizationId: number; // ✅ Scope de organización del token
+  storeId?: number | null; // ✅ Scope de tienda del token (opcional)
 }
 
 @Injectable()
@@ -47,19 +49,25 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Usuario no encontrado');
     }
 
-    if (!user.email_verified) {
-      throw new UnauthorizedException('Email no verificado');
-    }
+    // if (!user.email_verified) {
+    //   throw new UnauthorizedException('Email no verificado');
+    // }
 
     if (user.locked_until && user.locked_until > new Date()) {
       throw new UnauthorizedException('Cuenta bloqueada temporalmente');
-    } // Retornamos el usuario con roles y permisos
+    }
+
+    // ✅ Retornamos el usuario con scope del TOKEN (no de la BD)
+    // Esto permite tener diferentes scopes por sesión/token
     return {
       id: user.id,
       email: user.email,
       firstName: user.first_name,
       lastName: user.last_name,
       fullName: `${user.first_name} ${user.last_name}`,
+      organization_id: payload.organizationId, // ✅ Del TOKEN
+      store_id: payload.storeId || null, // ✅ Del TOKEN
+      user_roles: user.user_roles, // ✅ Mantener para el middleware
       roles: user.user_roles.map((ur) => ur.roles?.name || ''),
       permissions: user.user_roles.flatMap(
         (ur) =>

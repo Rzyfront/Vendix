@@ -20,6 +20,7 @@ import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { Public } from './decorators/public.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('auth')
@@ -30,6 +31,7 @@ export class AuthController {
   ) { }
 
   @Post('register-owner')
+  @Public()
   @HttpCode(HttpStatus.CREATED)
   async registerOwner(
     @Body() registerOwnerDto: RegisterOwnerDto,

@@ -194,7 +194,7 @@ export class AuditService {
 
     if (filters?.userId) where.user_id = filters.userId;
     if (filters?.storeId) where.store_id = filters.storeId;
-    if (filters?.organizationId) where.organization_id = filters.organizationId; // ✅ Filtro directo por organization_id
+    // if (filters?.organizationId) where.organization_id = filters.organizationId; // ✅ Filtro directo por organization_id
     if (filters?.action) where.action = filters.action;
     if (filters?.resource) where.resource = filters.resource;
     if (filters?.resourceId) where.resource_id = filters.resourceId;
@@ -225,13 +225,13 @@ export class AuditService {
             organization_id: true,
           },
         },
-        organizations: { // ✅ Nueva relación con organizations
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
+        // organizations: { // ✅ Nueva relación con organizations
+        //   select: {
+        //     id: true,
+        //     name: true,
+        //     slug: true,
+        //   },
+        // },
       },
       orderBy: { created_at: 'desc' },
       take: filters?.limit || 50,
