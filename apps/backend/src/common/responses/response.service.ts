@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, HttpStatus } from '@nestjs/common';
 import {
   SuccessResponse,
   ErrorResponse,
@@ -36,19 +36,19 @@ export class ResponseService {
    * Crea una respuesta de error estándar
    * @param message Mensaje de error principal
    * @param error Detalles del error
-   * @param statusCode Código de estado HTTP (opcional)
+   * @param statusCode Código de estado HTTP (opcional, por defecto 400)
    * @returns Respuesta de error estandarizada
    */
   error(
     message: string,
     error: string | Record<string, any> = 'An error occurred',
-    statusCode?: number,
+    statusCode: number = HttpStatus.BAD_REQUEST,
   ): ErrorResponse {
     return {
       success: false,
       message,
       error,
-      ...(statusCode && { statusCode }),
+      statusCode,
       timestamp: new Date().toISOString(),
     };
   }
@@ -126,4 +126,103 @@ export class ResponseService {
   deleted(message: string = 'Resource deleted successfully'): SuccessResponse<null> {
     return this.noContent(message);
   }
+
+  /**
+   * Crea una respuesta de error "Not Found" (404)
+   * @param message Mensaje de error
+   * @param resource Recurso no encontrado (opcional)
+   * @returns Respuesta de error 404
+   */
+  notFound(
+    message: string = 'Resource not found',
+    resource?: string,
+  ): ErrorResponse {
+    return this.error(
+      message,
+      resource ? `${resource} not found` : 'The requested resource was not found',
+      HttpStatus.NOT_FOUND,
+    );
+  }
+
+  /**
+   * Crea una respuesta de error "Unauthorized" (401)
+   * @param message Mensaje de error
+   * @returns Respuesta de error 401
+   */
+  unauthorized(
+    message: string = 'Unauthorized',
+  ): ErrorResponse {
+    return this.error(
+      message,
+      'Authentication is required to access this resource',
+      HttpStatus.UNAUTHORIZED,
+    );
+  }
+
+  /**
+   * Crea una respuesta de error "Forbidden" (403)
+   * @param message Mensaje de error
+   * @returns Respuesta de error 403
+   */
+  forbidden(
+    message: string = 'Forbidden',
+  ): ErrorResponse {
+    return this.error(
+      message,
+      'You do not have permission to access this resource',
+      HttpStatus.FORBIDDEN,
+    );
+  }
+
+  /**
+   * Crea una respuesta de error "Conflict" (409)
+   * @param message Mensaje de error
+   * @param details Detalles del conflicto
+   * @returns Respuesta de error 409
+   */
+  conflict(
+    message: string = 'Conflict',
+    details?: string | Record<string, any>,
+  ): ErrorResponse {
+    return this.error(
+      message,
+      details || 'The request could not be completed due to a conflict',
+      HttpStatus.CONFLICT,
+    );
+  }
+
+  /**
+   * Crea una respuesta de error "Unprocessable Entity" (422)
+   * @param message Mensaje de error
+   * @param validationErrors Errores de validación
+   * @returns Respuesta de error 422
+   */
+  validationError(
+    message: string = 'Validation failed',
+    validationErrors: Record<string, any>,
+  ): ErrorResponse {
+    return this.error(
+      message,
+      validationErrors,
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
+  /**
+   * Crea una respuesta de error "Internal Server Error" (500)
+   * @param message Mensaje de error
+   * @param error Detalles del error (opcional en producción)
+   * @returns Respuesta de error 500
+   */
+  internalError(
+    message: string = 'Internal server error',
+    error?: string,
+  ): ErrorResponse {
+    return this.error(
+      message,
+      error || 'An unexpected error occurred',
+      HttpStatus.INTERNAL_SERVER_ERROR,
+    );
+  }
 }
+

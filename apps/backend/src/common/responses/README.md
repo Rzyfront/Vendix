@@ -4,6 +4,8 @@ Este servicio proporciona una forma consistente de formatear las respuestas de A
 
 ## Instalación
 
+### 1. Importar el módulo
+
 El `ResponseModule` se puede importar en cualquier módulo que lo necesite:
 
 ```typescript
@@ -16,7 +18,43 @@ import { ResponseModule } from '../common/responses/response.module';
 export class YourModule {}
 ```
 
-Luego inyecta el `ResponseService` en tu controlador:
+### 2. Configurar el interceptor (Opcional pero Recomendado)
+
+Para que los códigos de estado HTTP se establezcan automáticamente en los headers, agrega el interceptor globalmente en tu `app.module.ts`:
+
+```typescript
+import { APP_INTERCEPTOR } from '@nestjs/core';
+import { ResponseInterceptor } from './common/responses/response.interceptor';
+
+@Module({
+  // ...
+  providers: [
+    // ...
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ResponseInterceptor,
+    },
+  ],
+})
+export class AppModule {}
+```
+
+O úsalo en un controlador específico:
+
+```typescript
+import { UseInterceptors } from '@nestjs/common';
+import { ResponseInterceptor } from '../common/responses/response.interceptor';
+
+@Controller('users')
+@UseInterceptors(ResponseInterceptor)
+export class UsersController {
+  // ...
+}
+```
+
+### 3. Inyectar el servicio
+
+Inyecta el `ResponseService` en tu controlador:
 
 ```typescript
 import { ResponseService } from '../common/responses/response.service';
@@ -31,27 +69,28 @@ export class YourController {
 
 ## Uso
 
-### Respuesta de Éxito
+### Respuestas de Éxito
+
+#### Respuesta de Éxito Estándar
 ```typescript
 return this.responseService.success(data, 'Operación completada exitosamente');
 ```
 
-### Respuesta de Recurso Creado
+#### Respuesta de Recurso Creado (201)
 ```typescript
 return this.responseService.created(newUser, 'Usuario creado exitosamente');
 ```
 
-### Respuesta de Recurso Actualizado
+#### Respuesta de Recurso Actualizado
 ```typescript
 return this.responseService.updated(updatedUser, 'Usuario actualizado exitosamente');
 ```
 
-### Respuesta de Recurso Eliminado
+#### Respuesta de Recurso Eliminado (204)
 ```typescript
 return this.responseService.deleted('Usuario eliminado exitosamente');
 ```
-
-### Respuesta Paginada
+#### Respuesta Paginada
 ```typescript
 return this.responseService.paginated(
   users,           // Array de datos
@@ -62,17 +101,64 @@ return this.responseService.paginated(
 );
 ```
 
-### Respuesta Sin Contenido
+#### Respuesta Sin Contenido
 ```typescript
 return this.responseService.noContent('Operación completada');
 ```
 
-### Respuesta de Error
+### Respuestas de Error
+
+#### Error Genérico (400)
 ```typescript
 return this.responseService.error(
   'Error al procesar la solicitud',
   'Detalles del error',
-  400 // Código de estado HTTP (opcional)
+  400 // Código de estado HTTP
+);
+```
+
+#### Not Found (404)
+```typescript
+return this.responseService.notFound(
+  'Usuario no encontrado',
+  'User' // Recurso opcional
+);
+```
+
+#### Unauthorized (401)
+```typescript
+return this.responseService.unauthorized('Credenciales inválidas');
+```
+
+#### Forbidden (403)
+```typescript
+return this.responseService.forbidden('No tienes permiso para acceder a este recurso');
+```
+
+#### Conflict (409)
+```typescript
+return this.responseService.conflict(
+  'El email ya está en uso',
+  { field: 'email', value: 'user@example.com' }
+);
+```
+
+#### Validation Error (422)
+```typescript
+return this.responseService.validationError(
+  'Validación fallida',
+  {
+    email: 'El email no es válido',
+    password: 'La contraseña debe tener al menos 8 caracteres'
+  }
+);
+```
+
+#### Internal Server Error (500)
+```typescript
+return this.responseService.internalError(
+  'Error interno del servidor',
+  process.env.NODE_ENV === 'development' ? error.message : undefined
 );
 ```
 
