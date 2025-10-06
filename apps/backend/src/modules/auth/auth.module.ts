@@ -10,8 +10,12 @@ import { EmailModule } from '../../email/email.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { AuditModule } from '../audit/audit.module';
 import { ResponseModule } from '../../common/responses/response.module';
-import { RateLimitMiddleware, LoginRateLimitMiddleware, RefreshRateLimitMiddleware } from '../../common/utils/rate-limit.middleware';
-import { SessionValidationMiddleware } from '../../common/utils/session-validation.middleware';
+import {
+  RateLimitMiddleware,
+  LoginRateLimitMiddleware,
+  RefreshRateLimitMiddleware,
+  SessionValidationMiddleware,
+} from '../../common/middleware';
 
 @Module({
   imports: [
