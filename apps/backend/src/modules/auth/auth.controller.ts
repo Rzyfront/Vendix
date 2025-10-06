@@ -94,6 +94,7 @@ export class AuthController {
   }
 
 
+  @Public() // ✅ Permitir acceso sin autenticación
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto, @Req() request: Request) {
@@ -119,6 +120,7 @@ export class AuthController {
     }
   }
 
+  @Public() // ✅ Permitir renovar token sin autenticación previa
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto, @Req() request: Request) {

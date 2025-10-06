@@ -17,9 +17,8 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { RefundsModule } from './modules/refunds/refunds.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
-import { PublicModule } from './common/public/public.module';
 import { AuditModule } from './modules/audit/audit.module';
-import { DomainSettingsModule } from './common/modules/domain-settings.module';
+import { DomainsModule } from './modules/domains/domains.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { APP_GUARD } from '@nestjs/core';
@@ -48,8 +47,7 @@ import { RequestContextService } from './common/context/request-context.service'
     RefundsModule,
     InventoryModule,
     TestModule,
-    PublicModule, // Módulo público para endpoints sin autenticación
-    DomainSettingsModule, // Módulo para configuración de dominios
+    DomainsModule, // ✅ Módulo de dominios (público y privado)
     AuditModule, // Módulo de auditoría
     RolesModule, // Módulo de roles y permisos
     PermissionsModule, // Módulo de permisos
