@@ -33,12 +33,14 @@ export class RequestContextMiddleware implements NestMiddleware {
     // Log del contexto (solo en desarrollo)
     if (process.env.NODE_ENV === 'development') {
       this.logger.debug(
-        `Context set: User ${user.id} | Org ${context.organizationId} | Store ${context.storeId || 'N/A'} | Roles: ${roles.join(', ')}`
+        `Context set: User ${user.id} | Org ${context.organizationId || 'N/A'} | Store ${context.storeId || 'N/A'} | Roles: ${roles.join(', ')}`
       );
     }
 
     // Ejecutar el siguiente middleware dentro del contexto
-    RequestContextService.run(context, () => {
+    // AsyncLocalStorage mantiene el contexto durante toda la ejecución asíncrona
+    const storage = (RequestContextService as any).asyncLocalStorage;
+    storage.run(context, () => {
       next();
     });
   }

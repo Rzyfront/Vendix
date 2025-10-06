@@ -81,7 +81,7 @@ Authorization: Bearer {{access_token}}
 ### ============================================
 ### PASO 5: CONFIGURAR DOMINIO
 ### ============================================
-POST {{baseUrl}}/domain-settings
+POST {{baseUrl}}/domains
 Content-Type: application/json
 Authorization: Bearer {{access_token}}
 

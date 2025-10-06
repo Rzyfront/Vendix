@@ -4,14 +4,20 @@ import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
 import { Roles } from '../modules/auth/decorators/roles.decorator';
 import { RequirePermissions } from '../modules/auth/decorators/permissions.decorator';
 import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
+import { Public } from '../modules/auth/decorators/public.decorator';
 import { EmailService } from '../email/email.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('test')
 export class TestController {
-  constructor(private readonly emailService: EmailService) {}
+  constructor(
+    private readonly emailService: EmailService,
+    private readonly prismaService: PrismaService,
+  ) {}
 
   // ===== RUTAS DE PRUEBA DE EMAIL =====
 
+  @Public()
   @Get('email-config')
   getEmailConfig() {
     return {
@@ -24,6 +30,7 @@ export class TestController {
     };
   }
 
+  @Public()
   @Post('email-quick')
   async testQuickEmail(@Body() body: { email: string }) {
     const result = await this.emailService.sendEmail(
@@ -39,11 +46,39 @@ export class TestController {
     };
   }
 
+  @Public()
   @Post('email-verification-test')
   async testVerificationEmail(
     @Body() body: { email: string; username: string },
   ) {
+    // Buscar usuario por email
+    const user = await this.prismaService.users.findFirst({
+      where: { email: body.email },
+    });
+
+    if (!user) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    // Invalidar tokens anteriores
+    await this.prismaService.email_verification_tokens.updateMany({
+      where: { user_id: user.id, verified: false },
+      data: { verified: true },
+    });
+
+    // Crear nuevo token de verificación
     const testToken = 'test-token-' + Date.now();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
+
+    await this.prismaService.email_verification_tokens.create({
+      data: {
+        user_id: user.id,
+        token: testToken,
+        expires_at: expiresAt,
+      },
+    });
+
+    // Enviar email de verificación
     const result = await this.emailService.sendVerificationEmail(
       body.email,
       testToken,
@@ -51,16 +86,18 @@ export class TestController {
     );
 
     return {
-      message: 'Verification email test sent',
+      message: 'Verification email test sent and token created in database',
       data: {
         ...result,
-        testToken, // Para que puedas ver el token generado
+        testToken, // Para que puedas usar el token para verificar
+        userId: user.id,
       },
     };
   }
 
   // ===== RUTAS EXISTENTES =====
 
+  @Public()
   @Get('public')
   getPublicData() {
     return {

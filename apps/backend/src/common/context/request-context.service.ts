@@ -17,9 +17,10 @@ export class RequestContextService {
 
   /**
    * Ejecuta un callback dentro de un contexto de request
+   * Soporta tanto callbacks síncronos como asíncronos
    */
-  static run(context: RequestContext, callback: () => void): void {
-    this.asyncLocalStorage.run(context, callback);
+  static run<T>(context: RequestContext, callback: () => T): T {
+    return this.asyncLocalStorage.run(context, callback);
   }
 
   /**

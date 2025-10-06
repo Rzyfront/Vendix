@@ -168,6 +168,7 @@ export class AuthController {
 
   // ===== RUTAS DE VERIFICACIÓN DE EMAIL =====
 
+  @Public()
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: { token: string }) {
@@ -175,6 +176,7 @@ export class AuthController {
     return result;
   }
 
+  @Public()
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {

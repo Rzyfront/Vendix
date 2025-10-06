@@ -8,19 +8,16 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 
   constructor() {
     super();
-  }
-
-  async onModuleInit() {
-    // Conecta a la base de datos cuando el módulo se inicializa
-    await this.$connect();
-    this.logger.log('✅ Prisma connected to database');
-    
-    // Aplicar middleware de scope después de conectar
+    // Aplicar interceptores después de la construcción
     this.applyOrganizationScope();
   }
 
+  async onModuleInit() {
+    await this.$connect();
+    this.logger.log('✅ Prisma connected to database');
+  }
+
   async enableShutdownHooks(app: INestApplication) {
-    // Asegura que la conexión se cierre limpiamente al apagar la app
     process.on('beforeExit', async () => {
       await this.$disconnect();
       await app.close();
@@ -28,181 +25,235 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
   }
 
   /**
-   * Aplica el scope de organización automáticamente a todas las queries
+   * Aplica el scope interceptando queries con una extensión de Prisma
    */
   private applyOrganizationScope() {
-    // Usar $extends en lugar de $use para Prisma 5+
-    const self = this as any;
-    
-    // Interceptar queries con $use (método legacy pero funcional)
-    const originalQuery = self._executeRequest?.bind(self);
-    if (!originalQuery) {
-      this.logger.warn('⚠️ No se pudo aplicar middleware de scope - método no disponible');
-      return;
-    }
+    // Modelos que tienen organization_id y deben filtrarse por organización
+    const orgScopedModels = [
+      'addresses',
+      'audit_logs',
+      'domain_settings',
+      'organization_settings',
+      'stores',
+      'users',
+      // Modelos de productos y ventas (heredan org a través de store)
+      'brands',
+      'categories',
+      'customers',
+      'inventory_movements',
+      'inventory_snapshots',
+      'inventory_transactions',
+      'login_attempts',
+      'order_items',
+      'order_item_taxes',
+      'orders',
+      'payment_methods',
+      'payments',
+      'product_categories',
+      'product_images',
+      'product_tax_assignments',
+      'product_variants',
+      'products',
+      'refund_items',
+      'refunds',
+      'reviews',
+      'store_settings',
+      'store_users',
+      'tax_categories',
+      'tax_rates',
+      'taxes',
+    ];
 
-    self._executeRequest = async (params: any) => {
-      const context = RequestContextService.getContext();
+    // Modelos que TAMBIÉN requieren filtro de tienda (además de organización)
+    const storeScopedModels = [
+      'addresses',
+      'audit_logs',
+      'categories',
+      'domain_settings',
+      'inventory_movements',
+      'inventory_snapshots',
+      'login_attempts',
+      'orders',
+      'payment_methods',
+      'products',
+      'store_settings',
+      'store_users',
+      'tax_categories',
+      'tax_rates',
+    ];
 
-      // Sin contexto: permitir la query (puede ser un job o seeder)
-      if (!context) {
-        return originalQuery(params);
-      }
+    // Interceptar cada modelo con scope
+    orgScopedModels.forEach((modelName) => {
+      const model = (this as any)[modelName];
+      if (!model) return;
 
-      // Super Admin: bypass completo
-      if (context.isSuperAdmin) {
-        this.logger.debug(`🔓 Super Admin bypass for ${params.model}.${params.action}`);
-        return originalQuery(params);
-      }
+      // Guardar métodos originales
+      const originalFindMany = model.findMany.bind(model);
+      const originalFindFirst = model.findFirst.bind(model);
+      const originalFindUnique = model.findUnique.bind(model);
+      const originalCount = model.count.bind(model);
+      const originalCreate = model.create.bind(model);
+      const originalCreateMany = model.createMany.bind(model);
+      const originalUpdate = model.update.bind(model);
+      const originalUpdateMany = model.updateMany.bind(model);
+      const originalDelete = model.delete.bind(model);
+      const originalDeleteMany = model.deleteMany.bind(model);
 
-      // Sin organization_id: no aplicar filtros (usuario público)
-      if (!context.organizationId) {
-        return originalQuery(params);
-      }
+      // Interceptar findMany
+      model.findMany = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+          this.logger.debug(`🔍 Scope applied to ${modelName}.findMany`);
+        }
+        return originalFindMany(args);
+      };
 
-      // Modelos que requieren scope de organización
-      const orgScopedModels = [
-        'stores',
-        'products',
-        'orders',
-        'categories',
-        'brands',
-        'addresses',
-        'taxes',
-        'inventory_movements',
-        'inventory_snapshots',
-        'customers',
-        'order_items',
-        'payments',
-        'refunds',
-        'product_images',
-        'product_variants',
-      ];
+      // Interceptar findFirst
+      model.findFirst = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+          this.logger.debug(`🔍 Scope applied to ${modelName}.findFirst`);
+        }
+        return originalFindFirst(args);
+      };
 
-      // Modelos que requieren scope de tienda (además de organización)
-      const storeScopedModels = [
-        'products',
-        'orders',
-        'inventory_movements',
-        'inventory_snapshots',
-      ];
-
-      // No aplicar scope a modelos no listados
-      if (!params.model || !orgScopedModels.includes(params.model)) {
-        return originalQuery(params);
-      }
-
-      // ========== OPERACIONES DE LECTURA ==========
-      if (['findMany', 'findFirst', 'count', 'aggregate', 'groupBy'].includes(params.action)) {
-        params.args = params.args || {};
-        params.args.where = params.args.where || {};
+      // Interceptar findUnique
+      model.findUnique = async (args: any) => {
+        const result = await originalFindUnique(args);
+        const context = RequestContextService.getContext();
         
-        // Aplicar filtro de organización
-        params.args.where.organization_id = context.organizationId;
-
-        // Aplicar filtro de tienda si aplica
-        if (context.storeId && storeScopedModels.includes(params.model)) {
-          params.args.where.store_id = context.storeId;
+        if (result && context && !context.isSuperAdmin && context.organizationId) {
+          if (result.organization_id && result.organization_id !== context.organizationId) {
+            this.logger.warn(`⛔ Access denied: ${modelName}`);
+            return null;
+          }
+          if (context.storeId && storeScopedModels.includes(modelName) && 
+              result.store_id && result.store_id !== context.storeId) {
+            this.logger.warn(`⛔ Access denied: ${modelName} (store)`);
+            return null;
+          }
         }
-
-        this.logger.debug(
-          `🔍 Scope applied to ${params.model}.${params.action}: org=${context.organizationId}, store=${context.storeId || 'N/A'}`
-        );
-      }
-
-      // ========== OPERACIONES DE LECTURA ÚNICA ==========
-      if (params.action === 'findUnique') {
-        // Ejecutar la query primero
-        const result = await originalQuery(params);
-
-        // Si no existe, retornar null
-        if (!result) {
-          return result;
-        }
-
-        // Validar que pertenece a la organización
-        if (result.organization_id && result.organization_id !== context.organizationId) {
-          this.logger.warn(
-            `⛔ Access denied: ${params.model} does not belong to org ${context.organizationId}`
-          );
-          return null; // Simular que no existe
-        }
-
-        // Validar tienda si aplica
-        if (
-          context.storeId &&
-          storeScopedModels.includes(params.model) &&
-          result.store_id &&
-          result.store_id !== context.storeId
-        ) {
-          this.logger.warn(
-            `⛔ Access denied: ${params.model} does not belong to store ${context.storeId}`
-          );
-          return null;
-        }
-
         return result;
-      }
+      };
 
-      // ========== OPERACIONES DE CREACIÓN ==========
-      if (params.action === 'create') {
-        params.args = params.args || {};
-        params.args.data = params.args.data || {};
-
-        // Inyectar organization_id automáticamente
-        if (!params.args.data.organization_id) {
-          params.args.data.organization_id = context.organizationId;
-          
-          this.logger.debug(
-            `➕ Auto-inject org_id=${context.organizationId} to ${params.model}.create`
-          );
+      // Interceptar count
+      model.count = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
         }
-      }
+        return originalCount(args);
+      };
 
-      // ========== OPERACIONES DE ACTUALIZACIÓN ==========
-      if (['update', 'updateMany', 'upsert'].includes(params.action)) {
-        params.args = params.args || {};
-        params.args.where = params.args.where || {};
-
-        // Validar que solo se actualicen registros de la organización
-        params.args.where.organization_id = context.organizationId;
-
-        // Validar tienda si aplica
-        if (context.storeId && storeScopedModels.includes(params.model)) {
-          params.args.where.store_id = context.storeId;
+      // Interceptar create
+      model.create = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && context.organizationId) {
+          args = args || {};
+          args.data = args.data || {};
+          if (!args.data.organization_id) {
+            args.data.organization_id = context.organizationId;
+            this.logger.debug(`➕ Auto-inject org_id to ${modelName}.create`);
+          }
         }
+        return originalCreate(args);
+      };
 
-        this.logger.debug(
-          `✏️ Scope applied to ${params.model}.${params.action}: org=${context.organizationId}`
-        );
-      }
-
-      // ========== OPERACIONES DE ELIMINACIÓN ==========
-      if (['delete', 'deleteMany'].includes(params.action)) {
-        params.args = params.args || {};
-        params.args.where = params.args.where || {};
-
-        // Validar que solo se eliminen registros de la organización
-        params.args.where.organization_id = context.organizationId;
-
-        // Validar tienda si aplica
-        if (context.storeId && storeScopedModels.includes(params.model)) {
-          params.args.where.store_id = context.storeId;
+      // Interceptar createMany
+      model.createMany = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && context.organizationId && args?.data) {
+          if (Array.isArray(args.data)) {
+            args.data = args.data.map((item: any) => ({
+              ...item,
+              organization_id: item.organization_id || context.organizationId,
+            }));
+          }
         }
+        return originalCreateMany(args);
+      };
 
-        this.logger.debug(
-          `🗑️ Scope applied to ${params.model}.${params.action}: org=${context.organizationId}`
-        );
-      }
+      // Interceptar update
+      model.update = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+          this.logger.debug(`✏️ Scope applied to ${modelName}.update`);
+        }
+        return originalUpdate(args);
+      };
 
-      return originalQuery(params);
-    };
+      // Interceptar updateMany
+      model.updateMany = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+        }
+        return originalUpdateMany(args);
+      };
+
+      // Interceptar delete
+      model.delete = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+          this.logger.debug(`🗑️ Scope applied to ${modelName}.delete`);
+        }
+        return originalDelete(args);
+      };
+
+      // Interceptar deleteMany
+      model.deleteMany = async (args: any) => {
+        const context = RequestContextService.getContext();
+        if (context && !context.isSuperAdmin && context.organizationId) {
+          args = args || {};
+          args.where = args.where || {};
+          args.where.organization_id = context.organizationId;
+          if (context.storeId && storeScopedModels.includes(modelName)) {
+            args.where.store_id = context.storeId;
+          }
+        }
+        return originalDeleteMany(args);
+      };
+    });
 
     this.logger.log('✅ Organization scope middleware applied');
   }
 
   /**
-   * Ejecuta queries sin scope (útil para jobs, seeders, super admin, etc.)
+   * Ejecuta queries sin scope (útil para jobs, seeders, etc.)
    */
   withoutScope() {
     return new PrismaClient();
