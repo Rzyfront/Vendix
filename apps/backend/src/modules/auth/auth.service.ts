@@ -27,15 +27,15 @@ export class AuthService {
     private readonly auditService: AuditService,
   ) {}
 
-  async registerOwner(registerOwnerDto: RegisterOwnerDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
-    const { email, password, first_name, last_name, organizationName } = registerOwnerDto as any;
+  async registerOwner(registerOwnerDto: RegisterOwnerDto, client_info?: { ip_address?: string; user_agent?: string }) {
+    const { email, password, first_name, last_name, organization_name } = registerOwnerDto as any;
 
     // Preparar datos críticos antes de la transacción
-    const organizationSlug = this.generateSlugFromName(organizationName);
+    const organization_slug = this.generateSlugFromName(organization_name);
 
     // Verificar si slug de organización ya existe
     const existingOrg = await this.prismaService.organizations.findUnique({
-      where: { slug: organizationSlug },
+      where: { slug: organization_slug },
     });
     if (existingOrg) {
       throw new ConflictException('Una organización con este nombre ya existe.');
@@ -100,8 +100,8 @@ export class AuthService {
 
       const organization = await tx.organizations.create({
         data: {
-          name: organizationName,
-          slug: organizationSlug,
+          name: organization_name,
+          slug: organization_slug,
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
         },
@@ -212,8 +212,8 @@ export class AuthService {
       },
       {
         registration_type: result.wasExistingUser ? 'existing_user' : 'new_user',
-        ip_address: clientInfo?.ipAddress,
-        user_agent: clientInfo?.userAgent,
+        ip_address: client_info?.ip_address,
+        user_agent: client_info?.user_agent,
       }
     );
 
@@ -230,16 +230,16 @@ export class AuthService {
       },
       {
         registration_type: result.wasExistingUser ? 'existing_user_assigned' : 'new_registration',
-        ip_address: clientInfo?.ipAddress,
-        user_agent: clientInfo?.userAgent,
+        ip_address: client_info?.ip_address,
+        user_agent: client_info?.user_agent,
       }
     );
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles, { organizationId: result.organization.id, storeId: null });
+    const tokens = await this.generateTokens(userWithRoles, { organization_id: result.organization.id, store_id: null });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
-      ipAddress: clientInfo?.ipAddress || '127.0.0.1',
-      userAgent: clientInfo?.userAgent || 'Registration-Device',
+      ip_address: client_info?.ip_address || '127.0.0.1',
+      user_agent: client_info?.user_agent || 'Registration-Device',
     });
 
   // Registrar intento de login exitoso
@@ -280,12 +280,12 @@ export class AuthService {
     };
   }
 
-  async registerCustomer(registerCustomerDto: RegisterCustomerDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
-    const { email, password, first_name, last_name, storeId } = registerCustomerDto;
+  async registerCustomer(registerCustomerDto: RegisterCustomerDto, client_info?: { ip_address?: string; user_agent?: string }) {
+    const { email, password, first_name, last_name, store_id } = registerCustomerDto;
 
     // Buscar la tienda por ID
     const store = await this.prismaService.stores.findUnique({
-      where: { id: storeId },
+      where: { id: store_id },
     });
     if (!store) {
       throw new BadRequestException('Tienda no encontrada');
@@ -367,10 +367,10 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles, { organizationId: store.organization_id, storeId: null });
+    const tokens = await this.generateTokens(userWithRoles, { organization_id: store.organization_id, store_id: null });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
-      ipAddress: clientInfo?.ipAddress || '127.0.0.1',
-      userAgent: clientInfo?.userAgent || 'Registration-Device',
+      ip_address: client_info?.ip_address || '127.0.0.1',
+      user_agent: client_info?.user_agent || 'Registration-Device',
     });
 
     // Registrar intento de login exitoso
@@ -439,12 +439,12 @@ export class AuthService {
     };
   }
 
-  async registerStaff(registerStaffDto: RegisterStaffDto, adminUserId: number) {
+  async registerStaff(registerStaffDto: RegisterStaffDto, admin_user_id: number) {
     const { email, password, first_name, last_name, role, store_id } = registerStaffDto;
 
     // Verificar que el usuario admin tenga permisos
     const adminUser = await this.prismaService.users.findUnique({
-      where: { id: adminUserId },
+      where: { id: admin_user_id },
       include: {
         user_roles: {
           include: {
@@ -574,7 +574,7 @@ export class AuthService {
 
     // Registrar auditoría
     await this.auditService.logCreate(
-      adminUserId,
+      admin_user_id,
       AuditResource.USERS,
       user.id,
       {
@@ -583,7 +583,7 @@ export class AuthService {
         last_name,
         role,
         store_id,
-        created_by: adminUserId,
+        created_by: admin_user_id,
       },
       {
         description: `Usuario staff creado por administrador ${adminUser.email}`
@@ -601,12 +601,12 @@ export class AuthService {
 
 
 
-  async login(loginDto: LoginDto, clientInfo?: { ipAddress?: string; userAgent?: string }) {
-    const { email, password, organizationSlug, storeSlug } = loginDto;
+  async login(loginDto: LoginDto, client_info?: { ip_address?: string; user_agent?: string }) {
+    const { email, password, organization_slug, store_slug } = loginDto;
 
     // Validar que se proporcione al menos uno de los dos
-    if (!organizationSlug && !storeSlug) {
-      throw new BadRequestException('Debe proporcionar organizationSlug o storeSlug');
+    if (!organization_slug && !store_slug) {
+      throw new BadRequestException('Debe proporcionar organization_slug o store_slug');
     }
 
     // Buscar usuario con rol y permisos
@@ -642,34 +642,34 @@ export class AuthService {
     }
 
     // Validar que el usuario pertenezca a la organización o tienda especificada
-    let targetOrganizationId: number | null = null;
-    let targetStoreId: number | null = null;
-    let loginContext: string = '';
+    let target_organization_id: number | null = null;
+    let target_store_id: number | null = null;
+    let login_context: string = '';
 
-    if (organizationSlug) {
+    if (organization_slug) {
       // Verificar que el usuario pertenezca a la organización especificada
       if (user.organization_id) {
         const userOrganization = await this.prismaService.organizations.findUnique({
           where: { id: user.organization_id }
         });
 
-        if (!userOrganization || userOrganization.slug !== organizationSlug) {
+        if (!userOrganization || userOrganization.slug !== organization_slug) {
           await this.logLoginAttempt(user.id, false);
           throw new UnauthorizedException('Usuario no pertenece a la organización especificada');
         }
 
-        targetOrganizationId = userOrganization.id;
-        loginContext = `organization:${organizationSlug}`;
+        target_organization_id = userOrganization.id;
+        login_context = `organization:${organization_slug}`;
       } else {
         await this.logLoginAttempt(user.id, false);
         throw new UnauthorizedException('Usuario no pertenece a ninguna organización');
       }
-    } else if (storeSlug) {
+    } else if (store_slug) {
       // Verificar que el usuario tenga acceso a la tienda especificada
       const storeUser = await this.prismaService.store_users.findFirst({
         where: {
           user_id: user.id,
-          store: { slug: storeSlug }
+          store: { slug: store_slug }
         },
         include: {
           store: {
@@ -685,9 +685,9 @@ export class AuthService {
         throw new UnauthorizedException('Usuario no tiene acceso a la tienda especificada');
       }
 
-      targetOrganizationId = storeUser.store.organizations.id;
-      targetStoreId = storeUser.store.id;
-      loginContext = `store:${storeSlug}`;
+      target_organization_id = storeUser.store.organizations.id;
+      target_store_id = storeUser.store.id;
+      login_context = `store:${store_slug}`;
     }
 
     // Verificar si la cuenta está bloqueada
@@ -708,12 +708,12 @@ export class AuthService {
           reason: 'Invalid credentials',
           attempt_number: user.failed_login_attempts + 1,
         },
-        clientInfo?.ipAddress || '127.0.0.1',
-        clientInfo?.userAgent || 'Unknown'
+        client_info?.ip_address || '127.0.0.1',
+        client_info?.user_agent || 'Unknown'
       );
 
       // Incrementar intentos fallidos
-      await this.handleFailedLogin(user.id, clientInfo);
+      await this.handleFailedLogin(user.id, client_info);
       await this.logLoginAttempt(user.id, false);
       throw new UnauthorizedException('Credenciales inválidas');
     }
@@ -730,12 +730,12 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(user, { organizationId: targetOrganizationId!, storeId: targetStoreId });
+    const tokens = await this.generateTokens(user, { organization_id: target_organization_id!, store_id: target_store_id });
 
     // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(user.id, tokens.refresh_token, {
-      ipAddress: clientInfo?.ipAddress || '127.0.0.1',
-      userAgent: clientInfo?.userAgent || 'Login-Device',
+      ip_address: client_info?.ip_address || '127.0.0.1',
+      user_agent: client_info?.user_agent || 'Login-Device',
     });
 
     // Registrar intento de login exitoso
@@ -748,12 +748,12 @@ export class AuthService {
       {
         login_method: 'password',
         success: true,
-        login_context: loginContext,
-        organization_id: targetOrganizationId,
-        store_id: targetStoreId,
+        login_context: login_context,
+        organization_id: target_organization_id,
+        store_id: target_store_id,
       },
-      clientInfo?.ipAddress || '127.0.0.1',
-      clientInfo?.userAgent || 'Login-Device'
+      client_info?.ip_address || '127.0.0.1',
+      client_info?.user_agent || 'Login-Device'
     );
 
     // Actualizar último login
@@ -773,9 +773,9 @@ export class AuthService {
 
   async refreshToken(
     refreshTokenDto: RefreshTokenDto,
-    clientInfo?: {
-      ipAddress?: string;
-      userAgent?: string;
+    client_info?: {
+      ip_address?: string;
+      user_agent?: string;
     },
   ): Promise<{ user: any; access_token: string; refresh_token: string; token_type: string; expires_in: number }> {
     const { refresh_token } = refreshTokenDto;
@@ -829,12 +829,12 @@ export class AuthService {
       }
 
       // 🔒 VALIDACIONES DE SEGURIDAD ADICIONALES
-      await this.validateRefreshTokenSecurity(tokenRecord, clientInfo);
+      await this.validateRefreshTokenSecurity(tokenRecord, client_info);
 
       // Generar nuevos tokens
       const tokens = await this.generateTokens(tokenRecord.users, {
-        organizationId: payload.organizationId,
-        storeId: payload.storeId,
+        organization_id: payload.organization_id,
+        store_id: payload.store_id,
       });
 
       // El password no está incluido en esta consulta por seguridad
@@ -851,8 +851,8 @@ export class AuthService {
           token: tokens.refresh_token,
           expires_at: new Date(Date.now() + expiryMs),
           // Actualizar información de seguridad
-          ip_address: clientInfo?.ipAddress || tokenRecord.ip_address,
-          user_agent: clientInfo?.userAgent || tokenRecord.user_agent,
+          ip_address: client_info?.ip_address || tokenRecord.ip_address,
+          user_agent: client_info?.user_agent || tokenRecord.user_agent,
           last_used: new Date(),
         },
       });
@@ -865,7 +865,7 @@ export class AuthService {
       // Log intento sospechoso
       console.error('🚨 Intento de refresh token sospechoso:', {
         error: error.message,
-        clientInfo,
+        client_info,
         timestamp: new Date().toISOString(),
       });
 
@@ -902,14 +902,14 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  async logout(userId: number, refreshToken?: string, allSessions: boolean = false) {
+  async logout(user_id: number, refresh_token?: string, all_sessions: boolean = false) {
     const now = new Date();
 
-    if (allSessions) {
+    if (all_sessions) {
       // Cerrar todas las sesiones activas del usuario
       const result = await this.prismaService.refresh_tokens.updateMany({
         where: {
-          user_id: userId,
+          user_id: user_id,
           revoked: false,
           expires_at: { gt: now }
         },
@@ -921,7 +921,7 @@ export class AuthService {
 
       // Registrar auditoría
       await this.auditService.logAuth(
-        userId,
+        user_id,
         AuditAction.LOGOUT,
         {
           action: 'logout_all_sessions',
@@ -935,15 +935,15 @@ export class AuthService {
       };
     }
 
-    if (refreshToken) {
+    if (refresh_token) {
       // Hashear el refresh token para comparación
-      const hashedRefreshToken = await bcrypt.hash(refreshToken, 12);
+      const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
 
       // Revocar solo el token específico de la sesión actual
       try {
         const result = await this.prismaService.refresh_tokens.updateMany({
           where: {
-            user_id: userId,
+            user_id: user_id,
             token: hashedRefreshToken,
             revoked: false,
           },
@@ -959,7 +959,7 @@ export class AuthService {
 
         // Registrar auditoría
         await this.auditService.logAuth(
-          userId,
+          user_id,
           AuditAction.LOGOUT,
           {
             action: 'logout_single_session',
@@ -1091,10 +1091,10 @@ export class AuthService {
 
   // ===== FUNCIONES DE RECUPERACIÓN DE CONTRASEÑA =====
 
-  async forgotPassword(email: string, organizationSlug: string): Promise<{ message: string }> {
+  async forgotPassword(email: string, organization_slug: string): Promise<{ message: string }> {
     // Validar que la organización existe
     const organization = await this.prismaService.organizations.findUnique({
-      where: { slug: organizationSlug },
+      where: { slug: organization_slug },
     });
 
     if (!organization) {
@@ -1247,12 +1247,12 @@ export class AuthService {
   }
 
   async changePassword(
-    userId: number,
-    currentPassword: string,
-    newPassword: string,
+    user_id: number,
+    current_password: string,
+    new_password: string,
   ): Promise<{ message: string }> {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
     });
 
     if (!user) {
@@ -1261,7 +1261,7 @@ export class AuthService {
 
     // Verificar contraseña actual
     const isCurrentPasswordValid = await bcrypt.compare(
-      currentPassword,
+      current_password,
       user.password,
     );
     if (!isCurrentPasswordValid) {
@@ -1269,35 +1269,35 @@ export class AuthService {
     }
 
     // Validar fortaleza de la nueva contraseña
-    if (!this.validatePasswordStrength(newPassword)) {
+    if (!this.validatePasswordStrength(new_password)) {
       throw new BadRequestException(
         'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números'
       );
     }
 
     // Verificar que la nueva contraseña no sea igual a la actual
-    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+    const isSamePassword = await bcrypt.compare(new_password, user.password);
     if (isSamePassword) {
       throw new BadRequestException('La nueva contraseña no puede ser igual a la contraseña actual');
     }
 
     // Hashear nueva contraseña
-    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    const hashedPassword = await bcrypt.hash(new_password, 12);
 
     // Actualizar contraseña
     await this.prismaService.users.update({
-      where: { id: userId },
+      where: { id: user_id },
       data: { password: hashedPassword },
     });
 
     // Invalidar todas las sesiones activas del usuario (seguridad adicional)
     await this.prismaService.refresh_tokens.deleteMany({
-      where: { user_id: userId },
+      where: { user_id: user_id },
     });
 
     // Registrar auditoría de cambio de contraseña
     await this.auditService.logAuth(
-      userId,
+      user_id,
       AuditAction.PASSWORD_CHANGE,
       {
         method: 'current_password_verification',
@@ -1330,9 +1330,9 @@ export class AuthService {
 
   // ===== FUNCIONES DE ORGANIZACIÓN DESPUÉS DEL REGISTRO =====
 
-  async canCreateOrganization(userId: number): Promise<boolean> {
+  async canCreateOrganization(user_id: number): Promise<boolean> {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: {
         user_roles: { include: { roles: true } },
       },
@@ -1348,15 +1348,15 @@ export class AuthService {
     return !isOwner;
   }
 
-  async getOnboardingStatus(userId: number): Promise<{
-    emailVerified: boolean;
-    canCreateOrganization: boolean;
-    hasOrganization: boolean;
-    organizationId?: number;
-    nextStep: string;
+  async getOnboardingStatus(user_id: number): Promise<{
+    email_verified: boolean;
+    can_create_organization: boolean;
+    has_organization: boolean;
+    organization_id?: number;
+    next_step: string;
   }> {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: {
         user_roles: { include: { roles: true } },
       },
@@ -1366,49 +1366,49 @@ export class AuthService {
       throw new NotFoundException('Usuario no encontrado');
     }
 
-    const emailVerified = user.email_verified;
-  const hasOrganization = !!user.organization_id;
-  const canCreateOrganization = await this.canCreateOrganization(userId);
+    const email_verified = user.email_verified;
+  const has_organization = !!user.organization_id;
+  const can_create_organization = await this.canCreateOrganization(user_id);
 
-    let nextStep = '';
-    if (!emailVerified) {
-      nextStep = 'verify_email';
-    } else if (!hasOrganization) {
-      nextStep = 'create_organization';
+    let next_step = '';
+    if (!email_verified) {
+      next_step = 'verify_email';
+    } else if (!has_organization) {
+      next_step = 'create_organization';
     } else {
-      nextStep = 'complete_setup';
+      next_step = 'complete_setup';
     }
 
     return {
-      emailVerified,
-      canCreateOrganization,
-      hasOrganization,
-      organizationId: user.organization_id,
-      nextStep,
+      email_verified,
+      can_create_organization,
+      has_organization,
+      organization_id: user.organization_id,
+      next_step,
     };
   }
 
   // ===== FUNCIONES DE ONBOARDING COMPLETO =====
 
-  async startOnboarding(userId: number): Promise<{
+  async startOnboarding(user_id: number): Promise<{
     status: string;
-    currentStep: string;
+    current_step: string;
     message: string;
     data?: any;
   }> {
-    const onboardingStatus = await this.getOnboardingStatus(userId);
+    const onboardingStatus = await this.getOnboardingStatus(user_id);
 
     return {
       status: 'success',
-      currentStep: onboardingStatus.nextStep,
+      current_step: onboardingStatus.next_step,
       message: 'Estado de onboarding obtenido',
       data: onboardingStatus,
     };
   }
 
   async createOrganizationDuringOnboarding(
-    userId: number,
-    organizationData: any,
+    user_id: number,
+    organization_data: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -1416,7 +1416,7 @@ export class AuthService {
     nextStep?: string;
   }> {
     // Verificar que el usuario puede crear organización
-    const canCreate = await this.canCreateOrganization(userId);
+    const canCreate = await this.canCreateOrganization(user_id);
     if (!canCreate) {
       throw new BadRequestException(
         'No puedes crear una organización en este momento',
@@ -1426,10 +1426,10 @@ export class AuthService {
     // Crear la organización
     const organization = await this.prismaService.organizations.create({
       data: {
-        ...organizationData,
+        ...organization_data,
         slug:
-          organizationData.slug ||
-          this.generateSlugFromName(organizationData.name),
+          organization_data.slug ||
+          this.generateSlugFromName(organization_data.name),
         updated_at: new Date(),
       },
     });
@@ -1446,17 +1446,17 @@ export class AuthService {
 
     // Actualizar user para asociarlo a la organización
     await this.prismaService.users.update({
-      where: { id: userId },
+      where: { id: user_id },
       data: { organization_id: organization.id },
     });
 
     // Asegurar que el usuario tenga el role owner
     const existingUserRole = await this.prismaService.user_roles.findFirst({
-      where: { user_id: userId, role_id: ownerRole.id },
+      where: { user_id: user_id, role_id: ownerRole.id },
     });
     if (!existingUserRole) {
       await this.prismaService.user_roles.create({
-        data: { user_id: userId, role_id: ownerRole.id },
+        data: { user_id: user_id, role_id: ownerRole.id },
       });
     }
 
@@ -1469,9 +1469,9 @@ export class AuthService {
   }
 
   async setupOrganization(
-    userId: number,
-    organizationId: number,
-    setupData: any,
+    user_id: number,
+    organization_id: number,
+    setup_data: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -1479,11 +1479,11 @@ export class AuthService {
   }> {
     // Verificar que el usuario tiene permisos en la organización
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: { user_roles: { include: { roles: true } } },
     });
 
-    if (!user || user.organization_id !== organizationId) {
+    if (!user || user.organization_id !== organization_id) {
       throw new BadRequestException('No tienes permisos para configurar esta organización');
     }
 
@@ -1500,27 +1500,27 @@ export class AuthService {
       state_province,
       postal_code,
       country_code,
-      ...organizationData
-    } = setupData;
+      ...organization_data
+    } = setup_data;
 
     // Actualizar la organización con los datos de configuración (sin campos de dirección)
     const updatedOrg = await this.prismaService.organizations.update({
-      where: { id: organizationId },
+      where: { id: organization_id },
       data: {
-        ...organizationData,
+        ...organization_data,
         updated_at: new Date(),
       },
     });
 
     // Si hay datos de dirección, crear/actualizar la dirección
-    if (setupData.address_line1) {
-      await this.createOrUpdateOrganizationAddress(organizationId, {
-        address_line1: setupData.address_line1,
-        address_line2: setupData.address_line2,
-        city: setupData.city,
-        state_province: setupData.state_province,
-        postal_code: setupData.postal_code,
-        country_code: setupData.country_code,
+    if (setup_data.address_line1) {
+      await this.createOrUpdateOrganizationAddress(organization_id, {
+        address_line1: setup_data.address_line1,
+        address_line2: setup_data.address_line2,
+        city: setup_data.city,
+        state_province: setup_data.state_province,
+        postal_code: setup_data.postal_code,
+        country_code: setup_data.country_code,
         type: 'headquarters',
         is_primary: true,
       });
@@ -1534,9 +1534,9 @@ export class AuthService {
   }
 
   async createStoreDuringOnboarding(
-    userId: number,
-    organizationId: number,
-    storeData: any,
+    user_id: number,
+    organization_id: number,
+    store_data: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -1545,11 +1545,11 @@ export class AuthService {
   }> {
     // Verificar que el usuario tiene permisos en la organización
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: { user_roles: { include: { roles: true } } },
     });
 
-    if (!user || user.organization_id !== organizationId) {
+    if (!user || user.organization_id !== organization_id) {
       throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
     }
 
@@ -1568,8 +1568,8 @@ export class AuthService {
       country_code,
       phone,
       email,
-      description,
       currency_code,
+      timezone,
       track_inventory,
       allow_backorders,
       low_stock_threshold,
@@ -1578,50 +1578,55 @@ export class AuthService {
       enable_cod,
       enable_online_payments,
       ...storeFields
-    } = storeData;
+    } = store_data;
 
-    // Crear la tienda con campos básicos (sin description que no existe en schema)
-    const store = await this.prismaService.stores.create({
-      data: {
-        ...storeFields,
-        organization_id: organizationId,
-        manager_user_id: userId,
-        slug: storeData.slug || this.generateSlugFromName(storeData.name),
-        is_active: true,
-        updated_at: new Date(),
-      },
-    });
-
-    // Crear configuraciones de la tienda
-    await this.createOrUpdateStoreSettings(store.id, storeData);
-
-    // Si hay datos de dirección, crear/actualizar la dirección
-    if (address_line1) {
-      await this.createOrUpdateStoreAddress(store.id, {
-        address_line1,
-        address_line2,
-        city,
-        state_province,
-        postal_code,
-        country_code,
-        phone_number: phone,
-        type: 'store_physical',
-        is_primary: true,
+    // Crear la tienda con campos básicos
+    try {
+      const store = await this.prismaService.stores.create({
+        data: {
+          ...storeFields,
+          organization_id: organization_id,
+          manager_user_id: user_id,
+          slug: store_data.slug || this.generateSlugFromName(store_data.name),
+          is_active: true,
+          updated_at: new Date(),
+        },
       });
-    }
 
-    return {
-      success: true,
-      message: 'Tienda creada y configurada exitosamente',
-      store,
-      nextStep: 'complete',
-    };
+      // Crear configuraciones de la tienda (usando el storeData completo)
+      await this.createOrUpdateStoreSettings(store.id, store_data);
+
+      // Si hay datos de dirección, crear/actualizar la dirección
+      if (address_line1) {
+        await this.createOrUpdateStoreAddress(store.id, {
+          address_line1,
+          address_line2,
+          city,
+          state_province,
+          postal_code,
+          country_code,
+          phone_number: phone,
+          type: 'store_physical',
+          is_primary: true,
+        });
+      }
+
+      return {
+        success: true,
+        message: 'Tienda creada y configurada exitosamente',
+        store,
+        nextStep: 'complete',
+      };
+    } catch (error) {
+      console.error('[ONBOARDING STORE ERROR]', error);
+      throw new BadRequestException('Error al crear la tienda durante el onboarding', error.message);
+    }
   }
 
   async setupStore(
-    userId: number,
-    storeId: number,
-    setupData: any,
+    user_id: number,
+    store_id: number,
+    setup_data: any,
   ): Promise<{
     success: boolean;
     message: string;
@@ -1629,7 +1634,7 @@ export class AuthService {
   }> {
     // Verificar que el usuario tiene permisos en la tienda
     const store = await this.prismaService.stores.findUnique({
-      where: { id: storeId },
+      where: { id: store_id },
     });
 
     if (!store) {
@@ -1638,7 +1643,7 @@ export class AuthService {
 
     // Verificar que el usuario pertenece a la misma organización
     const userForStore = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: { user_roles: { include: { roles: true } } },
     });
 
@@ -1671,7 +1676,7 @@ export class AuthService {
       enable_cod,
       enable_online_payments,
       ...storeSettings
-    } = setupData;
+    } = setup_data;
 
     // Actualizar configuraciones básicas de la tienda (solo campos válidos)
     const validStoreFields = {
@@ -1680,7 +1685,7 @@ export class AuthService {
     };
 
     await this.prismaService.stores.update({
-      where: { id: storeId },
+      where: { id: store_id },
       data: {
         ...validStoreFields,
         updated_at: new Date(),
@@ -1688,11 +1693,11 @@ export class AuthService {
     });
 
     // Crear/actualizar configuraciones de la tienda
-    await this.createOrUpdateStoreSettings(storeId, setupData);
+    await this.createOrUpdateStoreSettings(store_id, setup_data);
 
     // Si hay datos de dirección, crear/actualizar la dirección
     if (address_line1) {
-      await this.createOrUpdateStoreAddress(storeId, {
+      await this.createOrUpdateStoreAddress(store_id, {
         address_line1,
         address_line2,
         city,
@@ -1712,26 +1717,26 @@ export class AuthService {
     };
   }
 
-  async completeOnboarding(userId: number): Promise<{
+  async completeOnboarding(user_id: number): Promise<{
     success: boolean;
     message: string;
     data: any;
   }> {
-    const onboardingStatus = await this.getOnboardingStatus(userId);
+    const onboardingStatus = await this.getOnboardingStatus(user_id);
 
-    if (!onboardingStatus.emailVerified || !onboardingStatus.hasOrganization) {
+    if (!onboardingStatus.email_verified || !onboardingStatus.has_organization) {
       throw new BadRequestException('Onboarding no completado correctamente');
     }
 
     // Validar todas las pre-condiciones requeridas
-    const validationResult = await this.validateOnboardingCompletion(userId);
+    const validationResult = await this.validateOnboardingCompletion(user_id);
     if (!validationResult.isValid) {
       throw new BadRequestException(`Faltan datos requeridos: ${validationResult.missingFields.join(', ')}`);
     }
 
     // Actualizar el estado del usuario como onboarding completado
     const updatedUser = await this.prismaService.users.update({
-      where: { id: userId },
+      where: { id: user_id },
       data: {
         onboarding_completed: true,
         updated_at: new Date(),
@@ -1749,9 +1754,9 @@ export class AuthService {
 
     // Registrar auditoría
     await this.auditService.logUpdate(
-      userId,
+      user_id,
       AuditResource.USERS,
-      userId,
+      user_id,
       { onboarding_completed: false },
       { onboarding_completed: true },
       {
@@ -1765,7 +1770,7 @@ export class AuthService {
       message: 'Onboarding completado exitosamente',
       data: {
         ...onboardingStatus,
-        currentStep: 'complete',
+        current_step: 'complete',
         onboardingCompleted: true,
       },
     };
@@ -1773,7 +1778,7 @@ export class AuthService {
 
   // ===== MÉTODO AUXILIAR PARA VALIDACIONES =====
 
-  private async validateOnboardingCompletion(userId: number): Promise<{
+  private async validateOnboardingCompletion(user_id: number): Promise<{
     isValid: boolean;
     missingFields: string[];
   }> {
@@ -1781,7 +1786,7 @@ export class AuthService {
 
     // Obtener datos del usuario con organización
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: {
         organizations: {
           include: {
@@ -1911,14 +1916,12 @@ export class AuthService {
         where: { id: existingAddress.id },
         data: {
           ...addressData,
-          updated_at: new Date(),
         },
       });
     } else {
       return await this.prismaService.addresses.create({
         data: {
           ...addressData,
-          organization_id: organizationId,
           is_primary: true,
         },
       });
@@ -1939,14 +1942,12 @@ export class AuthService {
         where: { id: existingAddress.id },
         data: {
           ...addressData,
-          updated_at: new Date(),
         },
       });
     } else {
       return await this.prismaService.addresses.create({
         data: {
           ...addressData,
-          store_id: storeId,
           is_primary: true,
         },
       });
@@ -2010,7 +2011,7 @@ export class AuthService {
 
   private async generateTokens(
     user: any,
-    scope: { organizationId: number; storeId?: number | null },
+    scope: { organization_id: number; store_id?: number | null },
   ): Promise<{
     access_token: string;
     refresh_token: string;
@@ -2022,8 +2023,8 @@ export class AuthService {
       email: user.email,
       roles: user.user_roles.map((r) => r.roles.name),
       permissions: this.getPermissionsFromRoles(user.user_roles),
-      organizationId: scope.organizationId,
-      storeId: scope.storeId,
+      organization_id: scope.organization_id,
+      store_id: scope.store_id,
     };
 
     const accessToken = this.jwtService.sign(payload);
@@ -2045,11 +2046,11 @@ export class AuthService {
     };
   }
   private async createUserSession(
-    userId: number,
-    refreshToken: string,
-    clientInfo?: {
-      ipAddress?: string;
-      userAgent?: string;
+    user_id: number,
+    refresh_token: string,
+    client_info?: {
+      ip_address?: string;
+      user_agent?: string;
     },
   ) {
     // Obtener duración del refresh token del entorno
@@ -2058,107 +2059,107 @@ export class AuthService {
     const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
 
     // Generar fingerprint del dispositivo
-    const deviceFingerprint = this.generateDeviceFingerprint(clientInfo);
+    const device_fingerprint = this.generateDeviceFingerprint(client_info);
 
     // Hashear el refresh token para almacenamiento seguro
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, 12);
+    const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
 
     await this.prismaService.refresh_tokens.create({
       data: {
-        user_id: userId,
+        user_id: user_id,
         token: hashedRefreshToken, // Guardar hash en lugar del token en claro
         expires_at: new Date(Date.now() + expiryMs),
-        ip_address: clientInfo?.ipAddress || null,
-        user_agent: clientInfo?.userAgent || null,
-        device_fingerprint: deviceFingerprint,
+        ip_address: client_info?.ip_address || null,
+        user_agent: client_info?.user_agent || null,
+        device_fingerprint: device_fingerprint,
         last_used: new Date(),
         revoked: false,
       },
     });
   }
 
-  private async handleFailedLogin(userId: number, clientInfo?: { ipAddress?: string; userAgent?: string }) {
+  private async handleFailedLogin(user_id: number, client_info?: { ip_address?: string; user_agent?: string }) {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
     });
 
     if (!user) return;
 
-    const failedAttempts = user.failed_login_attempts + 1;
-    const updateData: any = { failed_login_attempts: failedAttempts };
+    const failed_attempts = user.failed_login_attempts + 1;
+    const updateData: any = { failed_login_attempts: failed_attempts };
 
     // Bloquear cuenta después de 5 intentos fallidos por 30 minutos
-    if (failedAttempts >= 5) {
+    if (failed_attempts >= 5) {
       updateData.locked_until = new Date(Date.now() + 30 * 60 * 1000);
 
       // Registrar auditoría de bloqueo de cuenta
       await this.auditService.logAuth(
-        userId,
+        user_id,
         AuditAction.ACCOUNT_LOCKED,
         {
           reason: 'Too many failed login attempts',
-          failed_attempts: failedAttempts,
+          failed_attempts: failed_attempts,
           locked_until: updateData.locked_until,
         },
-        clientInfo?.ipAddress || '127.0.0.1',
-        clientInfo?.userAgent || 'Unknown'
+        client_info?.ip_address || '127.0.0.1',
+        client_info?.user_agent || 'Unknown'
       );
     }
 
     await this.prismaService.users.update({
-      where: { id: userId },
+      where: { id: user_id },
       data: updateData,
     });
   }
   private async logLoginAttempt(
-    userId: number | null,
+    user_id: number | null,
     successful: boolean,
     email?: string,
   ) {
     // Obtener el email del usuario si no se proporciona
     let emailToLog = email;
-    if (!emailToLog && userId) {
+    if (!emailToLog && user_id) {
       const user = await this.prismaService.users.findUnique({
-        where: { id: userId },
+        where: { id: user_id },
         select: { email: true },
       });
       emailToLog = user?.email || '';
     }
 
     // Determinar store_id requerido por el modelo login_attempts
-    let storeIdToLog: number | null = null;
-    if (userId) {
+    let store_id_to_log: number | null = null;
+    if (user_id) {
       // Buscar relación store_users
       const su = await this.prismaService.store_users.findFirst({
-        where: { user_id: userId },
+        where: { user_id: user_id },
       });
-      if (su) storeIdToLog = su.store_id;
+      if (su) store_id_to_log = su.store_id;
 
       // Si no hay store_users, intentar obtener una tienda de la organización del usuario
-      if (!storeIdToLog) {
+      if (!store_id_to_log) {
         const user = await this.prismaService.users.findUnique({
-          where: { id: userId },
+          where: { id: user_id },
         });
         if (user) {
           const store = await this.prismaService.stores.findFirst({
             where: { organization_id: user.organization_id },
           });
-          if (store) storeIdToLog = store.id;
+          if (store) store_id_to_log = store.id;
         }
       }
     }
 
     // Fallback: si no encontramos ninguna tienda, usar null (se manejará en el schema)
-    if (!storeIdToLog) {
-      storeIdToLog = null; // No hay store disponible
+    if (!store_id_to_log) {
+      store_id_to_log = null; // No hay store disponible
     }
 
     // Solo crear el login attempt si tenemos un store_id válido
-    if (storeIdToLog) {
+    if (store_id_to_log) {
       await this.prismaService.login_attempts.create({
         data: {
           email: emailToLog || '',
-          store_id: storeIdToLog,
+          store_id: store_id_to_log,
           success: successful,
           ip_address: '', // Se puede obtener del request en el controller
           user_agent: '', // Se puede obtener del request en el controller
@@ -2168,9 +2169,9 @@ export class AuthService {
     }
   }
 
-  async validateUser(userId: number) {
+  async validateUser(user_id: number) {
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       include: {
         user_roles: {
           include: {
@@ -2196,10 +2197,10 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  async getUserSessions(userId: number) {
+  async getUserSessions(user_id: number) {
     const sessions = await this.prismaService.refresh_tokens.findMany({
       where: {
-        user_id: userId,
+        user_id: user_id,
         revoked: false,
         expires_at: { gt: new Date() }
       },
@@ -2225,12 +2226,12 @@ export class AuthService {
     }));
   }
 
-  async revokeUserSession(userId: number, sessionId: number) {
+  async revokeUserSession(user_id: number, session_id: number) {
     // Verificar que la sesión pertenece al usuario
     const session = await this.prismaService.refresh_tokens.findFirst({
       where: {
-        id: sessionId,
-        user_id: userId,
+        id: session_id,
+        user_id: user_id,
         revoked: false,
       },
     });
@@ -2241,20 +2242,20 @@ export class AuthService {
 
     // Revocar la sesión
     await this.prismaService.refresh_tokens.update({
-      where: { id: sessionId },
+      where: { id: session_id },
       data: { revoked: true },
     });
 
     // Registrar auditoría
     await this.auditService.log({
-      userId: userId,
+      userId: user_id,
       action: AuditAction.UPDATE,
       resource: AuditResource.USERS,
-      resourceId: userId,
+      resourceId: user_id,
       oldValues: { session_active: true },
       newValues: { session_active: false },
       metadata: {
-        session_id: sessionId,
+        session_id: session_id,
         action: 'revoke_session'
       },
       ipAddress: session.ip_address || undefined,
@@ -2263,7 +2264,7 @@ export class AuthService {
 
     return {
       message: 'Sesión revocada exitosamente',
-      data: { session_revoked: sessionId }
+      data: { session_revoked: session_id }
     };
   }
 
@@ -2318,10 +2319,10 @@ export class AuthService {
   // 🔒 VALIDACIONES DE SEGURIDAD PARA REFRESH TOKEN
   private async validateRefreshTokenSecurity(
     tokenRecord: any,
-    clientInfo?: { ipAddress?: string; userAgent?: string },
+    client_info?: { ip_address?: string; user_agent?: string },
   ): Promise<void> {
     // Si no hay información del cliente, permitir (compatibilidad con versiones anteriores)
-    if (!clientInfo) {
+    if (!client_info) {
       console.warn('⚠️ Refresh token usado sin información del cliente');
       return;
     }
@@ -2336,11 +2337,11 @@ export class AuthService {
     };
 
     // 🔍 VERIFICAR IP ADDRESS
-    if (tokenRecord.ip_address && clientInfo.ipAddress) {
-      if (tokenRecord.ip_address !== clientInfo.ipAddress) {
+    if (tokenRecord.ip_address && client_info.ip_address) {
+      if (tokenRecord.ip_address !== client_info.ip_address) {
         console.warn('🚨 IP Address mismatch:', {
           stored: tokenRecord.ip_address,
-          current: clientInfo.ipAddress,
+          current: client_info.ip_address,
           userId: tokenRecord.user_id,
           timestamp: new Date().toISOString(),
         });
@@ -2354,20 +2355,20 @@ export class AuthService {
     }
 
     // 🔍 VERIFICAR DEVICE FINGERPRINT (Más importante que IP)
-    if (tokenRecord.device_fingerprint && clientInfo.userAgent) {
-      const currentFingerprint = this.generateDeviceFingerprint(clientInfo);
+    if (tokenRecord.device_fingerprint && client_info.user_agent) {
+      const current_fingerprint = this.generateDeviceFingerprint(client_info);
 
-      if (tokenRecord.device_fingerprint !== currentFingerprint) {
+      if (tokenRecord.device_fingerprint !== current_fingerprint) {
         const storedBrowser = this.extractBrowserFromUserAgent(
           tokenRecord.user_agent || '',
         );
         const currentBrowser = this.extractBrowserFromUserAgent(
-          clientInfo.userAgent,
+          client_info.user_agent,
         );
         const storedOS = this.extractOSFromUserAgent(
           tokenRecord.user_agent || '',
         );
-        const currentOS = this.extractOSFromUserAgent(clientInfo.userAgent);
+        const currentOS = this.extractOSFromUserAgent(client_info.user_agent);
 
         console.error('🚨 DEVICE FINGERPRINT MISMATCH:', {
           userId: tokenRecord.user_id,
@@ -2378,10 +2379,10 @@ export class AuthService {
             ip: tokenRecord.ip_address,
           },
           current: {
-            fingerprint: currentFingerprint,
+            fingerprint: current_fingerprint,
             browser: currentBrowser,
             os: currentOS,
-            ip: clientInfo.ipAddress,
+            ip: client_info.ip_address,
           },
           timestamp: new Date().toISOString(),
         });
@@ -2431,12 +2432,12 @@ export class AuthService {
     // ✅ Log exitoso para monitoreo
     console.log('✅ Refresh token validation passed:', {
       userId: tokenRecord.user_id,
-      clientIP: clientInfo.ipAddress,
-      browser: this.extractBrowserFromUserAgent(clientInfo.userAgent || ''),
-      os: this.extractOSFromUserAgent(clientInfo.userAgent || ''),
-      deviceMatched:
+      clientIP: client_info.ip_address,
+      browser: this.extractBrowserFromUserAgent(client_info.user_agent || ''),
+      os: this.extractOSFromUserAgent(client_info.user_agent || ''),
+      device_matched:
         tokenRecord.device_fingerprint ===
-        this.generateDeviceFingerprint(clientInfo),
+        this.generateDeviceFingerprint(client_info),
       timestamp: new Date().toISOString(),
     });
   }
@@ -2456,22 +2457,22 @@ export class AuthService {
   }
 
   // Generar fingerprint único del dispositivo
-  private generateDeviceFingerprint(clientInfo?: {
-    ipAddress?: string;
-    userAgent?: string;
+  private generateDeviceFingerprint(client_info?: {
+    ip_address?: string;
+    user_agent?: string;
   }): string {
-    if (!clientInfo) {
+    if (!client_info) {
       return 'unknown-device';
     }
 
     // Extraer información básica del User Agent
     const browser = this.extractBrowserFromUserAgent(
-      clientInfo.userAgent || '',
+      client_info.user_agent || '',
     );
-    const os = this.extractOSFromUserAgent(clientInfo.userAgent || '');
+    const os = this.extractOSFromUserAgent(client_info.user_agent || '');
 
     // Crear fingerprint básico (sin ser invasivo)
-    const fingerprint = `${browser}-${os}-${clientInfo.ipAddress?.split('.')[0] || 'unknown'}`;
+    const fingerprint = `${browser}-${os}-${client_info.ip_address?.split('.')[0] || 'unknown'}`;
 
     // Hash para ofuscar información sensible
     const crypto = require('crypto');

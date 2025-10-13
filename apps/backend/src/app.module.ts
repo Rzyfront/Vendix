@@ -1,4 +1,4 @@
-import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -21,10 +21,11 @@ import { AuditModule } from './modules/audit/audit.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
-import { APP_GUARD } from '@nestjs/core';
+import { BypassEmailModule } from './modules/bypass-email/bypass-email.module';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
-import { RequestContextMiddleware } from './common/middleware/context.middleware';
 import { RequestContextService } from './common/context/request-context.service';
+import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { RequestContextService } from './common/context/request-context.service'
     AuditModule, // Módulo de auditoría
     RolesModule, // Módulo de roles y permisos
     PermissionsModule, // Módulo de permisos
+    BypassEmailModule, // Módulo de bypass de email (solo desarrollo)
   ],
   controllers: [AppController],
   providers: [
@@ -60,12 +62,10 @@ import { RequestContextService } from './common/context/request-context.service'
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: RequestContextInterceptor,
+    },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer
-      .apply(RequestContextMiddleware)
-      .forRoutes('*'); // ✅ Aplicar middleware de contexto a todas las rutas
-  }
-}
+export class AppModule {}

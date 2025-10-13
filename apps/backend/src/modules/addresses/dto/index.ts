@@ -87,13 +87,25 @@ export class CreateAddressDto {
   @Min(1)
   store_id?: number;
 
+  @ApiPropertyOptional({ example: 1, description: 'ID de organización (opcional)' })
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  organization_id?: number;
+
+  @ApiPropertyOptional({ example: 1, description: 'ID de usuario (opcional)' })
+  @IsInt()
+  @IsOptional()
+  @Min(1)
+  user_id?: number;
+
   @ApiPropertyOptional({
     example: false,
     description: '¿Es dirección principal? (opcional)',
   })
   @IsBoolean()
   @IsOptional()
-  is_default?: boolean;
+  is_primary?: boolean;
 
   @ApiPropertyOptional({
     example: '19.4326',
@@ -216,7 +228,7 @@ export class AddressQueryDto {
   @IsOptional()
   @Transform(({ value }) => value === 'true')
   @IsBoolean()
-  is_default?: boolean;
+  is_primary?: boolean;
 
   @ApiPropertyOptional({
     example: 'Ciudad de México',

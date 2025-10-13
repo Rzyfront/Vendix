@@ -37,14 +37,14 @@ export class AuthController {
     @Body() registerOwnerDto: RegisterOwnerDto,
     @Req() request: Request,
   ) {
-    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
-    const userAgent = request.get('user-agent') || '';
-    const clientInfo = {
-      ipAddress: ipAddress || undefined,
-      userAgent: userAgent || undefined,
+    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
+    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+    const user_agent = request.get('user-agent') || '';
+    const client_info = {
+      ip_address: ip_address || undefined,
+      user_agent: user_agent || undefined,
     };
-    const result = await this.authService.registerOwner(registerOwnerDto, clientInfo);
+    const result = await this.authService.registerOwner(registerOwnerDto, client_info);
 
     if (result.wasExistingUser) {
       return this.responseService.error(
@@ -65,15 +65,15 @@ export class AuthController {
     @Body() registerCustomerDto: RegisterCustomerDto,
     @Req() request: Request,
   ) {
-    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
-    const userAgent = request.get('user-agent') || '';
-    const clientInfo = {
-      ipAddress: ipAddress || undefined,
-      userAgent: userAgent || undefined,
+    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
+    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+    const user_agent = request.get('user-agent') || '';
+    const client_info = {
+      ip_address: ip_address || undefined,
+      user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.registerCustomer(registerCustomerDto, clientInfo);
+    const result = await this.authService.registerCustomer(registerCustomerDto, client_info);
     return this.responseService.success(
       result,
       'Cliente registrado exitosamente en la tienda.',
@@ -98,16 +98,16 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto, @Req() request: Request) {
-    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
-    const userAgent = request.get('user-agent') || '';
-    const clientInfo = {
-      ipAddress: ipAddress || undefined,
-      userAgent: userAgent || undefined,
+    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
+    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+    const user_agent = request.get('user-agent') || '';
+    const client_info = {
+      ip_address: ip_address || undefined,
+      user_agent: user_agent || undefined,
     };
 
     try {
-      const result = await this.authService.login(loginDto, clientInfo);
+      const result = await this.authService.login(loginDto, client_info);
       return this.responseService.success(
         result,
         'Login exitoso',
@@ -124,15 +124,15 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto, @Req() request: Request) {
-    const rawIp = request.headers['x-forwarded-for'] || request.ip || '';
-    const ipAddress = Array.isArray(rawIp) ? rawIp[0] : String(rawIp || '');
-    const userAgent = request.get('user-agent') || '';
-    const clientInfo = {
-      ipAddress: ipAddress || undefined,
-      userAgent: userAgent || undefined,
+    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
+    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+    const user_agent = request.get('user-agent') || '';
+    const client_info = {
+      ip_address: ip_address || undefined,
+      user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.refreshToken(refreshTokenDto, clientInfo);
+    const result = await this.authService.refreshToken(refreshTokenDto, client_info);
     return this.responseService.success(
       result,
       'Token refrescado exitosamente',
@@ -186,6 +186,7 @@ export class AuthController {
 
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
 
+  @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotDto: ForgotPasswordDto) {
@@ -193,6 +194,7 @@ export class AuthController {
     return result;
   }
 
+  @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   async resetPassword(
@@ -232,9 +234,9 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async revokeSession(
     @CurrentUser() user: any,
-    @Param('sessionId') sessionId: string,
+    @Param('session_id') session_id: string,
   ) {
-    const result = await this.authService.revokeUserSession(user.id, parseInt(sessionId));
+    const result = await this.authService.revokeUserSession(user.id, parseInt(session_id));
     return this.responseService.success(
       result.data,
       result.message,
@@ -294,8 +296,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async setupOrganization(
     @CurrentUser() user: any,
-    @Param('organizationId') organizationId: string,
-    @Body() setupData: any,
+    @Param('organization_id') organization_id: string,
+    @Body() setup_data: any,
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
@@ -310,8 +312,8 @@ export class AuthController {
 
     const result = await this.authService.setupOrganization(
       user.id,
-      parseInt(organizationId),
-      setupData,
+      parseInt(organization_id),
+      setup_data,
     );
     return this.responseService.success(
       result,
@@ -323,8 +325,8 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   async createStoreOnboarding(
     @CurrentUser() user: any,
-    @Param('organizationId') organizationId: string,
-    @Body() storeData: any,
+    @Param('organization_id') organization_id: string,
+    @Body() store_data: any,
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
@@ -339,8 +341,8 @@ export class AuthController {
 
     const result = await this.authService.createStoreDuringOnboarding(
       user.id,
-      parseInt(organizationId),
-      storeData,
+      parseInt(organization_id),
+      store_data,
     );
     return this.responseService.success(
       result,
@@ -352,8 +354,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async setupStore(
     @CurrentUser() user: any,
-    @Param('storeId') storeId: string,
-    @Body() setupData: any,
+    @Param('store_id') store_id: string,
+    @Body() setup_data: any,
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
@@ -368,8 +370,8 @@ export class AuthController {
 
     const result = await this.authService.setupStore(
       user.id,
-      parseInt(storeId),
-      setupData,
+      parseInt(store_id),
+      setup_data,
     );
     return this.responseService.success(
       result,

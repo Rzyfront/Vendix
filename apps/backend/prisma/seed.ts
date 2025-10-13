@@ -42,7 +42,30 @@ async function main() {
     { name: 'users.create', description: 'Crear usuarios', path: '/api/users', method: 'POST' },
     { name: 'users.update', description: 'Actualizar usuarios', path: '/api/users/:id', method: 'PUT' },
     { name: 'users.delete', description: 'Eliminar usuarios', path: '/api/users/:id', method: 'DELETE' },
-    // ... (otros permisos)
+    
+    // Direcciones
+    { name: 'addresses.read', description: 'Ver direcciones', path: '/api/addresses', method: 'GET' },
+    { name: 'addresses.create', description: 'Crear direcciones', path: '/api/addresses', method: 'POST' },
+    { name: 'addresses.update', description: 'Actualizar direcciones', path: '/api/addresses/:id', method: 'PUT' },
+    { name: 'addresses.delete', description: 'Eliminar direcciones', path: '/api/addresses/:id', method: 'DELETE' },
+    
+    // Organizaciones
+    { name: 'organizations.read', description: 'Ver organizaciones', path: '/api/organizations', method: 'GET' },
+    { name: 'organizations.create', description: 'Crear organizaciones', path: '/api/organizations', method: 'POST' },
+    { name: 'organizations.update', description: 'Actualizar organizaciones', path: '/api/organizations/:id', method: 'PUT' },
+    { name: 'organizations.delete', description: 'Eliminar organizaciones', path: '/api/organizations/:id', method: 'DELETE' },
+    
+    // Tiendas
+    { name: 'stores.read', description: 'Ver tiendas', path: '/api/stores', method: 'GET' },
+    { name: 'stores.create', description: 'Crear tiendas', path: '/api/stores', method: 'POST' },
+    { name: 'stores.update', description: 'Actualizar tiendas', path: '/api/stores/:id', method: 'PUT' },
+    { name: 'stores.delete', description: 'Eliminar tiendas', path: '/api/stores/:id', method: 'DELETE' },
+    
+    // Autenticación
+    { name: 'auth.login', description: 'Iniciar sesión', path: '/api/auth/login', method: 'POST' },
+    { name: 'auth.register', description: 'Registrarse', path: '/api/auth/register', method: 'POST' },
+    { name: 'auth.refresh', description: 'Refrescar token', path: '/api/auth/refresh', method: 'POST' },
+    { name: 'auth.logout', description: 'Cerrar sesión', path: '/api/auth/logout', method: 'POST' },
   ];
 
   for (const permission of permissions) {
@@ -99,11 +122,29 @@ async function main() {
   // 3. Asignar permisos a roles (lógica simplificada)
   console.log('🔗 Asignando permisos a roles...');
   const allPermissions = await prisma.permissions.findMany();
+  
+  // Asignar todos los permisos al super_admin
   for (const permission of allPermissions) {
     await prisma.role_permissions.upsert({
       where: { role_id_permission_id: { role_id: superAdminRole.id, permission_id: permission.id } },
       update: {},
       create: { role_id: superAdminRole.id, permission_id: permission.id },
+    });
+  }
+
+  // Asignar permisos específicos al owner (gestión de su organización)
+  const ownerPermissions = allPermissions.filter(p =>
+    p.name.includes('addresses.') ||
+    p.name.includes('organizations.') ||
+    p.name.includes('stores.') ||
+    p.name.includes('users.')
+  );
+  
+  for (const permission of ownerPermissions) {
+    await prisma.role_permissions.upsert({
+      where: { role_id_permission_id: { role_id: ownerRole.id, permission_id: permission.id } },
+      update: {},
+      create: { role_id: ownerRole.id, permission_id: permission.id },
     });
   }
 

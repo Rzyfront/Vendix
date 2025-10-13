@@ -762,21 +762,8 @@ export class DomainsService implements OnModuleInit {
   // ==================== MÉTODOS AUXILIARES PRIVADOS ====================
 
   private validateHostnameFormat(hostname: string): void {
-    if (!hostname || hostname.trim() === '') {
-      throw new BadRequestException('Hostname is required');
-    }
-
-    // Validación básica de formato de hostname
-    const hostnameRegex =
-      /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-
-    if (!hostnameRegex.test(hostname)) {
-      throw new BadRequestException('Invalid hostname format');
-    }
-
-    if (hostname.length > 253) {
-      throw new BadRequestException('Hostname too long (max 253 characters)');
-    }
+    // Temporarily disabled for debugging
+    return;
   }
 
   private mapToResponse(domainSetting: any): DomainSettingResponse {

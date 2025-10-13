@@ -46,5 +46,5 @@ export class RegisterCustomerDto {
   })
   @IsNumber({}, { message: 'El ID de la tienda debe ser un número' })
   @IsNotEmpty({ message: 'El ID de la tienda es requerido' })
-  storeId: number;
+  store_id: number;
 }

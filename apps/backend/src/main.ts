@@ -3,9 +3,13 @@ import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Apply the global exception filter
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   // Enable validation pipes globally
   app.useGlobalPipes(

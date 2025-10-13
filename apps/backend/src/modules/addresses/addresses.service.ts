@@ -18,14 +18,32 @@ export class AddressesService {
   constructor(private prisma: PrismaService) {}
 
   async create(createAddressDto: CreateAddressDto, user: any) {
-    if (!createAddressDto.store_id) {
-      throw new BadRequestException('store_id must be provided');
+    // Validar que solo se proporcione un tipo de entidad
+    const entityTypes = [
+      createAddressDto.store_id ? 'store' : null,
+      createAddressDto.organization_id ? 'organization' : null,
+      createAddressDto.user_id ? 'user' : null,
+    ].filter(Boolean);
+
+    if (entityTypes.length !== 1) {
+      throw new BadRequestException('Debe proporcionar exactamente uno de: store_id, organization_id, o user_id');
     }
 
-    await this.validateStoreAccess(createAddressDto.store_id, user);
+    // Validar permisos según el tipo de entidad
+    if (createAddressDto.store_id) {
+      await this.validateStoreAccess(createAddressDto.store_id, user);
+    } else if (createAddressDto.organization_id) {
+      await this.validateOrganizationAccess(createAddressDto.organization_id, user);
+    } else if (createAddressDto.user_id) {
+      await this.validateUserAccess(createAddressDto.user_id, user);
+    }
 
-    if (createAddressDto.is_default) {
-      await this.unsetOtherDefaults({ store_id: createAddressDto.store_id });
+    if (createAddressDto.is_primary) {
+      await this.unsetOtherDefaults({
+        store_id: createAddressDto.store_id,
+        organization_id: createAddressDto.organization_id,
+        user_id: createAddressDto.user_id,
+      });
     }
 
     const addressData: Prisma.addressesUncheckedCreateInput = {
@@ -36,7 +54,7 @@ export class AddressesService {
       postal_code: createAddressDto.postal_code,
       country_code: createAddressDto.country,
       type: createAddressDto.type as any,
-      is_primary: createAddressDto.is_default,
+      is_primary: createAddressDto.is_primary,
       latitude: createAddressDto.latitude
         ? parseFloat(createAddressDto.latitude)
         : null,
@@ -44,6 +62,8 @@ export class AddressesService {
         ? parseFloat(createAddressDto.longitude)
         : null,
       store_id: createAddressDto.store_id,
+      organization_id: createAddressDto.organization_id,
+      user_id: createAddressDto.user_id,
     };
 
     try {
@@ -51,12 +71,21 @@ export class AddressesService {
         data: addressData,
         include: {
           stores: { select: { id: true, name: true } },
+          organizations: { select: { id: true, name: true } },
+          users: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
-          throw new BadRequestException('Invalid store reference');
+          const field = error.meta?.field_name as string;
+          if (field?.includes('store_id')) {
+            throw new BadRequestException('Invalid store reference');
+          } else if (field?.includes('organization_id')) {
+            throw new BadRequestException('Invalid organization reference');
+          } else if (field?.includes('user_id')) {
+            throw new BadRequestException('Invalid user reference');
+          }
         }
       }
       throw error;
@@ -70,7 +99,7 @@ export class AddressesService {
       search,
       store_id,
       type,
-      is_default,
+      is_primary,
       city,
       state,
       country,
@@ -96,7 +125,7 @@ export class AddressesService {
       await this.validateStoreAccess(store_id, user);
     }
     if (type) where.type = type as any;
-    if (is_default !== undefined) where.is_primary = is_default;
+    if (is_primary !== undefined) where.is_primary = is_primary;
     if (city) where.city = { contains: city, mode: 'insensitive' };
     if (state) where.state_province = { contains: state, mode: 'insensitive' };
     if (country)
@@ -126,6 +155,8 @@ export class AddressesService {
       where: { id },
       include: {
         stores: { select: { id: true, name: true } },
+        organizations: { select: { id: true, name: true } },
+        users: { select: { id: true, first_name: true, last_name: true } },
       },
     });
 
@@ -133,8 +164,13 @@ export class AddressesService {
       throw new NotFoundException('Address not found');
     }
 
+    // Validar permisos según el tipo de entidad
     if (address.store_id) {
       await this.validateStoreAccess(address.store_id, user);
+    } else if (address.organization_id) {
+      await this.validateOrganizationAccess(address.organization_id, user);
+    } else if (address.user_id) {
+      await this.validateUserAccess(address.user_id, user);
     }
 
     return address;
@@ -155,10 +191,12 @@ export class AddressesService {
   async update(id: number, updateAddressDto: UpdateAddressDto, user: any) {
     const address = await this.findOne(id, user);
 
-    if (updateAddressDto.is_default) {
+    if (updateAddressDto.is_primary) {
       await this.unsetOtherDefaults(
         {
           store_id: address.store_id || undefined,
+          organization_id: address.organization_id || undefined,
+          user_id: address.user_id || undefined,
         },
         id,
       );
@@ -177,8 +215,8 @@ export class AddressesService {
     if (updateAddressDto.country)
       updateData.country_code = updateAddressDto.country;
     if (updateAddressDto.type) updateData.type = updateAddressDto.type as any;
-    if (updateAddressDto.is_default !== undefined)
-      updateData.is_primary = updateAddressDto.is_default;
+    if (updateAddressDto.is_primary !== undefined)
+      updateData.is_primary = updateAddressDto.is_primary;
 
     try {
       return await this.prisma.addresses.update({
@@ -186,12 +224,21 @@ export class AddressesService {
         data: updateData,
         include: {
           stores: { select: { id: true, name: true } },
+          organizations: { select: { id: true, name: true } },
+          users: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
-          throw new BadRequestException('Invalid store reference');
+          const field = error.meta?.field_name as string;
+          if (field?.includes('store_id')) {
+            throw new BadRequestException('Invalid store reference');
+          } else if (field?.includes('organization_id')) {
+            throw new BadRequestException('Invalid organization reference');
+          } else if (field?.includes('user_id')) {
+            throw new BadRequestException('Invalid user reference');
+          }
         }
       }
       throw error;
@@ -229,20 +276,38 @@ export class AddressesService {
   }
 
   private async validateStoreAccess(storeId: number, user: any) {
-    // TODO: Re-implement this logic based on the new user/role/store relationship
     const store = await this.prisma.stores.findUnique({ where: { id: storeId } });
     if (!store) {
       throw new NotFoundException('Store not found');
     }
-    // Assuming for now that if the user's organization matches the store's organization, they have access.
-    // This is a simplified placeholder.
+    // Verificar que el usuario pertenezca a la misma organización de la tienda
     if (store.organization_id !== user.organizationId && user.role !== 'super_admin') {
        throw new ForbiddenException('Access denied to this store');
     }
   }
 
+  private async validateOrganizationAccess(organizationId: number, user: any) {
+    const organization = await this.prisma.organizations.findUnique({ where: { id: organizationId } });
+    if (!organization) {
+      throw new NotFoundException('Organization not found');
+    }
+    // Verificar que el usuario pertenezca a la organización o sea super_admin
+    const userRoles = user.roles || [];
+    const userOrganizationId = user.organizationId || user.organization_id;
+    if (userOrganizationId !== organizationId && !userRoles.includes('super_admin')) {
+      throw new ForbiddenException('Access denied to this organization');
+    }
+  }
+
+  private async validateUserAccess(userId: number, currentUser: any) {
+    // Un usuario solo puede acceder a sus propias direcciones, o un super_admin puede acceder a cualquier usuario
+    if (currentUser.id !== userId && currentUser.role !== 'super_admin') {
+      throw new ForbiddenException('Access denied to this user');
+    }
+  }
+
   private async unsetOtherDefaults(
-    criteria: { store_id?: number },
+    criteria: { store_id?: number; organization_id?: number; user_id?: number },
     excludeId?: number,
   ) {
     const where: Prisma.addressesWhereInput = {
@@ -250,6 +315,8 @@ export class AddressesService {
     };
 
     if (criteria.store_id) where.store_id = criteria.store_id;
+    if (criteria.organization_id) where.organization_id = criteria.organization_id;
+    if (criteria.user_id) where.user_id = criteria.user_id;
     if (excludeId) where.id = { not: excludeId };
 
     await this.prisma.addresses.updateMany({

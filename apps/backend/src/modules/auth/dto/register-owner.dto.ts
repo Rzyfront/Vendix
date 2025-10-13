@@ -15,7 +15,7 @@ export class RegisterOwnerDto {
   })
   @IsString()
   @IsNotEmpty({ message: 'El nombre de la organización es requerido' })
-  organizationName: string;
+  organization_name: string;
 
   @ApiProperty({
     example: 'usuario@email.com',
