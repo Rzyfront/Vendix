@@ -23,3 +23,16 @@
 - Modular y reutilizable.
 - Multi-tenant: Soporte para dominios dinámicos, organizaciones, tiendas y usuarios.
 - Herramientas específicas se crean reutilizables en carpetas `utils/`.
+
+## Backend
+- Se maneja authenticacion globales en JWT desde el app.module.ts y se expluyen rutas publicas con @Public
+- Se manejan contextos automaticos globales en prisma desde el app.module.ts
+- Se registrar permisos para rutas granularmente con @Permissions
+
+## Front
+- Se maneja un punto e entrada que resuelve el dominio para configurar y decidir que vista mostrar.
+- Se setea la configuracion de branding resuelta por el dominio.
+- Se usa tokens para mantener un estandar de estilos generales en la app.
+- Se usan componentes reutilizables para la construccion de vistar y componentes.
+- Se usa un gestor de estados global centralizado.
+- Se usa un guard para direccionar a layout de aplicacion especificas por rol.
