@@ -15,7 +15,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Mi Tienda Online",
+  "organization_name": "Mi Tienda Online",
   "email": "owner@test.com",
   "password": "Password@123",
   "first_name": "Juan",
@@ -30,7 +30,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Otra Tienda",
+  "organization_name": "Otra Tienda",
   "email": "owner@test.com",
   "password": "Password@123",
   "first_name": "Juan",
@@ -44,7 +44,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Mi Tienda Online",
+  "organization_name": "Mi Tienda Online",
   "email": "owner@test.com",
   "password": "Password@456",
   "first_name": "María",
@@ -69,7 +69,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Débil",
+  "organization_name": "Tienda Débil",
   "email": "weak@test.com",
   "password": "123456",
   "first_name": "Test",
@@ -83,7 +83,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Email",
+  "organization_name": "Tienda Email",
   "email": "invalid-email",
   "password": "Password@123",
   "first_name": "Test",
@@ -97,7 +97,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Incompleta",
+  "organization_name": "Tienda Incompleta",
   "email": "incomplete@test.com",
   "password": "Password@123"
   // Faltan first_name y last_name
@@ -123,7 +123,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Username Test",
+  "organization_name": "Tienda Username Test",
   "email": "test.username@test.com",
   "password": "Password@123",
   "first_name": "Username",
@@ -137,7 +137,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Username Test 2",
+  "organization_name": "Tienda Username Test 2",
   "email": "test.username2@test.com",
   "password": "Password@123",
   "first_name": "Username",
@@ -151,7 +151,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Sin Teléfono",
+  "organization_name": "Tienda Sin Teléfono",
   "email": "notelefono@test.com",
   "password": "Password@123",
   "first_name": "Sin",
@@ -165,7 +165,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Café & Restaurant",
+  "organization_name": "Tienda Café & Restaurant",
   "email": "special@test.com",
   "password": "Password@123",
   "first_name": "José",
@@ -179,7 +179,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda Subdominio",
+  "organization_name": "Tienda Subdominio",
   "email": "user@sub.domain.test.com",
   "password": "Password@123",
   "first_name": "Sub",
@@ -193,7 +193,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Tienda con un nombre muy largo que supera los límites normales de una organización típica en el mercado",
+  "organization_name": "Tienda con un nombre muy largo que supera los límites normales de una organización típica en el mercado",
   "email": "longname@test.com",
   "password": "Password@123",
   "first_name": "Nombre",
@@ -207,7 +207,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "balmes_corp",
+  "organization_name": "balmes_corp",
   "email": "balmescamilobritovargas@gmail.com",
   "password": "Balmes123$",
   "first_name": "balmes",

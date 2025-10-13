@@ -45,7 +45,7 @@ export class RateLimitingController {
             type: 'object',
             properties: {
               ip: { type: 'string', example: '192.168.1.1' },
-              blockedUntil: { type: 'string', example: '2025-09-05T15:30:00Z' },
+              blocked_until: { type: 'string', example: '2025-09-05T15:30:00Z' },
               reason: { type: 'string', example: 'Too many login attempts' },
             },
           },

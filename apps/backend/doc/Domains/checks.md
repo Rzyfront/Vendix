@@ -19,11 +19,11 @@
 ### Resolución de Dominios
 - ✅ Mapeo hostname → organización/tienda correcto
 - ✅ Configuración completa retornada (branding, SEO, features)
-- ✅ Metadatos incluidos (organizationName, organizationSlug, domainType)
+- ✅ Metadatos incluidos (organization_name, organization_slug, domainType)
 
 ### Gestión CRUD de Dominios
 - ✅ Creación con configuración compleja (branding, features, theme, ecommerce)
-- ✅ Asociación correcta con organización (organizationId: 12)
+- ✅ Asociación correcta con organización (organization_id: 12)
 - ✅ Estados iniciales correctos (status: active, sslStatus: none, isPrimary: true)
 
 ### Validación y Seguridad
@@ -52,7 +52,7 @@
 - ✅ Configuración JSON compleja soportada ✅
 - ✅ Campos opcionales manejados correctamente ✅
 - ✅ Relaciones organization/store funcionales ✅
-- ✅ Timestamps automáticos (createdAt, updatedAt) ✅
+- ✅ Timestamps automáticos (created_at, updated_at) ✅
 
 ### API Response Format
 - ✅ Estructura consistente en todas las respuestas ✅
@@ -73,7 +73,7 @@
 - DELETE /api/domains/hostname/:hostname → Eliminación de dominios
 - POST /api/domains/hostname/:hostname/duplicate → Duplicación de dominios
 - GET /api/domains/organization/:orgId → Filtros por organización
-- GET /api/domains/store/:storeId → Filtros por tienda
+- GET /api/domains/store/:store_id → Filtros por tienda
 - POST /api/domains/hostname/:hostname/verify → Verificación DNS
 
 ### Casos de Error

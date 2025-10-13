@@ -65,8 +65,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       return {
         id: user.id,
         email: user.email,
-        firstName: user.first_name,
-        lastName: user.last_name,
+        first_name: user.first_name,
+        last_name: user.last_name,
         fullName: `${user.first_name} ${user.last_name}`,
         organization_id: payload.organization_id, // ✅ Del TOKEN
         store_id: payload.store_id || null, // ✅ Del TOKEN

@@ -16,7 +16,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization",
+  "organization_name": "Test Organization",
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -32,7 +32,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ### ============================================
@@ -65,7 +65,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization 2",
+  "organization_name": "Test Organization 2",
   "email": "test2@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -77,7 +77,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization 3",
+  "organization_name": "Test Organization 3",
   "email": "test3@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -89,7 +89,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization 4",
+  "organization_name": "Test Organization 4",
   "email": "test4@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -101,7 +101,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization 5",
+  "organization_name": "Test Organization 5",
   "email": "test5@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -113,7 +113,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization 6",
+  "organization_name": "Test Organization 6",
   "email": "test6@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -135,7 +135,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -145,7 +145,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -155,7 +155,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -165,7 +165,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -175,7 +175,7 @@ Content-Type: application/json
 {
   "email": "testratelimit@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ### ============================================

@@ -16,7 +16,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization",
+  "organization_name": "Test Organization",
   "email": "testsecurity@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -32,7 +32,7 @@ Content-Type: application/json
 {
   "email": "testsecurity@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ### ============================================
@@ -48,7 +48,7 @@ Content-Type: application/json
 {
   "email": "testsecurity@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -59,7 +59,7 @@ Content-Type: application/json
 {
   "email": "testsecurity@example.com",
   "password": "AnotherWrongPass!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ###
@@ -123,7 +123,7 @@ Content-Type: application/json
 {
   "email": "staff@example.com",
   "password": "StaffPass123!",
-  "organizationSlug": "test-organization"
+  "organization_slug": "test-organization"
 }
 
 ### ============================================

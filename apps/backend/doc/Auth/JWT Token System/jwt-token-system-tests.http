@@ -19,7 +19,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -99,7 +99,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -128,7 +128,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -138,7 +138,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -148,7 +148,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -158,7 +158,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -168,7 +168,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -180,7 +180,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "wrongpassword",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -192,7 +192,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "storeSlug": "tienda-principal"
+  "store_slug": "tienda-principal"
 }
 
 ### ============================================
@@ -205,7 +205,7 @@ User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -216,7 +216,7 @@ User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/6
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -227,7 +227,7 @@ User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -257,7 +257,7 @@ User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Geck
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -268,7 +268,7 @@ User-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:89.0) Gecko/20100101 Fire
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================

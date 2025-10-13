@@ -16,7 +16,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Login Organization",
+  "organization_name": "Test Login Organization",
   "email": "testlogin@example.com",
   "password": "TestPass123!",
   "first_name": "Test",
@@ -32,7 +32,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### ============================================
@@ -55,7 +55,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "wrong-organization"
+  "organization_slug": "wrong-organization"
 }
 
 ### ============================================
@@ -67,7 +67,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "storeSlug": "non-existent-store"
+  "store_slug": "non-existent-store"
 }
 
 ### ============================================
@@ -79,7 +79,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### ============================================
@@ -91,7 +91,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ###
@@ -101,7 +101,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ###
@@ -111,7 +111,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ###
@@ -121,7 +121,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ###
@@ -131,7 +131,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "WrongPassword123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### ============================================
@@ -143,7 +143,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### ============================================
@@ -183,7 +183,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "storeSlug": "tienda-principal"
+  "store_slug": "tienda-principal"
 }
 
 ### ============================================
@@ -195,7 +195,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -207,7 +207,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "storeSlug": "tienda-principal"
+  "store_slug": "tienda-principal"
 }
 
 ### ============================================
@@ -243,7 +243,7 @@ User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -254,7 +254,7 @@ User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/6
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ###
@@ -265,7 +265,7 @@ User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================
@@ -296,7 +296,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### Suspender usuario (DELETE lógico)
@@ -310,7 +310,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### Verificar respuesta esperada
@@ -336,7 +336,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### Verificar respuesta esperada
@@ -362,7 +362,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### ============================================
@@ -380,7 +380,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "organizationSlug": "test-login-organization"
+  "organization_slug": "test-login-organization"
 }
 
 ### Intentar login por tienda - ERROR
@@ -390,7 +390,7 @@ Content-Type: application/json
 {
   "email": "testlogin@example.com",
   "password": "TestPass123!",
-  "storeSlug": "test-store"
+  "store_slug": "test-store"
 }
 
 ### ============================================

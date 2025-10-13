@@ -17,7 +17,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Org Email",
+  "organization_name": "Test Org Email",
   "email": "owner.emailtest@example.com",
   "password": "TestOwner123!",
   "first_name": "Owner",
@@ -44,7 +44,7 @@ Content-Type: application/json
 {
   "email": "owner.emailtest@example.com",
   "password": "TestOwner123!",
-  "organizationSlug": "test-org-email"
+  "organization_slug": "test-org-email"
 }
 
 ### ============================================

@@ -18,7 +18,7 @@ POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "organizationName": "Test Organization Onboarding",
+  "organization_name": "Test Organization Onboarding",
   "email": "testonboarding@example.com",
   "password": "TestPass123!",
   "first_name": "Test",

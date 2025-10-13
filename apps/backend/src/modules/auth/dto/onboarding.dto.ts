@@ -18,7 +18,7 @@ export enum OnboardingStep {
 }
 
 export class OnboardingStatusDto {
-  emailVerified: boolean;
+  email_verified: boolean;
   canCreateOrganization: boolean;
   hasOrganization: boolean;
   organizationId?: number;

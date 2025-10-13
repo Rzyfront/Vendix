@@ -34,7 +34,7 @@ Consulta Base de Datos
 Resolución Jerárquica:
 ├── Dominio Exacto Encontrado
 │   ├── Tipo: organization_root/store_custom
-│   └── Retorna: orgId, storeId?, config
+│   └── Retorna: orgId, store_id?, config
 ├── Subdominio .vendix.com
 │   ├── tienda.vendix.com → store_subdomain
 │   └── org.vendix.com → organization_subdomain
@@ -80,8 +80,8 @@ const domainConfig = await this.prisma.domain_settings.findUnique({
 const response: DomainResolutionResponse = {
   id: domainConfig.id,
   hostname: domainConfig.hostname,
-  organizationId: domainConfig.organization_id!,
-  storeId: domainConfig.store_id || undefined,
+  organization_id: domainConfig.organization_id!,
+  store_id: domainConfig.store_id || undefined,
   config: domainConfig.config,
   // ... metadatos adicionales
 };
@@ -217,7 +217,7 @@ this.eventEmitter.on('domain.cache.invalidate', (payload) => {
 - `DELETE /domains/hostname/:hostname` - Eliminar dominio
 - `POST /domains/hostname/:hostname/duplicate` - Duplicar dominio
 - `GET /domains/organization/:orgId` - Dominios por organización
-- `GET /domains/store/:storeId` - Dominios por tienda
+- `GET /domains/store/:store_id` - Dominios por tienda
 - `POST /domains/validate-hostname` - Validar formato hostname
 - `POST /domains/hostname/:hostname/verify` - Verificar DNS
 

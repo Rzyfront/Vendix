@@ -53,12 +53,12 @@ Authorization: Bearer {{access_token}}
 
 {
   "hostname": "{{domain_hostname}}",
-  "organizationId": {{organization_id}},
-  "storeId": {{store_id}},
-  "domainType": "store_custom",
+  "organization_id": {{organization_id}},
+  "store_id": {{store_id}},
+  "domain_type": "store_custom",
   "status": "pending_dns",
-  "sslStatus": "none",
-  "isPrimary": true,
+  "ssl_status": "none",
+  "is_primary": true,
   "config": {
     "branding": {
       "primaryColor": "#007bff",
@@ -97,14 +97,14 @@ Authorization: Bearer {{access_token}}
 ### ============================================
 ### 2.3 LISTAR CON FILTROS - ORGANIZACIÓN - 200
 ### ============================================
-GET {{baseUrl}}/domains?organizationId={{organization_id}}&limit=10&offset=0
+GET {{baseUrl}}/domains?organization_id={{organization_id}}&limit=10&offset=0
 Content-Type: application/json
 Authorization: Bearer {{access_token}}
 
 ### ============================================
 ### 2.4 LISTAR CON FILTROS - TIENDA - 200
 ### ============================================
-GET {{baseUrl}}/domains?storeId={{store_id}}&search=test
+GET {{baseUrl}}/domains?store_id={{store_id}}&search=test
 Content-Type: application/json
 Authorization: Bearer {{access_token}}
 
@@ -131,7 +131,7 @@ Authorization: Bearer {{access_token}}
 
 {
   "status": "active",
-  "sslStatus": "issued",
+  "ssl_status": "issued",
   "config": {
     "branding": {
       "primaryColor": "#ff6b6b",
@@ -149,7 +149,7 @@ Content-Type: application/json
 Authorization: Bearer {{access_token}}
 
 {
-  "isPrimary": true
+  "is_primary": true
 }
 
 ### ============================================
@@ -233,7 +233,7 @@ Authorization: Bearer {{access_token}}
 
 {
   "hostname": "{{domain_hostname}}",
-  "organizationId": {{organization_id}},
+  "organization_id": {{organization_id}},
   "config": {}
 }
 
@@ -246,7 +246,7 @@ Authorization: Bearer {{access_token}}
 
 {
   "hostname": "new-domain.localhost",
-  "organizationId": 99999,
+  "organization_id": 99999,
   "config": {}
 }
 
@@ -311,7 +311,7 @@ Authorization: Bearer {{access_token}}
 ### ============================================
 ### 3.10 LISTAR CON PARÁMETROS INVÁLIDOS - 400
 ### ============================================
-GET {{baseUrl}}/domains?organizationId=invalid&limit=-1
+GET {{baseUrl}}/domains?organization_id=invalid&limit=-1
 Content-Type: application/json
 Authorization: Bearer {{access_token}}
 

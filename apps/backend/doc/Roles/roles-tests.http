@@ -1,4 +1,4 @@
-### VENDIX - Roles API Tests
+d### VENDIX - Roles API Tests
 ### Archivo para probar todos los endpoints del servicio de roles
 
 @baseUrl = http://localhost:3000/api
@@ -22,7 +22,7 @@ Content-Type: application/json
 {
   "email": "superadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### Login como Admin Regular
@@ -32,7 +32,7 @@ Content-Type: application/json
 {
   "email": "testadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================

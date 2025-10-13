@@ -13,11 +13,11 @@ import {
 export interface DomainSettingResponse {
   id: number;
   hostname: string;
-  organizationId: number;
-  storeId?: number;
+  organization_id: number;
+  store_id?: number;
   config: any;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
   organization?: {
     id: number;
     name: string;
@@ -28,30 +28,30 @@ export interface DomainSettingResponse {
     name: string;
     slug: string;
   };
-  domainType?: string;
+  domain_type?: string;
   status?: string;
-  sslStatus?: string;
-  isPrimary?: boolean;
-  verificationToken?: string | null;
+  ssl_status?: string;
+  is_primary?: boolean;
+  verification_token?: string | null;
 }
 
 export interface DomainResolutionResponse {
   id: number;
   hostname: string;
-  organizationId: number;
-  storeId?: number;
+  organization_id: number;
+  store_id?: number;
   config: any;
-  createdAt: string;
-  updatedAt: string;
-  storeName?: string;
-  storeSlug?: string;
-  organizationName?: string;
-  organizationSlug?: string;
-  domainType: 'organization' | 'store';
-  rawDomainType?: string;
+  created_at: string;
+  updated_at: string;
+  store_name?: string;
+  store_slug?: string;
+  organization_name?: string;
+  organization_slug?: string;
+  domain_type: 'organization' | 'store';
+  raw_domain_type?: string;
   status?: string;
-  sslStatus?: string;
-  isPrimary?: boolean;
+  ssl_status?: string;
+  is_primary?: boolean;
 }
 
 /**
@@ -168,9 +168,9 @@ export class DomainsService implements OnModuleInit {
 
     // Obtener detalles de store y organización
     let storeName: string | undefined;
-    let storeSlug: string | undefined;
-    let organizationName: string | undefined;
-    let organizationSlug: string | undefined;
+    let store_slug: string | undefined;
+    let organization_name: string | undefined;
+    let organization_slug: string | undefined;
     let domainType: 'organization' | 'store' = 'organization';
 
     if (domainConfig.store_id) {
@@ -181,9 +181,9 @@ export class DomainsService implements OnModuleInit {
 
       if (store) {
         storeName = store.name;
-        storeSlug = store.slug;
-        organizationName = store.organizations?.name;
-        organizationSlug = store.organizations?.slug;
+        store_slug = store.slug;
+        organization_name = store.organizations?.name;
+        organization_slug = store.organizations?.slug;
         domainType = 'store';
       }
     } else if (domainConfig.organization_id) {
@@ -192,35 +192,35 @@ export class DomainsService implements OnModuleInit {
       });
 
       if (organization) {
-        organizationName = organization.name;
-        organizationSlug = organization.slug;
+        organization_name = organization.name;
+        organization_slug = organization.slug;
       }
     }
 
     const response: DomainResolutionResponse = {
       id: domainConfig.id,
       hostname: domainConfig.hostname,
-      organizationId: domainConfig.organization_id!,
-      storeId: domainConfig.store_id || undefined,
+      organization_id: domainConfig.organization_id!,
+      store_id: domainConfig.store_id || undefined,
       config: domainConfig.config,
-      createdAt: domainConfig.created_at?.toISOString() || '',
-      updatedAt: domainConfig.updated_at?.toISOString() || '',
-      storeName,
-      storeSlug,
-      organizationName,
-      organizationSlug,
-      domainType,
-      rawDomainType: (domainConfig as any).domain_type,
+      created_at: domainConfig.created_at?.toISOString() || '',
+      updated_at: domainConfig.updated_at?.toISOString() || '',
+      store_name: storeName,
+      store_slug: store_slug,
+      organization_name: organization_name,
+      organization_slug: organization_slug,
+      domain_type: domainType,
+      raw_domain_type: (domainConfig as any).domain_type,
       status: (domainConfig as any).status,
-      sslStatus: (domainConfig as any).ssl_status,
-      isPrimary: (domainConfig as any).is_primary,
+      ssl_status: (domainConfig as any).ssl_status,
+      is_primary: (domainConfig as any).is_primary,
     };
 
     // Guardar en caché
     this.saveInCache(resolvedHostname, response);
 
     this.logger.log(
-      `✅ Successfully resolved domain: ${resolvedHostname} -> Org: ${response.organizationId}, Store: ${response.storeId}`,
+      `✅ Successfully resolved domain: ${resolvedHostname} -> Org: ${response.organization_id}, Store: ${response.store_id}`,
     );
 
     return response;
@@ -589,8 +589,8 @@ export class DomainsService implements OnModuleInit {
     // Crear nueva configuración
     return this.createDomainSetting({
       hostname: newHostname,
-      organizationId: source.organizationId,
-      storeId: source.storeId,
+      organizationId: source.organization_id,
+      storeId: source.store_id,
       config: source.config,
     });
   }
@@ -770,18 +770,18 @@ export class DomainsService implements OnModuleInit {
     return {
       id: domainSetting.id,
       hostname: domainSetting.hostname,
-      organizationId: domainSetting.organization_id,
-      storeId: domainSetting.store_id || undefined,
+      organization_id: domainSetting.organization_id,
+      store_id: domainSetting.store_id || undefined,
       config: domainSetting.config,
-      createdAt: domainSetting.created_at?.toISOString() || '',
-      updatedAt: domainSetting.updated_at?.toISOString() || '',
+      created_at: domainSetting.created_at?.toISOString() || '',
+      updated_at: domainSetting.updated_at?.toISOString() || '',
       organization: domainSetting.organization,
       store: domainSetting.store,
-      domainType: domainSetting.domain_type,
+      domain_type: domainSetting.domain_type,
       status: domainSetting.status,
-      sslStatus: domainSetting.ssl_status,
-      isPrimary: domainSetting.is_primary,
-      verificationToken: domainSetting.verification_token || null,
+      ssl_status: domainSetting.ssl_status,
+      is_primary: domainSetting.is_primary,
+      verification_token: domainSetting.verification_token || null,
     };
   }
 

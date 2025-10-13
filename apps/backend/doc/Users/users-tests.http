@@ -21,7 +21,7 @@ Content-Type: application/json
 {
   "email": "testadmin@vendix.com",
   "password": "password123",
-  "organizationSlug": "vendix-corp"
+  "organization_slug": "vendix-corp"
 }
 
 ### ============================================

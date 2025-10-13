@@ -1771,7 +1771,7 @@ export class AuthService {
       data: {
         ...onboardingStatus,
         current_step: 'complete',
-        onboardingCompleted: true,
+        onboarding_completed: true,
       },
     };
   }
@@ -2221,7 +2221,7 @@ export class AuthService {
       device: this.parseDeviceInfo(session.user_agent || ''),
       ipAddress: session.ip_address,
       lastUsed: session.last_used,
-      createdAt: session.created_at,
+      created_at: session.created_at,
       isCurrentSession: false, // TODO: Implementar lógica para identificar sesión actual
     }));
   }
