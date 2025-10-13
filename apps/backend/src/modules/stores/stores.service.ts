@@ -143,6 +143,12 @@ export class StoresService {
     if (activeOrders > 0) {
       throw new BadRequestException('Cannot delete store with active orders');
     }
+
+    // Eliminar registros relacionados que podrían causar violación de FK
+    await this.prisma.login_attempts.deleteMany({
+      where: { store_id: id },
+    });
+
     return this.prisma.stores.delete({ where: { id } });
   }
 
@@ -227,7 +233,8 @@ export class StoresService {
       }),
 
       // Top selling products
-      this.prisma.order_items.findMany({
+      this.prisma.order_items.groupBy({
+        by: ['product_id', 'product_name'],
         where: {
           orders: {
             store_id: id,
@@ -235,14 +242,14 @@ export class StoresService {
             state: { not: 'cancelled' }
           }
         },
-        select: {
-          product_id: true,
-          product_name: true,
+        _sum: {
           quantity: true,
-          _sum: { unit_price: true, total_price: true }
+          total_price: true
         },
         orderBy: {
-          quantity: 'desc'
+          _sum: {
+            quantity: 'desc'
+          }
         },
         take: 10
       }),

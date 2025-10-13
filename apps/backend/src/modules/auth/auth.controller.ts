@@ -67,6 +67,7 @@ export class AuthController {
   }
 
   @Post('register-customer')
+  @Public()
   @HttpCode(HttpStatus.CREATED)
   async registerCustomer(
     @Body() registerCustomerDto: RegisterCustomerDto,

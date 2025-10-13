@@ -1,7 +1,7 @@
 # 🎯 USER ONBOARDING FLOW
 # Flujo completo de registro y activación de usuario
 
-@baseUrl = http://localhost:3001/api
+@baseUrl = http://localhost:3000/api
 
 ###
 
@@ -10,44 +10,40 @@
 # =================================================================
 
 ### Register Organization Owner
-POST {{baseUrl}}/auth/register/owner
+POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
   "email": "new.owner@company.com",
   "password": "SecurePass123!",
-  "username": "owner_john",
   "first_name": "John",
   "last_name": "Smith",
-  "organization_name": "Tech Solutions Inc",
-  "organization_tax_id": "123456789"
+  "organization_name": "Tech Solutions Inc"
 }
 
 ### Register Organization Staff
-POST {{baseUrl}}/auth/register/staff
+POST {{baseUrl}}/auth/register-staff
 Content-Type: application/json
+Authorization: Bearer JWT_TOKEN_HERE
 
 {
   "email": "staff@company.com",
   "password": "SecurePass123!",
-  "username": "staff_jane",
   "first_name": "Jane",
   "last_name": "Doe",
-  "organization_slug": "tech-solutions-inc",
-  "role_name": "manager"
+  "role": "manager"
 }
 
 ### Register Store Customer
-POST {{baseUrl}}/auth/register/client
+POST {{baseUrl}}/auth/register-customer
 Content-Type: application/json
 
 {
   "email": "customer@store.com",
   "password": "SecurePass123!",
-  "username": "customer_bob",
   "first_name": "Bob",
   "last_name": "Johnson",
-  "store_slug": "main-store"
+  "store_id": 1
 }
 
 # =================================================================
