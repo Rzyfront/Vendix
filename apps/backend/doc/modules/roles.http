@@ -1,0 +1,144 @@
+# 🎭 ROLES & PERMISSIONS MANAGEMENT
+# Sistema de autorización RBAC multi-tenant
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 🎭 ROLES MANAGEMENT
+# =================================================================
+
+### Get All Roles
+GET {{baseUrl}}/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Role by ID
+GET {{baseUrl}}/roles/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Role
+POST {{baseUrl}}/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "store_manager",
+  "description": "Store Manager Role",
+  "is_system_role": false
+}
+
+### Update Role
+PATCH {{baseUrl}}/roles/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "description": "Updated description"
+}
+
+### Delete Role
+DELETE {{baseUrl}}/roles/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Assign Permissions to Role
+POST {{baseUrl}}/roles/1/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "permissionIds": [1, 2, 3]
+}
+
+### Remove Permissions from Role
+DELETE {{baseUrl}}/roles/1/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "permissionIds": [2]
+}
+
+### Assign Role to User
+POST {{baseUrl}}/roles/assign-to-user
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "userId": 5,
+  "roleId": 2
+}
+
+### Remove Role from User
+POST {{baseUrl}}/roles/remove-from-user
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "userId": 5,
+  "roleId": 2
+}
+
+### Get User Roles
+GET {{baseUrl}}/roles/user/5/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get User Permissions
+GET {{baseUrl}}/roles/user/5/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# =================================================================
+# 🗝️ PERMISSIONS MANAGEMENT
+# =================================================================
+
+### Get All Permissions
+GET {{baseUrl}}/permissions?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Permission by ID
+GET {{baseUrl}}/permissions/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Search Permission by Name
+GET {{baseUrl}}/permissions/search/by-name/users.create
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Search Permission by Path and Method
+GET {{baseUrl}}/permissions/search/by-path-method?path=/api/users&method=POST
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Permission
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "orders.create",
+  "description": "Create new orders",
+  "path": "/api/orders",
+  "method": "POST"
+}
+
+### Update Permission
+PATCH {{baseUrl}}/permissions/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "description": "Updated permission description"
+}
+
+### Delete Permission
+DELETE {{baseUrl}}/permissions/1
+Content-Type: application/json
+Authorization: {{authToken}}

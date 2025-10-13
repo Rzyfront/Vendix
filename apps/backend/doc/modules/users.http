@@ -1,0 +1,70 @@
+# 👥 USERS MODULE
+# Gestión completa de usuarios multi-tenant con dashboard avanzado
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 👥 USER MANAGEMENT
+# =================================================================
+
+### Get All Users
+GET {{baseUrl}}/users?page=1&limit=10&search=john&state=active
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get User by ID
+GET {{baseUrl}}/users/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### 🚨 USERS DASHBOARD - Advanced Panel FASE2
+GET {{baseUrl}}/users/dashboard?page=1&limit=10&role=manager&include_inactive=false
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# Returns: {
+#   data: [user_details_with_stores_and_roles],
+#   meta: {pagination_and_filters},
+#   statistics: {roles_stats, states_stats}
+# }
+
+### Create User
+POST {{baseUrl}}/users
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "email": "newuser@org.com",
+  "password": "TempPass123!",
+  "username": "new_user",
+  "first_name": "New",
+  "last_name": "User",
+  "organization_id": 1
+}
+
+### Update User
+PATCH {{baseUrl}}/users/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "first_name": "Updated Name"
+}
+
+### Archive User
+POST {{baseUrl}}/users/1/archive
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Reactivate User
+POST {{baseUrl}}/users/1/reactivate
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Delete User (Soft Delete)
+DELETE {{baseUrl}}/users/1
+Content-Type: application/json
+Authorization: {{authToken}}

@@ -1,0 +1,79 @@
+# 🏪 STORES MODULE
+# Gestión de tiendas con dashboards y analytics
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 🏪 STORE MANAGEMENT
+# =================================================================
+
+### Get All Stores
+GET {{baseUrl}}/stores?organization_id=1&page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Store by ID
+GET {{baseUrl}}/stores/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### 🚨 STORE DASHBOARD - Key FASE2 Feature
+GET {{baseUrl}}/stores/1/dashboard?start_date=2025-01-01&end_date=2025-12-31
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# Returns: {
+#   metrics: {
+#     total_orders: number,
+#     total_revenue: number,
+#     low_stock_products: number,
+#     active_customers: number,
+#     average_order_value: number
+#   },
+#   recent_orders: [...],
+#   top_products: [...],
+#   sales_chart: [...]
+# }
+
+### Create Store
+POST {{baseUrl}}/stores
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "organization_id": 1,
+  "name": "New Store",
+  "store_code": "STORE001",
+  "store_type": "physical",
+  "is_active": true
+}
+
+### Update Store
+PATCH {{baseUrl}}/stores/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "Updated Store Name",
+  "is_active": true
+}
+
+### Delete Store
+DELETE {{baseUrl}}/stores/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Update Store Settings
+PATCH {{baseUrl}}/stores/1/settings
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "settings": {
+    "theme": "dark",
+    "notifications": true
+  }
+}

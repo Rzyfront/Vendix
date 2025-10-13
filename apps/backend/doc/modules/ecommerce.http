@@ -1,0 +1,160 @@
+# 🛒 E-COMMERCE MODULES
+# Gestión de productos, órdenes, categorías y catálogo
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 🛒 PRODUCTS MANAGEMENT
+# =================================================================
+
+### Get All Products
+GET {{baseUrl}}/products?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Product
+POST {{baseUrl}}/products
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "store_id": 1,
+  "name": "iPhone 15",
+  "base_price": 999.99,
+  "sku": "IPHONE15-128",
+  "description": "Latest iPhone model"
+}
+
+# =================================================================
+# 🏷️ CATEGORIES MANAGEMENT
+# =================================================================
+
+### Get All Categories
+GET {{baseUrl}}/categories?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Category
+POST {{baseUrl}}/categories
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "store_id": 1,
+  "name": "Electronics",
+  "slug": "electronics"
+}
+
+# =================================================================
+# 🛍️ ORDERS MANAGEMENT
+# =================================================================
+
+### Get All Orders
+GET {{baseUrl}}/orders?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Order
+POST {{baseUrl}}/orders
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "store_id": 1,
+  "customer_id": 1,
+  "order_items": [
+    {
+      "product_id": 1,
+      "quantity": 1,
+      "unit_price": 999.99
+    }
+  ]
+}
+
+# =================================================================
+# 🏷️ BRANDS MANAGEMENT
+# =================================================================
+
+### Get All Brands
+GET {{baseUrl}}/brands?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Brand
+POST {{baseUrl}}/brands
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "Apple",
+  "description": "Technology company"
+}
+
+# =================================================================
+# 📍 ADDRESSES MANAGEMENT
+# =================================================================
+
+### Get All Addresses
+GET {{baseUrl}}/addresses?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Address
+POST {{baseUrl}}/addresses
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "user_id": 1,
+  "store_id": 1,
+  "address_line1": "123 Main St",
+  "city": "New York",
+  "country_code": "US",
+  "postal_code": "10001",
+  "type": "shipping"
+}
+
+# =================================================================
+# 📧 EMAIL MANAGEMENT
+# =================================================================
+
+### Send Email
+POST {{baseUrl}}/email/send
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "to": "recipient@example.com",
+  "subject": "Test Email",
+  "template": "welcome",
+  "data": {
+    "name": "John Doe",
+    "company": "My Company"
+  }
+}
+
+### Get Email Configuration
+GET {{baseUrl}}/email/config
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Switch Email Provider
+POST {{baseUrl}}/email/provider/switch
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "provider": "sendgrid"
+}
+
+# =================================================================
+# 🧾 TAXES MANAGEMENT
+# =================================================================
+
+### Get All Taxes
+GET {{baseUrl}}/taxes?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}

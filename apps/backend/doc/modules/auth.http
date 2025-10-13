@@ -1,0 +1,111 @@
+# 🔐 AUTHENTICATION MODULE
+# Endpoints para autenticación y gestión de sesiones
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 🔐 AUTHENTICATION ENDPOINTS
+# =================================================================
+
+### Register Organization Owner
+POST {{baseUrl}}/auth/register-owner
+Content-Type: application/json
+
+{
+  "email": "owner@organization.com",
+  "password": "SecurePass123!",
+  "first_name": "John",
+  "last_name": "Owner",
+  "organization_name": "My Corporation"
+}
+
+### Register Organization Staff
+POST {{baseUrl}}/auth/register/staff
+Content-Type: application/json
+
+{
+  "email": "staff@organization.com",
+  "password": "SecurePass123!",
+  "username": "org_staff",
+  "first_name": "Jane",
+  "last_name": "Staff",
+  "organization_slug": "my-corporation",
+  "role_name": "manager"
+}
+
+### Register Store Customer
+POST {{baseUrl}}/auth/register/client
+Content-Type: application/json
+
+{
+  "email": "customer@store.com",
+  "password": "SecurePass123!",
+  "username": "customer_user",
+  "first_name": "Bob",
+  "last_name": "Customer",
+  "store_slug": "main-store"
+}
+
+### Login Contextual (Auto Domain Resolution)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@domain.com",
+  "password": "userpass",
+  "organization_slug": "auto-detected-organization",
+  "store_slug": "auto-detected-store"
+}
+
+### Refresh Token
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "refresh_token": "your_refresh_token_here"
+}
+
+### Logout
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "refresh_token": "your_refresh_token_here"
+}
+
+### Password Recovery Request
+POST {{baseUrl}}/auth/password-recovery
+Content-Type: application/json
+
+{
+  "email": "user@domain.com",
+  "organization_slug": "my-organization"
+}
+
+### Password Reset
+POST {{baseUrl}}/auth/reset-password
+Content-Type: application/json
+
+{
+  "token": "reset_token_here",
+  "new_password": "NewSecurePass123!"
+}
+
+# =================================================================
+# 📊 SECURITY MONITORING
+# =================================================================
+
+### Rate Limiting Status
+GET {{baseUrl}}/rate-limiting/status
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Security Logs
+GET {{baseUrl}}/security-logs?page=1&limit=10
+Content-Type: application/json
+Authorization: {{authToken}}

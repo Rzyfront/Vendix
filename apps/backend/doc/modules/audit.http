@@ -1,0 +1,26 @@
+# 📊 AUDIT & LOGGING
+# Sistema de auditoría y monitoreo de seguridad
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 📊 AUDIT LOGS
+# =================================================================
+
+### Get Audit Logs
+GET {{baseUrl}}/audit?organization_id=1&user_id=1&page=1&limit=20
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Audit Log by ID
+GET {{baseUrl}}/audit/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Audit Stats
+GET {{baseUrl}}/audit/stats
+Content-Type: application/json
+Authorization: {{authToken}}

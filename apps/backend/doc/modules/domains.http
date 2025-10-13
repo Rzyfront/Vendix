@@ -1,0 +1,60 @@
+# 🌐 DOMAINS MANAGEMENT
+# Configuración de dominios y branding organizacional
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 🌐 DOMAIN MANAGEMENT
+# =================================================================
+
+### Get All Domains (Super Admin)
+GET {{baseUrl}}/domains
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Get Domain by ID
+GET {{baseUrl}}/domains/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Create Domain
+POST {{baseUrl}}/domains
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "hostname": "store.organization.com",
+  "organization_id": 1,
+  "store_id": 2,
+  "config": {
+    "branding": {
+      "primary_color": "#7ED7A5",
+      "theme": "light"
+    }
+  }
+}
+
+### Update Domain
+PATCH {{baseUrl}}/domains/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "config": {
+    "branding": {
+      "secondary_color": "#2F6F4E"
+    }
+  }
+}
+
+### Delete Domain
+DELETE {{baseUrl}}/domains/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+### Resolve Domain (Public)
+GET {{baseUrl}}/public/domains/resolve/store.organization.com
+Content-Type: application/json

@@ -1,0 +1,111 @@
+# 🎯 USER ONBOARDING FLOW
+# Flujo completo de registro y activación de usuario
+
+@baseUrl = http://localhost:3001/api
+
+###
+
+# =================================================================
+# 📝 STEP 1: USER REGISTRATION
+# =================================================================
+
+### Register Organization Owner
+POST {{baseUrl}}/auth/register/owner
+Content-Type: application/json
+
+{
+  "email": "new.owner@company.com",
+  "password": "SecurePass123!",
+  "username": "owner_john",
+  "first_name": "John",
+  "last_name": "Smith",
+  "organization_name": "Tech Solutions Inc",
+  "organization_tax_id": "123456789"
+}
+
+### Register Organization Staff
+POST {{baseUrl}}/auth/register/staff
+Content-Type: application/json
+
+{
+  "email": "staff@company.com",
+  "password": "SecurePass123!",
+  "username": "staff_jane",
+  "first_name": "Jane",
+  "last_name": "Doe",
+  "organization_slug": "tech-solutions-inc",
+  "role_name": "manager"
+}
+
+### Register Store Customer
+POST {{baseUrl}}/auth/register/client
+Content-Type: application/json
+
+{
+  "email": "customer@store.com",
+  "password": "SecurePass123!",
+  "username": "customer_bob",
+  "first_name": "Bob",
+  "last_name": "Johnson",
+  "store_slug": "main-store"
+}
+
+# =================================================================
+# 📧 STEP 2: EMAIL VERIFICATION
+# =================================================================
+# El sistema envía automáticamente email de verificación después del registro
+
+### Check User Email Status (for testing)
+GET {{baseUrl}}/test/check-user-email-status?email=customer@store.com
+Content-Type: application/json
+
+### Manual Email Verification (in development/testing)
+GET {{baseUrl}}/auth/verify-email?token=EMAIL_VERIFICATION_TOKEN
+Content-Type: application/json
+
+# =================================================================
+# 🔑 STEP 3: FIRST LOGIN
+# =================================================================
+
+### Login Contextual (Auto Domain Resolution)
+# Frontend automatically detects domain and calls /public/domains/resolve
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "customer@store.com",
+  "password": "SecurePass123!",
+  "organization_slug": "store-organization",
+  "store_slug": "main-store"
+}
+
+# =================================================================
+# 👤 STEP 4: PROFILE COMPLETION
+# =================================================================
+
+### Update User Profile (if not complete during registration)
+PATCH {{baseUrl}}/users/1
+Content-Type: application/json
+Authorization: Bearer JWT_TOKEN_HERE
+
+{
+  "first_name": "Updated First Name",
+  "last_name": "Updated Last Name",
+  "phone": "+1234567890"
+}
+
+# =================================================================
+# ✅ STEP 5: ACTIVATION COMPLETE
+# =================================================================
+
+### Verify User State (should be 'active')
+GET {{baseUrl}}/users/1
+Content-Type: application/json
+Authorization: Bearer JWT_TOKEN_HERE
+
+# Response should show:
+# {
+#   "email_verified": true,
+#   "state": "active",
+#   "onboarding_completed": true
+# }
