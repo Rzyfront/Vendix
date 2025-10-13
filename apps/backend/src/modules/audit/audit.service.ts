@@ -62,16 +62,21 @@ export class AuditService {
           action: auditData.action,
           resource: auditData.resource,
           resource_id: auditData.resourceId,
-          old_values: auditData.oldValues ? JSON.parse(JSON.stringify(auditData.oldValues)) : null,
-          new_values: auditData.newValues ? JSON.parse(JSON.stringify(auditData.newValues)) : null,
+          old_values: auditData.oldValues
+            ? JSON.parse(JSON.stringify(auditData.oldValues))
+            : null,
+          new_values: auditData.newValues
+            ? JSON.parse(JSON.stringify(auditData.newValues))
+            : null,
           ip_address: auditData.ipAddress,
           user_agent: auditData.userAgent,
         },
       });
 
       // Log console para desarrollo/debugging
-      console.log(`📊 AUDIT: ${auditData.action} on ${auditData.resource}${auditData.resourceId ? ` (${auditData.resourceId})` : ''} by user ${auditData.userId || 'system'}`);
-
+      console.log(
+        `📊 AUDIT: ${auditData.action} on ${auditData.resource}${auditData.resourceId ? ` (${auditData.resourceId})` : ''} by user ${auditData.userId || 'system'}`,
+      );
     } catch (error) {
       // No fallar la operación principal por error de auditoría
       console.error('❌ Error registrando auditoría:', error);
@@ -86,7 +91,7 @@ export class AuditService {
     resource: AuditResource,
     resourceId: number,
     newValues: any,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Promise<void> {
     await this.log({
       userId,
@@ -107,7 +112,7 @@ export class AuditService {
     resourceId: number,
     oldValues: any,
     newValues: any,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Promise<void> {
     await this.log({
       userId,
@@ -128,7 +133,7 @@ export class AuditService {
     resource: AuditResource,
     resourceId: number,
     oldValues: any,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Promise<void> {
     await this.log({
       userId,
@@ -148,7 +153,7 @@ export class AuditService {
     action: AuditAction,
     metadata?: Record<string, any>,
     ipAddress?: string,
-    userAgent?: string
+    userAgent?: string,
   ): Promise<void> {
     await this.log({
       userId,
@@ -166,7 +171,7 @@ export class AuditService {
   async logSystem(
     action: AuditAction,
     resource: AuditResource,
-    metadata?: Record<string, any>
+    metadata?: Record<string, any>,
   ): Promise<void> {
     await this.log({
       action,

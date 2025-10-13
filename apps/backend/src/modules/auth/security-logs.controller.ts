@@ -1,10 +1,10 @@
+import { Controller, Get, HttpStatus, Query } from '@nestjs/common';
 import {
-  Controller,
-  Get,
-  HttpStatus,
-  Query,
-} from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuditService, AuditAction } from '../audit/audit.service';
 
 @ApiTags('Security Logs')
@@ -16,7 +16,8 @@ export class SecurityLogsController {
   @Get('failed-logins')
   @ApiOperation({
     summary: 'Obtener logs de login fallidos',
-    description: 'Consulta todos los eventos de login fallidos con detalles de seguridad',
+    description:
+      'Consulta todos los eventos de login fallidos con detalles de seguridad',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -41,7 +42,8 @@ export class SecurityLogsController {
   @Get('account-locks')
   @ApiOperation({
     summary: 'Obtener logs de bloqueo de cuentas',
-    description: 'Consulta todos los eventos de bloqueo de cuentas por intentos fallidos',
+    description:
+      'Consulta todos los eventos de bloqueo de cuentas por intentos fallidos',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -146,7 +148,8 @@ export class SecurityLogsController {
         failedLogins: failedLogins.length,
         accountLocks: accountLocks.length,
         passwordChanges: passwordChanges.length,
-        totalSecurityEvents: failedLogins.length + accountLocks.length + passwordChanges.length,
+        totalSecurityEvents:
+          failedLogins.length + accountLocks.length + passwordChanges.length,
       },
       period: {
         from: from || 'All time',

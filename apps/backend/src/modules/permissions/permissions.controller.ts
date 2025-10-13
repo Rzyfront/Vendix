@@ -1,7 +1,33 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request, ParseIntPipe, BadRequestException, NotFoundException, ConflictException, InternalServerErrorException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  UseGuards,
+  Request,
+  ParseIntPipe,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { PermissionsService } from './permissions.service';
-import { CreatePermissionDto, UpdatePermissionDto, PermissionFilterDto } from './dto/permission.dto';
+import {
+  CreatePermissionDto,
+  UpdatePermissionDto,
+  PermissionFilterDto,
+} from './dto/permission.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
@@ -22,10 +48,19 @@ export class PermissionsController {
   @ApiOperation({ summary: 'Crear un nuevo permiso' })
   @ApiResponse({ status: 201, description: 'Permiso creado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  @ApiResponse({ status: 409, description: 'Ya existe un permiso con este nombre o ruta/método' })
-  async create(@Body() createPermissionDto: CreatePermissionDto, @Request() req) {
+  @ApiResponse({
+    status: 409,
+    description: 'Ya existe un permiso con este nombre o ruta/método',
+  })
+  async create(
+    @Body() createPermissionDto: CreatePermissionDto,
+    @Request() req,
+  ) {
     try {
-      const result = await this.permissionsService.create(createPermissionDto, req.user.id);
+      const result = await this.permissionsService.create(
+        createPermissionDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Permiso creado exitosamente',
@@ -41,16 +76,31 @@ export class PermissionsController {
   @Get()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Obtener todos los permisos' })
-  @ApiResponse({ status: 200, description: 'Lista de permisos obtenida exitosamente' })
-  @ApiQuery({ name: 'method', required: false, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] })
-  @ApiQuery({ name: 'status', required: false, enum: ['active', 'inactive', 'deprecated'] })
-  @ApiQuery({ name: 'search', required: false, description: 'Buscar por nombre, descripción o ruta' })
-  async findAll(
-    @Query() filterDto: PermissionFilterDto,
-    @Request() req
-  ) {
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de permisos obtenida exitosamente',
+  })
+  @ApiQuery({
+    name: 'method',
+    required: false,
+    enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['active', 'inactive', 'deprecated'],
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Buscar por nombre, descripción o ruta',
+  })
+  async findAll(@Query() filterDto: PermissionFilterDto, @Request() req) {
     try {
-      const result = await this.permissionsService.findAll(filterDto, req.user.id);
+      const result = await this.permissionsService.findAll(
+        filterDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Lista de permisos obtenida exitosamente',
@@ -91,14 +141,21 @@ export class PermissionsController {
   @ApiResponse({ status: 200, description: 'Permiso actualizado exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 404, description: 'Permiso no encontrado' })
-  @ApiResponse({ status: 409, description: 'Ya existe un permiso con este nombre o ruta/método' })
+  @ApiResponse({
+    status: 409,
+    description: 'Ya existe un permiso con este nombre o ruta/método',
+  })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updatePermissionDto: UpdatePermissionDto,
-    @Request() req
+    @Request() req,
   ) {
     try {
-      const result = await this.permissionsService.update(id, updatePermissionDto, req.user.id);
+      const result = await this.permissionsService.update(
+        id,
+        updatePermissionDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Permiso actualizado exitosamente',
@@ -166,17 +223,26 @@ export class PermissionsController {
   @ApiResponse({ status: 200, description: 'Permiso encontrado' })
   @ApiResponse({ status: 404, description: 'Permiso no encontrado' })
   @ApiQuery({ name: 'path', required: true, description: 'Ruta del endpoint' })
-  @ApiQuery({ name: 'method', required: true, enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'] })
+  @ApiQuery({
+    name: 'method',
+    required: true,
+    enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'],
+  })
   async findByPathAndMethod(
     @Query('path') path: string,
     @Query('method') method: string,
-    @Request() req
+    @Request() req,
   ) {
     try {
       if (!path || !method) {
-        throw new BadRequestException('Se requieren los parámetros path y method');
+        throw new BadRequestException(
+          'Se requieren los parámetros path y method',
+        );
       }
-      const result = await this.permissionsService.findByPathAndMethod(path, method as any);
+      const result = await this.permissionsService.findByPathAndMethod(
+        path,
+        method as any,
+      );
       if (!result) {
         throw new NotFoundException('Permiso no encontrado');
       }

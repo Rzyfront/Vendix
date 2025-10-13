@@ -6,7 +6,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 
 /**
  * Módulo de Dominios
- * 
+ *
  * Maneja toda la lógica relacionada con dominios:
  * - Resolución de dominios (público con @Public())
  * - CRUD de dominios (privado)

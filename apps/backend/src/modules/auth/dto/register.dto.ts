@@ -50,7 +50,8 @@ export class RegisterDto {
 
   @ApiPropertyOptional({
     example: 1,
-    description: 'ID de la organización a la que pertenece el usuario (opcional en algunos flujos)',
+    description:
+      'ID de la organización a la que pertenece el usuario (opcional en algunos flujos)',
   })
   @IsOptional()
   organization_id?: number;

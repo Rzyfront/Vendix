@@ -1,7 +1,20 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuditService, AuditAction, AuditResource } from '../audit/audit.service';
-import { CreatePermissionDto, UpdatePermissionDto, PermissionFilterDto } from './dto/permission.dto';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../audit/audit.service';
+import {
+  CreatePermissionDto,
+  UpdatePermissionDto,
+  PermissionFilterDto,
+} from './dto/permission.dto';
 import { http_method_enum } from '@prisma/client';
 
 @Injectable()
@@ -36,7 +49,9 @@ export class PermissionsService {
     });
 
     if (existingPathMethod) {
-      throw new ConflictException('Ya existe un permiso con esta ruta y método');
+      throw new ConflictException(
+        'Ya existe un permiso con esta ruta y método',
+      );
     }
 
     // Crear el permiso
@@ -138,15 +153,20 @@ export class PermissionsService {
     return permission;
   }
 
-  async update(id: number, updatePermissionDto: UpdatePermissionDto, userId: number) {
+  async update(
+    id: number,
+    updatePermissionDto: UpdatePermissionDto,
+    userId: number,
+  ) {
     const permission = await this.findOne(id);
     const { name, description, path, method, status } = updatePermissionDto;
 
     // Verificar que el nombre no exista (si se está cambiando)
     if (name && name !== permission.name) {
-      const existingPermission = await this.prismaService.permissions.findUnique({
-        where: { name },
-      });
+      const existingPermission =
+        await this.prismaService.permissions.findUnique({
+          where: { name },
+        });
 
       if (existingPermission) {
         throw new ConflictException('Ya existe un permiso con este nombre');
@@ -154,21 +174,27 @@ export class PermissionsService {
     }
 
     // Verificar que la combinación path-method no exista (si se están cambiando)
-    if ((path || method) && (path !== permission.path || method !== permission.method)) {
+    if (
+      (path || method) &&
+      (path !== permission.path || method !== permission.method)
+    ) {
       const newPath = path || permission.path;
       const newMethod = method || permission.method;
 
-      const existingPathMethod = await this.prismaService.permissions.findUnique({
-        where: {
-          path_method: {
-            path: newPath,
-            method: newMethod,
+      const existingPathMethod =
+        await this.prismaService.permissions.findUnique({
+          where: {
+            path_method: {
+              path: newPath,
+              method: newMethod,
+            },
           },
-        },
-      });
+        });
 
       if (existingPathMethod && existingPathMethod.id !== id) {
-        throw new ConflictException('Ya existe un permiso con esta ruta y método');
+        throw new ConflictException(
+          'Ya existe un permiso con esta ruta y método',
+        );
       }
     }
 
@@ -202,14 +228,14 @@ export class PermissionsService {
         description: permission.description,
         path: permission.path,
         method: permission.method,
-        status: permission.status
+        status: permission.status,
       },
       newValues: {
         name: updatedPermission.name,
         description: updatedPermission.description,
         path: updatedPermission.path,
         method: updatedPermission.method,
-        status: updatedPermission.status
+        status: updatedPermission.status,
       },
       metadata: {
         action: 'update_permission',
@@ -225,7 +251,9 @@ export class PermissionsService {
 
     // Verificar que no tenga roles asignados
     if (permission.role_permissions.length > 0) {
-      throw new BadRequestException('No se puede eliminar un permiso que tiene roles asignados');
+      throw new BadRequestException(
+        'No se puede eliminar un permiso que tiene roles asignados',
+      );
     }
 
     // Eliminar el permiso
@@ -244,7 +272,7 @@ export class PermissionsService {
         description: permission.description,
         path: permission.path,
         method: permission.method,
-        status: permission.status
+        status: permission.status,
       },
       metadata: {
         action: 'delete_permission',

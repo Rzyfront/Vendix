@@ -215,3 +215,13 @@ export class UpdateStoreSettingsDto {
   @IsObject()
   settings: any;
 }
+
+export class StoreDashboardDto {
+  @IsOptional()
+  @Type(() => Date)
+  start_date?: Date;
+
+  @IsOptional()
+  @Type(() => Date)
+  end_date?: Date;
+}

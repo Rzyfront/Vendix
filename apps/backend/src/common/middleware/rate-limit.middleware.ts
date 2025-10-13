@@ -32,7 +32,7 @@ export class RateLimitMiddleware implements NestMiddleware {
         statusCode: 429,
         message: 'Too many requests from this IP, please try again later.',
         error: 'Too Many Requests',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000)
+        retryAfter: Math.ceil((record.resetTime - now) / 1000),
       });
     }
   }
@@ -59,9 +59,10 @@ export class LoginRateLimitMiddleware implements NestMiddleware {
     } else {
       res.status(429).json({
         statusCode: 429,
-        message: 'Too many login attempts from this IP, please try again later.',
+        message:
+          'Too many login attempts from this IP, please try again later.',
         error: 'Too Many Login Attempts',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000)
+        retryAfter: Math.ceil((record.resetTime - now) / 1000),
       });
     }
   }
@@ -88,9 +89,10 @@ export class RefreshRateLimitMiddleware implements NestMiddleware {
     } else {
       res.status(429).json({
         statusCode: 429,
-        message: 'Too many refresh attempts from this IP, please try again later.',
+        message:
+          'Too many refresh attempts from this IP, please try again later.',
         error: 'Too Many Refresh Attempts',
-        retryAfter: Math.ceil((record.resetTime - now) / 1000)
+        retryAfter: Math.ceil((record.resetTime - now) / 1000),
       });
     }
   }

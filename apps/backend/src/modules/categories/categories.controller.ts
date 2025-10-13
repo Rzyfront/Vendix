@@ -13,11 +13,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
-import {
-  CreateCategoryDto,
-  UpdateCategoryDto,
-  CategoryQueryDto,
-} from './dto';
+import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';

@@ -70,7 +70,7 @@ export class ResponseService {
     message: string = 'Data retrieved successfully',
   ): PaginatedResponse<T> {
     const meta = createPaginationMeta(total, page, limit);
-    
+
     return {
       success: true,
       message,
@@ -84,7 +84,9 @@ export class ResponseService {
    * @param message Mensaje de éxito
    * @returns Respuesta de éxito sin datos
    */
-  noContent(message: string = 'Operation completed successfully'): SuccessResponse<null> {
+  noContent(
+    message: string = 'Operation completed successfully',
+  ): SuccessResponse<null> {
     return {
       success: true,
       message,
@@ -123,7 +125,9 @@ export class ResponseService {
    * @param message Mensaje de éxito (opcional)
    * @returns Respuesta de éxito sin datos
    */
-  deleted(message: string = 'Resource deleted successfully'): SuccessResponse<null> {
+  deleted(
+    message: string = 'Resource deleted successfully',
+  ): SuccessResponse<null> {
     return this.noContent(message);
   }
 
@@ -139,7 +143,9 @@ export class ResponseService {
   ): ErrorResponse {
     return this.error(
       message,
-      resource ? `${resource} not found` : 'The requested resource was not found',
+      resource
+        ? `${resource} not found`
+        : 'The requested resource was not found',
       HttpStatus.NOT_FOUND,
     );
   }
@@ -149,9 +155,7 @@ export class ResponseService {
    * @param message Mensaje de error
    * @returns Respuesta de error 401
    */
-  unauthorized(
-    message: string = 'Unauthorized',
-  ): ErrorResponse {
+  unauthorized(message: string = 'Unauthorized'): ErrorResponse {
     return this.error(
       message,
       'Authentication is required to access this resource',
@@ -164,9 +168,7 @@ export class ResponseService {
    * @param message Mensaje de error
    * @returns Respuesta de error 403
    */
-  forbidden(
-    message: string = 'Forbidden',
-  ): ErrorResponse {
+  forbidden(message: string = 'Forbidden'): ErrorResponse {
     return this.error(
       message,
       'You do not have permission to access this resource',
@@ -225,4 +227,3 @@ export class ResponseService {
     );
   }
 }
-

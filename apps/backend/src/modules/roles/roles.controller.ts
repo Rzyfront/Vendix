@@ -1,7 +1,35 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Request, ParseIntPipe, BadRequestException, NotFoundException, ConflictException, ForbiddenException, InternalServerErrorException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+  ParseIntPipe,
+  BadRequestException,
+  NotFoundException,
+  ConflictException,
+  ForbiddenException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { RolesService } from './roles.service';
-import { CreateRoleDto, UpdateRoleDto, AssignPermissionsDto, RemovePermissionsDto, AssignRoleToUserDto, RemoveRoleFromUserDto } from './dto/role.dto';
+import {
+  CreateRoleDto,
+  UpdateRoleDto,
+  AssignPermissionsDto,
+  RemovePermissionsDto,
+  AssignRoleToUserDto,
+  RemoveRoleFromUserDto,
+} from './dto/role.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
@@ -26,22 +54,19 @@ export class RolesController {
   async create(@Body() createRoleDto: CreateRoleDto, @Request() req) {
     try {
       const result = await this.rolesService.create(createRoleDto, req.user.id);
-      return this.responseService.success(
-        result,
-        'Rol creado exitosamente',
-      );
+      return this.responseService.success(result, 'Rol creado exitosamente');
     } catch (error) {
-      return this.responseService.error(
-        'Error al crear el rol',
-        error.message,
-      );
+      return this.responseService.error('Error al crear el rol', error.message);
     }
   }
 
   @Get()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Obtener todos los roles' })
-  @ApiResponse({ status: 200, description: 'Lista de roles obtenida exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'Lista de roles obtenida exitosamente',
+  })
   async findAll(@Request() req) {
     try {
       const result = await this.rolesService.findAll(req.user.id);
@@ -66,11 +91,7 @@ export class RolesController {
   async findOne(@Param('id', ParseIntPipe) id: number, @Request() req) {
     try {
       const result = await this.rolesService.findOne(id, req.user.id);
-      return this.responseService.success(
-        result,
-        'Rol encontrado',
-        req.url,
-      );
+      return this.responseService.success(result, 'Rol encontrado', req.url);
     } catch (error) {
       return this.responseService.error(
         'Error al obtener el rol',
@@ -89,10 +110,14 @@ export class RolesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateRoleDto: UpdateRoleDto,
-    @Request() req
+    @Request() req,
   ) {
     try {
-      const result = await this.rolesService.update(id, updateRoleDto, req.user.id);
+      const result = await this.rolesService.update(
+        id,
+        updateRoleDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Rol actualizado exitosamente',
@@ -139,10 +164,14 @@ export class RolesController {
   async assignPermissions(
     @Param('id', ParseIntPipe) roleId: number,
     @Body() assignPermissionsDto: AssignPermissionsDto,
-    @Request() req
+    @Request() req,
   ) {
     try {
-      const result = await this.rolesService.assignPermissions(roleId, assignPermissionsDto, req.user.id);
+      const result = await this.rolesService.assignPermissions(
+        roleId,
+        assignPermissionsDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Permisos asignados exitosamente',
@@ -165,10 +194,14 @@ export class RolesController {
   async removePermissions(
     @Param('id', ParseIntPipe) roleId: number,
     @Body() removePermissionsDto: RemovePermissionsDto,
-    @Request() req
+    @Request() req,
   ) {
     try {
-      const result = await this.rolesService.removePermissions(roleId, removePermissionsDto, req.user.id);
+      const result = await this.rolesService.removePermissions(
+        roleId,
+        removePermissionsDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Permisos removidos exitosamente',
@@ -191,13 +224,16 @@ export class RolesController {
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 404, description: 'Usuario o rol no encontrado' })
   @ApiResponse({ status: 409, description: 'El usuario ya tiene este rol' })
-  async assignRoleToUser(@Body() assignRoleToUserDto: AssignRoleToUserDto, @Request() req) {
+  async assignRoleToUser(
+    @Body() assignRoleToUserDto: AssignRoleToUserDto,
+    @Request() req,
+  ) {
     try {
-      const result = await this.rolesService.assignRoleToUser(assignRoleToUserDto, req.user.id);
-      return this.responseService.success(
-        result,
-        'Rol asignado exitosamente',
+      const result = await this.rolesService.assignRoleToUser(
+        assignRoleToUserDto,
+        req.user.id,
       );
+      return this.responseService.success(result, 'Rol asignado exitosamente');
     } catch (error) {
       return this.responseService.error(
         'Error al asignar el rol al usuario',
@@ -212,9 +248,15 @@ export class RolesController {
   @ApiResponse({ status: 200, description: 'Rol removido exitosamente' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   @ApiResponse({ status: 404, description: 'Relación no encontrada' })
-  async removeRoleFromUser(@Body() removeRoleFromUserDto: RemoveRoleFromUserDto, @Request() req) {
+  async removeRoleFromUser(
+    @Body() removeRoleFromUserDto: RemoveRoleFromUserDto,
+    @Request() req,
+  ) {
     try {
-      const result = await this.rolesService.removeRoleFromUser(removeRoleFromUserDto, req.user.id);
+      const result = await this.rolesService.removeRoleFromUser(
+        removeRoleFromUserDto,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'Rol removido exitosamente',
@@ -234,7 +276,10 @@ export class RolesController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Obtener permisos de un usuario' })
   @ApiResponse({ status: 200, description: 'Permisos obtenidos exitosamente' })
-  async getUserPermissions(@Param('userId', ParseIntPipe) userId: number, @Request() req) {
+  async getUserPermissions(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Request() req,
+  ) {
     try {
       const result = await this.rolesService.getUserPermissions(userId);
       return this.responseService.success(
@@ -254,7 +299,10 @@ export class RolesController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({ summary: 'Obtener roles de un usuario' })
   @ApiResponse({ status: 200, description: 'Roles obtenidos exitosamente' })
-  async getUserRoles(@Param('userId', ParseIntPipe) userId: number, @Request() req) {
+  async getUserRoles(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Request() req,
+  ) {
     try {
       const result = await this.rolesService.getUserRoles(userId);
       return this.responseService.success(

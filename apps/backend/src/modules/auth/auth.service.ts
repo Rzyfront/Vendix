@@ -15,7 +15,11 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { AuditService, AuditAction, AuditResource } from '../audit/audit.service';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../audit/audit.service';
 
 @Injectable()
 export class AuthService {
@@ -27,8 +31,12 @@ export class AuthService {
     private readonly auditService: AuditService,
   ) {}
 
-  async registerOwner(registerOwnerDto: RegisterOwnerDto, client_info?: { ip_address?: string; user_agent?: string }) {
-    const { email, password, first_name, last_name, organization_name } = registerOwnerDto as any;
+  async registerOwner(
+    registerOwnerDto: RegisterOwnerDto,
+    client_info?: { ip_address?: string; user_agent?: string },
+  ) {
+    const { email, password, first_name, last_name, organization_name } =
+      registerOwnerDto as any;
 
     // Preparar datos críticos antes de la transacción
     const organization_slug = this.generateSlugFromName(organization_name);
@@ -38,7 +46,9 @@ export class AuthService {
       where: { slug: organization_slug },
     });
     if (existingOrg) {
-      throw new ConflictException('Una organización con este nombre ya existe.');
+      throw new ConflictException(
+        'Una organización con este nombre ya existe.',
+      );
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
@@ -52,40 +62,39 @@ export class AuthService {
         user_roles: {
           some: {
             roles: {
-              name: 'owner'
-            }
-          }
-        }
+              name: 'owner',
+            },
+          },
+        },
       },
       include: {
         user_roles: {
           include: {
-            roles: true
-          }
-        }
-      }
-    });
-    if (existingUser){
-      const existingOrganization = await
-      this.prismaService.organizations.findUnique({
-        where:{id: existingUser.organization_id},
-        select:{
-          id:true,
-          name:true,
-          slug:true,
-          email:true,
-          state:true,
-          created_at:true,
+            roles: true,
+          },
         },
+      },
+    });
+    if (existingUser) {
+      const existingOrganization =
+        await this.prismaService.organizations.findUnique({
+          where: { id: existingUser.organization_id },
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            email: true,
+            state: true,
+            created_at: true,
+          },
+        });
 
-      });
-
-      //Retornar mesaje con informacion del onboarding pendiente 
+      //Retornar mesaje con informacion del onboarding pendiente
       throw new ConflictException({
-        message:'ya tienes un onboarding pendiente',
+        message: 'ya tienes un onboarding pendiente',
         pendingOnboarding: existingOrganization,
-        user:existingUser
-      })
+        user: existingUser,
+      });
     }
 
     // Crear organización + usuario + roles en una transacción atómica
@@ -108,57 +117,61 @@ export class AuthService {
       });
 
       let user;
-      let wasExistingUser = false;
+      const wasExistingUser = false;
 
-        // Verificar si ya existe usuario en esta organización (doble check)
-        const existingUserInOrg = await tx.users.findFirst({
-          where: { email, organization_id: organization.id },
-        });
-        if (existingUserInOrg) {
-          throw new ConflictException('Ya existe un usuario con este email en la organización');
-        }
+      // Verificar si ya existe usuario en esta organización (doble check)
+      const existingUserInOrg = await tx.users.findFirst({
+        where: { email, organization_id: organization.id },
+      });
+      if (existingUserInOrg) {
+        throw new ConflictException(
+          'Ya existe un usuario con este email en la organización',
+        );
+      }
 
-        // Verificar si existe un usuario con mismo email pero como CUSTOMER
-        // En este caso, permitir crear el OWNER (diferente organización)
-        const existingCustomer = await tx.users.findFirst({
-          where: {
-            email,
-            user_roles: {
-              some: {
-                roles: {
-                  name: 'customer'
-                }
-              }
-            }
-          },
-          include: {
-            user_roles: {
-              include: {
-                roles: true
-              }
+      // Verificar si existe un usuario con mismo email pero como CUSTOMER
+      // En este caso, permitir crear el OWNER (diferente organización)
+      const existingCustomer = await tx.users.findFirst({
+        where: {
+          email,
+          user_roles: {
+            some: {
+              roles: {
+                name: 'customer',
+              },
             },
-            organizations: true
-          }
-        });
-
-        if (existingCustomer) {
-          // Es un customer en otra organización, permitir crear owner
-          console.log(`Creando owner para email ${email} (customer existente en org: ${existingCustomer.organizations?.name})`);
-        }
-
-        // Crear nuevo usuario
-        user = await tx.users.create({
-          data: {
-            email,
-            password: hashedPassword,
-            first_name,
-            last_name,
-            username: await this.generateUniqueUsername(email),
-            email_verified: false,
-            organization_id: organization.id,
-            onboarding_completed: false,
           },
-        });
+        },
+        include: {
+          user_roles: {
+            include: {
+              roles: true,
+            },
+          },
+          organizations: true,
+        },
+      });
+
+      if (existingCustomer) {
+        // Es un customer en otra organización, permitir crear owner
+        console.log(
+          `Creando owner para email ${email} (customer existente en org: ${existingCustomer.organizations?.name})`,
+        );
+      }
+
+      // Crear nuevo usuario
+      user = await tx.users.create({
+        data: {
+          email,
+          password: hashedPassword,
+          first_name,
+          last_name,
+          username: await this.generateUniqueUsername(email),
+          email_verified: false,
+          organization_id: organization.id,
+          onboarding_completed: false,
+        },
+      });
 
       // Asignar rol owner al usuario (si no lo tiene ya)
       const existingUserRole = await tx.user_roles.findFirst({
@@ -192,7 +205,7 @@ export class AuthService {
             },
           },
         },
-  // organization_users removed in schema; use organization_id on users
+        // organization_users removed in schema; use organization_id on users
       },
     });
 
@@ -211,10 +224,12 @@ export class AuthService {
         email: result.organization.email,
       },
       {
-        registration_type: result.wasExistingUser ? 'existing_user' : 'new_user',
+        registration_type: result.wasExistingUser
+          ? 'existing_user'
+          : 'new_user',
         ip_address: client_info?.ip_address,
         user_agent: client_info?.user_agent,
-      }
+      },
     );
 
     // Registrar auditoría para creación/actualización de usuario
@@ -229,20 +244,25 @@ export class AuthService {
         organization_id: userWithRoles.organization_id,
       },
       {
-        registration_type: result.wasExistingUser ? 'existing_user_assigned' : 'new_registration',
+        registration_type: result.wasExistingUser
+          ? 'existing_user_assigned'
+          : 'new_registration',
         ip_address: client_info?.ip_address,
         user_agent: client_info?.user_agent,
-      }
+      },
     );
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles, { organization_id: result.organization.id, store_id: null });
+    const tokens = await this.generateTokens(userWithRoles, {
+      organization_id: result.organization.id,
+      store_id: null,
+    });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ip_address: client_info?.ip_address || '127.0.0.1',
       user_agent: client_info?.user_agent || 'Registration-Device',
     });
 
-  // Registrar intento de login exitoso
+    // Registrar intento de login exitoso
     await this.logLoginAttempt(userWithRoles.id, true);
 
     // Generar token de verificación de email
@@ -257,7 +277,7 @@ export class AuthService {
       },
     });
 
-  // Enviar email de verificación
+    // Enviar email de verificación
     try {
       await this.emailService.sendVerificationEmail(
         userWithRoles.email,
@@ -280,8 +300,12 @@ export class AuthService {
     };
   }
 
-  async registerCustomer(registerCustomerDto: RegisterCustomerDto, client_info?: { ip_address?: string; user_agent?: string }) {
-    const { email, password, first_name, last_name, store_id } = registerCustomerDto;
+  async registerCustomer(
+    registerCustomerDto: RegisterCustomerDto,
+    client_info?: { ip_address?: string; user_agent?: string },
+  ) {
+    const { email, password, first_name, last_name, store_id } =
+      registerCustomerDto;
 
     // Buscar la tienda por ID
     const store = await this.prismaService.stores.findUnique({
@@ -299,7 +323,9 @@ export class AuthService {
       },
     });
     if (existingUser) {
-      throw new ConflictException('El usuario con este email ya existe en esta organización/tienda');
+      throw new ConflictException(
+        'El usuario con este email ya existe en esta organización/tienda',
+      );
     }
 
     // Buscar rol customer
@@ -367,7 +393,10 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(userWithRoles, { organization_id: store.organization_id, store_id: null });
+    const tokens = await this.generateTokens(userWithRoles, {
+      organization_id: store.organization_id,
+      store_id: null,
+    });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ip_address: client_info?.ip_address || '127.0.0.1',
       user_agent: client_info?.user_agent || 'Registration-Device',
@@ -393,7 +422,7 @@ export class AuthService {
         store_id: store.id,
         organization_id: store.organization_id,
         registration_method: 'store_registration',
-      }
+      },
     );
 
     // Generar token de verificación de email
@@ -439,8 +468,12 @@ export class AuthService {
     };
   }
 
-  async registerStaff(registerStaffDto: RegisterStaffDto, admin_user_id: number) {
-    const { email, password, first_name, last_name, role, store_id } = registerStaffDto;
+  async registerStaff(
+    registerStaffDto: RegisterStaffDto,
+    admin_user_id: number,
+  ) {
+    const { email, password, first_name, last_name, role, store_id } =
+      registerStaffDto;
 
     // Verificar que el usuario admin tenga permisos
     const adminUser = await this.prismaService.users.findUnique({
@@ -459,12 +492,17 @@ export class AuthService {
     }
 
     // Verificar que el admin tenga rol de owner, admin o super_admin
-    const hasPermission = adminUser.user_roles.some(ur =>
-      ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'super_admin'
+    const hasPermission = adminUser.user_roles.some(
+      (ur) =>
+        ur.roles?.name === 'owner' ||
+        ur.roles?.name === 'admin' ||
+        ur.roles?.name === 'super_admin',
     );
 
     if (!hasPermission) {
-      throw new UnauthorizedException('No tienes permisos para crear usuarios staff');
+      throw new UnauthorizedException(
+        'No tienes permisos para crear usuarios staff',
+      );
     }
 
     // Obtener organización del admin
@@ -473,7 +511,9 @@ export class AuthService {
     });
 
     if (!adminOrganization) {
-      throw new BadRequestException('Organización del administrador no encontrada');
+      throw new BadRequestException(
+        'Organización del administrador no encontrada',
+      );
     }
 
     // Verificar si el usuario ya existe en la organización
@@ -485,13 +525,17 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new ConflictException('El usuario con este email ya existe en esta organización');
+      throw new ConflictException(
+        'El usuario con este email ya existe en esta organización',
+      );
     }
 
     // Verificar rol válido (solo roles de staff que puede asignar un admin)
     const validRoles = ['manager', 'supervisor', 'employee'];
     if (!validRoles.includes(role)) {
-      throw new BadRequestException(`Rol inválido. Roles válidos: ${validRoles.join(', ')}`);
+      throw new BadRequestException(
+        `Rol inválido. Roles válidos: ${validRoles.join(', ')}`,
+      );
     }
 
     // Buscar rol en la base de datos
@@ -500,7 +544,9 @@ export class AuthService {
     });
 
     if (!staffRole) {
-      throw new BadRequestException(`Rol '${role}' no encontrado en la base de datos`);
+      throw new BadRequestException(
+        `Rol '${role}' no encontrado en la base de datos`,
+      );
     }
 
     // Verificar store si se proporciona
@@ -513,7 +559,9 @@ export class AuthService {
       });
 
       if (!store) {
-        throw new BadRequestException('Tienda no encontrada o no pertenece a tu organización');
+        throw new BadRequestException(
+          'Tienda no encontrada o no pertenece a tu organización',
+        );
       }
     }
 
@@ -586,8 +634,8 @@ export class AuthService {
         created_by: admin_user_id,
       },
       {
-        description: `Usuario staff creado por administrador ${adminUser.email}`
-      }
+        description: `Usuario staff creado por administrador ${adminUser.email}`,
+      },
     );
 
     // Remover password del response (no es necesario ya que no se incluye en la query)
@@ -599,14 +647,17 @@ export class AuthService {
     };
   }
 
-
-
-  async login(loginDto: LoginDto, client_info?: { ip_address?: string; user_agent?: string }) {
+  async login(
+    loginDto: LoginDto,
+    client_info?: { ip_address?: string; user_agent?: string },
+  ) {
     const { email, password, organization_slug, store_slug } = loginDto;
 
     // Validar que se proporcione al menos uno de los dos
     if (!organization_slug && !store_slug) {
-      throw new BadRequestException('Debe proporcionar organization_slug o store_slug');
+      throw new BadRequestException(
+        'Debe proporcionar organization_slug o store_slug',
+      );
     }
 
     // Buscar usuario con rol y permisos
@@ -649,40 +700,47 @@ export class AuthService {
     if (organization_slug) {
       // Verificar que el usuario pertenezca a la organización especificada
       if (user.organization_id) {
-        const userOrganization = await this.prismaService.organizations.findUnique({
-          where: { id: user.organization_id }
-        });
+        const userOrganization =
+          await this.prismaService.organizations.findUnique({
+            where: { id: user.organization_id },
+          });
 
         if (!userOrganization || userOrganization.slug !== organization_slug) {
           await this.logLoginAttempt(user.id, false);
-          throw new UnauthorizedException('Usuario no pertenece a la organización especificada');
+          throw new UnauthorizedException(
+            'Usuario no pertenece a la organización especificada',
+          );
         }
 
         target_organization_id = userOrganization.id;
         login_context = `organization:${organization_slug}`;
       } else {
         await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException('Usuario no pertenece a ninguna organización');
+        throw new UnauthorizedException(
+          'Usuario no pertenece a ninguna organización',
+        );
       }
     } else if (store_slug) {
       // Verificar que el usuario tenga acceso a la tienda especificada
       const storeUser = await this.prismaService.store_users.findFirst({
         where: {
           user_id: user.id,
-          store: { slug: store_slug }
+          store: { slug: store_slug },
         },
         include: {
           store: {
             include: {
-              organizations: true
-            }
-          }
-        }
+              organizations: true,
+            },
+          },
+        },
       });
 
       if (!storeUser) {
         await this.logLoginAttempt(user.id, false);
-        throw new UnauthorizedException('Usuario no tiene acceso a la tienda especificada');
+        throw new UnauthorizedException(
+          'Usuario no tiene acceso a la tienda especificada',
+        );
       }
 
       target_organization_id = storeUser.store.organizations.id;
@@ -709,7 +767,7 @@ export class AuthService {
           attempt_number: user.failed_login_attempts + 1,
         },
         client_info?.ip_address || '127.0.0.1',
-        client_info?.user_agent || 'Unknown'
+        client_info?.user_agent || 'Unknown',
       );
 
       // Incrementar intentos fallidos
@@ -730,7 +788,10 @@ export class AuthService {
     }
 
     // Generar tokens
-    const tokens = await this.generateTokens(user, { organization_id: target_organization_id!, store_id: target_store_id });
+    const tokens = await this.generateTokens(user, {
+      organization_id: target_organization_id!,
+      store_id: target_store_id,
+    });
 
     // Crear refresh token en la base de datos con información del dispositivo
     await this.createUserSession(user.id, tokens.refresh_token, {
@@ -753,7 +814,7 @@ export class AuthService {
         store_id: target_store_id,
       },
       client_info?.ip_address || '127.0.0.1',
-      client_info?.user_agent || 'Login-Device'
+      client_info?.user_agent || 'Login-Device',
     );
 
     // Actualizar último login
@@ -777,7 +838,13 @@ export class AuthService {
       ip_address?: string;
       user_agent?: string;
     },
-  ): Promise<{ user: any; access_token: string; refresh_token: string; token_type: string; expires_in: number }> {
+  ): Promise<{
+    user: any;
+    access_token: string;
+    refresh_token: string;
+    token_type: string;
+    expires_in: number;
+  }> {
     const { refresh_token } = refreshTokenDto;
 
     try {
@@ -902,7 +969,11 @@ export class AuthService {
     return userWithoutPassword;
   }
 
-  async logout(user_id: number, refresh_token?: string, all_sessions: boolean = false) {
+  async logout(
+    user_id: number,
+    refresh_token?: string,
+    all_sessions: boolean = false,
+  ) {
     const now = new Date();
 
     if (all_sessions) {
@@ -911,7 +982,7 @@ export class AuthService {
         where: {
           user_id: user_id,
           revoked: false,
-          expires_at: { gt: now }
+          expires_at: { gt: now },
         },
         data: {
           revoked: true,
@@ -920,18 +991,14 @@ export class AuthService {
       });
 
       // Registrar auditoría
-      await this.auditService.logAuth(
-        user_id,
-        AuditAction.LOGOUT,
-        {
-          action: 'logout_all_sessions',
-          sessions_revoked: result.count
-        }
-      );
+      await this.auditService.logAuth(user_id, AuditAction.LOGOUT, {
+        action: 'logout_all_sessions',
+        sessions_revoked: result.count,
+      });
 
       return {
         message: `Se cerraron ${result.count} sesiones activas.`,
-        data: { sessions_revoked: result.count }
+        data: { sessions_revoked: result.count },
       };
     }
 
@@ -954,22 +1021,21 @@ export class AuthService {
         });
 
         if (result.count === 0) {
-          return { message: 'Sesión no encontrada o ya revocada.', data: { sessions_revoked: 0 } };
+          return {
+            message: 'Sesión no encontrada o ya revocada.',
+            data: { sessions_revoked: 0 },
+          };
         }
 
         // Registrar auditoría
-        await this.auditService.logAuth(
-          user_id,
-          AuditAction.LOGOUT,
-          {
-            action: 'logout_single_session',
-            sessions_revoked: result.count
-          }
-        );
+        await this.auditService.logAuth(user_id, AuditAction.LOGOUT, {
+          action: 'logout_single_session',
+          sessions_revoked: result.count,
+        });
 
         return {
           message: 'Logout exitoso.',
-          data: { sessions_revoked: result.count }
+          data: { sessions_revoked: result.count },
         };
       } catch (error) {
         console.error('Error during logout:', error);
@@ -980,8 +1046,9 @@ export class AuthService {
     }
 
     return {
-      message: 'No se proporcionó refresh token. Use all_sessions: true para cerrar todas las sesiones.',
-      data: { sessions_revoked: 0 }
+      message:
+        'No se proporcionó refresh token. Use all_sessions: true para cerrar todas las sesiones.',
+      data: { sessions_revoked: 0 },
     };
   }
 
@@ -1091,7 +1158,10 @@ export class AuthService {
 
   // ===== FUNCIONES DE RECUPERACIÓN DE CONTRASEÑA =====
 
-  async forgotPassword(email: string, organization_slug: string): Promise<{ message: string }> {
+  async forgotPassword(
+    email: string,
+    organization_slug: string,
+  ): Promise<{ message: string }> {
     // Validar que la organización existe
     const organization = await this.prismaService.organizations.findUnique({
       where: { slug: organization_slug },
@@ -1157,7 +1227,7 @@ export class AuthService {
         email_sent: true,
       },
       undefined, // IP no disponible en este contexto
-      undefined  // User-Agent no disponible en este contexto
+      undefined, // User-Agent no disponible en este contexto
     );
 
     return {
@@ -1185,7 +1255,9 @@ export class AuthService {
     }
 
     if (new Date() > resetToken.expires_at) {
-      throw new BadRequestException('Token expirado. Solicita un nuevo enlace de recuperación.');
+      throw new BadRequestException(
+        'Token expirado. Solicita un nuevo enlace de recuperación.',
+      );
     }
 
     // Verificar que el usuario aún existe y está activo
@@ -1196,14 +1268,19 @@ export class AuthService {
     // Validar fortaleza de la nueva contraseña
     if (!this.validatePasswordStrength(newPassword)) {
       throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números'
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
       );
     }
 
     // Verificar que la nueva contraseña no sea igual a la actual
-    const isSamePassword = await bcrypt.compare(newPassword, resetToken.users.password);
+    const isSamePassword = await bcrypt.compare(
+      newPassword,
+      resetToken.users.password,
+    );
     if (isSamePassword) {
-      throw new BadRequestException('La nueva contraseña no puede ser igual a la contraseña actual');
+      throw new BadRequestException(
+        'La nueva contraseña no puede ser igual a la contraseña actual',
+      );
     }
 
     // Hashear nueva contraseña
@@ -1240,7 +1317,7 @@ export class AuthService {
         token_used: true,
       },
       undefined, // IP no disponible en este contexto
-      undefined  // User-Agent no disponible en este contexto
+      undefined, // User-Agent no disponible en este contexto
     );
 
     return { message: 'Contraseña restablecida exitosamente' };
@@ -1271,14 +1348,16 @@ export class AuthService {
     // Validar fortaleza de la nueva contraseña
     if (!this.validatePasswordStrength(new_password)) {
       throw new BadRequestException(
-        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números'
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
       );
     }
 
     // Verificar que la nueva contraseña no sea igual a la actual
     const isSamePassword = await bcrypt.compare(new_password, user.password);
     if (isSamePassword) {
-      throw new BadRequestException('La nueva contraseña no puede ser igual a la contraseña actual');
+      throw new BadRequestException(
+        'La nueva contraseña no puede ser igual a la contraseña actual',
+      );
     }
 
     // Hashear nueva contraseña
@@ -1305,10 +1384,13 @@ export class AuthService {
         sessions_invalidated: true,
       },
       undefined, // IP no disponible en este contexto
-      undefined  // User-Agent no disponible en este contexto
+      undefined, // User-Agent no disponible en este contexto
     );
 
-    return { message: 'Contraseña cambiada exitosamente. Todas las sesiones han sido invalidadas por seguridad.' };
+    return {
+      message:
+        'Contraseña cambiada exitosamente. Todas las sesiones han sido invalidadas por seguridad.',
+    };
   }
 
   // Método auxiliar para verificar tokens de cambio de contraseña (para futura implementación)
@@ -1343,7 +1425,9 @@ export class AuthService {
     }
 
     // Verificar si ya es propietario de alguna organización mediante user_roles
-    const isOwner = (user.user_roles || []).some((ur) => ur.roles?.name === 'owner');
+    const isOwner = (user.user_roles || []).some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     return !isOwner;
   }
@@ -1367,8 +1451,8 @@ export class AuthService {
     }
 
     const email_verified = user.email_verified;
-  const has_organization = !!user.organization_id;
-  const can_create_organization = await this.canCreateOrganization(user_id);
+    const has_organization = !!user.organization_id;
+    const can_create_organization = await this.canCreateOrganization(user_id);
 
     let next_step = '';
     if (!email_verified) {
@@ -1434,11 +1518,11 @@ export class AuthService {
       },
     });
 
-      // Asignar el usuario a la organización como propietario
-      // Primero obtenemos el rol de owner
-      const ownerRole = await this.prismaService.roles.findFirst({
-        where: { name: 'owner' },
-      });
+    // Asignar el usuario a la organización como propietario
+    // Primero obtenemos el rol de owner
+    const ownerRole = await this.prismaService.roles.findFirst({
+      where: { name: 'owner' },
+    });
 
     if (!ownerRole) {
       throw new BadRequestException('Rol de propietario no encontrado');
@@ -1484,12 +1568,16 @@ export class AuthService {
     });
 
     if (!user || user.organization_id !== organization_id) {
-      throw new BadRequestException('No tienes permisos para configurar esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta organización',
+      );
     }
 
     const roleNames = user.user_roles.map((ur) => ur.roles?.name);
     if (!roleNames.includes('owner') && !roleNames.includes('admin')) {
-      throw new BadRequestException('No tienes permisos para configurar esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta organización',
+      );
     }
 
     // Separar datos de organización de datos de dirección
@@ -1550,12 +1638,16 @@ export class AuthService {
     });
 
     if (!user || user.organization_id !== organization_id) {
-      throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para crear tiendas en esta organización',
+      );
     }
 
     const roleNames = user.user_roles.map((ur) => ur.roles?.name);
     if (!roleNames.includes('owner') && !roleNames.includes('admin')) {
-      throw new BadRequestException('No tienes permisos para crear tiendas en esta organización');
+      throw new BadRequestException(
+        'No tienes permisos para crear tiendas en esta organización',
+      );
     }
 
     // Separar datos de tienda de datos de configuración y dirección
@@ -1619,7 +1711,10 @@ export class AuthService {
       };
     } catch (error) {
       console.error('[ONBOARDING STORE ERROR]', error);
-      throw new BadRequestException('Error al crear la tienda durante el onboarding', error.message);
+      throw new BadRequestException(
+        'Error al crear la tienda durante el onboarding',
+        error.message,
+      );
     }
   }
 
@@ -1647,13 +1742,20 @@ export class AuthService {
       include: { user_roles: { include: { roles: true } } },
     });
 
-    if (!userForStore || userForStore.organization_id !== store.organization_id) {
-      throw new BadRequestException('No tienes permisos para configurar esta tienda');
+    if (
+      !userForStore ||
+      userForStore.organization_id !== store.organization_id
+    ) {
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta tienda',
+      );
     }
 
     const roleNames = userForStore.user_roles.map((ur) => ur.roles?.name);
     if (!roleNames.includes('owner') && !roleNames.includes('admin')) {
-      throw new BadRequestException('No tienes permisos para configurar esta tienda');
+      throw new BadRequestException(
+        'No tienes permisos para configurar esta tienda',
+      );
     }
 
     // Separar datos de tienda de datos de dirección
@@ -1724,14 +1826,19 @@ export class AuthService {
   }> {
     const onboardingStatus = await this.getOnboardingStatus(user_id);
 
-    if (!onboardingStatus.email_verified || !onboardingStatus.has_organization) {
+    if (
+      !onboardingStatus.email_verified ||
+      !onboardingStatus.has_organization
+    ) {
       throw new BadRequestException('Onboarding no completado correctamente');
     }
 
     // Validar todas las pre-condiciones requeridas
     const validationResult = await this.validateOnboardingCompletion(user_id);
     if (!validationResult.isValid) {
-      throw new BadRequestException(`Faltan datos requeridos: ${validationResult.missingFields.join(', ')}`);
+      throw new BadRequestException(
+        `Faltan datos requeridos: ${validationResult.missingFields.join(', ')}`,
+      );
     }
 
     // Actualizar el estado del usuario como onboarding completado
@@ -1762,7 +1869,7 @@ export class AuthService {
       {
         action: 'complete_onboarding',
         completed_at: new Date().toISOString(),
-      }
+      },
     );
 
     return {
@@ -1833,11 +1940,15 @@ export class AuthService {
     if (!organization.addresses || organization.addresses.length === 0) {
       missingFields.push('dirección de organización');
     } else {
-      const primaryAddress = organization.addresses.find(addr => addr.is_primary);
-      if (!primaryAddress ||
-          !primaryAddress.address_line1 ||
-          !primaryAddress.city ||
-          !primaryAddress.country_code) {
+      const primaryAddress = organization.addresses.find(
+        (addr) => addr.is_primary,
+      );
+      if (
+        !primaryAddress ||
+        !primaryAddress.address_line1 ||
+        !primaryAddress.city ||
+        !primaryAddress.country_code
+      ) {
         missingFields.push('dirección completa de organización');
       }
     }
@@ -1859,7 +1970,10 @@ export class AuthService {
     }
 
     // 4. Validar configuración de dominio
-    if (!organization.domain_settings || organization.domain_settings.length === 0) {
+    if (
+      !organization.domain_settings ||
+      organization.domain_settings.length === 0
+    ) {
       missingFields.push('configuración de dominio');
     } else {
       const domainSetting = organization.domain_settings[0];
@@ -1874,19 +1988,24 @@ export class AuthService {
         missingFields.push('configuración de colores en domain_settings');
       } else {
         try {
-          const config = typeof domainSetting.config === 'string'
-            ? JSON.parse(domainSetting.config)
-            : domainSetting.config;
+          const config =
+            typeof domainSetting.config === 'string'
+              ? JSON.parse(domainSetting.config)
+              : domainSetting.config;
 
           const colors: string[] = [];
           if (config.branding?.primaryColor) colors.push('primaryColor');
           if (config.branding?.secondaryColor) colors.push('secondaryColor');
 
           if (colors.length < 2) {
-            missingFields.push('al menos 2 colores (primario y secundario) en domain_settings.config.branding');
+            missingFields.push(
+              'al menos 2 colores (primario y secundario) en domain_settings.config.branding',
+            );
           }
         } catch (error) {
-          missingFields.push('configuración de colores válida en domain_settings');
+          missingFields.push(
+            'configuración de colores válida en domain_settings',
+          );
         }
       }
     }
@@ -2078,7 +2197,10 @@ export class AuthService {
     });
   }
 
-  private async handleFailedLogin(user_id: number, client_info?: { ip_address?: string; user_agent?: string }) {
+  private async handleFailedLogin(
+    user_id: number,
+    client_info?: { ip_address?: string; user_agent?: string },
+  ) {
     const user = await this.prismaService.users.findUnique({
       where: { id: user_id },
     });
@@ -2102,7 +2224,7 @@ export class AuthService {
           locked_until: updateData.locked_until,
         },
         client_info?.ip_address || '127.0.0.1',
-        client_info?.user_agent || 'Unknown'
+        client_info?.user_agent || 'Unknown',
       );
     }
 
@@ -2202,7 +2324,7 @@ export class AuthService {
       where: {
         user_id: user_id,
         revoked: false,
-        expires_at: { gt: new Date() }
+        expires_at: { gt: new Date() },
       },
       orderBy: { last_used: 'desc' },
       select: {
@@ -2212,11 +2334,11 @@ export class AuthService {
         user_agent: true,
         last_used: true,
         created_at: true,
-      }
+      },
     });
 
     // Parsear información del dispositivo para cada sesión
-    return sessions.map(session => ({
+    return sessions.map((session) => ({
       id: session.id,
       device: this.parseDeviceInfo(session.user_agent || ''),
       ipAddress: session.ip_address,
@@ -2237,7 +2359,9 @@ export class AuthService {
     });
 
     if (!session) {
-      throw new NotFoundException('Sesión no encontrada o no pertenece al usuario');
+      throw new NotFoundException(
+        'Sesión no encontrada o no pertenece al usuario',
+      );
     }
 
     // Revocar la sesión
@@ -2256,7 +2380,7 @@ export class AuthService {
       newValues: { session_active: false },
       metadata: {
         session_id: session_id,
-        action: 'revoke_session'
+        action: 'revoke_session',
       },
       ipAddress: session.ip_address || undefined,
       userAgent: session.user_agent || undefined,
@@ -2264,7 +2388,7 @@ export class AuthService {
 
     return {
       message: 'Sesión revocada exitosamente',
-      data: { session_revoked: session_id }
+      data: { session_revoked: session_id },
     };
   }
 
@@ -2525,7 +2649,7 @@ export class AuthService {
       return {
         browser: 'Unknown',
         os: 'Unknown',
-        type: 'Unknown'
+        type: 'Unknown',
       };
     }
 
@@ -2536,13 +2660,17 @@ export class AuthService {
     return {
       browser,
       os,
-      type
+      type,
     };
   }
 
   // Detectar tipo de dispositivo
   private detectDeviceType(userAgent: string): string {
-    if (userAgent.includes('Mobile') || userAgent.includes('Android') || userAgent.includes('iPhone')) {
+    if (
+      userAgent.includes('Mobile') ||
+      userAgent.includes('Android') ||
+      userAgent.includes('iPhone')
+    ) {
       return 'Mobile';
     }
     if (userAgent.includes('Tablet') || userAgent.includes('iPad')) {

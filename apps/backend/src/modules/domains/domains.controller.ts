@@ -52,7 +52,11 @@ export class DomainsController {
     @Query('subdomain') subdomain?: string,
     @Headers('x-forwarded-host') forwardedHost?: string,
   ): Promise<any> {
-    return this.domainsService.resolveDomain(hostname, subdomain, forwardedHost);
+    return this.domainsService.resolveDomain(
+      hostname,
+      subdomain,
+      forwardedHost,
+    );
   }
 
   /**
@@ -152,7 +156,9 @@ export class DomainsController {
    */
   @Get(':id')
   @Roles('super_admin', 'admin', 'owner')
-  async getDomainSettingById(@Param('id') id: string): Promise<DomainSettingResponse> {
+  async getDomainSettingById(
+    @Param('id') id: string,
+  ): Promise<DomainSettingResponse> {
     const domainId = parseInt(id, 10);
     if (isNaN(domainId)) {
       throw new BadRequestException('Invalid domain ID');
@@ -169,7 +175,10 @@ export class DomainsController {
     @Param('hostname') hostname: string,
     @Body() updateDomainSettingDto: UpdateDomainSettingDto,
   ): Promise<DomainSettingResponse> {
-    return this.domainsService.updateDomainSetting(hostname, updateDomainSettingDto);
+    return this.domainsService.updateDomainSetting(
+      hostname,
+      updateDomainSettingDto,
+    );
   }
 
   /**
@@ -178,7 +187,9 @@ export class DomainsController {
   @Delete('hostname/:hostname')
   @Roles('super_admin', 'admin', 'owner')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteDomainSetting(@Param('hostname') hostname: string): Promise<void> {
+  async deleteDomainSetting(
+    @Param('hostname') hostname: string,
+  ): Promise<void> {
     await this.domainsService.deleteDomainSetting(hostname);
   }
 
@@ -191,7 +202,10 @@ export class DomainsController {
     @Param('hostname') hostname: string,
     @Body() duplicateData: DuplicateDomainDto,
   ): Promise<DomainSettingResponse> {
-    return this.domainsService.duplicateDomainSetting(hostname, duplicateData.newHostname);
+    return this.domainsService.duplicateDomainSetting(
+      hostname,
+      duplicateData.newHostname,
+    );
   }
 
   /**
@@ -206,7 +220,9 @@ export class DomainsController {
     if (isNaN(orgId)) {
       throw new BadRequestException('Invalid organization ID');
     }
-    const result = await this.domainsService.getAllDomainSettings({ organizationId: orgId });
+    const result = await this.domainsService.getAllDomainSettings({
+      organizationId: orgId,
+    });
     return result.data;
   }
 
@@ -215,12 +231,16 @@ export class DomainsController {
    */
   @Get('store/:storeId')
   @Roles('super_admin', 'admin', 'owner')
-  async getDomainSettingsByStore(@Param('storeId') storeId: string): Promise<DomainSettingResponse[]> {
+  async getDomainSettingsByStore(
+    @Param('storeId') storeId: string,
+  ): Promise<DomainSettingResponse[]> {
     const sId = parseInt(storeId, 10);
     if (isNaN(sId)) {
       throw new BadRequestException('Invalid store ID');
     }
-    const result = await this.domainsService.getAllDomainSettings({ storeId: sId });
+    const result = await this.domainsService.getAllDomainSettings({
+      storeId: sId,
+    });
     return result.data;
   }
 

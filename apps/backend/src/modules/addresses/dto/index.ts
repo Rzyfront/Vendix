@@ -87,7 +87,10 @@ export class CreateAddressDto {
   @Min(1)
   store_id?: number;
 
-  @ApiPropertyOptional({ example: 1, description: 'ID de organización (opcional)' })
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'ID de organización (opcional)',
+  })
   @IsInt()
   @IsOptional()
   @Min(1)

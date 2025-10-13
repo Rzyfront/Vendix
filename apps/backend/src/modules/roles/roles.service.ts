@@ -1,7 +1,24 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuditService, AuditAction, AuditResource } from '../audit/audit.service';
-import { CreateRoleDto, UpdateRoleDto, AssignPermissionsDto, RemovePermissionsDto, AssignRoleToUserDto, RemoveRoleFromUserDto } from './dto/role.dto';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../audit/audit.service';
+import {
+  CreateRoleDto,
+  UpdateRoleDto,
+  AssignPermissionsDto,
+  RemovePermissionsDto,
+  AssignRoleToUserDto,
+  RemoveRoleFromUserDto,
+} from './dto/role.dto';
 
 @Injectable()
 export class RolesService {
@@ -77,14 +94,18 @@ export class RolesService {
       },
     });
 
-    const isSuperAdmin = userRoles.some(ur => ur.roles?.name === 'super_admin');
+    const isSuperAdmin = userRoles.some(
+      (ur) => ur.roles?.name === 'super_admin',
+    );
 
     // Si no es super_admin, filtrar el rol super_admin de los resultados
-    const whereClause = isSuperAdmin ? {} : {
-      name: {
-        not: 'super_admin'
-      }
-    };
+    const whereClause = isSuperAdmin
+      ? {}
+      : {
+          name: {
+            not: 'super_admin',
+          },
+        };
 
     return await this.prismaService.roles.findMany({
       where: whereClause,
@@ -149,7 +170,9 @@ export class RolesService {
         },
       });
 
-      const isSuperAdmin = userRoles.some(ur => ur.roles?.name === 'super_admin');
+      const isSuperAdmin = userRoles.some(
+        (ur) => ur.roles?.name === 'super_admin',
+      );
 
       // Si el rol es super_admin y el usuario no es super_admin, devolver 404
       if (role.name === 'super_admin' && !isSuperAdmin) {
@@ -203,7 +226,10 @@ export class RolesService {
       resource: AuditResource.ROLES,
       resourceId: id,
       oldValues: { name: role.name, description: role.description },
-      newValues: { name: updatedRole.name, description: updatedRole.description },
+      newValues: {
+        name: updatedRole.name,
+        description: updatedRole.description,
+      },
       metadata: {
         action: 'update_role',
         role_name: updatedRole.name,
@@ -223,7 +249,9 @@ export class RolesService {
 
     // Verificar que no tenga usuarios asignados
     if (role.user_roles.length > 0) {
-      throw new BadRequestException('No se puede eliminar un rol que tiene usuarios asignados');
+      throw new BadRequestException(
+        'No se puede eliminar un rol que tiene usuarios asignados',
+      );
     }
 
     // Eliminar el rol
@@ -249,7 +277,11 @@ export class RolesService {
 
   // ===== GESTIÓN DE PERMISOS =====
 
-  async assignPermissions(roleId: number, assignPermissionsDto: AssignPermissionsDto, userId: number) {
+  async assignPermissions(
+    roleId: number,
+    assignPermissionsDto: AssignPermissionsDto,
+    userId: number,
+  ) {
     const role = await this.findOne(roleId);
     const { permissionIds } = assignPermissionsDto;
 
@@ -262,11 +294,13 @@ export class RolesService {
     });
 
     if (permissions.length !== permissionIds.length) {
-      throw new BadRequestException('Uno o más permisos no existen o están inactivos');
+      throw new BadRequestException(
+        'Uno o más permisos no existen o están inactivos',
+      );
     }
 
     // Crear las relaciones role_permissions
-    const rolePermissions = permissionIds.map(permissionId => ({
+    const rolePermissions = permissionIds.map((permissionId) => ({
       role_id: roleId,
       permission_id: permissionId,
       granted: true,
@@ -297,7 +331,11 @@ export class RolesService {
     return updatedRole;
   }
 
-  async removePermissions(roleId: number, removePermissionsDto: RemovePermissionsDto, userId: number) {
+  async removePermissions(
+    roleId: number,
+    removePermissionsDto: RemovePermissionsDto,
+    userId: number,
+  ) {
     const role = await this.findOne(roleId);
     const { permissionIds } = removePermissionsDto;
 
@@ -331,7 +369,10 @@ export class RolesService {
 
   // ===== GESTIÓN DE USUARIOS =====
 
-  async assignRoleToUser(assignRoleToUserDto: AssignRoleToUserDto, adminUserId: number) {
+  async assignRoleToUser(
+    assignRoleToUserDto: AssignRoleToUserDto,
+    adminUserId: number,
+  ) {
     const { userId, roleId } = assignRoleToUserDto;
 
     // Verificar que el usuario existe
@@ -363,28 +404,39 @@ export class RolesService {
         },
       });
 
-      const isSuperAdmin = adminUserRoles.some(ur => ur.roles?.name === 'super_admin');
+      const isSuperAdmin = adminUserRoles.some(
+        (ur) => ur.roles?.name === 'super_admin',
+      );
 
       if (!isSuperAdmin) {
-        throw new ForbiddenException('Solo los super administradores pueden asignar el rol super_admin');
+        throw new ForbiddenException(
+          'Solo los super administradores pueden asignar el rol super_admin',
+        );
       }
 
       // Verificar que no exista ya un super admin
       const existingSuperAdmin = await this.prismaService.user_roles.findFirst({
         where: {
           roles: {
-            name: 'super_admin'
-          }
+            name: 'super_admin',
+          },
         },
         include: {
           users: {
-            select: { id: true, email: true, first_name: true, last_name: true }
-          }
-        }
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
+        },
       });
 
       if (existingSuperAdmin) {
-        throw new ConflictException(`Ya existe un super administrador: ${existingSuperAdmin.users?.email}. Solo puede existir un super administrador en el sistema.`);
+        throw new ConflictException(
+          `Ya existe un super administrador: ${existingSuperAdmin.users?.email}. Solo puede existir un super administrador en el sistema.`,
+        );
       }
     }
 
@@ -438,7 +490,10 @@ export class RolesService {
     return userRole;
   }
 
-  async removeRoleFromUser(removeRoleFromUserDto: RemoveRoleFromUserDto, adminUserId: number) {
+  async removeRoleFromUser(
+    removeRoleFromUserDto: RemoveRoleFromUserDto,
+    adminUserId: number,
+  ) {
     const { userId, roleId } = removeRoleFromUserDto;
 
     // Verificar que la relación existe
@@ -470,7 +525,9 @@ export class RolesService {
       });
 
       if (userRoleCount === 1) {
-        throw new BadRequestException('No se puede remover el último rol del sistema de un usuario');
+        throw new BadRequestException(
+          'No se puede remover el último rol del sistema de un usuario',
+        );
       }
     }
 
@@ -519,14 +576,15 @@ export class RolesService {
       },
     });
 
-    const permissions = userRoles.flatMap(userRole =>
-      userRole.roles?.role_permissions?.map(rp => rp.permissions) || []
+    const permissions = userRoles.flatMap(
+      (userRole) =>
+        userRole.roles?.role_permissions?.map((rp) => rp.permissions) || [],
     );
 
     // Remover duplicados
     const uniquePermissions = permissions.filter(
       (permission, index, self) =>
-        index === self.findIndex(p => p.id === permission.id)
+        index === self.findIndex((p) => p.id === permission.id),
     );
 
     return uniquePermissions;

@@ -1,17 +1,14 @@
+import { Controller, Get, Query, UseGuards, HttpStatus } from '@nestjs/common';
 import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-  HttpStatus,
-} from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
-import { OrganizationAuditGuard } from './guards/organization-audit.guard'; // ✅ Importar guard
 
 @ApiTags('Audit')
 @Controller('audit')
-@UseGuards(OrganizationAuditGuard) // ✅ Aplicar guard de organización
 @ApiBearerAuth()
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

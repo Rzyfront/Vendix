@@ -18,7 +18,11 @@ import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { ChangePasswordDto, ForgotPasswordDto, ResetPasswordDto } from './dto/password.dto';
+import {
+  ChangePasswordDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+} from './dto/password.dto';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { ResponseService } from '../../common/responses/response.service';
@@ -28,7 +32,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post('register-owner')
   @Public()
@@ -44,7 +48,10 @@ export class AuthController {
       ip_address: ip_address || undefined,
       user_agent: user_agent || undefined,
     };
-    const result = await this.authService.registerOwner(registerOwnerDto, client_info);
+    const result = await this.authService.registerOwner(
+      registerOwnerDto,
+      client_info,
+    );
 
     if (result.wasExistingUser) {
       return this.responseService.error(
@@ -73,7 +80,10 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.registerCustomer(registerCustomerDto, client_info);
+    const result = await this.authService.registerCustomer(
+      registerCustomerDto,
+      client_info,
+    );
     return this.responseService.success(
       result,
       'Cliente registrado exitosamente en la tienda.',
@@ -86,13 +96,12 @@ export class AuthController {
     @Body() registerStaffDto: RegisterStaffDto,
     @CurrentUser() user: any,
   ) {
-    const result = await this.authService.registerStaff(registerStaffDto, user.id);
-    return this.responseService.success(
-      result.user,
-      result.message,
+    const result = await this.authService.registerStaff(
+      registerStaffDto,
+      user.id,
     );
+    return this.responseService.success(result.user, result.message);
   }
-
 
   @Public() // ✅ Permitir acceso sin autenticación
   @Post('login')
@@ -108,10 +117,7 @@ export class AuthController {
 
     try {
       const result = await this.authService.login(loginDto, client_info);
-      return this.responseService.success(
-        result,
-        'Login exitoso',
-      );
+      return this.responseService.success(result, 'Login exitoso');
     } catch (error) {
       return this.responseService.error(
         'Credenciales inválidas',
@@ -123,7 +129,10 @@ export class AuthController {
   @Public() // ✅ Permitir renovar token sin autenticación previa
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto, @Req() request: Request) {
+  async refreshToken(
+    @Body() refreshTokenDto: RefreshTokenDto,
+    @Req() request: Request,
+  ) {
     const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
     const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
     const user_agent = request.get('user-agent') || '';
@@ -132,7 +141,10 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.refreshToken(refreshTokenDto, client_info);
+    const result = await this.authService.refreshToken(
+      refreshTokenDto,
+      client_info,
+    );
     return this.responseService.success(
       result,
       'Token refrescado exitosamente',
@@ -150,12 +162,16 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@CurrentUser() user: any, @Body() body?: { refresh_token?: string; all_sessions?: boolean }) {
-    const result = await this.authService.logout(user.id, body?.refresh_token, body?.all_sessions);
-    return this.responseService.success(
-      result.data,
-      result.message,
+  async logout(
+    @CurrentUser() user: any,
+    @Body() body?: { refresh_token?: string; all_sessions?: boolean },
+  ) {
+    const result = await this.authService.logout(
+      user.id,
+      body?.refresh_token,
+      body?.all_sessions,
     );
+    return this.responseService.success(result.data, result.message);
   }
 
   @Get('me')
@@ -180,7 +196,9 @@ export class AuthController {
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {
-    const result = await this.authService.resendEmailVerification(resendDto.email);
+    const result = await this.authService.resendEmailVerification(
+      resendDto.email,
+    );
     return result;
   }
 
@@ -190,16 +208,17 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() forgotDto: ForgotPasswordDto) {
-    const result = await this.authService.forgotPassword(forgotDto.email, forgotDto.organization_slug);
+    const result = await this.authService.forgotPassword(
+      forgotDto.email,
+      forgotDto.organization_slug,
+    );
     return result;
   }
 
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
-  async resetPassword(
-    @Body() resetDto: ResetPasswordDto,
-  ) {
+  async resetPassword(@Body() resetDto: ResetPasswordDto) {
     const result = await this.authService.resetPassword(
       resetDto.token,
       resetDto.new_password,
@@ -236,11 +255,11 @@ export class AuthController {
     @CurrentUser() user: any,
     @Param('session_id') session_id: string,
   ) {
-    const result = await this.authService.revokeUserSession(user.id, parseInt(session_id));
-    return this.responseService.success(
-      result.data,
-      result.message,
+    const result = await this.authService.revokeUserSession(
+      user.id,
+      parseInt(session_id),
     );
+    return this.responseService.success(result.data, result.message);
   }
 
   // ===== RUTAS DE ONBOARDING =====
@@ -249,7 +268,9 @@ export class AuthController {
   async getOnboardingStatus(@CurrentUser() user: any) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+    const isOwner = userWithRoles?.user_roles?.some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     if (!isOwner) {
       return this.responseService.error(
@@ -273,7 +294,9 @@ export class AuthController {
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+    const isOwner = userWithRoles?.user_roles?.some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     if (!isOwner) {
       return this.responseService.error(
@@ -286,10 +309,7 @@ export class AuthController {
       user.id,
       organizationData,
     );
-    return this.responseService.success(
-      result,
-      result.message,
-    );
+    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/setup-organization/:organizationId')
@@ -301,7 +321,9 @@ export class AuthController {
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+    const isOwner = userWithRoles?.user_roles?.some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     if (!isOwner) {
       return this.responseService.error(
@@ -315,10 +337,7 @@ export class AuthController {
       parseInt(organization_id),
       setup_data,
     );
-    return this.responseService.success(
-      result,
-      result.message,
-    );
+    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/create-store/:organizationId')
@@ -330,7 +349,9 @@ export class AuthController {
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+    const isOwner = userWithRoles?.user_roles?.some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     if (!isOwner) {
       return this.responseService.error(
@@ -344,10 +365,7 @@ export class AuthController {
       parseInt(organization_id),
       store_data,
     );
-    return this.responseService.success(
-      result,
-      result.message,
-    );
+    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/setup-store/:storeId')
@@ -359,7 +377,9 @@ export class AuthController {
   ) {
     // Verificar que el usuario sea owner
     const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(ur => ur.roles?.name === 'owner');
+    const isOwner = userWithRoles?.user_roles?.some(
+      (ur) => ur.roles?.name === 'owner',
+    );
 
     if (!isOwner) {
       return this.responseService.error(
@@ -373,17 +393,15 @@ export class AuthController {
       parseInt(store_id),
       setup_data,
     );
-    return this.responseService.success(
-      result,
-      result.message,
-    );
+    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/complete')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Completar onboarding del usuario',
-    description: 'Permite a un usuario marcar su proceso de onboarding como completado. Valida que todos los datos requeridos estén configurados antes de permitir la finalización.',
+    description:
+      'Permite a un usuario marcar su proceso de onboarding como completado. Valida que todos los datos requeridos estén configurados antes de permitir la finalización.',
   })
   @ApiBearerAuth()
   @ApiResponse({
@@ -393,7 +411,10 @@ export class AuthController {
       type: 'object',
       properties: {
         success: { type: 'boolean', example: true },
-        message: { type: 'string', example: 'Onboarding completado exitosamente' },
+        message: {
+          type: 'string',
+          example: 'Onboarding completado exitosamente',
+        },
         data: {
           type: 'object',
           properties: {
@@ -426,7 +447,11 @@ export class AuthController {
     schema: {
       type: 'object',
       properties: {
-        message: { type: 'string', example: 'Faltan datos requeridos: nombre y descripción de organización, email y teléfono de organización, dirección de organización, al menos una tienda configurada, configuración de dominio' },
+        message: {
+          type: 'string',
+          example:
+            'Faltan datos requeridos: nombre y descripción de organización, email y teléfono de organización, dirección de organización, al menos una tienda configurada, configuración de dominio',
+        },
         error: { type: 'string', example: 'Bad Request' },
         statusCode: { type: 'number', example: 400 },
       },

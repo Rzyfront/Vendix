@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsBoolean, IsArray, IsInt, MinLength, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsArray,
+  IsInt,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateRoleDto {
@@ -6,7 +14,7 @@ export class CreateRoleDto {
     description: 'Nombre único del rol',
     example: 'manager',
     minLength: 2,
-    maxLength: 50
+    maxLength: 50,
   })
   @IsString()
   @MinLength(2)
@@ -15,7 +23,7 @@ export class CreateRoleDto {
 
   @ApiPropertyOptional({
     description: 'Descripción del rol',
-    example: 'Gestor de tienda con permisos administrativos'
+    example: 'Gestor de tienda con permisos administrativos',
   })
   @IsOptional()
   @IsString()
@@ -24,7 +32,7 @@ export class CreateRoleDto {
   @ApiPropertyOptional({
     description: 'Indica si es un rol del sistema (no se puede eliminar)',
     example: false,
-    default: false
+    default: false,
   })
   @IsOptional()
   @IsBoolean()
@@ -34,7 +42,7 @@ export class CreateRoleDto {
 export class UpdateRoleDto {
   @ApiPropertyOptional({
     description: 'Nombre único del rol',
-    example: 'senior_manager'
+    example: 'senior_manager',
   })
   @IsOptional()
   @IsString()
@@ -44,7 +52,7 @@ export class UpdateRoleDto {
 
   @ApiPropertyOptional({
     description: 'Descripción del rol',
-    example: 'Gestor senior con permisos avanzados'
+    example: 'Gestor senior con permisos avanzados',
   })
   @IsOptional()
   @IsString()
@@ -55,7 +63,7 @@ export class AssignPermissionsDto {
   @ApiProperty({
     description: 'Lista de IDs de permisos a asignar',
     example: [1, 2, 3],
-    type: [Number]
+    type: [Number],
   })
   @IsArray()
   @IsInt({ each: true })
@@ -66,7 +74,7 @@ export class RemovePermissionsDto {
   @ApiProperty({
     description: 'Lista de IDs de permisos a remover',
     example: [2, 4],
-    type: [Number]
+    type: [Number],
   })
   @IsArray()
   @IsInt({ each: true })
@@ -76,14 +84,14 @@ export class RemovePermissionsDto {
 export class AssignRoleToUserDto {
   @ApiProperty({
     description: 'ID del usuario',
-    example: 123
+    example: 123,
   })
   @IsInt()
   userId: number;
 
   @ApiProperty({
     description: 'ID del rol a asignar',
-    example: 5
+    example: 5,
   })
   @IsInt()
   roleId: number;
@@ -92,14 +100,14 @@ export class AssignRoleToUserDto {
 export class RemoveRoleFromUserDto {
   @ApiProperty({
     description: 'ID del usuario',
-    example: 123
+    example: 123,
   })
   @IsInt()
   userId: number;
 
   @ApiProperty({
     description: 'ID del rol a remover',
-    example: 5
+    example: 5,
   })
   @IsInt()
   roleId: number;

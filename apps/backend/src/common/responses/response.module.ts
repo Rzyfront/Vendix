@@ -4,7 +4,7 @@ import { ResponseInterceptor } from './response.interceptor';
 
 /**
  * Módulo de respuestas estandarizadas
- * 
+ *
  * Proporciona:
  * - ResponseService: Servicio para crear respuestas consistentes
  * - ResponseInterceptor: Interceptor para establecer códigos HTTP en headers

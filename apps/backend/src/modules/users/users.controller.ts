@@ -1,7 +1,21 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, ParseIntPipe, HttpCode, HttpStatus, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Query,
+  UseGuards,
+  ParseIntPipe,
+  HttpCode,
+  HttpStatus,
+  Req,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from './dto';
+import { CreateUserDto, UpdateUserDto, UserQueryDto, UsersDashboardDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { ResponseService } from '../../common/responses/response.service';
@@ -18,10 +32,7 @@ export class UsersController {
   @Permissions('users:create')
   async create(@Body() createUserDto: CreateUserDto) {
     const user = await this.usersService.create(createUserDto);
-    return this.responseService.success(
-      user,
-      'User created successfully',
-    );
+    return this.responseService.success(user, 'User created successfully');
   }
 
   @Get()
@@ -39,15 +50,15 @@ export class UsersController {
   @Permissions('users:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const user = await this.usersService.findOne(id);
-    return this.responseService.success(
-      user,
-      'User retrieved successfully',
-    );
+    return this.responseService.success(user, 'User retrieved successfully');
   }
 
   @Patch(':id')
   @Permissions('users:update')
-  update(@Param('id', ParseIntPipe) id: number, @Body() updateUserDto: UpdateUserDto) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
     return this.usersService.update(id, updateUserDto);
   }
 
@@ -70,5 +81,23 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   reactivate(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.reactivate(id);
+  }
+
+  @Get('dashboard')
+  @Permissions('users:read')
+  async getDashboard(@Query() query: UsersDashboardDto) {
+    try {
+      const result = await this.usersService.getDashboard(query);
+      return this.responseService.success(
+        result.data,
+        'Dashboard de usuarios obtenido exitosamente',
+        result.meta,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard de usuarios',
+        error.message,
+      );
+    }
   }
 }

@@ -37,7 +37,7 @@ export class RegisterOwnerDto {
     message: 'La contraseña debe contener al menos un carácter especial',
   })
   @Matches(/[A-Z]/, {
-  message: 'La contraseña debe contener al menos una letra mayúscula',
+    message: 'La contraseña debe contener al menos una letra mayúscula',
   })
   password: string;
 

@@ -31,7 +31,7 @@ export class ResponseInterceptor implements NestInterceptor {
           else if ('success' in data && data.success === true) {
             // Si no tiene statusCode explícito, usar el apropiado según el contexto
             const method = context.switchToHttp().getRequest().method;
-            
+
             // POST -> 201 Created (si no se especifica otro)
             if (method === 'POST' && response.statusCode === HttpStatus.OK) {
               response.status(HttpStatus.CREATED);

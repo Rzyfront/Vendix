@@ -27,7 +27,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
   async validate(payload: JwtPayload) {
     console.log('JWT Strategy - Validating payload:', payload);
-    console.log('JWT Strategy - Using secret:', this.configService.get<string>('JWT_SECRET'));
+    console.log(
+      'JWT Strategy - Using secret:',
+      this.configService.get<string>('JWT_SECRET'),
+    );
     try {
       const user = await this.prismaService.withoutScope().users.findUnique({
         where: { id: payload.sub },
@@ -47,9 +50,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           },
         },
       });
-      console.log('JWT Strategy - User found:', user ? 'YES' : 'NO', user?.id, user?.email);
+      console.log(
+        'JWT Strategy - User found:',
+        user ? 'YES' : 'NO',
+        user?.id,
+        user?.email,
+      );
       if (!user) {
-        throw new UnauthorizedException('Usuario no encontrado en base de datos');
+        throw new UnauthorizedException(
+          'Usuario no encontrado en base de datos',
+        );
       }
 
       // if (!user.email_verified) {

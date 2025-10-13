@@ -33,7 +33,8 @@ export class TaxesService {
     const skip = (page - 1) * limit;
     const where: any = {};
 
-    if (search) where.OR = [{ name: { contains: search, mode: 'insensitive' } }];
+    if (search)
+      where.OR = [{ name: { contains: search, mode: 'insensitive' } }];
     if (store_id) where.store_id = store_id;
 
     const [taxCategories, total] = await Promise.all([
@@ -48,13 +49,20 @@ export class TaxesService {
   }
 
   async findOne(id: number, user: any) {
-    const taxCategory = await this.prisma.tax_categories.findUnique({ where: { id } });
+    const taxCategory = await this.prisma.tax_categories.findUnique({
+      where: { id },
+    });
     if (!taxCategory) throw new NotFoundException('Tax category not found');
-    if (taxCategory.store_id) await this.validateStoreAccess(taxCategory.store_id, user);
+    if (taxCategory.store_id)
+      await this.validateStoreAccess(taxCategory.store_id, user);
     return taxCategory;
   }
 
-  async update(id: number, updateTaxCategoryDto: UpdateTaxCategoryDto, user: any) {
+  async update(
+    id: number,
+    updateTaxCategoryDto: UpdateTaxCategoryDto,
+    user: any,
+  ) {
     await this.findOne(id, user);
     return this.prisma.tax_categories.update({
       where: { id },
@@ -68,9 +76,14 @@ export class TaxesService {
   }
 
   private async validateStoreAccess(storeId: number, user: any) {
-    const store = await this.prisma.stores.findUnique({ where: { id: storeId } });
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+    });
     if (!store) throw new NotFoundException('Store not found');
-    if (store.organization_id !== user.organizationId && user.role !== 'super_admin') {
+    if (
+      store.organization_id !== user.organizationId &&
+      user.role !== 'super_admin'
+    ) {
       throw new ForbiddenException('Access denied to this store');
     }
   }

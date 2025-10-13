@@ -7,14 +7,14 @@ export class CreatePermissionDto {
     description: 'Nombre único del permiso',
     example: 'users.create',
     minLength: 3,
-    maxLength: 100
+    maxLength: 100,
   })
   @IsString()
   name: string;
 
   @ApiPropertyOptional({
     description: 'Descripción del permiso',
-    example: 'Permite crear nuevos usuarios en el sistema'
+    example: 'Permite crear nuevos usuarios en el sistema',
   })
   @IsOptional()
   @IsString()
@@ -22,7 +22,7 @@ export class CreatePermissionDto {
 
   @ApiProperty({
     description: 'Ruta del endpoint',
-    example: '/api/users'
+    example: '/api/users',
   })
   @IsString()
   path: string;
@@ -30,7 +30,7 @@ export class CreatePermissionDto {
   @ApiProperty({
     description: 'Método HTTP',
     example: 'POST',
-    enum: http_method_enum
+    enum: http_method_enum,
   })
   @IsEnum(http_method_enum)
   method: http_method_enum;
@@ -39,7 +39,7 @@ export class CreatePermissionDto {
     description: 'Estado del permiso',
     example: 'active',
     enum: permission_status_enum,
-    default: 'active'
+    default: 'active',
   })
   @IsOptional()
   @IsEnum(permission_status_enum)
@@ -49,7 +49,7 @@ export class CreatePermissionDto {
 export class UpdatePermissionDto {
   @ApiPropertyOptional({
     description: 'Nombre único del permiso',
-    example: 'users.create.admin'
+    example: 'users.create.admin',
   })
   @IsOptional()
   @IsString()
@@ -57,7 +57,7 @@ export class UpdatePermissionDto {
 
   @ApiPropertyOptional({
     description: 'Descripción del permiso',
-    example: 'Permite crear usuarios administradores'
+    example: 'Permite crear usuarios administradores',
   })
   @IsOptional()
   @IsString()
@@ -65,7 +65,7 @@ export class UpdatePermissionDto {
 
   @ApiPropertyOptional({
     description: 'Ruta del endpoint',
-    example: '/api/admin/users'
+    example: '/api/admin/users',
   })
   @IsOptional()
   @IsString()
@@ -73,7 +73,7 @@ export class UpdatePermissionDto {
 
   @ApiPropertyOptional({
     description: 'Método HTTP',
-    enum: http_method_enum
+    enum: http_method_enum,
   })
   @IsOptional()
   @IsEnum(http_method_enum)
@@ -81,7 +81,7 @@ export class UpdatePermissionDto {
 
   @ApiPropertyOptional({
     description: 'Estado del permiso',
-    enum: permission_status_enum
+    enum: permission_status_enum,
   })
   @IsOptional()
   @IsEnum(permission_status_enum)
@@ -91,7 +91,7 @@ export class UpdatePermissionDto {
 export class PermissionFilterDto {
   @ApiPropertyOptional({
     description: 'Filtrar por método HTTP',
-    enum: http_method_enum
+    enum: http_method_enum,
   })
   @IsOptional()
   @IsEnum(http_method_enum)
@@ -99,7 +99,7 @@ export class PermissionFilterDto {
 
   @ApiPropertyOptional({
     description: 'Filtrar por estado',
-    enum: permission_status_enum
+    enum: permission_status_enum,
   })
   @IsOptional()
   @IsEnum(permission_status_enum)
@@ -107,7 +107,7 @@ export class PermissionFilterDto {
 
   @ApiPropertyOptional({
     description: 'Buscar por nombre o descripción',
-    example: 'user'
+    example: 'user',
   })
   @IsOptional()
   @IsString()

@@ -12,6 +12,16 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
+class DateRangeDto {
+  @IsOptional()
+  @Type(() => Date)
+  start_date?: Date;
+
+  @IsOptional()
+  @Type(() => Date)
+  end_date?: Date;
+}
+
 export enum OrganizationState {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
@@ -149,4 +159,42 @@ export class AddUserToOrganizationDto {
   @IsOptional()
   @IsObject()
   permissions?: any;
+}
+
+export class OrganizationDashboardDto {
+  @IsOptional()
+  @Type(() => Date)
+  start_date?: Date;
+
+  @IsOptional()
+  @Type(() => Date)
+  end_date?: Date;
+}
+
+export class UsersDashboardDto {
+  @IsOptional()
+  @IsString()
+  store_id?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsString()
+  role?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsBoolean()
+  include_inactive?: boolean = false;
 }

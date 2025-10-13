@@ -26,14 +26,19 @@ export class AddressesService {
     ].filter(Boolean);
 
     if (entityTypes.length !== 1) {
-      throw new BadRequestException('Debe proporcionar exactamente uno de: store_id, organization_id, o user_id');
+      throw new BadRequestException(
+        'Debe proporcionar exactamente uno de: store_id, organization_id, o user_id',
+      );
     }
 
     // Validar permisos según el tipo de entidad
     if (createAddressDto.store_id) {
       await this.validateStoreAccess(createAddressDto.store_id, user);
     } else if (createAddressDto.organization_id) {
-      await this.validateOrganizationAccess(createAddressDto.organization_id, user);
+      await this.validateOrganizationAccess(
+        createAddressDto.organization_id,
+        user,
+      );
     } else if (createAddressDto.user_id) {
       await this.validateUserAccess(createAddressDto.user_id, user);
     }
@@ -201,7 +206,7 @@ export class AddressesService {
         id,
       );
     }
-    
+
     const updateData: Prisma.addressesUpdateInput = {};
     if (updateAddressDto.address_line_1)
       updateData.address_line1 = updateAddressDto.address_line_1;
@@ -276,25 +281,35 @@ export class AddressesService {
   }
 
   private async validateStoreAccess(storeId: number, user: any) {
-    const store = await this.prisma.stores.findUnique({ where: { id: storeId } });
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+    });
     if (!store) {
       throw new NotFoundException('Store not found');
     }
     // Verificar que el usuario pertenezca a la misma organización de la tienda
-    if (store.organization_id !== user.organizationId && user.role !== 'super_admin') {
-       throw new ForbiddenException('Access denied to this store');
+    if (
+      store.organization_id !== user.organizationId &&
+      user.role !== 'super_admin'
+    ) {
+      throw new ForbiddenException('Access denied to this store');
     }
   }
 
   private async validateOrganizationAccess(organizationId: number, user: any) {
-    const organization = await this.prisma.organizations.findUnique({ where: { id: organizationId } });
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: organizationId },
+    });
     if (!organization) {
       throw new NotFoundException('Organization not found');
     }
     // Verificar que el usuario pertenezca a la organización o sea super_admin
     const userRoles = user.roles || [];
     const userOrganizationId = user.organizationId || user.organization_id;
-    if (userOrganizationId !== organizationId && !userRoles.includes('super_admin')) {
+    if (
+      userOrganizationId !== organizationId &&
+      !userRoles.includes('super_admin')
+    ) {
       throw new ForbiddenException('Access denied to this organization');
     }
   }
@@ -315,7 +330,8 @@ export class AddressesService {
     };
 
     if (criteria.store_id) where.store_id = criteria.store_id;
-    if (criteria.organization_id) where.organization_id = criteria.organization_id;
+    if (criteria.organization_id)
+      where.organization_id = criteria.organization_id;
     if (criteria.user_id) where.user_id = criteria.user_id;
     if (excludeId) where.id = { not: excludeId };
 

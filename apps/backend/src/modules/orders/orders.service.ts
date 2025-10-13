@@ -125,7 +125,9 @@ export class OrdersService {
         orderBy,
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
-          order_items: { select: { id: true, product_name: true, quantity: true } },
+          order_items: {
+            select: { id: true, product_name: true, quantity: true },
+          },
         },
       }),
       this.prisma.orders.count({ where }),

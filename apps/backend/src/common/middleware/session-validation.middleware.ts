@@ -1,4 +1,8 @@
-import { Injectable, NestMiddleware, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  NestMiddleware,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -18,21 +22,24 @@ export class SessionValidationMiddleware implements NestMiddleware {
           const hashedToken = await bcrypt.hash(refresh_token, 12);
 
           // Verificar si el token existe y no está revocado
-          const tokenRecord = await this.prismaService.refresh_tokens.findFirst({
-            where: {
-              token: hashedToken,
-              revoked: false,
-              expires_at: { gt: new Date() }
-            }
-          });
+          const tokenRecord = await this.prismaService.refresh_tokens.findFirst(
+            {
+              where: {
+                token: hashedToken,
+                revoked: false,
+                expires_at: { gt: new Date() },
+              },
+            },
+          );
 
           if (!tokenRecord) {
-            throw new UnauthorizedException('Refresh token inválido o revocado');
+            throw new UnauthorizedException(
+              'Refresh token inválido o revocado',
+            );
           }
 
           // Agregar información del token al request para uso posterior
           (req as any).tokenRecord = tokenRecord;
-
         } catch (error) {
           if (error instanceof UnauthorizedException) {
             throw error;

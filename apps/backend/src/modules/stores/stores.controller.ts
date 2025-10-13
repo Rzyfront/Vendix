@@ -10,12 +10,14 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { ResponseService } from '../../common/responses/response.service';
 import { StoresService } from './stores.service';
 import {
   CreateStoreDto,
   UpdateStoreDto,
   StoreQueryDto,
   UpdateStoreSettingsDto,
+  StoreDashboardDto,
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -23,7 +25,10 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 @Controller('stores')
 @UseGuards(PermissionsGuard)
 export class StoresController {
-  constructor(private readonly storesService: StoresService) {}
+  constructor(
+    private readonly storesService: StoresService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Post()
   @Permissions('stores:create')
@@ -65,5 +70,25 @@ export class StoresController {
     @Body() settingsDto: UpdateStoreSettingsDto,
   ) {
     return this.storesService.updateStoreSettings(storeId, settingsDto);
+  }
+
+  @Get(':id/dashboard')
+  @Permissions('stores:read')
+  async getDashboard(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: StoreDashboardDto
+  ) {
+    try {
+      const result = await this.storesService.getDashboard(id, query);
+      return this.responseService.success(
+        result,
+        'Dashboard de tienda obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard de tienda',
+        error.message,
+      );
+    }
   }
 }

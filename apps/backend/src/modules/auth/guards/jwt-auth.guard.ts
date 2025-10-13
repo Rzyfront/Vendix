@@ -22,12 +22,20 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     const request = context.switchToHttp().getRequest();
     const path = request.path;
     const publicPaths = ['/api/health', '/api-docs'];
-    if (publicPaths.some(publicPath => path === publicPath || path.startsWith(publicPath + '/'))) {
+    if (
+      publicPaths.some(
+        (publicPath) =>
+          path === publicPath || path.startsWith(publicPath + '/'),
+      )
+    ) {
       return true;
     }
 
     console.log('JWT Guard - Path:', path, 'Is Public:', isPublic);
-    console.log('JWT Guard - Headers:', request.headers.authorization ? 'Bearer token present' : 'No auth header');
+    console.log(
+      'JWT Guard - Headers:',
+      request.headers.authorization ? 'Bearer token present' : 'No auth header',
+    );
 
     return super.canActivate(context);
   }

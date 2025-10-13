@@ -430,7 +430,13 @@ export class CreateDomainSettingDto {
 
   @ApiPropertyOptional({ example: 'store_subdomain' })
   @IsOptional()
-  @IsIn(['vendix_core', 'organization_root', 'organization_subdomain', 'store_subdomain', 'store_custom'])
+  @IsIn([
+    'vendix_core',
+    'organization_root',
+    'organization_subdomain',
+    'store_subdomain',
+    'store_custom',
+  ])
   domainType?: string;
 
   @ApiPropertyOptional({ example: 'pending_dns' })
@@ -475,7 +481,13 @@ export class UpdateDomainSettingDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsIn(['vendix_core', 'organization_root', 'organization_subdomain', 'store_subdomain', 'store_custom'])
+  @IsIn([
+    'vendix_core',
+    'organization_root',
+    'organization_subdomain',
+    'store_subdomain',
+    'store_custom',
+  ])
   domainType?: string;
 
   @ApiPropertyOptional()

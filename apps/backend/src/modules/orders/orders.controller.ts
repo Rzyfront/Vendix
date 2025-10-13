@@ -43,7 +43,10 @@ export class OrdersController {
 
   @Patch(':id')
   @Permissions('orders:update')
-  update(@Param('id', ParseIntPipe) id: number, @Body() updateOrderDto: UpdateOrderDto) {
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateOrderDto: UpdateOrderDto,
+  ) {
     return this.ordersService.update(id, updateOrderDto);
   }
 

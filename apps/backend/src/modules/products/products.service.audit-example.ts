@@ -131,7 +131,7 @@ export class ProductsService {
           category_ids,
           tax_category_ids,
           image_count: image_urls?.length || 0,
-        }
+        },
       );
 
       return await this.findOne(result.id);
@@ -155,13 +155,13 @@ export class ProductsService {
         where: { id },
         include: {
           product_categories: {
-            include: { categories: true }
+            include: { categories: true },
           },
           product_tax_assignments: {
-            include: { tax_categories: true }
+            include: { tax_categories: true },
           },
           product_images: true,
-        }
+        },
       });
 
       if (!existingProduct) {
@@ -169,8 +169,11 @@ export class ProductsService {
       }
 
       // Generar nuevo slug si el nombre cambió
-      const slug = updateProductDto.slug ||
-        (updateProductDto.name ? generateSlug(updateProductDto.name) : existingProduct.slug);
+      const slug =
+        updateProductDto.slug ||
+        (updateProductDto.name
+          ? generateSlug(updateProductDto.name)
+          : existingProduct.slug);
 
       // Verificar unicidad del slug si cambió
       if (slug !== existingProduct.slug) {
@@ -191,7 +194,10 @@ export class ProductsService {
       }
 
       // Verificar unicidad del SKU si cambió
-      if (updateProductDto.sku && updateProductDto.sku !== existingProduct.sku) {
+      if (
+        updateProductDto.sku &&
+        updateProductDto.sku !== existingProduct.sku
+      ) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
             sku: updateProductDto.sku,
@@ -287,8 +293,12 @@ export class ProductsService {
           name: existingProduct.name,
           sku: existingProduct.sku,
           base_price: existingProduct.base_price,
-          category_ids: existingProduct.product_categories.map(pc => pc.category_id),
-          tax_category_ids: existingProduct.product_tax_assignments.map(pta => pta.tax_category_id),
+          category_ids: existingProduct.product_categories.map(
+            (pc) => pc.category_id,
+          ),
+          tax_category_ids: existingProduct.product_tax_assignments.map(
+            (pta) => pta.tax_category_id,
+          ),
           image_count: existingProduct.product_images.length,
         },
         {
@@ -302,7 +312,7 @@ export class ProductsService {
         {
           updated_fields: Object.keys(updateProductDto),
           store_id: existingProduct.store_id,
-        }
+        },
       );
 
       return updatedProduct;
@@ -326,13 +336,13 @@ export class ProductsService {
         where: { id },
         include: {
           product_categories: {
-            include: { categories: true }
+            include: { categories: true },
           },
           product_tax_assignments: {
-            include: { tax_categories: true }
+            include: { tax_categories: true },
           },
           product_images: true,
-        }
+        },
       });
 
       if (!product) {
@@ -358,11 +368,13 @@ export class ProductsService {
           sku: product.sku,
           store_id: product.store_id,
           base_price: product.base_price,
-          category_ids: product.product_categories.map(pc => pc.category_id),
-          tax_category_ids: product.product_tax_assignments.map(pta => pta.tax_category_id),
+          category_ids: product.product_categories.map((pc) => pc.category_id),
+          tax_category_ids: product.product_tax_assignments.map(
+            (pta) => pta.tax_category_id,
+          ),
           image_count: product.product_images.length,
         },
-        { reason: 'archived_by_user' }
+        { reason: 'archived_by_user' },
       );
 
       return result;

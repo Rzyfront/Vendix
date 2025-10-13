@@ -14,11 +14,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { AddressesService } from './addresses.service';
-import {
-  CreateAddressDto,
-  UpdateAddressDto,
-  AddressQueryDto,
-} from './dto';
+import { CreateAddressDto, UpdateAddressDto, AddressQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -55,7 +51,11 @@ export class AddressesController {
 
   @Get()
   @Permissions('addresses:read')
-  async findAll(@Query() query: AddressQueryDto, @CurrentUser() user: any, @Request() req) {
+  async findAll(
+    @Query() query: AddressQueryDto,
+    @CurrentUser() user: any,
+    @Request() req,
+  ) {
     try {
       const result = await this.addressesService.findAll(query, user);
       return this.responseService.success(
@@ -124,7 +124,11 @@ export class AddressesController {
     @Request() req,
   ) {
     try {
-      const result = await this.addressesService.update(id, updateAddressDto, user);
+      const result = await this.addressesService.update(
+        id,
+        updateAddressDto,
+        user,
+      );
       return this.responseService.success(
         result,
         'Dirección actualizada exitosamente',

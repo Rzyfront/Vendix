@@ -8,7 +8,12 @@ import {
   Query,
   Body,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 
 @ApiTags('Rate Limiting')
 @Controller('rate-limiting')
@@ -19,7 +24,8 @@ export class RateLimitingController {
   @Get('status')
   @ApiOperation({
     summary: 'Obtener estado actual del rate limiting',
-    description: 'Consulta el estado actual de rate limiting para todos los endpoints',
+    description:
+      'Consulta el estado actual de rate limiting para todos los endpoints',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -45,7 +51,10 @@ export class RateLimitingController {
             type: 'object',
             properties: {
               ip: { type: 'string', example: '192.168.1.1' },
-              blocked_until: { type: 'string', example: '2025-09-05T15:30:00Z' },
+              blocked_until: {
+                type: 'string',
+                example: '2025-09-05T15:30:00Z',
+              },
               reason: { type: 'string', example: 'Too many login attempts' },
             },
           },
@@ -84,7 +93,8 @@ export class RateLimitingController {
   @Get('attempts')
   @ApiOperation({
     summary: 'Obtener intentos de rate limiting para una IP',
-    description: 'Consulta los intentos actuales de rate limiting para una dirección IP específica',
+    description:
+      'Consulta los intentos actuales de rate limiting para una dirección IP específica',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -104,7 +114,8 @@ export class RateLimitingController {
   @Post('reset')
   @ApiOperation({
     summary: 'Resetear contador de rate limiting para una IP',
-    description: 'Resetea el contador de intentos para una dirección IP específica',
+    description:
+      'Resetea el contador de intentos para una dirección IP específica',
   })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -138,7 +149,8 @@ export class RateLimitingController {
   @Delete('blocked')
   @ApiOperation({
     summary: 'Desbloquear una IP',
-    description: 'Remueve el bloqueo de rate limiting para una dirección IP específica',
+    description:
+      'Remueve el bloqueo de rate limiting para una dirección IP específica',
   })
   @ApiResponse({
     status: HttpStatus.OK,

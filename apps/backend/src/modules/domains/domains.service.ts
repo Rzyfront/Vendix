@@ -1,4 +1,11 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as dns from 'node:dns/promises';
@@ -65,7 +72,10 @@ export interface DomainResolutionResponse {
 @Injectable()
 export class DomainsService implements OnModuleInit {
   private readonly logger = new Logger(DomainsService.name);
-  private cache = new Map<string, { expires: number; data: DomainResolutionResponse }>();
+  private cache = new Map<
+    string,
+    { expires: number; data: DomainResolutionResponse }
+  >();
   private readonly CACHE_TTL_MS = 60_000; // 60 segundos
 
   constructor(
@@ -77,7 +87,9 @@ export class DomainsService implements OnModuleInit {
     this.eventEmitter.on('domain.cache.invalidate', (payload: any) => {
       if (payload?.hostname) {
         if (this.cache.delete(payload.hostname)) {
-          this.logger.debug(`Cache invalidated via event for host=${payload.hostname}`);
+          this.logger.debug(
+            `Cache invalidated via event for host=${payload.hostname}`,
+          );
         }
       }
     });
@@ -114,7 +126,9 @@ export class DomainsService implements OnModuleInit {
 
   public clearOne(hostname: string): void {
     this.cache.delete(hostname);
-    this.logger.debug(`Domain resolution cache entry cleared manually for ${hostname}`);
+    this.logger.debug(
+      `Domain resolution cache entry cleared manually for ${hostname}`,
+    );
   }
 
   // ==================== RESOLUCIÓN DE DOMINIOS ====================
@@ -145,7 +159,9 @@ export class DomainsService implements OnModuleInit {
       resolvedHostname = forwardedHost.toLowerCase().trim();
     }
 
-    this.logger.log(`🌐 Resolving domain configuration for: ${resolvedHostname}`);
+    this.logger.log(
+      `🌐 Resolving domain configuration for: ${resolvedHostname}`,
+    );
 
     // Verificar caché primero
     const cached = this.getFromCache(resolvedHostname);
@@ -210,10 +226,10 @@ export class DomainsService implements OnModuleInit {
       organization_name: organization_name,
       organization_slug: organization_slug,
       domain_type: domainType,
-      raw_domain_type: (domainConfig as any).domain_type,
-      status: (domainConfig as any).status,
-      ssl_status: (domainConfig as any).ssl_status,
-      is_primary: (domainConfig as any).is_primary,
+      raw_domain_type: domainConfig.domain_type,
+      status: domainConfig.status,
+      ssl_status: domainConfig.ssl_status,
+      is_primary: domainConfig.is_primary,
     };
 
     // Guardar en caché
@@ -229,14 +245,16 @@ export class DomainsService implements OnModuleInit {
   /**
    * Verificar disponibilidad de hostname
    */
-  async checkHostnameAvailability(hostname: string): Promise<{ available: boolean; reason?: string }> {
+  async checkHostnameAvailability(
+    hostname: string,
+  ): Promise<{ available: boolean; reason?: string }> {
     this.logger.log(`🔍 Checking hostname availability: ${hostname}`);
 
     try {
       const exists = await this.prisma.domain_settings.findUnique({
         where: { hostname },
       });
-      
+
       if (exists) {
         return {
           available: false,
@@ -258,7 +276,9 @@ export class DomainsService implements OnModuleInit {
   async createDomainSetting(
     createDomainSettingDto: CreateDomainSettingDto,
   ): Promise<DomainSettingResponse> {
-    this.logger.log(`Creating domain setting for hostname: ${createDomainSettingDto.hostname}`);
+    this.logger.log(
+      `Creating domain setting for hostname: ${createDomainSettingDto.hostname}`,
+    );
 
     const data = createDomainSettingDto;
 
@@ -304,16 +324,26 @@ export class DomainsService implements OnModuleInit {
     }
 
     // Inferir domain_type si no se pasa
-    const inferredType = this.inferDomainType(data.hostname, !!data.storeId, data.domainType);
+    const inferredType = this.inferDomainType(
+      data.hostname,
+      !!data.storeId,
+      data.domainType,
+    );
 
     // Estado inicial
-    const status = data.status || (inferredType === 'store_custom' ? 'pending_dns' : 'active');
+    const status =
+      data.status ||
+      (inferredType === 'store_custom' ? 'pending_dns' : 'active');
     const sslStatus = data.sslStatus || 'none';
 
     // Verificación: un dominio primario por (org, store?) y tipo base organizacional/tienda
     let isPrimary = data.isPrimary || false;
     if (isPrimary) {
-      await this.clearExistingPrimary(data.organizationId, data.storeId, inferredType);
+      await this.clearExistingPrimary(
+        data.organizationId,
+        data.storeId,
+        inferredType,
+      );
     } else {
       // Si no hay primario existente para el scope, este se marca automático
       const existingPrimary = await this.prisma.domain_settings.findFirst({
@@ -330,7 +360,8 @@ export class DomainsService implements OnModuleInit {
     }
 
     // Generar token de verificación si custom
-    const verificationToken = inferredType === 'store_custom' ? this.generateVerificationToken() : null;
+    const verificationToken =
+      inferredType === 'store_custom' ? this.generateVerificationToken() : null;
 
     const domainSetting = await this.prisma.domain_settings.create({
       data: {
@@ -431,7 +462,9 @@ export class DomainsService implements OnModuleInit {
   /**
    * Obtener configuración por hostname
    */
-  async getDomainSettingByHostname(hostname: string): Promise<DomainSettingResponse> {
+  async getDomainSettingByHostname(
+    hostname: string,
+  ): Promise<DomainSettingResponse> {
     this.logger.log(`Finding domain setting for hostname: ${hostname}`);
 
     const domainSetting = await this.prisma.domain_settings.findUnique({
@@ -504,17 +537,19 @@ export class DomainsService implements OnModuleInit {
     updateDomainSettingDto: UpdateDomainSettingDto,
   ): Promise<DomainSettingResponse> {
     this.logger.log(`Updating domain setting for hostname: ${hostname}`);
-    
+
     const data = updateDomainSettingDto;
-    
+
     // Verificar que el dominio existe
     const existingRecord = await this.prisma.domain_settings.findUnique({
       where: { hostname },
       select: { organization_id: true, store_id: true, domain_type: true },
     });
-    
+
     if (!existingRecord) {
-      throw new NotFoundException(`Domain setting not found for hostname: ${hostname}`);
+      throw new NotFoundException(
+        `Domain setting not found for hostname: ${hostname}`,
+      );
     }
 
     const updates: any = { updated_at: new Date() };
@@ -526,9 +561,9 @@ export class DomainsService implements OnModuleInit {
     if (typeof data.isPrimary === 'boolean') {
       if (data.isPrimary) {
         await this.clearExistingPrimary(
-          existingRecord.organization_id!,
+          existingRecord.organization_id,
           existingRecord.store_id || undefined,
-          existingRecord.domain_type as any,
+          existingRecord.domain_type,
         );
       }
       updates.is_primary = data.isPrimary;
@@ -598,19 +633,30 @@ export class DomainsService implements OnModuleInit {
   /**
    * Verificar configuración DNS
    */
-  async verifyDomain(hostname: string, body: VerifyDomainDto): Promise<VerifyDomainResult> {
+  async verifyDomain(
+    hostname: string,
+    body: VerifyDomainDto,
+  ): Promise<VerifyDomainResult> {
     this.logger.log(`Starting verification for ${hostname}`);
-    
-    const domain = await this.prisma.domain_settings.findUnique({ where: { hostname } });
-    if (!domain) throw new NotFoundException(`Domain setting not found for hostname: ${hostname}`);
+
+    const domain = await this.prisma.domain_settings.findUnique({
+      where: { hostname },
+    });
+    if (!domain)
+      throw new NotFoundException(
+        `Domain setting not found for hostname: ${hostname}`,
+      );
 
     const statusBefore = domain.status as string;
-    const checksToRun = (body.checks && body.checks.length > 0) ? body.checks : ['txt', 'cname'];
+    const checksToRun =
+      body.checks && body.checks.length > 0 ? body.checks : ['txt', 'cname'];
 
     // Solo verificamos tipos custom / root externos
-    const verifiableTypes = ['store_custom','organization_root'];
+    const verifiableTypes = ['store_custom', 'organization_root'];
     if (!verifiableTypes.includes(domain.domain_type as string)) {
-      throw new BadRequestException(`Domain type ${domain.domain_type} is not verifiable`);
+      throw new BadRequestException(
+        `Domain type ${domain.domain_type} is not verifiable`,
+      );
     }
 
     if (domain.status === 'active' && !body.force) {
@@ -631,16 +677,22 @@ export class DomainsService implements OnModuleInit {
     let allPassed = true;
 
     // Expected values
-    const expectedCname = (body.expectedCname || 'edge.vendix.com').toLowerCase();
-    const expectedAList = (body.expectedA && body.expectedA.length ? body.expectedA : ['203.0.113.10']).map(i => i.trim());
+    const expectedCname = (
+      body.expectedCname || 'edge.vendix.com'
+    ).toLowerCase();
+    const expectedAList = (
+      body.expectedA && body.expectedA.length
+        ? body.expectedA
+        : ['203.0.113.10']
+    ).map((i) => i.trim());
 
     // TXT check
     if (checksToRun.includes('txt')) {
       try {
         const txtRecords = await dns.resolveTxt(hostname);
-        const flat = txtRecords.map(arr => arr.join('')).filter(Boolean);
+        const flat = txtRecords.map((arr) => arr.join('')).filter(Boolean);
         const token = domain.verification_token;
-        const passed = !!token && flat.some(v => v.includes(token));
+        const passed = !!token && flat.some((v) => v.includes(token));
         results.txt = { passed, found: flat, expectedToken: token };
         if (!passed) {
           allPassed = false;
@@ -657,7 +709,7 @@ export class DomainsService implements OnModuleInit {
     if (checksToRun.includes('cname')) {
       try {
         const cnames = await dns.resolveCname(hostname);
-        const normalized = cnames.map(c => c.toLowerCase());
+        const normalized = cnames.map((c) => c.toLowerCase());
         const passed = normalized.includes(expectedCname);
         results.cname = { passed, found: normalized, expected: expectedCname };
         if (!passed) {
@@ -675,17 +727,23 @@ export class DomainsService implements OnModuleInit {
     if (checksToRun.includes('a')) {
       try {
         const aRecords = await dns.resolve4(hostname);
-        const intersection = aRecords.filter(ip => expectedAList.includes(ip));
+        const intersection = aRecords.filter((ip) =>
+          expectedAList.includes(ip),
+        );
         const passed = intersection.length > 0;
         results.a = { passed, found: aRecords, expectedAnyOf: expectedAList };
         if (!passed) {
           allPassed = false;
-          suggestedFixes.push(`Apuntar A a una de: ${expectedAList.join(', ')}`);
+          suggestedFixes.push(
+            `Apuntar A a una de: ${expectedAList.join(', ')}`,
+          );
         }
       } catch (e: any) {
         results.a = { passed: false, error: e.code || e.message };
         allPassed = false;
-        suggestedFixes.push(`Agregar registro A válido (${expectedAList.join(', ')})`);
+        suggestedFixes.push(
+          `Agregar registro A válido (${expectedAList.join(', ')})`,
+        );
       }
     }
 
@@ -703,7 +761,7 @@ export class DomainsService implements OnModuleInit {
     let nextAction: string | undefined;
 
     if (allPassed) {
-      if (['pending_dns','failed_dns'].includes(domain.status as string)) {
+      if (['pending_dns', 'failed_dns'].includes(domain.status as string)) {
         statusAfter = 'pending_ssl';
         nextAction = 'issue_certificate';
       }
@@ -716,11 +774,14 @@ export class DomainsService implements OnModuleInit {
     const updateData: any = {
       status: statusAfter as any,
       last_verified_at: new Date(),
-      last_error: allPassed ? null : (suggestedFixes[0] || 'Verification failed'),
+      last_error: allPassed ? null : suggestedFixes[0] || 'Verification failed',
       updated_at: new Date(),
     };
 
-    const updated = await this.prisma.domain_settings.update({ where: { hostname }, data: updateData });
+    const updated = await this.prisma.domain_settings.update({
+      where: { hostname },
+      data: updateData,
+    });
     this.emitDomainCacheInvalidation(hostname);
 
     return {
@@ -740,16 +801,18 @@ export class DomainsService implements OnModuleInit {
   /**
    * Validar formato de hostname
    */
-  async validateHostname(hostname: string): Promise<{ valid: boolean; reason?: string }> {
+  async validateHostname(
+    hostname: string,
+  ): Promise<{ valid: boolean; reason?: string }> {
     try {
       const exists = await this.prisma.domain_settings.findUnique({
         where: { hostname },
       });
-      
+
       if (exists) {
         return { valid: false, reason: 'Hostname already exists' };
       }
-      
+
       return { valid: true };
     } catch (error) {
       if (error.message?.includes('not found')) {
@@ -785,18 +848,27 @@ export class DomainsService implements OnModuleInit {
     };
   }
 
-  private inferDomainType(hostname: string, hasStore: boolean, provided?: string): string {
+  private inferDomainType(
+    hostname: string,
+    hasStore: boolean,
+    provided?: string,
+  ): string {
     if (provided) return provided;
     if (hostname.endsWith('.vendix.com')) {
       const parts = hostname.split('.');
-      if (parts.length === 3) return hasStore ? 'store_subdomain' : 'organization_subdomain';
+      if (parts.length === 3)
+        return hasStore ? 'store_subdomain' : 'organization_subdomain';
       if (parts.length === 4) return 'store_subdomain';
       return 'vendix_core';
     }
     return hasStore ? 'store_custom' : 'organization_root';
   }
 
-  private async clearExistingPrimary(orgId: number, storeId: number | undefined, domainType: string) {
+  private async clearExistingPrimary(
+    orgId: number,
+    storeId: number | undefined,
+    domainType: string,
+  ) {
     await this.prisma.domain_settings.updateMany({
       where: {
         organization_id: orgId,
@@ -809,6 +881,10 @@ export class DomainsService implements OnModuleInit {
   }
 
   private generateVerificationToken(): string {
-    return 'vdx_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+    return (
+      'vdx_' +
+      Math.random().toString(36).substring(2, 12) +
+      Date.now().toString(36)
+    );
   }
 }

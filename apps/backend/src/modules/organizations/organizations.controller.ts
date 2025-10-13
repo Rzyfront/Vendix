@@ -16,6 +16,8 @@ import {
   CreateOrganizationDto,
   UpdateOrganizationDto,
   OrganizationQueryDto,
+  OrganizationDashboardDto,
+  UsersDashboardDto,
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -33,7 +35,9 @@ export class OrganizationsController {
   @Permissions('organizations:create')
   async create(@Body() createOrganizationDto: CreateOrganizationDto) {
     try {
-      const result = await this.organizationsService.create(createOrganizationDto);
+      const result = await this.organizationsService.create(
+        createOrganizationDto,
+      );
       return this.responseService.success(
         result,
         'Organización creada exitosamente',
@@ -102,10 +106,13 @@ export class OrganizationsController {
   @Permissions('organizations:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() updateOrganizationDto: UpdateOrganizationDto
+    @Body() updateOrganizationDto: UpdateOrganizationDto,
   ) {
     try {
-      const result = await this.organizationsService.update(id, updateOrganizationDto);
+      const result = await this.organizationsService.update(
+        id,
+        updateOrganizationDto,
+      );
       return this.responseService.success(
         result,
         'Organización actualizada exitosamente',
@@ -130,6 +137,26 @@ export class OrganizationsController {
     } catch (error) {
       return this.responseService.error(
         'Error al eliminar la organización',
+        error.message,
+      );
+    }
+  }
+
+  @Get(':id/dashboard')
+  @Permissions('organizations:read')
+  async getDashboard(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: OrganizationDashboardDto,
+  ) {
+    try {
+      const result = await this.organizationsService.getDashboard(id, query);
+      return this.responseService.success(
+        result,
+        'Dashboard organizacional obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard organizacional',
         error.message,
       );
     }

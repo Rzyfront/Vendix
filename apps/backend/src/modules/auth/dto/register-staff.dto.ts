@@ -50,7 +50,8 @@ export class RegisterStaffDto {
 
   @ApiPropertyOptional({
     example: 1,
-    description: 'ID de la tienda (opcional, para asignar staff a una tienda específica)',
+    description:
+      'ID de la tienda (opcional, para asignar staff a una tienda específica)',
   })
   @IsOptional()
   @IsInt()

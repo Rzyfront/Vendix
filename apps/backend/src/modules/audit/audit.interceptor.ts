@@ -46,7 +46,9 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private isCreateOperation(url: string): boolean {
-    return url.includes('/create') || url.includes('/register') || !url.includes('/');
+    return (
+      url.includes('/create') || url.includes('/register') || !url.includes('/')
+    );
   }
 
   private isUpdateOperation(url: string, method: string): boolean {
@@ -64,10 +66,21 @@ export class AuditInterceptor implements NestInterceptor {
     }
   }
 
-  private async logUpdateOperation(userId: number, url: string, oldData: any, newData: any) {
+  private async logUpdateOperation(
+    userId: number,
+    url: string,
+    oldData: any,
+    newData: any,
+  ) {
     const resource = this.extractResourceFromUrl(url);
     if (resource && newData?.id) {
-      await this.auditService.logUpdate(userId, resource, newData.id, oldData, newData);
+      await this.auditService.logUpdate(
+        userId,
+        resource,
+        newData.id,
+        oldData,
+        newData,
+      );
     }
   }
 
@@ -80,13 +93,13 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private extractResourceFromUrl(url: string): AuditResource | null {
-    const segments = url.split('/').filter(s => s);
+    const segments = url.split('/').filter((s) => s);
     const resourceMap: Record<string, AuditResource> = {
-      'users': AuditResource.USERS,
-      'organizations': AuditResource.ORGANIZATIONS,
-      'stores': AuditResource.STORES,
-      'products': AuditResource.PRODUCTS,
-      'orders': AuditResource.ORDERS,
+      users: AuditResource.USERS,
+      organizations: AuditResource.ORGANIZATIONS,
+      stores: AuditResource.STORES,
+      products: AuditResource.PRODUCTS,
+      orders: AuditResource.ORDERS,
     };
 
     for (const segment of segments) {
@@ -99,7 +112,7 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private extractIdFromUrl(url: string): number | null {
-    const segments = url.split('/').filter(s => s);
+    const segments = url.split('/').filter((s) => s);
     for (const segment of segments) {
       const id = parseInt(segment);
       if (!isNaN(id)) {
