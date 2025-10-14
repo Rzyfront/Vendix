@@ -411,4 +411,64 @@ export class ThemeService {
     
     console.log('[THEME SERVICE] Theme reset to default');
   }
+
+  /**
+   * Transforma el branding desde el formato de API al formato interno
+   * Soluciona el problema de mapeo incorrecto identificado en el plan de reestructuración
+   */
+  transformBrandingFromApi(apiBranding: any): BrandingConfig {
+    return {
+      colors: {
+        primary: apiBranding.primary_color || '#3b82f6',
+        secondary: apiBranding.secondary_color || '#6b7280',
+        accent: apiBranding.accent_color || '#8b5cf6',
+        background: apiBranding.background_color || '#ffffff',
+        surface: apiBranding.background_color || '#f8fafc',
+        text: {
+          primary: apiBranding.text_color || '#1f2937',
+          secondary: apiBranding.text_color || '#6b7280',
+          muted: apiBranding.text_color || '#9ca3af'
+        }
+      },
+      fonts: {
+        primary: 'Inter, sans-serif',
+        secondary: 'Inter, sans-serif',
+        headings: 'Inter, sans-serif'
+      },
+      logo: {
+        url: apiBranding.logo_url || '',
+        alt: apiBranding.name || 'Logo'
+      },
+      favicon: apiBranding.favicon_url || '',
+      customCSS: apiBranding.custom_css || ''
+    };
+  }
+
+  /**
+   * Transforma el tema desde el formato de API al formato interno
+   */
+  transformThemeFromApi(apiTheme: any): ThemeConfig {
+    return {
+      name: apiTheme.name || 'default',
+      primaryColor: apiTheme.primary_color || apiTheme.primaryColor || '#3b82f6',
+      secondaryColor: apiTheme.secondary_color || apiTheme.secondaryColor || '#6b7280',
+      accentColor: apiTheme.accent_color || apiTheme.accentColor || '#8b5cf6',
+      backgroundColor: apiTheme.background_color || apiTheme.backgroundColor || '#ffffff',
+      textColor: apiTheme.text_color || apiTheme.textColor || '#1f2937',
+      borderRadius: apiTheme.border_radius || apiTheme.borderRadius || '0.375rem',
+      fontFamily: apiTheme.font_family || apiTheme.fontFamily || 'Inter, sans-serif',
+      spacing: apiTheme.spacing || {
+        xs: '0.25rem',
+        sm: '0.5rem',
+        md: '1rem',
+        lg: '1.5rem',
+        xl: '2rem'
+      },
+      shadows: apiTheme.shadows || {
+        sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+        md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+        lg: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)'
+      }
+    };
+  }
 }

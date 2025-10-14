@@ -1,7 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { TenantConfigService } from '../../../../core/services/tenant-config.service';
-import { DomainDetectorService } from '../../../../core/services/domain-detector.service';
+import { AppConfigService } from '../../../../core/services/app-config.service';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 
@@ -63,20 +62,27 @@ export class OrgLandingComponent implements OnInit {
   branding: any = {};
   features: any[] = [];
 
-  constructor(
-    private tenantConfig: TenantConfigService,
-    private domainDetector: DomainDetectorService
-  ) {}
+  private appConfig = inject(AppConfigService);
 
   async ngOnInit() {
-    const domainConfig = await this.domainDetector.detectDomain();
-    await this.tenantConfig.loadTenantConfig(domainConfig);
-    const tenantConfig = this.tenantConfig.getCurrentTenantConfig();
+    const appConfig = this.appConfig.getCurrentConfig();
+    if (!appConfig) {
+      console.warn('[ORG-LANDING] App config not available, using default values');
+      this.loadDefaultData();
+      return;
+    }
+
+    const domainConfig = appConfig.domainConfig;
+    const tenantConfig = appConfig.tenantConfig;
     
     this.organizationName = domainConfig.organizationSlug || 'Organización';
     this.branding = tenantConfig?.branding || {};
     this.organizationDescription = tenantConfig?.organization?.description || '';
     this.features = this.mapFeatures(tenantConfig?.features || {});
+  }
+
+  private loadDefaultData() {
+    this.features = this.mapFeatures({});
   }
 
   private mapFeatures(features: any): any[] {
@@ -98,8 +104,8 @@ export class OrgLandingComponent implements OnInit {
   }
 
   navigateToLogin() {
-    // Navegar al login contextual de la organización
-    window.location.href = '/auth/organization/login';
+    // Usar login contextual unificado
+    window.location.href = '/auth/login';
   }
 
   navigateToShop() {

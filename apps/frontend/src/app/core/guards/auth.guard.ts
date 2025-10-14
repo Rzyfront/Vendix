@@ -1,48 +1,99 @@
-import { Injectable } from '@angular/core';
-import { CanActivate, Router } from '@angular/router';
-import { Observable, of, map, take, switchMap } from 'rxjs';
+import { Injectable, inject } from '@angular/core';
+import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router, UrlTree } from '@angular/router';
+import { Observable, of } from 'rxjs';
+import { map, switchMap, take, catchError } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
-import { AuthContextService } from '../services/auth-context.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AuthGuard implements CanActivate {
+  private authFacade = inject(AuthFacade);
+  private router = inject(Router);
 
-  constructor(
-    private authFacade: AuthFacade,
-    private authContext: AuthContextService,
-    private router: Router
-  ) {}
+  canActivate(
+    route: ActivatedRouteSnapshot,
+    state: RouterStateSnapshot
+  ): Observable<boolean | UrlTree> | Promise<boolean | UrlTree> | boolean | UrlTree {
+    
+    console.log('[AUTH GUARD] Checking authentication for route:', {
+      path: route.routeConfig?.path,
+      url: state.url,
+      data: route.data
+    });
 
-  canActivate(): Observable<boolean> {
     return this.authFacade.isAuthenticated$.pipe(
       take(1),
       switchMap(isAuthenticated => {
         if (!isAuthenticated) {
           console.log('[AUTH GUARD] User not authenticated, redirecting to login');
-          this.router.navigate(['/auth/login']);
-          return of(false);
+          return this.redirectToLogin(state.url);
         }
 
-        console.log('[AUTH GUARD] User authenticated, checking context permissions');
-        return this.authContext.hasContextPermission().pipe(
-          map(hasPermission => {
-            if (hasPermission) {
-              console.log('[AUTH GUARD] Context permission granted, access allowed');
-              return true;
-            } else {
-              console.log('[AUTH GUARD] Context permission denied, redirecting');
-              this.authContext.redirectAuthenticatedUser();
-              return false;
-            }
-          })
-        );
+        // Usuario autenticado, verificar permisos básicos
+        const user = this.authFacade.getCurrentUser();
+        const userRoles = user?.roles || [];
+        
+        // Verificar permisos básicos para la ruta
+        const routeAllowed = this.checkBasicRoutePermissions(state.url, userRoles);
+        
+        if (!routeAllowed) {
+          console.warn('[AUTH GUARD] Route not allowed for user:', {
+            route: state.url,
+            userRoles
+          });
+          return of(this.router.createUrlTree(['/access-denied']));
+        }
+
+        console.log('[AUTH GUARD] Route allowed, proceeding');
+        return of(true);
+      }),
+      catchError(error => {
+        console.error('[AUTH GUARD] Error checking authentication:', error);
+        return of(this.router.createUrlTree(['/auth/login']));
       })
     );
   }
 
-  canActivateChild(): Observable<boolean> {
-    return this.canActivate();
+  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
+    // Siempre redirigir al login contextual unificado
+    const loginPath = '/auth/login';
+    
+    // Agregar parámetro de retorno si no es la página de login
+    const navigationExtras = returnUrl !== '/auth/login' ? { queryParams: { returnUrl } } : {};
+    
+    return of(this.router.createUrlTree([loginPath], navigationExtras));
+  }
+
+  private checkBasicRoutePermissions(routePath: string, userRoles: string[]): boolean {
+    // Rutas de super admin solo para super_admin
+    if (routePath.startsWith('/superadmin') && !userRoles.includes('super_admin')) {
+      return false;
+    }
+
+    // Rutas de admin para roles administrativos
+    if (routePath.startsWith('/admin')) {
+      const adminRoles = ['super_admin', 'admin', 'owner', 'manager'];
+      if (!userRoles.some(role => adminRoles.includes(role))) {
+        return false;
+      }
+    }
+
+    // Rutas de POS para empleados y supervisores
+    if (routePath.startsWith('/pos')) {
+      const posRoles = ['supervisor', 'employee'];
+      if (!userRoles.some(role => posRoles.includes(role))) {
+        return false;
+      }
+    }
+
+    // Rutas de cuenta de cliente para clientes
+    if (routePath.startsWith('/account')) {
+      if (!userRoles.includes('customer')) {
+        return false;
+      }
+    }
+
+    return true;
   }
 }

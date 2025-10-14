@@ -1,8 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TenantConfigService } from '../../../../core/services/tenant-config.service';
-import { DomainDetectorService } from '../../../../core/services/domain-detector.service';
+import { AppConfigService } from '../../../../core/services/app-config.service';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../shared/components/input/input.component';
@@ -205,21 +204,31 @@ export class StorefrontComponent implements OnInit {
     return this.cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   }
 
-  constructor(
-    private tenantConfig: TenantConfigService,
-    private domainDetector: DomainDetectorService
-  ) {}
+  private appConfig = inject(AppConfigService);
 
   async ngOnInit() {
-    const domainConfig = await this.domainDetector.detectDomain();
-    await this.tenantConfig.loadTenantConfig(domainConfig);
-    const tenantConfig = this.tenantConfig.getCurrentTenantConfig();
+    // Esperar a que la configuración de la aplicación esté lista
+    const appConfig = this.appConfig.getCurrentConfig();
+    if (!appConfig) {
+      console.warn('[STOREFRONT] App config not available, using default values');
+      this.loadDefaultData();
+      return;
+    }
+
+    const domainConfig = appConfig.domainConfig;
+    const tenantConfig = appConfig.tenantConfig;
     
     this.storeName = domainConfig.storeSlug || 'Tienda';
     this.branding = tenantConfig?.branding || {};
     this.storeDescription = tenantConfig?.store?.description || '';
     
     // Cargar datos de ejemplo
+    this.categories = this.generateSampleCategories();
+    this.products = this.generateSampleProducts();
+    this.filteredProducts = [...this.products];
+  }
+
+  private loadDefaultData() {
     this.categories = this.generateSampleCategories();
     this.products = this.generateSampleProducts();
     this.filteredProducts = [...this.products];
@@ -378,7 +387,8 @@ export class StorefrontComponent implements OnInit {
   }
 
   navigateToLogin() {
-    window.location.href = '/auth/store/login';
+    // Usar login contextual unificado
+    window.location.href = '/auth/login';
   }
 
   proceedToCheckout() {

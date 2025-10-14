@@ -1,9 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { TenantConfigService } from '../../../../core/services/tenant-config.service';
-import { DomainDetectorService } from '../../../../core/services/domain-detector.service';
+import { AppConfigService } from '../../../../core/services/app-config.service';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
-import { CardComponent } from '../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'app-store-landing',
@@ -95,21 +93,28 @@ export class StoreLandingComponent implements OnInit {
     return this.featuredProducts.length > 0;
   }
 
-  constructor(
-    private tenantConfig: TenantConfigService,
-    private domainDetector: DomainDetectorService
-  ) {}
+  private appConfig = inject(AppConfigService);
 
   async ngOnInit() {
-    const domainConfig = await this.domainDetector.detectDomain();
-    await this.tenantConfig.loadTenantConfig(domainConfig);
-    const tenantConfig = this.tenantConfig.getCurrentTenantConfig();
+    const appConfig = this.appConfig.getCurrentConfig();
+    if (!appConfig) {
+      console.warn('[STORE-LANDING] App config not available, using default values');
+      this.loadDefaultData();
+      return;
+    }
+
+    const domainConfig = appConfig.domainConfig;
+    const tenantConfig = appConfig.tenantConfig;
     
     this.storeName = domainConfig.storeSlug || 'Tienda';
     this.branding = tenantConfig?.branding || {};
     this.storeDescription = tenantConfig?.store?.description || '';
     
     // Simular productos destacados (en producción vendría de API)
+    this.featuredProducts = this.generateSampleProducts();
+  }
+
+  private loadDefaultData() {
     this.featuredProducts = this.generateSampleProducts();
   }
 
@@ -140,8 +145,8 @@ export class StoreLandingComponent implements OnInit {
   }
 
   navigateToLogin() {
-    // Navegar al login contextual de la tienda
-    window.location.href = '/auth/store/login';
+    // Usar login contextual unificado
+    window.location.href = '/auth/login';
   }
 
   navigateToShop() {

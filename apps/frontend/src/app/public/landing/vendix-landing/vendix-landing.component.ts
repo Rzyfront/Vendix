@@ -50,7 +50,9 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
         this.tenantConfig = {
           branding: {
             name: 'Vendix',
-            logo: '/assets/images/logo.png'
+            logo: {
+              url: 'assets/images/logo.png'
+            }
           }
         };
       }

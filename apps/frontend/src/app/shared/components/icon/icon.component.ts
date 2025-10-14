@@ -1,191 +1,11 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, Input, computed } from '@angular/core';
-import type { IconNode } from 'lucide';
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 
 /**
  * IconComponent
- * - Renders Lucide SVG icons by name: <app-icon name="cart" [size]="16" class="text-gray-600" />
- * - The ICONS map below contains a curated base set grouped by domain (UI, POS/eCommerce, etc.).
- * - To add a new icon:
- *   1) Import it from 'lucide' at the top (e.g., ImportName).
- *   2) Add an entry in ICONS: 'kebab-name': ImportName.
- * - You can also add aliases by mapping multiple keys to the same import (e.g., delete/trash).
- * - Explore all available icons at https://lucide.dev/icons and keep the set lean; expand on demand.
+ * - Renders basic SVG icons by name: <app-icon name="cart" [size]="16" class="text-gray-600" />
+ * - Simplified version without external dependencies
  */
-// Minimal registry: add icons you use, or expand on demand
-// Import a curated base icon set; add more as needed
-import {
-  // UI basics
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
-  Plus, Minus, X, Check, MoreVertical, MoreHorizontal, Search,
-  Edit, Trash2, Copy, Download, Upload, RefreshCw, Filter, SortAsc, SortDesc,
-  Info, AlertTriangle, AlertCircle, HelpCircle, CheckCircle2, XCircle,
-  Calendar, Clock, Settings as Cog, SlidersHorizontal, Sun, Moon, Monitor,
-  Home, LogIn, LogOut, User, Users, UserPlus, UserCog, ShieldCheck as Shield,
-  Lock, Key, Eye, EyeOff,
-
-  // Commerce / POS
-  ShoppingCart, ShoppingBasket, Store, Package, PackageOpen, Barcode, Tags, Tag,
-  CreditCard, Wallet, Banknote, Receipt, Truck, Bike, Car, MapPin, Navigation,
-  Printer, ScanLine, QrCode, Percent, DollarSign, Euro, PoundSterling,
-  IndianRupee, JapaneseYen, Coins, PiggyBank,
-
-  // Inventory & products
-  Boxes, ClipboardList, ClipboardCheck, CheckSquare, Grid3X3, Grid,
-  Layers, List, ListChecks,
-
-  // Analytics / dashboard
-  BarChart3, LineChart, PieChart, AreaChart, Activity,
-
-  // Communication / support
-  Mail, MessageSquare, Phone, Headphones, Bell,
-
-  // Files / docs
-  File, FileText, FilePlus, FileOutput, Folder, FolderOpen, Save, Undo, Redo,
-
-  // Multitenant / org / settings
-  Building2, Building, Globe, Globe2, Network, Server, Cloud,
-  Link, ExternalLink, Database, Spline, Layers3,
-} from 'lucide';
-
-const ICONS: Record<string, IconNode> = {
-  // --- UI basics ---
-  'chevron-down': ChevronDown,
-  'chevron-up': ChevronUp,
-  'chevron-left': ChevronLeft,
-  'chevron-right': ChevronRight,
-  'arrow-right': ArrowRight,
-  'arrow-left': ArrowLeft,
-  'arrow-up': ArrowUp,
-  'arrow-down': ArrowDown,
-  plus: Plus,
-  add: Plus,
-  minus: Minus,
-  close: X,
-  x: X,
-  check: Check,
-  'more-vertical': MoreVertical,
-  'more-horizontal': MoreHorizontal,
-  search: Search,
-  edit: Edit,
-  delete: Trash2,
-  trash: Trash2,
-  copy: Copy,
-  download: Download,
-  upload: Upload,
-  refresh: RefreshCw,
-  filter: Filter,
-  'sort-asc': SortAsc,
-  'sort-desc': SortDesc,
-  info: Info,
-  warning: AlertTriangle,
-  error: AlertCircle,
-  help: HelpCircle,
-  success: CheckCircle2,
-  'x-circle': XCircle,
-  calendar: Calendar,
-  clock: Clock,
-  settings: Cog,
-  cog: Cog,
-  sliders: SlidersHorizontal,
-  sun: Sun,
-  moon: Moon,
-  monitor: Monitor,
-  home: Home,
-  login: LogIn,
-  logout: LogOut,
-  user: User,
-  users: Users,
-  'user-plus': UserPlus,
-  'user-cog': UserCog,
-  'user-shield': Shield,
-  lock: Lock,
-  key: Key,
-  eye: Eye,
-  'eye-off': EyeOff,
-
-  // --- Commerce / POS ---
-  cart: ShoppingCart,
-  basket: ShoppingBasket,
-  store: Store,
-  package: Package,
-  'package-open': PackageOpen,
-  barcode: Barcode,
-  tag: Tag,
-  tags: Tags,
-  'credit-card': CreditCard,
-  wallet: Wallet,
-  cash: Banknote,
-  receipt: Receipt,
-  truck: Truck,
-  bike: Bike,
-  car: Car,
-  'map-pin': MapPin,
-  navigation: Navigation,
-  printer: Printer,
-  scan: ScanLine,
-  qrcode: QrCode,
-  percent: Percent,
-  dollar: DollarSign,
-  euro: Euro,
-  pound: PoundSterling,
-  rupee: IndianRupee,
-  yen: JapaneseYen,
-  coins: Coins,
-  'piggy-bank': PiggyBank,
-
-  // --- Inventory & products ---
-  boxes: Boxes,
-  'clipboard-list': ClipboardList,
-  'clipboard-check': ClipboardCheck,
-  checklist: ListChecks,
-  list: List,
-  grid: Grid,
-  'grid-3x3': Grid3X3,
-  layers: Layers,
-
-  // --- Analytics / dashboard ---
-  'bar-chart': BarChart3,
-  'line-chart': LineChart,
-  'pie-chart': PieChart,
-  'area-chart': AreaChart,
-  activity: Activity,
-
-  // --- Communication / support ---
-  mail: Mail,
-  message: MessageSquare,
-  phone: Phone,
-  support: Headphones,
-  bell: Bell,
-
-  // --- Files / docs ---
-  file: File,
-  'file-text': FileText,
-  'file-plus': FilePlus,
-  'file-export': FileOutput,
-  folder: Folder,
-  'folder-open': FolderOpen,
-  save: Save,
-  undo: Undo,
-  redo: Redo,
-
-  // --- Multitenant / org / settings ---
-  org: Building2,
-  organization: Building,
-  building: Building,
-  apartment: Building2,
-  globe: Globe,
-  'globe-2': Globe2,
-  network: Network,
-  server: Server,
-  cloud: Cloud,
-  link: Link,
-  'external-link': ExternalLink,
-  database: Database,
-  'org-layers': Layers3,
-  domains: Spline,
-};
 
 @Component({
   selector: 'app-icon',
@@ -193,7 +13,6 @@ const ICONS: Record<string, IconNode> = {
   imports: [CommonModule],
   template: `
     <svg
-      *ngIf="node() as n"
       [attr.viewBox]="'0 0 24 24'"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
@@ -206,16 +25,34 @@ const ICONS: Record<string, IconNode> = {
       [attr.class]="cls"
       aria-hidden="true"
     >
-      <ng-container *ngFor="let c of children()">
-        <ng-container [ngSwitch]="c[0]">
-          <path *ngSwitchCase="'path'" [attr.d]="attrs(c).d"></path>
-          <circle *ngSwitchCase="'circle'" [attr.cx]="attrs(c).cx" [attr.cy]="attrs(c).cy" [attr.r]="attrs(c).r"></circle>
-          <rect *ngSwitchCase="'rect'" [attr.x]="attrs(c).x" [attr.y]="attrs(c).y" [attr.width]="attrs(c).width" [attr.height]="attrs(c).height" [attr.rx]="attrs(c).rx" [attr.ry]="attrs(c).ry"></rect>
-          <line *ngSwitchCase="'line'" [attr.x1]="attrs(c).x1" [attr.y1]="attrs(c).y1" [attr.x2]="attrs(c).x2" [attr.y2]="attrs(c).y2"></line>
-          <polyline *ngSwitchCase="'polyline'" [attr.points]="attrs(c).points"></polyline>
-          <polygon *ngSwitchCase="'polygon'" [attr.points]="attrs(c).points"></polygon>
-          <ellipse *ngSwitchCase="'ellipse'" [attr.cx]="attrs(c).cx" [attr.cy]="attrs(c).cy" [attr.rx]="attrs(c).rx" [attr.ry]="attrs(c).ry"></ellipse>
-        </ng-container>
+      <ng-container [ngSwitch]="name">
+        <!-- Basic UI icons -->
+        <path *ngSwitchCase="'chevron-down'" d="m6 9 6 6 6-6"/>
+        <path *ngSwitchCase="'chevron-up'" d="m18 15-6-6-6 6"/>
+        <path *ngSwitchCase="'chevron-left'" d="m15 18-6-6 6-6"/>
+        <path *ngSwitchCase="'chevron-right'" d="m9 18 6-6-6-6"/>
+        <path *ngSwitchCase="'plus'" d="M5 12h14m-7-7v14"/>
+        <path *ngSwitchCase="'close'" d="M18 6 6 18M6 6l12 12"/>
+        <path *ngSwitchCase="'check'" d="M20 6 9 17l-5-5"/>
+        <path *ngSwitchCase="'search'" d="m21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z"/>
+        <path *ngSwitchCase="'edit'" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path *ngSwitchCase="'delete'" d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        <path *ngSwitchCase="'info'" d="M12 16v-4m0-4h.01M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10z"/>
+        <path *ngSwitchCase="'warning'" d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4m0 4h.01"/>
+        <path *ngSwitchCase="'user'" d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
+        <path *ngSwitchCase="'lock'" d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/>
+        <path *ngSwitchCase="'home'" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <path *ngSwitchCase="'settings'" d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+        <circle *ngSwitchCase="'settings'" cx="12" cy="12" r="3"/>
+        
+        <!-- Commerce icons -->
+        <path *ngSwitchCase="'cart'" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0-2.5 1.5M7 13v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6"/>
+        <path *ngSwitchCase="'store'" d="M3 3h18v2H3zm0 4h18v10H3zm0 4h18M3 3v18"/>
+        <path *ngSwitchCase="'package'" d="m7.5 4.27 9 5.15M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+        <path *ngSwitchCase="'tag'" d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01"/>
+        
+        <!-- Default icon for unknown names -->
+        <path *ngSwitchDefault d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
       </ng-container>
     </svg>
   `,
@@ -226,20 +63,4 @@ export class IconComponent {
   @Input() size: number | string = 16;
   @Input() color?: string;
   @Input('class') cls = '';
-
-  node = computed<IconNode | null>(() => {
-    const key = (this.name || '').toLowerCase();
-    return ICONS[key] ?? null;
-  });
-
-  children(): any[] {
-    // Lucide's IconNode is an array of [tag, attrs] tuples representing SVG children
-    // Example: IconNode = [["path", { d: "..." }], ["circle", { cx: 12, cy: 12, r: 10 }]]
-    // So we should iterate over the node itself, not n[2].
-    return (this.node() as unknown as any[]) ?? [];
-  }
-
-  attrs(c: any): any {
-    return (c && c[1]) || {};
-  }
 }

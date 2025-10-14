@@ -26,24 +26,22 @@ export interface DomainConfig {
 }
 
 export interface DomainResolution {
-  id: string;
+  id: number;
   hostname: string;
-  raw_domain_type?: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
-  domainType?: string; // Alternative field used by API
-  purpose?: 'landing' | 'admin' | 'ecommerce';
-  app?: string; // App environment identifier (VENDIX_LANDING, VENDIX_ADMIN, etc.)
-  organizationId: string;
-  organizationSlug: string;
-  storeId?: string;
-  storeSlug?: string;
-  config: any;
-  environmentConfig?: {
-    showLanding?: boolean;
-    defaultStore?: string;
-    redirectRules?: any[];
+  organization_id: number;
+  config: {
+    app: string;
+    branding?: any;
+    security?: any;
   };
-  isActive: boolean;
-  sslEnabled: boolean;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
+  organization_name: string;
+  organization_slug: string;
+  domain_type: string;
+  raw_domain_type: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
+  status: string;
+  ssl_status: string;
+  is_primary: boolean;
+  store_slug?: string;
 }

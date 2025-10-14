@@ -2,22 +2,20 @@ import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { of, from } from 'rxjs';
 import { map, mergeMap, catchError, tap } from 'rxjs/operators';
-import { DomainDetectorService } from '../../services/domain-detector.service';
-import { TenantConfigService } from '../../services/tenant-config.service';
+import { AppConfigService } from '../../services/app-config.service';
 import { TenantConfig } from '../../models/tenant-config.interface';
 import * as TenantActions from './tenant.actions';
 
 @Injectable()
 export class TenantEffects {
   private actions$ = inject(Actions);
-  private domainDetector = inject(DomainDetectorService);
-  private tenantConfig = inject(TenantConfigService);
+  private appConfig = inject(AppConfigService);
 
   initTenant$ = createEffect(() =>
     this.actions$.pipe(
       ofType(TenantActions.initTenant),
       mergeMap(({ domainConfig }) =>
-        from(this.tenantConfig.loadTenantConfig(domainConfig)).pipe(
+        from(this.appConfig.loadTenantConfigByDomain(domainConfig)).pipe(
           map((tenantConfig: TenantConfig | null) => {
             if (!tenantConfig) {
               throw new Error('Failed to load tenant config');
@@ -36,7 +34,7 @@ export class TenantEffects {
     this.actions$.pipe(
       ofType(TenantActions.loadTenantConfig),
       mergeMap(({ domainConfig }) =>
-        from(this.tenantConfig.loadTenantConfig(domainConfig)).pipe(
+        from(this.appConfig.loadTenantConfigByDomain(domainConfig)).pipe(
           map((tenantConfig: TenantConfig | null) => {
             if (!tenantConfig) {
               throw new Error('Failed to load tenant config');

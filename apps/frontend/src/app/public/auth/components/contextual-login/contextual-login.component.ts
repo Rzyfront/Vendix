@@ -2,15 +2,12 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { AuthService } from '../../../../core/services/auth.service';
-import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { AppConfigService } from '../../../../core/services/app-config.service';
 import { takeUntil } from 'rxjs/operators';
 import { Subject } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
-import { AppResolverService } from '../../../../core/services/app-resolver.service';
-import { DomainDetectorService } from '../../../../core/services/domain-detector.service';
-import { AppEnvironment } from '../../../../core/models/domain-config.interface';
 
 export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
 
@@ -23,7 +20,7 @@ export interface LoginError {
 }
 
 @Component({
-  selector: 'app-vendix-login',
+  selector: 'app-contextual-login',
   standalone: true,
   imports: [
     CommonModule,
@@ -31,18 +28,28 @@ export interface LoginError {
     ReactiveFormsModule
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-green-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="backgroundClass">
       <div class="max-w-md w-full space-y-8">
-        <!-- Vendix Branding -->
+        <!-- Contextual Branding -->
         <div class="text-center">
-          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
-            <span class="text-white font-bold text-xl">V</span>
+          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4" 
+               *ngIf="logoUrl; else defaultLogo">
+            <img [src]="logoUrl" [alt]="displayName" class="h-10 w-10">
           </div>
+          <ng-template #defaultLogo>
+            <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
+              <span class="text-white font-bold text-xl">{{ contextInitial }}</span>
+            </div>
+          </ng-template>
+          
           <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
-            Iniciar Sesión en Vendix
+            {{ loginTitle }}
           </h2>
-          <p class="mt-2 text-sm text-gray-600">
-            Plataforma de gestión multi-tenant
+          <p class="mt-2 text-sm text-gray-600" *ngIf="displayName">
+            {{ contextDescription }}
+          </p>
+          <p class="mt-1 text-sm text-gray-500" *ngIf="!displayName">
+            {{ defaultDescription }}
           </p>
         </div>
 
@@ -52,7 +59,7 @@ export interface LoginError {
             <!-- Email Field -->
             <div>
               <label for="email" class="block text-sm font-medium text-gray-700">
-                Email Corporativo
+                {{ emailLabel }}
               </label>
               <input
                 id="email"
@@ -60,7 +67,7 @@ export interface LoginError {
                 type="email"
                 autocomplete="email"
                 [class]="getFieldClass('email')"
-                placeholder="usuario@empresa.com"
+                [placeholder]="emailPlaceholder"
                 (blur)="onFieldBlur('email')"
                 (input)="onFieldInput('email')">
               <div class="mt-1 text-sm text-red-600" *ngIf="hasFieldError('email')">
@@ -166,39 +173,74 @@ export interface LoginError {
 
         <!-- Additional Links -->
         <div class="text-center text-sm text-gray-600">
-          <p>
-            ¿Necesitas una cuenta corporativa? 
-            <a routerLink="/auth/register" class="font-medium text-primary hover:text-primary-dark">
-              Solicitar acceso
-            </a>
-          </p>
+          <ng-container *ngIf="contextType === 'vendix'">
+            <p>
+              ¿Necesitas una cuenta corporativa? 
+              <a routerLink="/auth/register" class="font-medium text-primary hover:text-primary-dark">
+                Solicitar acceso
+              </a>
+            </p>
+          </ng-container>
+
+          <ng-container *ngIf="contextType === 'organization'">
+            <p>
+              ¿Eres cliente? 
+              <a [routerLink]="['/shop']" class="font-medium text-primary hover:text-primary-dark">
+                Accede a nuestra tienda
+              </a>
+            </p>
+          </ng-container>
+
+          <ng-container *ngIf="contextType === 'store'">
+            <p>
+              ¿No tienes cuenta? 
+              <a [routerLink]="['/auth/register']" class="font-medium text-primary hover:text-primary-dark">
+                Regístrate aquí
+              </a>
+            </p>
+            <p class="mt-2">
+              <a [routerLink]="['/']" class="font-medium text-primary hover:text-primary-dark">
+                Continuar como invitado
+              </a>
+            </p>
+          </ng-container>
+        </div>
+
+        <!-- Context Info -->
+        <div class="text-center text-xs text-gray-500 mt-4" *ngIf="displayName">
+          <p>{{ contextFooter }}</p>
+          <p>Powered by Vendix Platform</p>
         </div>
       </div>
     </div>
   `,
   styleUrls: []
 })
-export class VendixLoginComponent implements OnInit, OnDestroy {
+export class ContextualLoginComponent implements OnInit, OnDestroy {
   loginForm: FormGroup;
   loginState: LoginState = 'idle';
   loginError: LoginError | null = null;
   loginAttempts = 0;
   maxAttempts = 5;
-  lockoutTime = 180; // 3 minutes in seconds
+  lockoutTime = 180;
   retryCountdown = 0;
   retryTimer: any;
-  private destroy$ = new Subject<void>();
+  
+  // Context properties
+  contextType: 'vendix' | 'organization' | 'store' = 'vendix';
+  displayName: string = '';
+  logoUrl: string = '';
+  primaryColor: string = '';
 
+  private destroy$ = new Subject<void>();
   private toast = inject(ToastService);
+  private appConfig = inject(AppConfigService);
 
   constructor(
     private fb: FormBuilder,
-    private authService: AuthService,
-    private tenantFacade: TenantFacade,
     private authFacade: AuthFacade,
-    private router: Router,
-    private appResolver: AppResolverService,
-    private domainDetector: DomainDetectorService
+    private tenantFacade: TenantFacade,
+    private router: Router
   ) {
     this.loginForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
@@ -207,13 +249,15 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Load auth context from AppConfig
+    this.loadAuthContext();
+    
     // Subscribe to reactive auth state
     this.authFacade.loading$.pipe(takeUntil(this.destroy$)).subscribe(loading => {
       this.loginState = loading ? 'loading' : 'idle';
     });
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
-      console.log('Vendix Login component - Error received:', error);
       if (error) {
         this.handleLoginError(error);
       }
@@ -222,14 +266,43 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
     // Subscribe to authentication success
     this.authFacade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe(isAuth => {
       if (isAuth) {
-        console.log('Vendix user authenticated, redirecting...');
-        this.toast.success('¡Bienvenido a Vendix Platform!');
+        const welcomeMessage = this.getWelcomeMessage();
+        this.toast.success(welcomeMessage);
       }
     });
   }
 
+  private loadAuthContext(): void {
+    const appConfig = this.appConfig.getCurrentConfig();
+    if (!appConfig) {
+      console.warn('[CONTEXTUAL-LOGIN] App config not available, using default context');
+      return;
+    }
+
+    const domainConfig = appConfig.domainConfig;
+    const tenantConfig = appConfig.tenantConfig;
+
+    // Determine context type based on domain configuration
+    if (domainConfig.organizationSlug) {
+      this.contextType = 'organization';
+      this.displayName = domainConfig.organizationSlug;
+    } else if (domainConfig.storeSlug) {
+      this.contextType = 'store';
+      this.displayName = domainConfig.storeSlug;
+    } else {
+      this.contextType = 'vendix';
+      this.displayName = 'Vendix Platform';
+    }
+
+    // Apply branding
+    this.logoUrl = tenantConfig?.branding?.logo?.url || '';
+    this.primaryColor = tenantConfig?.branding?.colors?.primary || '#3b82f6';
+
+    // Apply branding CSS variables
+    this.updateBrandingCSSVariables();
+  }
+
   private handleLoginError(error: any): void {
-    console.log('Vendix handleLoginError called with:', error);
     this.loginAttempts++;
     const errorMessage = error?.message || error?.error?.message || error?.error || 'Error de autenticación';
 
@@ -264,7 +337,7 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
     } else if (errorMessage.toLowerCase().includes('suspended') || errorMessage.toLowerCase().includes('suspendida')) {
       this.setLoginError({
         type: 'account_suspended',
-        message: 'Cuenta suspendida. Contacta al administrador de Vendix.',
+        message: 'Cuenta suspendida. Contacta al administrador.',
         canRetry: false
       });
     } else if (errorMessage.toLowerCase().includes('expired') || errorMessage.toLowerCase().includes('expirada')) {
@@ -336,6 +409,15 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
     this.loginState = 'idle';
     this.loginError = null;
     this.retryCountdown = 0;
+  }
+
+  private updateBrandingCSSVariables(): void {
+    const root = document.documentElement;
+
+    if (this.primaryColor) {
+      root.style.setProperty('--primary', this.primaryColor);
+      root.style.setProperty('--color-primary', this.primaryColor);
+    }
   }
 
   ngOnDestroy(): void {
@@ -414,7 +496,7 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
 
       const { email, password } = this.loginForm.value;
 
-      // Vendix login doesn't need store/organization slugs
+      // Use direct authentication through AuthFacade
       this.authFacade.login(email, password);
     } else {
       Object.keys(this.loginForm.controls).forEach(key => {
@@ -430,15 +512,8 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
   resendVerificationEmail(): void {
     const email = this.loginForm.get('email')?.value;
     if (email && this.loginForm.get('email')?.valid) {
-      this.authService.resendVerification(email).subscribe({
-        next: () => {
-          this.toast.success('Email de verificación reenviado');
-        },
-        error: (error) => {
-          this.toast.error('Error al reenviar email de verificación');
-          console.error('Resend verification error:', error);
-        }
-      });
+      // This would need to be implemented in AuthService
+      this.toast.warning('Función de reenvío de verificación no implementada aún');
     } else {
       this.toast.warning('Ingresa un email válido primero');
     }
@@ -471,5 +546,116 @@ export class VendixLoginComponent implements OnInit, OnDestroy {
 
   get errorDetails(): string {
     return this.loginError?.details || '';
+  }
+
+  // Contextual computed properties
+  get backgroundClass(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return 'bg-gradient-to-br from-gray-50 to-green-50';
+      case 'organization':
+        return 'bg-gradient-to-br from-blue-50 to-indigo-50';
+      case 'store':
+        return 'bg-gradient-to-br from-orange-50 to-red-50';
+      default:
+        return 'bg-gray-50';
+    }
+  }
+
+  get contextInitial(): string {
+    switch (this.contextType) {
+      case 'vendix': return 'V';
+      case 'organization': return 'O';
+      case 'store': return 'S';
+      default: return 'L';
+    }
+  }
+
+  get loginTitle(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return 'Iniciar Sesión en Vendix';
+      case 'organization':
+      case 'store':
+        return 'Iniciar Sesión';
+      default:
+        return 'Iniciar Sesión';
+    }
+  }
+
+  get contextDescription(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return 'Plataforma de gestión multi-tenant';
+      case 'organization':
+        return `en ${this.displayName}`;
+      case 'store':
+        return `en ${this.displayName}`;
+      default:
+        return '';
+    }
+  }
+
+  get defaultDescription(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return 'Plataforma de gestión multi-tenant';
+      case 'organization':
+        return 'Plataforma organizacional';
+      case 'store':
+        return 'Tienda en línea';
+      default:
+        return '';
+    }
+  }
+
+  get emailLabel(): string {
+    switch (this.contextType) {
+      case 'vendix':
+      case 'organization':
+        return 'Email Corporativo';
+      case 'store':
+        return 'Email';
+      default:
+        return 'Email';
+    }
+  }
+
+  get emailPlaceholder(): string {
+    switch (this.contextType) {
+      case 'vendix':
+      case 'organization':
+        return 'usuario@empresa.com';
+      case 'store':
+        return 'cliente@email.com';
+      default:
+        return 'usuario@email.com';
+    }
+  }
+
+  get contextFooter(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return 'Acceso a Vendix Platform';
+      case 'organization':
+        return `Acceso administrativo de ${this.displayName}`;
+      case 'store':
+        return `Acceso a ${this.displayName}`;
+      default:
+        return '';
+    }
+  }
+
+  private getWelcomeMessage(): string {
+    switch (this.contextType) {
+      case 'vendix':
+        return '¡Bienvenido a Vendix Platform!';
+      case 'organization':
+        return `¡Bienvenido a ${this.displayName || 'tu organización'}!`;
+      case 'store':
+        return `¡Bienvenido a ${this.displayName || 'nuestra tienda'}!`;
+      default:
+        return '¡Bienvenido!';
+    }
   }
 }
