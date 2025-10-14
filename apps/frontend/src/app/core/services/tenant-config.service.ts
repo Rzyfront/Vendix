@@ -145,7 +145,7 @@ export class TenantConfigService {
       },
       branding: {
         logo: {
-          url: '/assets/images/vendix-logo.png',
+          url: '/assets/images/logo.png',
           alt: 'Vendix',
           width: 120,
           height: 40
