@@ -19,7 +19,7 @@ export class StoreService {
    * Get store by subdomain or custom domain
    */
   getStoreByDomain(domain: string): Observable<Store> {
-    return this.http.get<Store>(`${this.apiUrl}/api/public/domains/resolve/${domain}`);
+    return this.http.get<Store>(`${this.apiUrl}/api/domains/resolve/${domain}`);
   }
 
   /**

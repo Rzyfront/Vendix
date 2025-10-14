@@ -106,7 +106,7 @@ export class DomainDetectorService {
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
     try {
       const response = await this.http
-        .get<DomainResolution>(`${this.API_URL}/api/public/domains/resolve/${hostname}`)
+        .get<DomainResolution>(`${this.API_URL}/api/domains/resolve/${hostname}`)
         .pipe(
           catchError(error => {
             console.warn(`[DOMAIN DETECTOR] API resolution failed for ${hostname}:`, error);

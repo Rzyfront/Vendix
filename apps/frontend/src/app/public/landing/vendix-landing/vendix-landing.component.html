@@ -1,0 +1,156 @@
+<div class="vendrix-landing">
+  <header class="landing-header">
+    <div class="container">
+      <div class="header-content">
+        <div class="logo-section">
+          <img [src]="tenantConfig?.branding?.logo || '/assets/images/logo.png'" alt="Vendix" class="logo">
+          <h1 class="platform-name">{{ tenantConfig?.branding?.name || 'Vendix' }}</h1>
+        </div>
+        <nav class="navigation">
+          <a href="#features" class="nav-link">Características</a>
+          <a href="#pricing" class="nav-link">Precios</a>
+          <a href="/auth/login" class="nav-link">Iniciar Sesión</a>
+          <a href="/auth/register" class="btn-primary">Registrarse</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <main class="landing-main">
+    <!-- Hero Section -->
+    <section class="hero-section">
+      <div class="container">
+        <div class="hero-content">
+          <h1 class="hero-title">
+            Plataforma Multi-tenant para E-commerce y Gestión Empresarial
+          </h1>
+          <p class="hero-description">
+            Solución completa para organizaciones, tiendas y administradores. 
+            Gestiona múltiples dominios, usuarios y permisos en una sola plataforma.
+          </p>
+          <div class="hero-actions">
+            <a href="/auth/register" class="btn-primary btn-large">Comenzar Ahora</a>
+            <a href="#features" class="btn-secondary btn-large">Conocer Más</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="platform-preview">
+            <div class="preview-card admin">
+              <h4>Panel Administrativo</h4>
+              <p>Gestión completa de usuarios y permisos</p>
+            </div>
+            <div class="preview-card store">
+              <h4>Tienda Online</h4>
+              <p>E-commerce personalizado por dominio</p>
+            </div>
+            <div class="preview-card pos">
+              <h4>Punto de Venta</h4>
+              <p>Sistema POS integrado</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features-section">
+      <div class="container">
+        <h2 class="section-title">Características Principales</h2>
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon">🏢</div>
+            <h3>Arquitectura Multi-tenant</h3>
+            <p>Soporte para múltiples organizaciones y dominios con configuración independiente</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔐</div>
+            <h3>Autenticación Contextual</h3>
+            <p>Login adaptado al contexto (Vendix, Organización, Tienda) con permisos granulares</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🎨</div>
+            <h3>Branding Dinámico</h3>
+            <p>Personalización de marca, temas y estilos por dominio y organización</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🛒</div>
+            <h3>E-commerce Completo</h3>
+            <p>Tiendas online personalizadas con catálogo, carrito y pasarelas de pago</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">💻</div>
+            <h3>Panel Administrativo</h3>
+            <p>Gestión centralizada de usuarios, permisos, productos y configuraciones</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📱</div>
+            <h3>Sistema POS</h3>
+            <p>Punto de venta integrado para gestión de ventas físicas</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Environment Types -->
+    <section class="environments-section">
+      <div class="container">
+        <h2 class="section-title">Entornos Disponibles</h2>
+        <div class="environments-grid">
+          <div class="environment-card">
+            <h3>Vendix Platform</h3>
+            <p>Plataforma principal para gestión multi-organizacional</p>
+            <ul>
+              <li>Super Administración</li>
+              <li>Gestión de Organizaciones</li>
+              <li>Configuración Global</li>
+            </ul>
+          </div>
+          <div class="environment-card">
+            <h3>Organización</h3>
+            <p>Panel administrativo para empresas con múltiples tiendas</p>
+            <ul>
+              <li>Administración de Tiendas</li>
+              <li>Gestión de Usuarios</li>
+              <li>Reportes Consolidados</li>
+            </ul>
+          </div>
+          <div class="environment-card">
+            <h3>Tienda</h3>
+            <p>E-commerce y gestión para tiendas individuales</p>
+            <ul>
+              <li>Catálogo de Productos</li>
+              <li>Ventas Online</li>
+              <li>Sistema POS</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="landing-footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-section">
+          <h4>Vendix Platform</h4>
+          <p>Soluciones multi-tenant para e-commerce y gestión empresarial</p>
+        </div>
+        <div class="footer-section">
+          <h4>Enlaces</h4>
+          <a href="/auth/login">Iniciar Sesión</a>
+          <a href="/auth/register">Registrarse</a>
+          <a href="#features">Características</a>
+        </div>
+        <div class="footer-section">
+          <h4>Soporte</h4>
+          <a href="#">Documentación</a>
+          <a href="#">Contacto</a>
+          <a href="#">Políticas</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2024 Vendix Platform. Todos los derechos reservados.</p>
+      </div>
+    </div>
+  </footer>
+</div>

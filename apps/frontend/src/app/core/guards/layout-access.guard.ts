@@ -2,34 +2,26 @@ import { Injectable } from '@angular/core';
 import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AuthFacade } from '../store/auth/auth.facade';
-import { LayoutRouterService } from '../services/layout-router.service';
+import { AuthContextService } from '../services/auth-context.service';
+import { AppResolverService } from '../services/app-resolver.service';
 
 @Injectable({ providedIn: 'root' })
 export class LayoutAccessGuard implements CanActivate {
   constructor(
     private readonly auth: AuthFacade,
-    private readonly layoutRouter: LayoutRouterService,
+    private readonly authContext: AuthContextService,
+    private readonly appResolver: AppResolverService,
     private readonly router: Router
   ) {}
 
   async canActivate(route: ActivatedRouteSnapshot, _state: RouterStateSnapshot): Promise<boolean> {
     const isAuthenticated = await firstValueFrom(this.auth.isAuthenticated$);
     const user = await firstValueFrom(this.auth.user$);
-    const requiredLayout = (route.data?.['layout'] as 'superadmin' | 'admin' | 'pos' | 'storefront' | undefined) || undefined;
+    const requiredLayout = (route.data?.['layout'] as string) || undefined;
 
     if (!isAuthenticated || !user) {
       this.router.navigateByUrl('/auth/login');
       return false;
-    }
-
-    const roles: string[] = Array.isArray((user as any)?.roles)
-      ? (user as any).roles
-      : ((user as any)?.role ? [(user as any).role] : []);
-    
-    // Handle user_roles structure from backend
-    if ((user as any)?.user_roles && Array.isArray((user as any).user_roles) && (user as any).user_roles.length > 0) {
-      const backendRoles = (user as any).user_roles.map((ur: any) => ur.roles?.name).filter(Boolean);
-      roles.push(...backendRoles);
     }
 
     if (!requiredLayout) {
@@ -37,31 +29,32 @@ export class LayoutAccessGuard implements CanActivate {
       return true;
     }
 
-    // Usa la misma lógica que el LayoutRouterService para validar
-    const allowed = (this as any).getAllowed?.(roles, requiredLayout) ?? this.isLayoutAllowed(roles, requiredLayout);
-    if (allowed) {
+    // Obtener contexto de autenticación
+    const authContext = await firstValueFrom(this.authContext.getAuthContext());
+    const userRoles = this.auth.getRoles();
+
+    console.log('[LAYOUT ACCESS GUARD] Checking layout access:', {
+      requiredLayout,
+      userRoles,
+      contextType: authContext.contextType,
+      allowedRoles: authContext.allowedRoles
+    });
+
+    // Verificar si el layout está permitido usando AppResolverService
+    const isLayoutAllowed = this.appResolver.isLayoutAllowed(
+      requiredLayout,
+      authContext.environment,
+      userRoles
+    );
+
+    if (isLayoutAllowed) {
+      console.log('[LAYOUT ACCESS GUARD] Layout access granted');
       return true;
     }
 
     // No permitido: redirigimos a post-login para recalcular un destino válido
+    console.log('[LAYOUT ACCESS GUARD] Layout access denied, redirecting to post-login');
     this.router.navigateByUrl('/post-login');
     return false;
-  }
-
-  private isLayoutAllowed(roles: string[], layout: 'superadmin' | 'admin' | 'pos' | 'storefront'): boolean {
-    const has = (name: string) => roles.includes(name) || roles.includes(name.toLowerCase()) || roles.includes(name.toUpperCase());
-
-    switch (layout) {
-      case 'superadmin':
-        return has('super_admin');
-      case 'admin':
-        return has('super_admin') || has('owner') || has('admin') || has('manager');
-      case 'pos':
-        return has('super_admin') || has('owner') || has('admin') || has('manager') || has('supervisor') || has('employee');
-      case 'storefront':
-        return true; // cualquier autenticado puede ver storefront; o restringir a customer si se desea
-      default:
-        return false;
-    }
   }
 }

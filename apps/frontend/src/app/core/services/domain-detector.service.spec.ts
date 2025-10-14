@@ -93,7 +93,7 @@ describe('DomainDetectorService', () => {
 
       const domainPromise = service.detectDomain(customDomain);
 
-      const req = httpMock.expectOne(`${service['API_URL']}/api/public/domains/resolve/${customDomain}`);
+      const req = httpMock.expectOne(`${service['API_URL']}/api/domains/resolve/${customDomain}`);
       expect(req.request.method).toBe('GET');
       req.flush(mockApiResponse);
 
@@ -109,7 +109,7 @@ describe('DomainDetectorService', () => {
     it('should handle API resolution failure gracefully', async () => {
       const customDomain = 'unknown-domain.com';
 
-      const req = httpMock.expectOne(`${service['API_URL']}/api/public/domains/resolve/${customDomain}`);
+      const req = httpMock.expectOne(`${service['API_URL']}/api/domains/resolve/${customDomain}`);
       req.flush({ success: false }, { status: 404, statusText: 'Not Found' });
 
       try {

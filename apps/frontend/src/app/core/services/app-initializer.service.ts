@@ -9,6 +9,8 @@ import { TenantFacade } from '../store/tenant/tenant.facade';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 import { TenantConfig } from '../models/tenant-config.interface';
+import { AppResolverService } from './app-resolver.service';
+import { RouteConfigService } from './route-config.service';
 
 @Injectable({
   providedIn: 'root'
@@ -22,7 +24,9 @@ export class AppInitializerService {
     private themeService: ThemeService,
     private tenantFacade: TenantFacade,
     private authFacade: AuthFacade,
-    private router: Router
+    private router: Router,
+    private appResolver: AppResolverService,
+    private routeConfig: RouteConfigService
   ) {}
 
   /**
@@ -51,16 +55,20 @@ export class AppInitializerService {
         console.log('[APP INITIALIZER] Basic branding applied from domain config');
       }
 
-      // 5. Configurar rutas dinámicamente
-      await this.configureRoutesForEnvironment(domainConfig);
+      // 5. Configurar rutas dinámicamente usando el nuevo servicio centralizado
+      await this.routeConfig.configureRoutes();
+      
+      // 6. Resolver configuración completa de la aplicación
+      const appConfig = await this.appResolver.resolveAppConfiguration();
+      console.log('[APP INITIALIZER] App configuration resolved:', appConfig);
 
-      // 6. Inicializar servicios específicos del entorno
+      // 7. Configurar servicios específicos del entorno
       await this.initializeEnvironmentServices(domainConfig);
 
-      // 7. If user is authenticated, redirect to appropriate environment
+      // 8. If user is authenticated, redirect to appropriate environment
       if (isAuthenticated) {
         console.log('[APP INITIALIZER] User is authenticated, redirecting...');
-        await this.redirectAuthenticatedUser();
+        await this.redirectAuthenticatedUser(domainConfig);
       }
 
       console.log('[APP INITIALIZER] Application initialization completed successfully');
@@ -100,7 +108,7 @@ export class AppInitializerService {
   /**
    * Redirige al usuario autenticado a su entorno apropiado
    */
-  private async redirectAuthenticatedUser(): Promise<void> {
+  private async redirectAuthenticatedUser(domainConfig: DomainConfig): Promise<void> {
     try {
       // Wait a bit for the auth state to be restored
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -113,24 +121,27 @@ export class AppInitializerService {
         user: user?.email,
         userRole,
         isAuthenticated,
-        currentPath: this.router.url
+        currentPath: this.router.url,
+        environment: domainConfig.environment
       });
       
       if (user && userRole && isAuthenticated) {
-        // Only redirect if we're not already in the admin area
-        if (!this.router.url.startsWith('/admin')) {
-          // Determine redirect path based on user role
-          let redirectPath = '/admin/dashboard'; // default
-          
-          const adminRoles = ['super_admin', 'admin', 'owner', 'manager', 'supervisor'];
-          if (adminRoles.includes(userRole.toLowerCase())) {
-            redirectPath = '/admin/dashboard';
-          }
+        // Only redirect if we're not already in the appropriate area
+        const currentPath = this.router.url;
+        const shouldRedirect = this.shouldRedirectUser(currentPath, userRole, domainConfig.environment);
+        
+        if (shouldRedirect) {
+          // Use the new AppResolverService for intelligent redirection
+          const userRoles = Array.isArray((user as any)?.roles)
+            ? (user as any).roles
+            : [userRole];
+            
+          const redirectPath = this.appResolver.getPostLoginRedirect(domainConfig.environment, userRoles);
           
           console.log('[APP INITIALIZER] Redirecting to:', redirectPath);
           this.router.navigate([redirectPath]);
         } else {
-          console.log('[APP INITIALIZER] User already in admin area, no redirect needed');
+          console.log('[APP INITIALIZER] User already in appropriate area, no redirect needed');
         }
       } else {
         console.log('[APP INITIALIZER] Auth state not fully restored, skipping redirect');
@@ -149,131 +160,35 @@ export class AppInitializerService {
   }
 
   /**
-   * Configura las rutas según el entorno
+   * Determina si el usuario necesita redirección basado en su ubicación actual y rol
    */
-   private async configureRoutesForEnvironment(domainConfig: DomainConfig): Promise<void> {
-    console.log('[APP INITIALIZER] Configuring routes for environment:', domainConfig.environment);
-
-    // Las rutas se configurarán dinámicamente según el entorno
-    // Por ahora, simplemente logueamos el entorno
-    const routeConfig = this.getRouteConfigForEnvironment(domainConfig.environment);
-    console.log('[APP INITIALIZER] Route configuration:', routeConfig);
-  }
-
-  /**
-   * Obtiene la configuración de rutas para un entorno específico
-   * Nota: La configuración de rutas ahora viene del domain resolution service
-   */
-  private getRouteConfigForEnvironment(environment: AppEnvironment): any {
-    // La configuración de rutas se determina basada en el entorno detectado
-    // Esta información ya está disponible en la configuración del dominio
-    switch (environment) {
-      case AppEnvironment.VENDIX_LANDING:
-        return {
-          modules: ['landing', 'auth', 'onboarding'],
-          defaultRoute: '/',
-          features: ['registration', 'login', 'marketing']
-        };
-
-      case AppEnvironment.VENDIX_ADMIN:
-        return {
-          modules: ['admin', 'super-admin', 'organizations', 'analytics'],
-          defaultRoute: '/admin/dashboard',
-          features: ['user-management', 'system-settings', 'analytics']
-        };
-
-      case AppEnvironment.ORG_LANDING:
-        return {
-          modules: ['organization-landing', 'auth'],
-          defaultRoute: '/',
-          features: ['company-info', 'contact', 'login']
-        };
-
-      case AppEnvironment.ORG_ADMIN:
-        return {
-          modules: ['organization', 'stores', 'users', 'reports'],
-          defaultRoute: '/dashboard',
-          features: ['store-management', 'user-management', 'analytics']
-        };
-
-      case AppEnvironment.STORE_ADMIN:
-        return {
-          modules: ['store', 'products', 'orders', 'customers', 'pos'],
-          defaultRoute: '/dashboard',
-          features: ['inventory', 'sales', 'customer-management', 'pos']
-        };
-
-      case AppEnvironment.STORE_ECOMMERCE:
-        return {
-          modules: ['ecommerce', 'products', 'cart', 'checkout'],
-          defaultRoute: '/',
-          features: ['catalog', 'shopping-cart', 'checkout', 'account']
-        };
-
-      default:
-        return {
-          modules: ['error'],
-          defaultRoute: '/error',
-          features: []
-        };
+  private shouldRedirectUser(currentPath: string, userRole: string, environment: AppEnvironment): boolean {
+    const adminRoles = ['super_admin', 'admin', 'owner', 'manager', 'supervisor'];
+    const isAdmin = adminRoles.includes(userRole.toLowerCase());
+    
+    // No redirigir si ya está en el área apropiada
+    if (isAdmin && currentPath.startsWith('/admin')) {
+      return false;
     }
-  }
-
-  /**
-   * Configuración de rutas por defecto (fallback)
-   */
-  private getFallbackRouteConfigForEnvironment(environment: AppEnvironment): any {
-    switch (environment) {
-      case AppEnvironment.VENDIX_LANDING:
-        return {
-          modules: ['landing', 'auth', 'onboarding'],
-          defaultRoute: '/',
-          features: ['registration', 'login', 'marketing']
-        };
-
-      case AppEnvironment.VENDIX_ADMIN:
-        return {
-          modules: ['admin', 'super-admin', 'organizations', 'analytics'],
-          defaultRoute: '/admin/dashboard',
-          features: ['user-management', 'system-settings', 'analytics']
-        };
-
-      case AppEnvironment.ORG_LANDING:
-        return {
-          modules: ['organization-landing', 'auth'],
-          defaultRoute: '/',
-          features: ['company-info', 'contact', 'login']
-        };
-
-      case AppEnvironment.ORG_ADMIN:
-        return {
-          modules: ['organization', 'stores', 'users', 'reports'],
-          defaultRoute: '/dashboard',
-          features: ['store-management', 'user-management', 'analytics']
-        };
-
-      case AppEnvironment.STORE_ADMIN:
-        return {
-          modules: ['store', 'products', 'orders', 'customers', 'pos'],
-          defaultRoute: '/dashboard',
-          features: ['inventory', 'sales', 'customer-management', 'pos']
-        };
-
-      case AppEnvironment.STORE_ECOMMERCE:
-        return {
-          modules: ['ecommerce', 'products', 'cart', 'checkout'],
-          defaultRoute: '/',
-          features: ['catalog', 'shopping-cart', 'checkout', 'account']
-        };
-
-      default:
-        return {
-          modules: ['error'],
-          defaultRoute: '/error',
-          features: []
-        };
+    
+    if (userRole === 'super_admin' && currentPath.startsWith('/superadmin')) {
+      return false;
     }
+    
+    if (userRole === 'customer' && (currentPath.startsWith('/account') || currentPath.startsWith('/shop'))) {
+      return false;
+    }
+    
+    // No redirigir desde rutas públicas específicas
+    const publicRoutes = ['/auth/login', '/auth/register', '/auth/forgot-password', '/'];
+    if (publicRoutes.includes(currentPath)) {
+      return true;
+    }
+    
+    return true;
   }
+
+
 
 
   /**
