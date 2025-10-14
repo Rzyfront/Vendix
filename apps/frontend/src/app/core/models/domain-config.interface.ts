@@ -28,7 +28,7 @@ export interface DomainConfig {
 export interface DomainResolution {
   id: string;
   hostname: string;
-  type?: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
+  raw_domain_type?: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
   domainType?: string; // Alternative field used by API
   purpose?: 'landing' | 'admin' | 'ecommerce';
   app?: string; // App environment identifier (VENDIX_LANDING, VENDIX_ADMIN, etc.)

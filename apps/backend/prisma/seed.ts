@@ -176,7 +176,7 @@ async function main() {
 
   // 5. Configurar dominio para la corporación del super admin
   console.log('🌐 Configurando dominio para Vendix Corp...');
-  console.log('   📍 Hostname: localhost');
+  console.log('   📍 Hostname: vendix.com');
   console.log('   🏢 Organización: Vendix Corp');
 
   // Primero eliminar cualquier configuración existente para este hostname

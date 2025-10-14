@@ -130,7 +130,7 @@ export class DomainDetectorService {
 
     // Map domain type from API to enum
     let domainType: DomainType;
-    switch (domainInfo.type) {
+    switch (domainInfo.raw_domain_type) {
       case 'organization_root':
         domainType = DomainType.ORGANIZATION_ROOT;
         break;
@@ -190,7 +190,7 @@ export class DomainDetectorService {
       organizationSlug: domainInfo.organizationSlug,
       storeSlug: domainInfo.storeSlug,
       customConfig: domainInfo.config,
-      isVendixDomain: false,
+      isVendixDomain: domainInfo.organizationSlug === 'vendix-corp',
       hostname
     };
   }

@@ -35,11 +35,17 @@ export class TenantConfigService {
       // Guardar configuración de dominio
       this.domainConfigSubject.next(domainConfig);
       
-      // Si es dominio de Vendix, usar configuración por defecto
-      if (domainConfig.isVendixDomain && 
-          (domainConfig.environment === AppEnvironment.VENDIX_LANDING || 
+      // Si es dominio de Vendix, usar configuración por defecto pero aplicar branding personalizado si existe
+      if (domainConfig.isVendixDomain &&
+          (domainConfig.environment === AppEnvironment.VENDIX_LANDING ||
            domainConfig.environment === AppEnvironment.VENDIX_ADMIN)) {
         const vendixConfig = this.getVendixDefaultConfig();
+        
+        // Aplicar branding personalizado desde la configuración del dominio si está disponible
+        if (domainConfig.customConfig?.branding) {
+          vendixConfig.branding = this.mergeVendixBranding(vendixConfig.branding, domainConfig.customConfig.branding);
+        }
+        
         this.tenantConfigSubject.next(vendixConfig);
         return vendixConfig;
       }
@@ -243,6 +249,31 @@ export class TenantConfigService {
       console.error('[TENANT CONFIG] Error fetching from API:', error);
       return null;
     }
+  }
+
+  /**
+   * Fusiona el branding por defecto de Vendix con el branding personalizado del dominio
+   */
+  private mergeVendixBranding(defaultBranding: any, domainBranding: any): any {
+    return {
+      ...defaultBranding,
+      colors: {
+        ...defaultBranding.colors,
+        primary: domainBranding.primary_color || defaultBranding.colors.primary,
+        secondary: domainBranding.secondary_color || defaultBranding.colors.secondary,
+        accent: domainBranding.accent_color || defaultBranding.colors.accent,
+        background: domainBranding.background_color || defaultBranding.colors.background,
+        text: {
+          primary: domainBranding.text_color || defaultBranding.colors.text.primary,
+          secondary: domainBranding.text_color || defaultBranding.colors.text.secondary,
+          muted: domainBranding.text_color || defaultBranding.colors.text.muted
+        }
+      },
+      logo: {
+        ...defaultBranding.logo,
+        url: domainBranding.logo_url || defaultBranding.logo.url
+      }
+    };
   }
 
   /**
