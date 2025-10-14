@@ -150,7 +150,7 @@ export class DomainDetectorService {
             domainType = DomainType.ORGANIZATION_ROOT;
             break;
           default:
-            throw new Error(`Unknown domain type: ${domainInfo.type || domainInfo.domainType}`);
+            throw new Error(`Unknown domain type: ${domainInfo.raw_domain_type || domainInfo.domainType}`);
         }
     }
 
