@@ -1,51 +1,57 @@
-.store-admin-layout {
-  min-height: 100vh;
-  background: #f8fafc;
+/* Applied Vendix Corp branding colors */
+:root {
+  --primary: #7ED7A5;
+  --secondary: #2F6F4E;
+  --background: #F4F4F4;
+  --accent: #FFFFFF;
+  --border: #B0B0B0;
+  --text: #222222;
 }
 
-.store-admin-header {
-  background: white;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 1rem 2rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+/* Global styles for the layout */
+:host {
+  display: block;
+  height: 100vh;
+  font-family: 'Inter', sans-serif;
 }
 
-.header-content {
-  max-width: 1200px;
-  margin: 0 auto;
+.flex {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
 }
 
-.store-admin-header h1 {
-  margin: 0;
-  color: #1e293b;
-  font-size: 1.5rem;
-  font-weight: 600;
+.h-full {
+  height: 100%;
 }
 
-.store-admin-nav {
-  display: flex;
-  gap: 2rem;
+.overflow-hidden {
+  overflow: hidden;
 }
 
-.nav-link {
-  color: #64748b;
-  text-decoration: none;
-  font-weight: 500;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  transition: all 0.2s;
+.overflow-y-auto {
+  overflow-y: auto;
 }
 
-.nav-link:hover {
-  color: #2563eb;
-  background: #f1f5f9;
+.flex-1 {
+  flex: 1 1 0%;
 }
 
-.store-admin-main {
-  padding: 2rem;
-  max-width: 1200px;
-  margin: 0 auto;
+.flex-col {
+  flex-direction: column;
+}
+
+/* Main content area styles */
+main {
+  background-color: var(--background);
+}
+
+/* Ensure proper spacing */
+.p-6 {
+  padding: 1.5rem;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .p-6 {
+    padding: 1rem;
+  }
 }

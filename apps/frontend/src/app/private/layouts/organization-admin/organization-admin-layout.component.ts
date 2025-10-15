@@ -1,111 +1,107 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { ButtonComponent } from '../../../shared/components/button/button.component';
+import { SidebarComponent, MenuItem } from '../../shared/components/sidebar/sidebar.component';
+import { HeaderComponent } from '../../shared/components/header/header.component';
 
 @Component({
   selector: 'app-organization-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent],
+  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
   template: `
-    <div class="organization-admin-layout">
-      <!-- Header -->
-      <header class="layout-header">
-        <div class="header-content">
-          <div class="brand-section">
-            <div class="logo">
-              <img src="/assets/vlogo.png" alt="Vendix" class="logo-image">
-              <span class="brand-name">Organización</span>
-            </div>
-          </div>
-          
-          <nav class="main-nav">
-            <a routerLink="/organization/dashboard" routerLinkActive="active" class="nav-link">
-              Dashboard
-            </a>
-            <a routerLink="/organization/stores" routerLinkActive="active" class="nav-link">
-              Tiendas
-            </a>
-            <a routerLink="/organization/users" routerLinkActive="active" class="nav-link">
-              Usuarios
-            </a>
-            <a routerLink="/organization/reports" routerLinkActive="active" class="nav-link">
-              Reportes
-            </a>
-            <a routerLink="/organization/settings" routerLinkActive="active" class="nav-link">
-              Configuración
-            </a>
-          </nav>
-
-          <div class="user-section">
-            <div class="user-info">
-              <span class="user-name">Admin Organización</span>
-              <span class="user-role">Administrador</span>
-            </div>
-            <app-button variant="ghost" size="sm">
-              Cerrar Sesión
-            </app-button>
-          </div>
-        </div>
-      </header>
-
+    <div class="flex h-full">
+      <!-- Sidebar -->
+      <app-sidebar 
+        [menuItems]="menuItems"
+        subtitle="Organization Admin"
+        [collapsed]="sidebarCollapsed">
+      </app-sidebar>
+      
       <!-- Main Content -->
-      <main class="layout-main">
-        <div class="sidebar">
-          <nav class="sidebar-nav">
-            <h4 class="sidebar-title">Gestión</h4>
-            <a routerLink="/organization/dashboard" routerLinkActive="active" class="sidebar-link">
-              📊 Dashboard
-            </a>
-            <a routerLink="/organization/stores" routerLinkActive="active" class="sidebar-link">
-              🏪 Tiendas
-            </a>
-            <a routerLink="/organization/users" routerLinkActive="active" class="sidebar-link">
-              👥 Usuarios
-            </a>
-            <a routerLink="/organization/products" routerLinkActive="active" class="sidebar-link">
-              📦 Productos
-            </a>
-            <a routerLink="/organization/orders" routerLinkActive="active" class="sidebar-link">
-              🛒 Pedidos
-            </a>
-            
-            <h4 class="sidebar-title">Análisis</h4>
-            <a routerLink="/organization/reports" routerLinkActive="active" class="sidebar-link">
-              📈 Reportes
-            </a>
-            <a routerLink="/organization/analytics" routerLinkActive="active" class="sidebar-link">
-              📊 Analytics
-            </a>
-            
-            <h4 class="sidebar-title">Configuración</h4>
-            <a routerLink="/organization/settings" routerLinkActive="active" class="sidebar-link">
-              ⚙️ Configuración
-            </a>
-            <a routerLink="/organization/billing" routerLinkActive="active" class="sidebar-link">
-              💳 Facturación
-            </a>
-          </nav>
-        </div>
-
-        <div class="content-area">
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <!-- Header -->
+        <app-header 
+          [title]="currentPageTitle"
+          [breadcrumb]="breadcrumb"
+          [user]="user"
+          (toggleSidebar)="toggleSidebar()">
+        </app-header>
+        
+        <!-- Page Content -->
+        <main class="flex-1 overflow-y-auto p-6" style="background-color: var(--background);">
           <router-outlet></router-outlet>
-        </div>
-      </main>
-
-      <!-- Footer -->
-      <footer class="layout-footer">
-        <div class="footer-content">
-          <p>&copy; 2024 Vendix - Panel de Organización</p>
-          <div class="footer-links">
-            <a href="/help">Ayuda</a>
-            <a href="/support">Soporte</a>
-            <a href="/privacy">Privacidad</a>
-          </div>
-        </div>
-      </footer>
+        </main>
+      </div>
     </div>
   `,
   styleUrls: ['./organization-admin-layout.component.scss']
 })
-export class OrganizationAdminLayoutComponent {}
+export class OrganizationAdminLayoutComponent {
+  sidebarCollapsed = false;
+  currentPageTitle = 'Organization Dashboard';
+  
+  breadcrumb = {
+    parent: 'Organization',
+    current: 'Dashboard'
+  };
+
+  user = {
+    name: 'John Doe',
+    role: 'Organization Admin',
+    initials: 'JD'
+  };
+
+  menuItems: MenuItem[] = [
+    {
+      label: 'Dashboard',
+      icon: 'fas fa-home',
+      route: '/organization/dashboard'
+    },
+    {
+      label: 'Analytics',
+      icon: 'fas fa-chart-line',
+      children: [
+        { label: 'Reports', icon: 'fas fa-circle', route: '/organization/analytics/reports' },
+        { label: 'Statistics', icon: 'fas fa-circle', route: '/organization/analytics/statistics' },
+        { label: 'Insights', icon: 'fas fa-circle', route: '/organization/analytics/insights' }
+      ]
+    },
+    {
+      label: 'Users',
+      icon: 'fas fa-users',
+      children: [
+        { label: 'All Users', icon: 'fas fa-circle', route: '/organization/users/all' },
+        { label: 'Roles', icon: 'fas fa-circle', route: '/organization/users/roles' },
+        { label: 'Permissions', icon: 'fas fa-circle', route: '/organization/users/permissions' }
+      ]
+    },
+    {
+      label: 'Products',
+      icon: 'fas fa-box',
+      children: [
+        { label: 'All Products', icon: 'fas fa-circle', route: '/organization/products/all' },
+        { label: 'Categories', icon: 'fas fa-circle', route: '/organization/products/categories' },
+        { label: 'Inventory', icon: 'fas fa-circle', route: '/organization/products/inventory' }
+      ]
+    },
+    {
+      label: 'Orders',
+      icon: 'fas fa-shopping-cart',
+      route: '/organization/orders',
+      badge: '12'
+    },
+    {
+      label: 'Settings',
+      icon: 'fas fa-cog',
+      children: [
+        { label: 'General', icon: 'fas fa-circle', route: '/organization/settings/general' },
+        { label: 'Security', icon: 'fas fa-circle', route: '/organization/settings/security' },
+        { label: 'Notifications', icon: 'fas fa-circle', route: '/organization/settings/notifications' }
+      ]
+    }
+  ];
+
+  toggleSidebar() {
+    this.sidebarCollapsed = !this.sidebarCollapsed;
+  }
+}

@@ -1,0 +1,26 @@
+/* Applied Vendix Corp branding colors */
+:root {
+  --primary: #7ED7A5;
+  --secondary: #2F6F4E;
+  --background: #F4F4F4;
+  --accent: #FFFFFF;
+  --border: #B0B0B0;
+  --text: #222222;
+}
+
+/* Header specific styles */
+header {
+  border-bottom: 1px solid var(--border);
+  background-color: white;
+}
+
+button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}

@@ -1,119 +1,114 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { ButtonComponent } from '../../../shared/components/button/button.component';
+import { SidebarComponent, MenuItem } from '../../shared/components/sidebar/sidebar.component';
+import { HeaderComponent } from '../../shared/components/header/header.component';
 
 @Component({
   selector: 'app-store-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent],
+  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
   template: `
-    <div class="store-admin-layout">
-      <!-- Header -->
-      <header class="layout-header">
-        <div class="header-content">
-          <div class="brand-section">
-            <div class="logo">
-              <img src="/assets/vlogo.png" alt="Vendix" class="logo-image">
-              <span class="brand-name">Mi Tienda</span>
-            </div>
-          </div>
-          
-          <nav class="main-nav">
-            <a routerLink="/store/dashboard" routerLinkActive="active" class="nav-link">
-              Dashboard
-            </a>
-            <a routerLink="/store/products" routerLinkActive="active" class="nav-link">
-              Productos
-            </a>
-            <a routerLink="/store/orders" routerLinkActive="active" class="nav-link">
-              Pedidos
-            </a>
-            <a routerLink="/store/customers" routerLinkActive="active" class="nav-link">
-              Clientes
-            </a>
-            <a routerLink="/store/settings" routerLinkActive="active" class="nav-link">
-              Configuración
-            </a>
-          </nav>
-
-          <div class="user-section">
-            <div class="user-info">
-              <span class="user-name">Admin Tienda</span>
-              <span class="user-role">Administrador</span>
-            </div>
-            <app-button variant="ghost" size="sm">
-              Cerrar Sesión
-            </app-button>
-          </div>
-        </div>
-      </header>
-
+    <div class="flex h-full">
+      <!-- Sidebar -->
+      <app-sidebar 
+        [menuItems]="menuItems"
+        subtitle="Store Admin"
+        [collapsed]="sidebarCollapsed">
+      </app-sidebar>
+      
       <!-- Main Content -->
-      <main class="layout-main">
-        <div class="sidebar">
-          <nav class="sidebar-nav">
-            <h4 class="sidebar-title">Gestión</h4>
-            <a routerLink="/store/dashboard" routerLinkActive="active" class="sidebar-link">
-              📊 Dashboard
-            </a>
-            <a routerLink="/store/products" routerLinkActive="active" class="sidebar-link">
-              📦 Productos
-            </a>
-            <a routerLink="/store/categories" routerLinkActive="active" class="sidebar-link">
-              🏷️ Categorías
-            </a>
-            <a routerLink="/store/inventory" routerLinkActive="active" class="sidebar-link">
-              📋 Inventario
-            </a>
-            <a routerLink="/store/orders" routerLinkActive="active" class="sidebar-link">
-              🛒 Pedidos
-            </a>
-            
-            <h4 class="sidebar-title">Clientes</h4>
-            <a routerLink="/store/customers" routerLinkActive="active" class="sidebar-link">
-              👥 Clientes
-            </a>
-            <a routerLink="/store/reviews" routerLinkActive="active" class="sidebar-link">
-              ⭐ Reseñas
-            </a>
-            
-            <h4 class="sidebar-title">Marketing</h4>
-            <a routerLink="/store/promotions" routerLinkActive="active" class="sidebar-link">
-              🎯 Promociones
-            </a>
-            <a routerLink="/store/coupons" routerLinkActive="active" class="sidebar-link">
-              🎫 Cupones
-            </a>
-            
-            <h4 class="sidebar-title">Configuración</h4>
-            <a routerLink="/store/settings" routerLinkActive="active" class="sidebar-link">
-              ⚙️ Configuración
-            </a>
-            <a routerLink="/store/appearance" routerLinkActive="active" class="sidebar-link">
-              🎨 Apariencia
-            </a>
-          </nav>
-        </div>
-
-        <div class="content-area">
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <!-- Header -->
+        <app-header 
+          [title]="currentPageTitle"
+          [breadcrumb]="breadcrumb"
+          [user]="user"
+          (toggleSidebar)="toggleSidebar()">
+        </app-header>
+        
+        <!-- Page Content -->
+        <main class="flex-1 overflow-y-auto p-6" style="background-color: var(--background);">
           <router-outlet></router-outlet>
-        </div>
-      </main>
-
-      <!-- Footer -->
-      <footer class="layout-footer">
-        <div class="footer-content">
-          <p>&copy; 2024 Vendix - Panel de Tienda</p>
-          <div class="footer-links">
-            <a href="/help">Ayuda</a>
-            <a href="/support">Soporte</a>
-            <a href="/privacy">Privacidad</a>
-          </div>
-        </div>
-      </footer>
+        </main>
+      </div>
     </div>
   `,
   styleUrls: ['./store-admin-layout.component.scss']
 })
-export class StoreAdminLayoutComponent {}
+export class StoreAdminLayoutComponent {
+  sidebarCollapsed = false;
+  currentPageTitle = 'Store Dashboard';
+  
+  breadcrumb = {
+    parent: 'Store',
+    current: 'Dashboard'
+  };
+
+  user = {
+    name: 'Jane Smith',
+    role: 'Store Manager',
+    initials: 'JS'
+  };
+
+  menuItems: MenuItem[] = [
+    {
+      label: 'Dashboard',
+      icon: 'fas fa-home',
+      route: '/store/dashboard'
+    },
+    {
+      label: 'Products',
+      icon: 'fas fa-box',
+      children: [
+        { label: 'All Products', icon: 'fas fa-circle', route: '/store/products/all' },
+        { label: 'Categories', icon: 'fas fa-circle', route: '/store/products/categories' },
+        { label: 'Inventory', icon: 'fas fa-circle', route: '/store/products/inventory' }
+      ]
+    },
+    {
+      label: 'Orders',
+      icon: 'fas fa-shopping-cart',
+      route: '/store/orders',
+      badge: '8'
+    },
+    {
+      label: 'Customers',
+      icon: 'fas fa-users',
+      children: [
+        { label: 'All Customers', icon: 'fas fa-circle', route: '/store/customers/all' },
+        { label: 'Reviews', icon: 'fas fa-circle', route: '/store/customers/reviews' }
+      ]
+    },
+    {
+      label: 'Marketing',
+      icon: 'fas fa-bullhorn',
+      children: [
+        { label: 'Promotions', icon: 'fas fa-circle', route: '/store/marketing/promotions' },
+        { label: 'Coupons', icon: 'fas fa-circle', route: '/store/marketing/coupons' }
+      ]
+    },
+    {
+      label: 'Analytics',
+      icon: 'fas fa-chart-line',
+      children: [
+        { label: 'Sales', icon: 'fas fa-circle', route: '/store/analytics/sales' },
+        { label: 'Traffic', icon: 'fas fa-circle', route: '/store/analytics/traffic' },
+        { label: 'Performance', icon: 'fas fa-circle', route: '/store/analytics/performance' }
+      ]
+    },
+    {
+      label: 'Settings',
+      icon: 'fas fa-cog',
+      children: [
+        { label: 'General', icon: 'fas fa-circle', route: '/store/settings/general' },
+        { label: 'Appearance', icon: 'fas fa-circle', route: '/store/settings/appearance' },
+        { label: 'Security', icon: 'fas fa-circle', route: '/store/settings/security' }
+      ]
+    }
+  ];
+
+  toggleSidebar() {
+    this.sidebarCollapsed = !this.sidebarCollapsed;
+  }
+}

@@ -60,28 +60,28 @@ export interface LoginError {
         <!-- Login Form -->
         <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
           <div class="space-y-4">
-            <!-- Slug Field (only for Vendix context) -->
+            <!-- Vlink Field (only for Vendix context) -->
             @if (contextType === 'vendix') {
               <div>
-                <label for="slug" class="block text-sm font-medium text-gray-700">
-                  Slug de Organización o Tienda
+                <label for="vlink" class="block text-sm font-medium text-gray-700">
+                  Vlink
                 </label>
                 <input
-                  id="slug"
-                  formControlName="slug"
+                  id="vlink"
+                  formControlName="vlink"
                   type="text"
                   autocomplete="organization"
-                  [class]="getFieldClass('slug')"
+                  [class]="getFieldClass('vlink')"
                   placeholder="mi-organizacion"
-                  (blur)="onFieldBlur('slug')"
-                  (input)="onFieldInput('slug')">
-                @if (hasFieldError('slug')) {
+                  (blur)="onFieldBlur('vlink')"
+                  (input)="onFieldInput('vlink')">
+                @if (hasFieldError('vlink')) {
                   <div class="mt-1 text-sm text-red-600">
-                    {{ getFieldError('slug') }}
+                    {{ getFieldError('vlink') }}
                   </div>
                 }
                 <p class="mt-1 text-xs text-gray-500">
-                  Ingresa el slug de tu organización o tienda
+                  Ingresa el vlink de tu organización o tienda
                 </p>
               </div>
             }
@@ -293,7 +293,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     private router: Router
   ) {
     this.loginForm = this.fb.group({
-      slug: [''],
+      vlink: [''],
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]]
     });
@@ -334,28 +334,34 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     const tenantConfig = appConfig.tenantConfig;
 
     // Determine context type based on domain configuration
-    if (domainConfig.organization_slug) {
-      this.contextType = 'organization';
-      this.displayName = domainConfig.organization_slug;
-      // Clear slug field for organization context (will use domain slug)
-      this.loginForm.patchValue({ slug: '' });
-      this.loginForm.get('slug')?.clearValidators();
-      this.loginForm.get('slug')?.updateValueAndValidity();
-    } else if (domainConfig.store_slug) {
-      this.contextType = 'store';
-      this.displayName = domainConfig.store_slug;
-      // Clear slug field for store context (will use domain slug)
-      this.loginForm.patchValue({ slug: '' });
-      this.loginForm.get('slug')?.clearValidators();
-      this.loginForm.get('slug')?.updateValueAndValidity();
-    } else {
+    if (domainConfig.domainType === 'vendix_core') {
       this.contextType = 'vendix';
       this.displayName = 'Vendix Platform';
-      // Clear slug field for vendix context (user must enter it)
-      this.loginForm.patchValue({ slug: '' });
-      // Require slug for vendix context
-      this.loginForm.get('slug')?.setValidators([Validators.required]);
-      this.loginForm.get('slug')?.updateValueAndValidity();
+      // Require vlink for vendix context
+      this.loginForm.patchValue({ vlink: '' });
+      this.loginForm.get('vlink')?.setValidators([Validators.required]);
+      this.loginForm.get('vlink')?.updateValueAndValidity();
+    } else if (domainConfig.domainType === 'organization') {
+      this.contextType = 'organization';
+      this.displayName = domainConfig.organization_slug || '';
+      // Clear vlink field for organization context (will use domain slug)
+      this.loginForm.patchValue({ vlink: '' });
+      this.loginForm.get('vlink')?.clearValidators();
+      this.loginForm.get('vlink')?.updateValueAndValidity();
+    } else if (domainConfig.domainType === 'store' || domainConfig.domainType === 'ecommerce') {
+      this.contextType = 'store';
+      this.displayName = domainConfig.store_slug || '';
+      // Clear vlink field for store context (will use domain slug)
+      this.loginForm.patchValue({ vlink: '' });
+      this.loginForm.get('vlink')?.clearValidators();
+      this.loginForm.get('vlink')?.updateValueAndValidity();
+    } else {
+      // Fallback to vendix context if domain type is not recognized
+      this.contextType = 'vendix';
+      this.displayName = 'Vendix Platform';
+      this.loginForm.patchValue({ vlink: '' });
+      this.loginForm.get('vlink')?.setValidators([Validators.required]);
+      this.loginForm.get('vlink')?.updateValueAndValidity();
     }
 
     // Apply branding
@@ -529,8 +535,8 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     const field = this.loginForm.get(fieldName);
     if (field?.errors && field?.touched) {
       if (field.errors['required']) {
-        if (fieldName === 'slug') {
-          return 'El slug es requerido';
+        if (fieldName === 'vlink') {
+          return 'El vlink es requerido';
         }
         return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
       }
@@ -553,15 +559,15 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     if (this.loginForm.valid && this.loginState !== 'loading') {
       this.clearError();
 
-      const { slug, email, password } = this.loginForm.value;
+      const { vlink, email, password } = this.loginForm.value;
 
       let store_slug: string | undefined;
       let organization_slug: string | undefined;
 
       // Determine which slug to use based on context
       if (this.contextType === 'vendix') {
-        // En contexto Vendix, el slug ingresado por el usuario se usa como organization_slug
-        organization_slug = slug;
+        // En contexto Vendix, el vlink ingresado por el usuario se usa como organization_slug
+        organization_slug = vlink;
       } else if (this.contextType === 'organization') {
         // En contexto organización, usar el slug del dominio
         organization_slug = this.displayName;
