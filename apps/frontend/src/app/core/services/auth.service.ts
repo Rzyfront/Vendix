@@ -11,8 +11,8 @@ import { environment } from '../../../environments/environment';
 export interface LoginDto {
   email: string;
   password: string;
-  storeSlug?: string;
-  organizationSlug?: string;
+  store_slug?: string;
+  organization_slug?: string;
 }
 
 export interface RegisterOwnerDto {
@@ -92,6 +92,8 @@ export interface AuthResponse {
     access_token: string;
     refresh_token: string;
     user: BackendUser;
+    permissions?: string[];
+    roles?: string[];
   } | null;
   error: string;
   meta?: any;
@@ -111,16 +113,16 @@ export class AuthService {
     private tenantFacade: TenantFacade
   ) {}
 
-  // Login - auto-populates organizationSlug/storeSlug from current domain
+  // Login - auto-populates organization_slug/store_slug from current domain
   login(loginDto: LoginDto): Observable<AuthResponse> {
-    // Auto-populate organizationSlug/storeSlug from current domain if not provided
+    // Auto-populate organization_slug/store_slug from current domain if not provided
     const enrichedLoginDto = { ...loginDto };
 
-    if (!enrichedLoginDto.organizationSlug && !enrichedLoginDto.storeSlug) {
+    if (!enrichedLoginDto.organization_slug && !enrichedLoginDto.store_slug) {
       const currentDomain = this.tenantFacade.getCurrentDomainConfig();
       if (currentDomain) {
-        enrichedLoginDto.organizationSlug = currentDomain.organizationSlug;
-        enrichedLoginDto.storeSlug = currentDomain.storeSlug;
+        enrichedLoginDto.organization_slug = currentDomain.organization_slug;
+        enrichedLoginDto.store_slug = currentDomain.store_slug;
       }
     }
 
@@ -151,23 +153,22 @@ export class AuthService {
             const permissions = decodedToken?.permissions || [];
             const roles = decodedToken?.roles || [];
 
-            // Update auth store - this will trigger the navigation in effects
-            this.store.dispatch(AuthActions.loginSuccess({
-              user: frontendUser,
-              tokens: {
-                accessToken: response.data.access_token,
-                refreshToken: response.data.refresh_token
-              },
-              permissions,
-              roles
-            }));
-
             // Set tokens in localStorage for interceptor
             if (typeof localStorage !== 'undefined') {
               localStorage.setItem('access_token', response.data.access_token);
               localStorage.setItem('refresh_token', response.data.refresh_token);
             }
 
+            // Return the transformed response for the effect to handle
+            return {
+              ...response,
+              data: {
+                ...response.data,
+                user: frontendUser,
+                permissions,
+                roles
+              }
+            };
           }
 
           return response;
@@ -216,8 +217,8 @@ export class AuthService {
   }
 
   // Forgot Password
-  forgotPassword(email: string, organizationSlug: string): Observable<any> {
-    return this.http.post(`${this.API_URL}/forgot-password`, { email, organization_slug: organizationSlug });
+  forgotPassword(email: string, organization_slug: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/forgot-password`, { email, organization_slug });
   }
 
   // Reset Password

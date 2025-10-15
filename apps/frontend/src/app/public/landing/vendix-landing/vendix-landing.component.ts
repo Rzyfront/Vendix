@@ -38,10 +38,8 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       if (tenantConfig) {
         this.tenantConfig = tenantConfig;
         
-        // Update branding colors via CSS variables
-        if (tenantConfig.branding?.colors) {
-          this.updateCssVariables(tenantConfig.branding.colors);
-        }
+        // Los estilos ya fueron aplicados globalmente por ThemeService durante la inicialización
+        // No es necesario actualizarlos aquí nuevamente
 
         // Load dynamic content from tenant config if available
         this.loadContentFromTenantConfig(tenantConfig);
@@ -64,15 +62,6 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  private updateCssVariables(colors: any): void {
-    const root = this.el.nativeElement;
-    if (colors.primary) this.renderer.setStyle(root, '--color-primary', colors.primary);
-    if (colors.secondary) this.renderer.setStyle(root, '--color-secondary', colors.secondary);
-    if (colors.background) this.renderer.setStyle(root, '--color-background', colors.background);
-    if (colors.text?.primary || colors.text) this.renderer.setStyle(root, '--color-text-primary', colors.text?.primary || colors.text);
-    if (colors.text?.secondary) this.renderer.setStyle(root, '--color-text-secondary', colors.text?.secondary);
-    if (colors.surface) this.renderer.setStyle(root, '--color-border', colors.surface);
-  }
 
   getBackgroundGradient(): string {
     // This will now use the CSS variables if they are set, otherwise it will use the defaults from :root

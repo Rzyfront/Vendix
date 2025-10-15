@@ -54,8 +54,7 @@ export interface DomainResolutionResponse {
   store_slug?: string;
   organization_name?: string;
   organization_slug?: string;
-  domain_type: 'organization' | 'store';
-  raw_domain_type?: string;
+  domain_type: string;
   status?: string;
   ssl_status?: string;
   is_primary?: boolean;
@@ -170,9 +169,32 @@ export class DomainsService implements OnModuleInit {
       return cached;
     }
 
-    // Buscar configuración del dominio
+    // Buscar configuración del dominio con relaciones
     const domainConfig = await this.prisma.domain_settings.findUnique({
       where: { hostname: resolvedHostname },
+      include: {
+        organization: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            organizations: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!domainConfig) {
@@ -182,35 +204,20 @@ export class DomainsService implements OnModuleInit {
       );
     }
 
-    // Obtener detalles de store y organización
+    // Obtener información de store/organización
     let storeName: string | undefined;
     let store_slug: string | undefined;
     let organization_name: string | undefined;
     let organization_slug: string | undefined;
-    let domainType: 'organization' | 'store' = 'organization';
 
-    if (domainConfig.store_id) {
-      const store = await this.prisma.stores.findUnique({
-        where: { id: domainConfig.store_id },
-        include: { organizations: true },
-      });
-
-      if (store) {
-        storeName = store.name;
-        store_slug = store.slug;
-        organization_name = store.organizations?.name;
-        organization_slug = store.organizations?.slug;
-        domainType = 'store';
-      }
-    } else if (domainConfig.organization_id) {
-      const organization = await this.prisma.organizations.findUnique({
-        where: { id: domainConfig.organization_id },
-      });
-
-      if (organization) {
-        organization_name = organization.name;
-        organization_slug = organization.slug;
-      }
+    if (domainConfig.store_id && domainConfig.store) {
+      storeName = domainConfig.store.name;
+      store_slug = domainConfig.store.slug;
+      organization_name = domainConfig.store.organizations?.name;
+      organization_slug = domainConfig.store.organizations?.slug;
+    } else if (domainConfig.organization_id && domainConfig.organization) {
+      organization_name = domainConfig.organization.name;
+      organization_slug = domainConfig.organization.slug;
     }
 
     const response: DomainResolutionResponse = {
@@ -225,8 +232,7 @@ export class DomainsService implements OnModuleInit {
       store_slug: store_slug,
       organization_name: organization_name,
       organization_slug: organization_slug,
-      domain_type: domainType,
-      raw_domain_type: domainConfig.domain_type,
+      domain_type: domainConfig.domain_type,
       status: domainConfig.status,
       ssl_status: domainConfig.ssl_status,
       is_primary: domainConfig.is_primary,
@@ -333,7 +339,7 @@ export class DomainsService implements OnModuleInit {
     // Estado inicial
     const status =
       data.status ||
-      (inferredType === 'store_custom' ? 'pending_dns' : 'active');
+      (inferredType === 'store' ? 'pending_dns' : 'active');
     const sslStatus = data.sslStatus || 'none';
 
     // Verificación: un dominio primario por (org, store?) y tipo base organizacional/tienda
@@ -361,7 +367,7 @@ export class DomainsService implements OnModuleInit {
 
     // Generar token de verificación si custom
     const verificationToken =
-      inferredType === 'store_custom' ? this.generateVerificationToken() : null;
+      inferredType === 'store' ? this.generateVerificationToken() : null;
 
     const domainSetting = await this.prisma.domain_settings.create({
       data: {
@@ -651,8 +657,8 @@ export class DomainsService implements OnModuleInit {
     const checksToRun =
       body.checks && body.checks.length > 0 ? body.checks : ['txt', 'cname'];
 
-    // Solo verificamos tipos custom / root externos
-    const verifiableTypes = ['store_custom', 'organization_root'];
+    // Solo verificamos tipos store / organization externos
+    const verifiableTypes = ['store', 'organization'];
     if (!verifiableTypes.includes(domain.domain_type as string)) {
       throw new BadRequestException(
         `Domain type ${domain.domain_type} is not verifiable`,
@@ -857,11 +863,11 @@ export class DomainsService implements OnModuleInit {
     if (hostname.endsWith('.vendix.com')) {
       const parts = hostname.split('.');
       if (parts.length === 3)
-        return hasStore ? 'store_subdomain' : 'organization_subdomain';
-      if (parts.length === 4) return 'store_subdomain';
+        return hasStore ? 'ecommerce' : 'organization';
+      if (parts.length === 4) return 'ecommerce';
       return 'vendix_core';
     }
-    return hasStore ? 'store_custom' : 'organization_root';
+    return hasStore ? 'store' : 'organization';
   }
 
   private async clearExistingPrimary(

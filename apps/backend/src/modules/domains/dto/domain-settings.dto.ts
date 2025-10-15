@@ -428,14 +428,13 @@ export class CreateDomainSettingDto {
   @IsNotEmpty()
   hostname: string;
 
-  @ApiPropertyOptional({ example: 'store_subdomain' })
+  @ApiPropertyOptional({ example: 'ecommerce' })
   @IsOptional()
   @IsIn([
     'vendix_core',
-    'organization_root',
-    'organization_subdomain',
-    'store_subdomain',
-    'store_custom',
+    'organization',
+    'store',
+    'ecommerce',
   ])
   domainType?: string;
 
@@ -483,10 +482,9 @@ export class UpdateDomainSettingDto {
   @IsOptional()
   @IsIn([
     'vendix_core',
-    'organization_root',
-    'organization_subdomain',
-    'store_subdomain',
-    'store_custom',
+    'organization',
+    'store',
+    'ecommerce',
   ])
   domainType?: string;
 

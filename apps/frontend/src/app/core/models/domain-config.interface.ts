@@ -1,9 +1,8 @@
 export enum DomainType {
   VENDIX_CORE = 'vendix_core',
-  ORGANIZATION_ROOT = 'organization_root',
-  ORGANIZATION_SUBDOMAIN = 'org_subdomain',
-  STORE_SUBDOMAIN = 'store_subdomain',
-  STORE_CUSTOM = 'store_custom'
+  ORGANIZATION = 'organization',
+  STORE = 'store',
+  ECOMMERCE = 'ecommerce'
 }
 
 export enum AppEnvironment {
@@ -18,8 +17,8 @@ export enum AppEnvironment {
 export interface DomainConfig {
   domainType: DomainType;
   environment: AppEnvironment;
-  organizationSlug?: string;
-  storeSlug?: string;
+  organization_slug?: string;
+  store_slug?: string;
   customConfig?: any;
   isVendixDomain: boolean;
   hostname: string;
@@ -39,7 +38,7 @@ export interface DomainResolution {
   organization_name: string;
   organization_slug: string;
   domain_type: string;
-  raw_domain_type: 'organization_root' | 'organization_subdomain' | 'store_subdomain' | 'store_custom';
+  raw_domain_type: 'vendix_core' | 'organization' | 'store' | 'ecommerce';
   status: string;
   ssl_status: string;
   is_primary: boolean;

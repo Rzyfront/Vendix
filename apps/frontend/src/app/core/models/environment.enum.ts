@@ -1,9 +1,8 @@
 export enum DomainType {
   VENDIX_CORE = 'vendix_core',
-  ORGANIZATION_ROOT = 'organization_root',
-  ORGANIZATION_SUBDOMAIN = 'org_subdomain',
-  STORE_SUBDOMAIN = 'store_subdomain',
-  STORE_CUSTOM = 'store_custom'
+  ORGANIZATION = 'organization',
+  STORE = 'store',
+  ECOMMERCE = 'ecommerce'
 }
 
 export enum AppEnvironment {

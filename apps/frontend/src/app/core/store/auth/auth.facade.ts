@@ -38,8 +38,8 @@ export class AuthFacade {
   readonly authInfo$ = this.store.select(AuthSelectors.selectAuthInfo);
 
   // Actions
-  login(email: string, password: string, storeSlug?: string, organizationSlug?: string): void {
-    this.store.dispatch(AuthActions.login({ email, password, storeSlug, organizationSlug }));
+  login(email: string, password: string, store_slug?: string, organization_slug?: string): void {
+    this.store.dispatch(AuthActions.login({ email, password, store_slug, organization_slug }));
   }
 
   logout(): void {

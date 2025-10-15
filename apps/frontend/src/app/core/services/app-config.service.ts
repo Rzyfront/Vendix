@@ -494,23 +494,32 @@ export class AppConfigService {
     // Map domain type from API to enum
     let domainType: DomainType;
     switch (domainInfo.raw_domain_type) {
-      case 'organization_root':
-        domainType = DomainType.ORGANIZATION_ROOT;
+      case 'vendix_core':
+        domainType = DomainType.VENDIX_CORE;
         break;
-      case 'organization_subdomain':
-        domainType = DomainType.ORGANIZATION_SUBDOMAIN;
+      case 'organization':
+        domainType = DomainType.ORGANIZATION;
         break;
-      case 'store_subdomain':
-        domainType = DomainType.STORE_SUBDOMAIN;
+      case 'store':
+        domainType = DomainType.STORE;
         break;
-      case 'store_custom':
-        domainType = DomainType.STORE_CUSTOM;
+      case 'ecommerce':
+        domainType = DomainType.ECOMMERCE;
         break;
       default:
-        // Handle cases where domainType is provided directly (like "organization")
+        // Handle cases where domainType is provided directly
         switch (domainInfo.domain_type) {
+          case 'vendix_core':
+            domainType = DomainType.VENDIX_CORE;
+            break;
           case 'organization':
-            domainType = DomainType.ORGANIZATION_ROOT;
+            domainType = DomainType.ORGANIZATION;
+            break;
+          case 'store':
+            domainType = DomainType.STORE;
+            break;
+          case 'ecommerce':
+            domainType = DomainType.ECOMMERCE;
             break;
           default:
             throw new Error(`Unknown domain type: ${domainInfo.raw_domain_type || domainInfo.domain_type}`);
@@ -550,8 +559,8 @@ export class AppConfigService {
     return {
       domainType,
       environment,
-      organizationSlug: domainInfo.organization_slug,
-      storeSlug: domainInfo.store_slug,
+      organization_slug: domainInfo.organization_slug,
+      store_slug: domainInfo.store_slug,
       customConfig: domainInfo.config,
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
       hostname
@@ -567,12 +576,12 @@ export class AppConfigService {
     try {
       let endpoint = '';
       
-      if (domainConfig.organizationSlug && domainConfig.storeSlug) {
+      if (domainConfig.organization_slug && domainConfig.store_slug) {
         // Configuración de tienda específica
-        endpoint = `/api/tenants/store/${domainConfig.organizationSlug}/${domainConfig.storeSlug}`;
-      } else if (domainConfig.organizationSlug) {
+        endpoint = `/api/tenants/store/${domainConfig.organization_slug}/${domainConfig.store_slug}`;
+      } else if (domainConfig.organization_slug) {
         // Configuración de organización
-        endpoint = `/api/tenants/organization/${domainConfig.organizationSlug}`;
+        endpoint = `/api/tenants/organization/${domainConfig.organization_slug}`;
       } else {
         throw new Error('No organization or store slug provided');
       }
@@ -654,12 +663,12 @@ export class AppConfigService {
   private getTenantCacheKey(domainConfig: DomainConfig): string {
     const parts = [domainConfig.environment as string];
     
-    if (domainConfig.organizationSlug) {
-      parts.push(domainConfig.organizationSlug);
+    if (domainConfig.organization_slug) {
+      parts.push(domainConfig.organization_slug);
     }
     
-    if (domainConfig.storeSlug) {
-      parts.push(domainConfig.storeSlug);
+    if (domainConfig.store_slug) {
+      parts.push(domainConfig.store_slug);
     }
     
     return `${this.TENANT_CACHE_KEY}_${parts.join('-')}`;

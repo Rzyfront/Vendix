@@ -32,30 +32,60 @@ export interface LoginError {
       <div class="max-w-md w-full space-y-8">
         <!-- Contextual Branding -->
         <div class="text-center">
-          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4" 
-               *ngIf="logoUrl; else defaultLogo">
-            <img [src]="logoUrl" [alt]="displayName" class="h-10 w-10">
-          </div>
-          <ng-template #defaultLogo>
+          @if (logoUrl) {
+            <div class="mx-auto h-16 w-16 flex items-center justify-center mb-4">
+              <img [src]="logoUrl" [alt]="displayName" class="h-10 w-10 rounded">
+            </div>
+          } @else {
             <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
               <span class="text-white font-bold text-xl">{{ contextInitial }}</span>
             </div>
-          </ng-template>
-          
+          }
+
           <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
             {{ loginTitle }}
           </h2>
-          <p class="mt-2 text-sm text-gray-600" *ngIf="displayName">
-            {{ contextDescription }}
-          </p>
-          <p class="mt-1 text-sm text-gray-500" *ngIf="!displayName">
-            {{ defaultDescription }}
-          </p>
+          @if (displayName) {
+            <p class="mt-2 text-sm text-gray-600">
+              {{ contextDescription }}
+            </p>
+          }
+          @if (!displayName) {
+            <p class="mt-1 text-sm text-gray-500">
+              {{ defaultDescription }}
+            </p>
+          }
         </div>
 
         <!-- Login Form -->
         <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
           <div class="space-y-4">
+            <!-- Slug Field (only for Vendix context) -->
+            @if (contextType === 'vendix') {
+              <div>
+                <label for="slug" class="block text-sm font-medium text-gray-700">
+                  Slug de Organización o Tienda
+                </label>
+                <input
+                  id="slug"
+                  formControlName="slug"
+                  type="text"
+                  autocomplete="organization"
+                  [class]="getFieldClass('slug')"
+                  placeholder="mi-organizacion"
+                  (blur)="onFieldBlur('slug')"
+                  (input)="onFieldInput('slug')">
+                @if (hasFieldError('slug')) {
+                  <div class="mt-1 text-sm text-red-600">
+                    {{ getFieldError('slug') }}
+                  </div>
+                }
+                <p class="mt-1 text-xs text-gray-500">
+                  Ingresa el slug de tu organización o tienda
+                </p>
+              </div>
+            }
+
             <!-- Email Field -->
             <div>
               <label for="email" class="block text-sm font-medium text-gray-700">
@@ -70,9 +100,11 @@ export interface LoginError {
                 [placeholder]="emailPlaceholder"
                 (blur)="onFieldBlur('email')"
                 (input)="onFieldInput('email')">
-              <div class="mt-1 text-sm text-red-600" *ngIf="hasFieldError('email')">
-                {{ getFieldError('email') }}
-              </div>
+              @if (hasFieldError('email')) {
+                <div class="mt-1 text-sm text-red-600">
+                  {{ getFieldError('email') }}
+                </div>
+              }
             </div>
 
             <!-- Password Field -->
@@ -89,35 +121,43 @@ export interface LoginError {
                 placeholder="••••••••"
                 (blur)="onFieldBlur('password')"
                 (input)="onFieldInput('password')">
-              <div class="mt-1 text-sm text-red-600" *ngIf="hasFieldError('password')">
-                {{ getFieldError('password') }}
-              </div>
+              @if (hasFieldError('password')) {
+                <div class="mt-1 text-sm text-red-600">
+                  {{ getFieldError('password') }}
+                </div>
+              }
             </div>
           </div>
 
           <!-- Error Display -->
-          <div *ngIf="hasError" class="rounded-md bg-red-50 p-4">
-            <div class="flex">
-              <div class="flex-shrink-0">
-                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                </svg>
-              </div>
-              <div class="ml-3">
-                <h3 class="text-sm font-medium text-red-800">
-                  {{ errorMessage }}
-                </h3>
-                <div class="mt-2 text-sm text-red-700" *ngIf="errorDetails">
-                  {{ errorDetails }}
+          @if (hasError) {
+            <div class="rounded-md bg-red-50 p-4">
+              <div class="flex">
+                <div class="flex-shrink-0">
+                  <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                  </svg>
                 </div>
-                <div class="mt-2" *ngIf="canRetry && retryCountdown > 0">
-                  <p class="text-sm text-red-700">
-                    Puedes reintentar en {{ retryCountdown }} segundos
-                  </p>
+                <div class="ml-3">
+                  <h3 class="text-sm font-medium text-red-800">
+                    {{ errorMessage }}
+                  </h3>
+                  @if (errorDetails) {
+                    <div class="mt-2 text-sm text-red-700">
+                      {{ errorDetails }}
+                    </div>
+                  }
+                  @if (canRetry && retryCountdown > 0) {
+                    <div class="mt-2">
+                      <p class="text-sm text-red-700">
+                        Puedes reintentar en {{ retryCountdown }} segundos
+                      </p>
+                    </div>
+                  }
                 </div>
               </div>
             </div>
-          </div>
+          }
 
           <!-- Actions -->
           <div class="flex items-center justify-between">
@@ -138,60 +178,68 @@ export interface LoginError {
               [class]="isLoading 
                 ? 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary/70 cursor-not-allowed' 
                 : 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary'">
-              <span *ngIf="isLoading" class="flex items-center">
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Iniciando sesión...
-              </span>
-              <span *ngIf="!isLoading">
-                Iniciar Sesión
-              </span>
+              @if (isLoading) {
+                <span class="flex items-center">
+                  <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Iniciando sesión...
+                </span>
+              }
+              @if (!isLoading) {
+                <span>
+                  Iniciar Sesión
+                </span>
+              }
             </button>
           </div>
 
           <!-- Special Actions -->
-          <div *ngIf="loginState === 'email_not_verified'" class="text-center">
-            <button
-              type="button"
-              (click)="resendVerificationEmail()"
-              class="text-sm font-medium text-primary hover:text-primary-dark">
-              Reenviar email de verificación
-            </button>
-          </div>
+          @if (loginState === 'email_not_verified') {
+            <div class="text-center">
+              <button
+                type="button"
+                (click)="resendVerificationEmail()"
+                class="text-sm font-medium text-primary hover:text-primary-dark">
+                Reenviar email de verificación
+              </button>
+            </div>
+          }
 
-          <div *ngIf="canRetry && retryCountdown === 0" class="text-center">
-            <button
-              type="button"
-              (click)="retryLogin()"
-              class="text-sm font-medium text-primary hover:text-primary-dark">
-              Reintentar inicio de sesión
-            </button>
-          </div>
+          @if (canRetry && retryCountdown === 0) {
+            <div class="text-center">
+              <button
+                type="button"
+                (click)="retryLogin()"
+                class="text-sm font-medium text-primary hover:text-primary-dark">
+                Reintentar inicio de sesión
+              </button>
+            </div>
+          }
         </form>
 
         <!-- Additional Links -->
         <div class="text-center text-sm text-gray-600">
-          <ng-container *ngIf="contextType === 'vendix'">
+          @if (contextType === 'vendix') {
             <p>
               ¿Necesitas una cuenta corporativa? 
               <a routerLink="/auth/register" class="font-medium text-primary hover:text-primary-dark">
                 Solicitar acceso
               </a>
             </p>
-          </ng-container>
+          }
 
-          <ng-container *ngIf="contextType === 'organization'">
+          @if (contextType === 'organization') {
             <p>
               ¿Eres cliente? 
               <a [routerLink]="['/shop']" class="font-medium text-primary hover:text-primary-dark">
                 Accede a nuestra tienda
               </a>
             </p>
-          </ng-container>
+          }
 
-          <ng-container *ngIf="contextType === 'store'">
+          @if (contextType === 'store') {
             <p>
               ¿No tienes cuenta? 
               <a [routerLink]="['/auth/register']" class="font-medium text-primary hover:text-primary-dark">
@@ -203,14 +251,16 @@ export interface LoginError {
                 Continuar como invitado
               </a>
             </p>
-          </ng-container>
+          }
         </div>
 
         <!-- Context Info -->
-        <div class="text-center text-xs text-gray-500 mt-4" *ngIf="displayName">
-          <p>{{ contextFooter }}</p>
-          <p>Powered by Vendix Platform</p>
-        </div>
+        @if (displayName) {
+          <div class="text-center text-xs text-gray-500 mt-4">
+            <p>{{ contextFooter }}</p>
+            <p>Powered by Vendix Platform</p>
+          </div>
+        }
       </div>
     </div>
   `,
@@ -243,6 +293,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     private router: Router
   ) {
     this.loginForm = this.fb.group({
+      slug: [''],
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]]
     });
@@ -283,23 +334,36 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     const tenantConfig = appConfig.tenantConfig;
 
     // Determine context type based on domain configuration
-    if (domainConfig.organizationSlug) {
+    if (domainConfig.organization_slug) {
       this.contextType = 'organization';
-      this.displayName = domainConfig.organizationSlug;
-    } else if (domainConfig.storeSlug) {
+      this.displayName = domainConfig.organization_slug;
+      // Clear slug field for organization context (will use domain slug)
+      this.loginForm.patchValue({ slug: '' });
+      this.loginForm.get('slug')?.clearValidators();
+      this.loginForm.get('slug')?.updateValueAndValidity();
+    } else if (domainConfig.store_slug) {
       this.contextType = 'store';
-      this.displayName = domainConfig.storeSlug;
+      this.displayName = domainConfig.store_slug;
+      // Clear slug field for store context (will use domain slug)
+      this.loginForm.patchValue({ slug: '' });
+      this.loginForm.get('slug')?.clearValidators();
+      this.loginForm.get('slug')?.updateValueAndValidity();
     } else {
       this.contextType = 'vendix';
       this.displayName = 'Vendix Platform';
+      // Clear slug field for vendix context (user must enter it)
+      this.loginForm.patchValue({ slug: '' });
+      // Require slug for vendix context
+      this.loginForm.get('slug')?.setValidators([Validators.required]);
+      this.loginForm.get('slug')?.updateValueAndValidity();
     }
 
     // Apply branding
     this.logoUrl = tenantConfig?.branding?.logo?.url || '';
     this.primaryColor = tenantConfig?.branding?.colors?.primary || '#3b82f6';
 
-    // Apply branding CSS variables
-    this.updateBrandingCSSVariables();
+    // Los estilos CSS ya fueron aplicados globalmente por ThemeService durante la inicialización
+    // No es necesario actualizarlos aquí nuevamente
   }
 
   private handleLoginError(error: any): void {
@@ -411,14 +475,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.retryCountdown = 0;
   }
 
-  private updateBrandingCSSVariables(): void {
-    const root = document.documentElement;
-
-    if (this.primaryColor) {
-      root.style.setProperty('--primary', this.primaryColor);
-      root.style.setProperty('--color-primary', this.primaryColor);
-    }
-  }
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -473,6 +529,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     const field = this.loginForm.get(fieldName);
     if (field?.errors && field?.touched) {
       if (field.errors['required']) {
+        if (fieldName === 'slug') {
+          return 'El slug es requerido';
+        }
         return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
       }
       if (field.errors['email']) {
@@ -494,10 +553,25 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     if (this.loginForm.valid && this.loginState !== 'loading') {
       this.clearError();
 
-      const { email, password } = this.loginForm.value;
+      const { slug, email, password } = this.loginForm.value;
 
-      // Use direct authentication through AuthFacade
-      this.authFacade.login(email, password);
+      let store_slug: string | undefined;
+      let organization_slug: string | undefined;
+
+      // Determine which slug to use based on context
+      if (this.contextType === 'vendix') {
+        // En contexto Vendix, el slug ingresado por el usuario se usa como organization_slug
+        organization_slug = slug;
+      } else if (this.contextType === 'organization') {
+        // En contexto organización, usar el slug del dominio
+        organization_slug = this.displayName;
+      } else if (this.contextType === 'store') {
+        // En contexto tienda, usar el slug del dominio
+        store_slug = this.displayName;
+      }
+
+      // Use direct authentication through AuthFacade with appropriate slug context
+      this.authFacade.login(email, password, store_slug, organization_slug);
     } else {
       Object.keys(this.loginForm.controls).forEach(key => {
         this.loginForm.get(key)?.markAsTouched();

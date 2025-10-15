@@ -136,15 +136,14 @@ export class DomainGuardService {
     }
 
     // Para organizaciones, restringir acceso a rutas de super admin
-    if ((domainConfig.domainType === DomainType.ORGANIZATION_ROOT ||
-         domainConfig.domainType === DomainType.ORGANIZATION_SUBDOMAIN) &&
+    if (domainConfig.domainType === DomainType.ORGANIZATION &&
         currentPath.startsWith('/superadmin')) {
       return false;
     }
 
     // Para tiendas, restringir acceso a rutas de super admin y admin de organización
-    if (domainConfig.domainType === DomainType.STORE_SUBDOMAIN ||
-        domainConfig.domainType === DomainType.STORE_CUSTOM) {
+    if (domainConfig.domainType === DomainType.STORE ||
+        domainConfig.domainType === DomainType.ECOMMERCE) {
       if (currentPath.startsWith('/superadmin') ||
           currentPath.startsWith('/admin/tenants')) {
         return false;

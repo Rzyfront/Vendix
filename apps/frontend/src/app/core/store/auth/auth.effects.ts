@@ -15,8 +15,8 @@ export class AuthEffects {
   login$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.login),
-      mergeMap(({ email, password, storeSlug, organizationSlug }) =>
-        this.authService.login({ email, password, storeSlug, organizationSlug }).pipe(
+      mergeMap(({ email, password, store_slug, organization_slug }) =>
+        this.authService.login({ email, password, store_slug, organization_slug }).pipe(
           map(response => {
             if (!response.data) {
               throw new Error('Invalid response data');
@@ -26,7 +26,9 @@ export class AuthEffects {
               tokens: {
                 accessToken: response.data.access_token,
                 refreshToken: response.data.refresh_token
-              }
+              },
+              permissions: response.data.permissions || [],
+              roles: response.data.roles || []
             });
           }),
           catchError(error => of(AuthActions.loginFailure({ error })))
@@ -38,10 +40,23 @@ export class AuthEffects {
   loginSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.loginSuccess),
-      tap(({ user }) => {
-        // Navigate directly to admin dashboard for successful login
-        console.log('Login successful, navigating to admin dashboard...');
-        this.router.navigate(['/admin']);
+      tap(({ user, roles }) => {
+        console.log('Login successful, determining redirect based on roles:', roles);
+        
+        // Determine redirect based on user roles (ensure roles is always an array)
+        const userRoles = roles || [];
+        let redirectPath = this.determineRedirectPath(userRoles, user);
+        
+        console.log('Redirecting to:', redirectPath);
+        this.router.navigate([redirectPath]).then(success => {
+          if (success) {
+            console.log('Successfully navigated to:', redirectPath);
+          } else {
+            console.error('Failed to navigate to:', redirectPath);
+            // Fallback to admin dashboard
+            this.router.navigate(['/admin']);
+          }
+        });
       })
     ),
     { dispatch: false }
@@ -166,4 +181,27 @@ export class AuthEffects {
     ),
     { dispatch: false }
   );
+
+  // Helper method to determine redirect path based on user roles
+  private determineRedirectPath(roles: string[], user: any): string {
+    console.log('Determining redirect path for roles:', roles, 'user:', user);
+    
+    // Priority-based role redirection
+    if (roles.includes('super_admin')) {
+      return '/superadmin';
+    } else if (roles.includes('owner') || roles.includes('admin')) {
+      return '/admin';
+    } else if (roles.includes('manager')) {
+      return '/admin/store';
+    } else if (roles.includes('supervisor') || roles.includes('employee')) {
+      // Since POS route doesn't exist yet, redirect to store ecommerce for now
+      return '/store-ecommerce';
+    } else if (roles.includes('customer')) {
+      return '/shop';
+    }
+    
+    // Default fallback
+    console.warn('No specific role match found, defaulting to admin dashboard');
+    return '/admin';
+  }
 }

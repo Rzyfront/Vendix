@@ -268,7 +268,7 @@ model domain_settings {
   config             Json
   created_at         DateTime?          @default(now()) @db.Timestamp(6)
   updated_at         DateTime?          @default(now()) @db.Timestamp(6)
-  domain_type        domain_type_enum   @default(organization_root)
+  domain_type        domain_type_enum   @default(organization)
   is_primary         Boolean            @default(false)
   last_error         String?            @db.VarChar(255)
   last_verified_at   DateTime?          @db.Timestamp(6)
@@ -760,10 +760,9 @@ enum api_key_status_enum {
 
 enum domain_type_enum {
   vendix_core
-  organization_root
-  organization_subdomain
-  store_subdomain
-  store_custom
+  organization
+  store
+  ecommerce
 }
 
 enum domain_status_enum {

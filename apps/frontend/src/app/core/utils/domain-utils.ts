@@ -39,15 +39,15 @@ export class DomainUtils {
       return DomainType.VENDIX_CORE; // Asumimos que admin es parte de Vendix core
     }
 
-    // Organization subdomains (custom names)
+    // Organization domains (custom names)
     if (subdomain && subdomain !== 'www' && subdomain !== 'app') {
-      return DomainType.ORGANIZATION_SUBDOMAIN;
+      return DomainType.ORGANIZATION;
     }
 
     // Store domains (could be custom domains)
     // En producción, esto se determinaría con una consulta a la API
     if (this.isStoreDomain(hostname)) {
-      return DomainType.STORE_CUSTOM;
+      return DomainType.STORE;
     }
 
     // Default to Vendix
@@ -79,7 +79,7 @@ export class DomainUtils {
     const hostname = window.location.hostname;
     const environmentType = this.detectEnvironmentType();
 
-    if (environmentType === DomainType.STORE_CUSTOM || environmentType === DomainType.STORE_SUBDOMAIN) {
+    if (environmentType === DomainType.STORE || environmentType === DomainType.ECOMMERCE) {
       // Para tiendas con subdominio: store.organization.com
       const subdomain = this.getSubdomain();
       if (subdomain && subdomain !== 'www') {
@@ -104,19 +104,16 @@ export class DomainUtils {
       case DomainType.VENDIX_CORE:
         return `${protocol}//${baseDomain}`;
       
-      case DomainType.ORGANIZATION_ROOT:
-        return `${protocol}//${baseDomain}`;
-      
-      case DomainType.ORGANIZATION_SUBDOMAIN:
+      case DomainType.ORGANIZATION:
         if (!slug) throw new Error('Organization slug is required');
         return `${protocol}//${slug}.${baseDomain}`;
       
-      case DomainType.STORE_SUBDOMAIN:
+      case DomainType.STORE:
         if (!slug) throw new Error('Store slug is required');
         // Para desarrollo, asumimos store.organization.com
         return `${protocol}//${slug}.${baseDomain}`;
       
-      case DomainType.STORE_CUSTOM:
+      case DomainType.ECOMMERCE:
         if (!slug) throw new Error('Store slug is required');
         return `${protocol}//${slug}`;
       
@@ -201,7 +198,7 @@ export class DomainUtils {
           'twitter:description': 'La plataforma de e-commerce multi-tenant más avanzada',
         };
       
-      case DomainType.ORGANIZATION_SUBDOMAIN:
+      case DomainType.ORGANIZATION:
         return {
           ...defaultMeta,
           'og:title': tenantConfig?.organization?.name || 'Organización',
@@ -211,8 +208,8 @@ export class DomainUtils {
           'twitter:description': tenantConfig?.organization?.description || 'Tienda en línea',
         };
       
-      case DomainType.STORE_CUSTOM:
-      case DomainType.STORE_SUBDOMAIN:
+      case DomainType.STORE:
+      case DomainType.ECOMMERCE:
         return {
           ...defaultMeta,
           'og:title': tenantConfig?.store?.name || 'Tienda',

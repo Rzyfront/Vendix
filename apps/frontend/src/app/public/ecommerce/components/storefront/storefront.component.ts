@@ -218,7 +218,7 @@ export class StorefrontComponent implements OnInit {
     const domainConfig = appConfig.domainConfig;
     const tenantConfig = appConfig.tenantConfig;
     
-    this.storeName = domainConfig.storeSlug || 'Tienda';
+    this.storeName = domainConfig.store_slug || 'Tienda';
     this.branding = tenantConfig?.branding || {};
     this.storeDescription = tenantConfig?.store?.description || '';
     
