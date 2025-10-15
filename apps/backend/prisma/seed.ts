@@ -16,6 +16,8 @@ async function main() {
   await prisma.domain_settings.deleteMany({});
   await prisma.addresses.deleteMany({});
   await prisma.store_settings.deleteMany({});
+  await prisma.refresh_tokens.deleteMany({});
+  await prisma.login_attempts.deleteMany({});
   await prisma.users.deleteMany({});
   await prisma.stores.deleteMany({});
   await prisma.organizations.deleteMany({});

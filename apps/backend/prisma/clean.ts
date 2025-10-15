@@ -17,6 +17,8 @@ async function cleanDatabase() {
     await prisma.addresses.deleteMany({});
     await prisma.store_settings.deleteMany({});
     await prisma.organization_settings.deleteMany({});
+    await prisma.refresh_tokens.deleteMany({});
+    await prisma.login_attempts.deleteMany({});
     
     // Eliminar datos de tablas principales
     await prisma.users.deleteMany({});
@@ -35,6 +37,8 @@ async function cleanDatabase() {
     console.log('  - addresses');
     console.log('  - store_settings');
     console.log('  - organization_settings');
+    console.log('  - refresh_tokens');
+    console.log('  - login_attempts');
     console.log('  - users');
     console.log('  - stores');
     console.log('  - organizations');

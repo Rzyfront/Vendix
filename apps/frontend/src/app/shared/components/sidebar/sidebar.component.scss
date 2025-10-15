@@ -1,21 +1,16 @@
-/* Applied Vendix Corp branding colors */
-:root {
-  --primary: #7ED7A5;
-  --secondary: #2F6F4E;
-  --background: #F4F4F4;
-  --accent: #FFFFFF;
-  --border: #B0B0B0;
-  --text: #222222;
-}
-
-/* Improved sidebar transitions and collapsed state */
+/* Sidebar styles with shadcn-inspired design and full height */
 .sidebar {
   transition: width 0.3s ease;
   width: 16rem;
-  background-color: white;
+  background-color: var(--color-accent);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--color-border);
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
 }
 
 .sidebar.collapsed {
@@ -49,7 +44,7 @@
   max-height: 500px;
 }
 
-/* Updated menu item hover and active states with brand colors */
+/* Updated menu item hover and active states with shadcn design */
 .menu-item {
   transition: all 0.2s ease;
   cursor: pointer;
@@ -57,15 +52,17 @@
   background: none;
   text-align: left;
   width: 100%;
+  border-radius: var(--radius-sm);
 }
 
 .menu-item:hover {
-  background-color: rgba(126, 215, 165, 0.1);
+  background-color: var(--color-accent);
 }
 
 .menu-item.active {
-  background-color: rgba(126, 215, 165, 0.15);
-  border-left: 3px solid var(--primary);
+  background-color: var(--color-accent);
+  color: var(--color-primary);
+  font-weight: 500;
 }
 
 .chevron {

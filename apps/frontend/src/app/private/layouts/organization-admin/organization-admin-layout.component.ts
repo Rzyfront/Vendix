@@ -9,16 +9,18 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
   standalone: true,
   imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
   template: `
-    <div class="flex h-full">
+    <div class="flex">
       <!-- Sidebar -->
-      <app-sidebar 
+      <app-sidebar
         [menuItems]="menuItems"
         subtitle="Organization Admin"
+        [vlink]="currentVlink"
         [collapsed]="sidebarCollapsed">
       </app-sidebar>
       
       <!-- Main Content -->
-      <div class="flex-1 flex flex-col overflow-hidden">
+      <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
+           [class.ml-16]="sidebarCollapsed">
         <!-- Header -->
         <app-header 
           [title]="currentPageTitle"
@@ -39,6 +41,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 export class OrganizationAdminLayoutComponent {
   sidebarCollapsed = false;
   currentPageTitle = 'Organization Dashboard';
+  currentVlink = 'organization-admin';
   
   breadcrumb = {
     parent: 'Organization',

@@ -27,6 +27,13 @@ export const routes: Routes = [
     component: VendixLandingComponent // Componente placeholder, será reemplazado dinámicamente
   },
 
+  // Ruta específica para verificación de email desde parámetros de consulta
+  {
+    path: 'verify-email',
+    loadComponent: () => import('./public/auth/components/email-verification/email-verification.component').then(c => c.EmailVerificationComponent),
+    data: { isPublic: true }
+  },
+
   // Rutas de autenticación contextual
   {
     path: 'auth',
@@ -34,6 +41,11 @@ export const routes: Routes = [
       {
         path: 'login',
         loadComponent: () => import('./public/auth/components/contextual-login/contextual-login.component').then(c => c.ContextualLoginComponent),
+        data: { isPublic: true }
+      },
+      {
+        path: 'register',
+        loadComponent: () => import('./public/auth/components/register-owner/register-owner.component').then(c => c.RegisterOwnerComponent),
         data: { isPublic: true }
       }
     ]
@@ -56,6 +68,58 @@ export const routes: Routes = [
       {
         path: 'organizations',
         loadComponent: () => import('./private/modules/super-admin/organizations/organizations.component').then(c => c.OrganizationsComponent)
+      },
+      {
+        path: 'organizations/create',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'organizations/settings',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users/roles',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users/permissions',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'system/settings',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'system/logs',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'system/backups',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'analytics/platform',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'analytics/users',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'analytics/performance',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'billing',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'support',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
       }
     ]
   },
@@ -77,6 +141,58 @@ export const routes: Routes = [
       {
         path: 'store',
         loadComponent: () => import('./private/modules/store/dashboard/dashboard.component').then(c => c.DashboardComponent)
+      },
+      {
+        path: 'analytics/reports',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'analytics/statistics',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'analytics/insights',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users/all',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users/roles',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'users/permissions',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'products/all',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'products/categories',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'products/inventory',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'orders',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'settings/general',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'settings/security',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
+      },
+      {
+        path: 'settings/notifications',
+        loadComponent: () => import('./shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent)
       }
     ]
   },

@@ -15,17 +15,18 @@ export interface MenuItem {
   standalone: true,
   imports: [CommonModule, RouterModule],
   template: `
-    <aside [class]="'sidebar ' + (collapsed ? 'collapsed' : '')" 
+    <aside [class]="'sidebar ' + (collapsed ? 'collapsed' : '')"
            [style]="{ 'border-color': 'var(--border)' }">
-      <!-- Logo -->
+      <!-- Logo Section -->
       <div class="p-4 border-b flex items-center gap-3" [style]="{ 'border-color': 'var(--border)' }">
-        <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" 
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
              [style]="{ 'background-color': 'var(--primary)' }">
           <i class="fas fa-store text-white text-lg"></i>
         </div>
         <div class="logo-text">
           <h1 class="font-bold text-lg" [style]="{ 'color': 'var(--text)' }">Vendix Corp</h1>
           <span class="text-xs" [style]="{ 'color': 'var(--secondary)' }">{{ subtitle }}</span>
+          <span class="text-xs font-mono mt-1" [style]="{ 'color': 'var(--muted-foreground)' }">{{ vlink }}</span>
         </div>
       </div>
       
@@ -79,6 +80,7 @@ export interface MenuItem {
 export class SidebarComponent {
   @Input() menuItems: MenuItem[] = [];
   @Input() subtitle: string = 'Admin Panel';
+  @Input() vlink: string = 'vlink-slug';
   @Input() collapsed: boolean = false;
 
   private openSubmenus: Set<string> = new Set();

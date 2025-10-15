@@ -16,7 +16,7 @@ export interface LoginDto {
 }
 
 export interface RegisterOwnerDto {
-  organizationName: string;
+  organization_name: string;
   email: string;
   password: string;
   first_name: string;
@@ -177,8 +177,8 @@ export class AuthService {
   }
 
   // Register Owner
-  registerOwner(registerData: RegisterOwnerDto): Observable<any> {
-    return this.http.post(`${this.API_URL}/register-owner`, registerData);
+  registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> {
+    return this.http.post<AuthResponse>(`${this.API_URL}/register-owner`, registerData);
   }
 
   // Register Staff

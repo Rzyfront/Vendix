@@ -34,7 +34,7 @@ export interface LoginError {
         <div class="text-center">
           @if (logoUrl) {
             <div class="mx-auto h-16 w-16 flex items-center justify-center mb-4">
-              <img [src]="logoUrl" [alt]="displayName" class="h-10 w-10 rounded">
+              <img [src]="logoUrl" [alt]="displayName" class="h-15 w-15 rounded-md">
             </div>
           } @else {
             <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">

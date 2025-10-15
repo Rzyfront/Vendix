@@ -6,12 +6,12 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <header class="bg-white border-b px-6 py-4" [style]="{ 'border-color': 'var(--border)' }">
+    <header class="header-container px-6 py-4" [style]="{ 'border-color': 'var(--border)' }">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-4">
           <!-- Toggle Sidebar Button -->
-          <button (click)="toggleSidebar.emit()" 
-                  class="hover:bg-gray-100 p-2 rounded-lg transition-colors" 
+          <button (click)="toggleSidebar.emit()"
+                  class="hover:bg-gray-100 p-2 rounded-lg transition-colors"
                   [style]="{ 'color': 'var(--text)' }">
             <i class="fas fa-bars text-lg"></i>
           </button>
@@ -28,12 +28,12 @@ import { CommonModule } from '@angular/common';
         </div>
         
         <!-- Clean user badge in top right corner -->
-        <div class="flex items-center gap-3">
+        <div class="user-badge-container flex items-center gap-3">
           <div class="text-right">
             <p class="text-sm font-medium" [style]="{ 'color': 'var(--text)' }">{{ user?.name || 'Usuario' }}</p>
             <p class="text-xs" [style]="{ 'color': 'var(--secondary)' }">{{ user?.role || 'Administrador' }}</p>
           </div>
-          <div class="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-white" 
+          <div class="w-10 h-10 rounded-full flex items-center justify-center font-semibold text-white"
                [style]="{ 'background-color': 'var(--primary)' }">
             {{ user?.initials || 'US' }}
           </div>
