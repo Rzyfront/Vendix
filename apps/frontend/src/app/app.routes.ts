@@ -47,6 +47,16 @@ export const routes: Routes = [
         path: 'register',
         loadComponent: () => import('./public/auth/components/register-owner/register-owner.component').then(c => c.RegisterOwnerComponent),
         data: { isPublic: true }
+      },
+      {
+        path: 'forgot-owner-password',
+        loadComponent: () => import('./public/auth/components/forgot-owner-password/forgot-owner-password').then(c => c.ForgotOwnerPasswordComponent),
+        data: { isPublic: true }
+      },
+      {
+        path: 'reset-owner-password',
+        loadComponent: () => import('./public/auth/components/reset-owner-password/reset-owner-password').then(c => c.ResetOwnerPasswordComponent),
+        data: { isPublic: true }
       }
     ]
   },

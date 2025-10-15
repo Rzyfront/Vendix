@@ -206,9 +206,9 @@ export class AuthController {
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
 
   @Public()
-  @Post('forgot-password')
+  @Post('forgot-owner-password')
   @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body() forgotDto: ForgotPasswordDto) {
+  async forgotOwnerPassword(@Body() forgotDto: ForgotPasswordDto) {
     const result = await this.authService.forgotPassword(
       forgotDto.email,
       forgotDto.organization_slug,
@@ -217,9 +217,9 @@ export class AuthController {
   }
 
   @Public()
-  @Post('reset-password')
+  @Post('reset-owner-password')
   @HttpCode(HttpStatus.OK)
-  async resetPassword(@Body() resetDto: ResetPasswordDto) {
+  async resetOwnerPassword(@Body() resetDto: ResetPasswordDto) {
     const result = await this.authService.resetPassword(
       resetDto.token,
       resetDto.new_password,

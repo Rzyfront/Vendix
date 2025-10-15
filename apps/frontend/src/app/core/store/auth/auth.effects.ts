@@ -182,6 +182,30 @@ export class AuthEffects {
     { dispatch: false }
   );
 
+  forgotOwnerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.forgotOwnerPassword),
+      mergeMap(({ organization_slug, email }) =>
+        this.authService.forgotOwnerPassword(organization_slug, email).pipe(
+          map(() => AuthActions.forgotOwnerPasswordSuccess()),
+          catchError(error => of(AuthActions.forgotOwnerPasswordFailure({ error })))
+        )
+      )
+    )
+  );
+
+  resetOwnerPassword$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resetOwnerPassword),
+      mergeMap(({ token, password }) =>
+        this.authService.resetOwnerPassword(token, password).pipe(
+          map(() => AuthActions.resetOwnerPasswordSuccess()),
+          catchError(error => of(AuthActions.resetOwnerPasswordFailure({ error })))
+        )
+      )
+    )
+  );
+
   // Helper method to determine redirect path based on user roles
   private determineRedirectPath(roles: string[], user: any): string {
     console.log('Determining redirect path for roles:', roles, 'user:', user);

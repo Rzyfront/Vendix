@@ -226,6 +226,16 @@ export class AuthService {
     return this.http.post(`${this.API_URL}/reset-password`, { token, newPassword });
   }
 
+  // Forgot Owner Password
+  forgotOwnerPassword(organization_slug: string, email: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/forgot-owner-password`, { organization_slug, email });
+  }
+
+  // Reset Owner Password
+  resetOwnerPassword(token: string, password: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/reset-owner-password`, { token, password });
+  }
+
   // Get current user from store
   getCurrentUser(): any {
     return this.authFacade.getCurrentUser();

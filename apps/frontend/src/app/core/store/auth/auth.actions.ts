@@ -66,6 +66,69 @@ export const setLoading = createAction(
 );
 
 export const setError = createAction(
+
   '[Auth] Set Error',
+
   props<{ error: string | null }>()
+
+);
+
+
+
+// Forgot Owner Password
+
+export const forgotOwnerPassword = createAction(
+
+  '[Auth] Forgot Owner Password',
+
+  props<{ organization_slug: string; email: string }>()
+
+);
+
+
+
+export const forgotOwnerPasswordSuccess = createAction(
+
+  '[Auth] Forgot Owner Password Success'
+
+);
+
+
+
+export const forgotOwnerPasswordFailure = createAction(
+
+  '[Auth] Forgot Owner Password Failure',
+
+  props<{ error: any }>()
+
+);
+
+
+
+// Reset Owner Password
+
+export const resetOwnerPassword = createAction(
+
+  '[Auth] Reset Owner Password',
+
+  props<{ token: string; password: string }>()
+
+);
+
+
+
+export const resetOwnerPasswordSuccess = createAction(
+
+  '[Auth] Reset Owner Password Success'
+
+);
+
+
+
+export const resetOwnerPasswordFailure = createAction(
+
+  '[Auth] Reset Owner Password Failure',
+
+  props<{ error: any }>()
+
 );

@@ -600,7 +600,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   }
 
   navigateToForgotPassword(): void {
-    this.router.navigate(['/auth/forgot-password']);
+    this.router.navigate(['/auth/forgot-owner-password']);
   }
 
   // Computed properties for template

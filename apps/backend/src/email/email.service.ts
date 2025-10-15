@@ -46,6 +46,15 @@ export class EmailService {
   }
 
   private initializeProvider() {
+    // En desarrollo, forzar consola si no hay API key válida
+    if (process.env.NODE_ENV === 'development' && !this.config.apiKey) {
+      this.logger.warn(
+        'Development environment: forcing console email provider (no API key)',
+      );
+      this.provider = new ConsoleProvider(this.config);
+      return;
+    }
+
     switch (this.config.provider) {
       case 'resend':
         if (!this.config.apiKey) {

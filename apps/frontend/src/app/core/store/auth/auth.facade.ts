@@ -66,6 +66,14 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.restoreAuthState({ user, tokens }));
   }
 
+  forgotOwnerPassword(organization_slug: string, email: string): void {
+    this.store.dispatch(AuthActions.forgotOwnerPassword({ organization_slug, email }));
+  }
+
+  resetOwnerPassword(token: string, password: string): void {
+    this.store.dispatch(AuthActions.resetOwnerPassword({ token, password }));
+  }
+
   // Synchronous getters for templates
   getCurrentUser(): any {
     let result: any = null;
