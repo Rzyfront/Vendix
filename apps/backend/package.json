@@ -28,6 +28,7 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:seed": "ts-node prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
+    "db:clean": "ts-node prisma/clean.ts",
     "// ----- DOCKER -----": "",
     "docker:build": "npm run build",
     "docker:start": "npm run start:prod",
