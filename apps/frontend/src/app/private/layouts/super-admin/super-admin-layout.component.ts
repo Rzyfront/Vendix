@@ -1,8 +1,8 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { SidebarComponent, MenuItem } from '../../shared/components/sidebar/sidebar.component';
-import { HeaderComponent } from '../../shared/components/header/header.component';
+import { SidebarComponent, MenuItem } from '../../../shared/components/sidebar/sidebar.component';
+import { HeaderComponent } from '../../../shared/components/header/header.component';
 
 @Component({
   selector: 'app-super-admin-layout',

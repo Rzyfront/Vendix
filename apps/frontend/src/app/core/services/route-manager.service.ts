@@ -14,12 +14,11 @@ import { VendixLandingComponent } from '../../public/landing/vendix-landing/vend
 import { OrgLandingComponent } from '../../public/dynamic-landing/components/org-landing/org-landing.component';
 import { StoreLandingComponent } from '../../public/dynamic-landing/components/store-landing/store-landing.component';
 import { StorefrontComponent } from '../../public/ecommerce/components/storefront/storefront.component';
-import { SuperAdminDashboardComponent } from '../../private/super-admin/components/dashboard/super-admin-dashboard.component';
-import { OrganizationsManagementComponent } from '../../private/super-admin/components/organizations/organizations-management.component';
-import { OrganizationDashboardComponent } from '../../private/organization-admin/components/dashboard/organization-dashboard.component';
-import { StoreDashboardComponent } from '../../private/store-admin/components/dashboard/store-dashboard.component';
-import { StoreEcommerceDashboardComponent } from '../../private/store-ecommerce/components/dashboard/store-ecommerce-dashboard.component';
-import { OrgEcommerceDashboardComponent } from '../../private/org-ecommerce/components/dashboard/org-ecommerce-dashboard.component';
+// Importaciones de componentes modulares
+import { DashboardComponent as SuperAdminDashboardComponent } from '../../private/modules/super-admin/dashboard/dashboard.component';
+import { OrganizationsComponent as OrganizationsManagementComponent } from '../../private/modules/super-admin/organizations/organizations.component';
+import { DashboardComponent as OrganizationDashboardComponent } from '../../private/modules/organization/dashboard/dashboard.component';
+import { DashboardComponent as StoreDashboardComponent } from '../../private/modules/store/dashboard/dashboard.component';
 
 // Layout components - Only include existing components
 import { OrganizationAdminLayoutComponent } from '../../private/layouts/organization-admin/organization-admin-layout.component';
@@ -86,9 +85,9 @@ export class RouteManagerService {
     // Store Admin components
     this.componentRegistry.set('StoreAdminDashboardComponent', StoreDashboardComponent);
     
-    // E-commerce components
-    this.componentRegistry.set('StoreEcommerceComponent', StoreEcommerceDashboardComponent);
-    this.componentRegistry.set('OrgEcommerceComponent', OrgEcommerceDashboardComponent);
+    // E-commerce components - using existing dashboard components
+    this.componentRegistry.set('StoreEcommerceComponent', StoreDashboardComponent);
+    this.componentRegistry.set('OrgEcommerceComponent', OrganizationDashboardComponent);
     
     // Auth components - consolidated contextual login
     this.componentRegistry.set('ContextualLoginComponent', () =>
