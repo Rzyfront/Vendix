@@ -35,9 +35,21 @@ export function extractApiErrorMessage(response: any): string {
   if (response && typeof response === 'object' && 'success' in response) {
     const apiResponse = response as ApiResponse;
     
-    if (!apiResponse.success && apiResponse.error) {
-      // Usar el mensaje de error específico si está disponible
-      return apiResponse.error.message || apiResponse.message || 'Error en la operación';
+    if (!apiResponse.success) {
+      // Caso 1: Si hay un objeto error con mensaje
+      if (apiResponse.error && typeof apiResponse.error === 'object' && apiResponse.error.message) {
+        return apiResponse.error.message;
+      }
+      // Caso 2: Si error es un string
+      if (typeof apiResponse.error === 'string') {
+        return apiResponse.error;
+      }
+      // Caso 3: Si hay un mensaje en la raíz
+      if (apiResponse.message) {
+        return apiResponse.message;
+      }
+      // Caso por defecto
+      return 'Error en la operación';
     }
     
     // Si success es true pero hay algún problema, usar el mensaje general

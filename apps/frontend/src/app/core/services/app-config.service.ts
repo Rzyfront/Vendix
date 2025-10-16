@@ -41,6 +41,8 @@ export interface LayoutConfig {
 export class AppConfigService {
   private readonly CACHE_KEY = 'vendix_app_config';
   private readonly TENANT_CACHE_KEY = 'vendix_tenant_config';
+  private readonly DOMAIN_CACHE_KEY = 'vendix_domain_cache';
+  private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutos en milisegundos
   
   private configSubject = new BehaviorSubject<AppConfig | null>(null);
   public config$ = this.configSubject.asObservable();
@@ -471,10 +473,20 @@ export class AppConfigService {
   // ==================== DOMAIN DETECTION METHODS ====================
 
   /**
-   * Consulta la API para resolver dominios personalizados
+   * Consulta la API para resolver dominios personalizados con caché
    */
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
     try {
+      // 1. Primero verificar si existe en caché
+      const cachedDomain = this.getCachedDomain(hostname);
+      if (cachedDomain) {
+        console.log(`[APP CONFIG] Domain ${hostname} found in cache`);
+        return cachedDomain;
+      }
+
+      console.log(`[APP CONFIG] Domain ${hostname} not in cache, calling API...`);
+
+      // 2. Si no está en caché, llamar a la API
       const response = await this.http
         .get<DomainResolution>(`${environment.apiUrl}/api/domains/resolve/${hostname}`)
         .pipe(
@@ -484,6 +496,12 @@ export class AppConfigService {
           })
         )
         .toPromise();
+
+      // 3. Si la respuesta es válida, guardar en caché
+      if (response) {
+        console.log(`[APP CONFIG] Caching domain ${hostname} for future requests`);
+        this.cacheDomain(hostname, response);
+      }
 
       return response || null;
     } catch (error) {
@@ -637,6 +655,50 @@ export class AppConfigService {
   }
 
   // ==================== CACHE METHODS ====================
+
+  /**
+   * Métodos de caché para dominios con expiración
+   */
+  private cacheDomain(hostname: string, domainInfo: DomainResolution): void {
+    try {
+      const cacheData = {
+        data: domainInfo,
+        timestamp: Date.now(),
+        ttl: this.CACHE_TTL
+      };
+      const cacheKey = `${this.DOMAIN_CACHE_KEY}_${hostname}`;
+      localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to cache domain:', error);
+    }
+  }
+
+  private getCachedDomain(hostname: string): DomainResolution | null {
+    try {
+      const cacheKey = `${this.DOMAIN_CACHE_KEY}_${hostname}`;
+      const cached = localStorage.getItem(cacheKey);
+      
+      if (!cached) {
+        return null;
+      }
+
+      const cacheData = JSON.parse(cached);
+      const now = Date.now();
+      
+      // Verificar si el caché ha expirado
+      if (now - cacheData.timestamp > cacheData.ttl) {
+        console.log(`[APP CONFIG] Domain cache expired for ${hostname}, removing...`);
+        localStorage.removeItem(cacheKey);
+        return null;
+      }
+
+      console.log(`[APP CONFIG] Using cached domain data for ${hostname} (age: ${Math.round((now - cacheData.timestamp) / 1000)}s)`);
+      return cacheData.data;
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to get cached domain:', error);
+      return null;
+    }
+  }
 
   private cacheAppConfig(config: AppConfig): void {
     try {
@@ -836,7 +898,7 @@ export class AppConfigService {
       localStorage.removeItem(this.CACHE_KEY);
       // Remove all tenant cache entries
       Object.keys(localStorage).forEach(key => {
-        if (key.startsWith(this.TENANT_CACHE_KEY)) {
+        if (key.startsWith(this.TENANT_CACHE_KEY) || key.startsWith(this.DOMAIN_CACHE_KEY)) {
           localStorage.removeItem(key);
         }
       });

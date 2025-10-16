@@ -123,5 +123,43 @@ export const authReducer = createReducer(
     isAuthenticated: true,
     loading: false,
     error: null
+  })),
+
+  // Forgot Owner Password
+  on(AuthActions.forgotOwnerPassword, (state) => ({
+    ...state,
+    loading: true,
+    error: null
+  })),
+
+  on(AuthActions.forgotOwnerPasswordSuccess, (state) => ({
+    ...state,
+    loading: false,
+    error: null
+  })),
+
+  on(AuthActions.forgotOwnerPasswordFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error: extractApiErrorMessage(error)
+  })),
+
+  // Reset Owner Password
+  on(AuthActions.resetOwnerPassword, (state) => ({
+    ...state,
+    loading: true,
+    error: null
+  })),
+
+  on(AuthActions.resetOwnerPasswordSuccess, (state) => ({
+    ...state,
+    loading: false,
+    error: null
+  })),
+
+  on(AuthActions.resetOwnerPasswordFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error: extractApiErrorMessage(error)
   }))
 );

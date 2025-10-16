@@ -13,7 +13,6 @@ import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
@@ -189,18 +188,34 @@ export class AuthController {
   @Post('verify-email')
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: { token: string }) {
-    const result = await this.authService.verifyEmail(verifyEmailDto.token);
-    return this.responseService.success(result, result.message);
+    try {
+      const result = await this.authService.verifyEmail(verifyEmailDto.token);
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al verificar el email',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Public()
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   async resendVerification(@Body() resendDto: { email: string }) {
-    const result = await this.authService.resendEmailVerification(
-      resendDto.email,
-    );
-    return this.responseService.success(result, result.message);
+    try {
+      const result = await this.authService.resendEmailVerification(
+        resendDto.email,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al reenviar la verificación',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
@@ -209,22 +224,38 @@ export class AuthController {
   @Post('forgot-owner-password')
   @HttpCode(HttpStatus.OK)
   async forgotOwnerPassword(@Body() forgotDto: ForgotPasswordDto) {
-    const result = await this.authService.forgotPassword(
-      forgotDto.email,
-      forgotDto.organization_slug,
-    );
-    return this.responseService.success(result, result.message);
+    try {
+      const result = await this.authService.forgotPassword(
+        forgotDto.email,
+        forgotDto.organization_slug,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al solicitar recuperación de contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Public()
   @Post('reset-owner-password')
   @HttpCode(HttpStatus.OK)
   async resetOwnerPassword(@Body() resetDto: ResetPasswordDto) {
-    const result = await this.authService.resetPassword(
-      resetDto.token,
-      resetDto.new_password,
-    );
-    return this.responseService.success(result, result.message);
+    try {
+      const result = await this.authService.resetPassword(
+        resetDto.token,
+        resetDto.new_password,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al restablecer la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Post('change-password')
@@ -471,6 +502,15 @@ export class AuthController {
     },
   })
   async completeOnboarding(@CurrentUser() user: any) {
-    return await this.authService.completeOnboarding(user.id);
+    try {
+      const result = await this.authService.completeOnboarding(user.id);
+      return this.responseService.success(result.data, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al completar el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 }

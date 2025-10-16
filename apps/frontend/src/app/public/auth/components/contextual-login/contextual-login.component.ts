@@ -305,12 +305,19 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     
     // Subscribe to reactive auth state
     this.authFacade.loading$.pipe(takeUntil(this.destroy$)).subscribe(loading => {
-      this.loginState = loading ? 'loading' : 'idle';
+      if (loading) {
+        this.loginState = 'loading';
+      }
+      // When loading becomes false, don't automatically set to idle
+      // Let the error or success handlers manage the state
     });
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
       if (error) {
         this.handleLoginError(error);
+      } else {
+        // Clear error state when error becomes null (e.g., after retry)
+        this.clearError();
       }
     });
 
@@ -319,6 +326,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       if (isAuth) {
         const welcomeMessage = this.getWelcomeMessage();
         this.toast.success(welcomeMessage);
+        this.loginState = 'success';
       }
     });
   }

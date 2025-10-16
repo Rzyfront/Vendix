@@ -4,6 +4,7 @@ import { of } from 'rxjs';
 import { map, mergeMap, catchError, tap } from 'rxjs/operators';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
+import { ToastService } from '../../../shared/components/toast/toast.service';
 import * as AuthActions from './auth.actions';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class AuthEffects {
   private actions$ = inject(Actions);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private toast = inject(ToastService);
 
   login$ = createEffect(() =>
     this.actions$.pipe(
@@ -199,24 +201,33 @@ export class AuthEffects {
       ofType(AuthActions.resetOwnerPassword),
       mergeMap(({ token, new_password }) =>
         this.authService.resetOwnerPassword(token, new_password).pipe(
-          map(() => AuthActions.resetOwnerPasswordSuccess()),
-          catchError(error => {
-            // Extract specific error message from API response
-            let errorMessage = 'Error al restablecer la contraseña. Por favor, inténtalo de nuevo.';
-            
-            if (error.error?.message?.message) {
-              errorMessage = error.error.message.message;
-            } else if (error.error?.message) {
-              errorMessage = error.error.message;
-            } else if (error.message) {
-              errorMessage = error.message;
+          map((response: any) => {
+            // Check if response indicates success
+            if (response.success === true) {
+              return AuthActions.resetOwnerPasswordSuccess();
+            } else {
+              // If success is false, throw the response to be caught by catchError
+              throw response;
             }
-            
-            return of(AuthActions.resetOwnerPasswordFailure({ error: errorMessage }));
+          }),
+          catchError(error => {
+            // Pass the entire error object to let the reducer extract the message
+            return of(AuthActions.resetOwnerPasswordFailure({ error }));
           })
         )
       )
     )
+  );
+
+  resetOwnerPasswordSuccess$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resetOwnerPasswordSuccess),
+      tap(() => {
+        this.toast.success('Contraseña restablecida con éxito.');
+        this.router.navigate(['/auth/login']);
+      })
+    ),
+    { dispatch: false }
   );
 
   // Helper method to determine redirect path based on user roles

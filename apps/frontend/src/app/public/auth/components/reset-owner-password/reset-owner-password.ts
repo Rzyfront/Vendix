@@ -205,11 +205,13 @@ export class ResetOwnerPasswordComponent implements OnInit {
       const { new_password } = this.resetPasswordForm.value;
       this.authFacade.resetOwnerPassword(this.token, new_password);
 
-      this.authFacade.loading$.subscribe(isLoading => {
+      // Subscribe to loading state
+      const loadingSubscription = this.authFacade.loading$.subscribe(isLoading => {
         this.isLoading = isLoading;
       });
 
-      this.authFacade.error$.subscribe(error => {
+      // Subscribe to error state - handle errors without redirecting
+      const errorSubscription = this.authFacade.error$.subscribe(error => {
         if (error) {
           // Extract specific error message from API response
           let errorMessage = 'Error al restablecer la contraseña. Por favor, inténtalo de nuevo.';
@@ -223,6 +225,8 @@ export class ResetOwnerPasswordComponent implements OnInit {
               errorMessage = errorObj.message;
             } else if (errorObj.error?.message) {
               errorMessage = errorObj.error.message;
+            } else if (errorObj.error) {
+              errorMessage = errorObj.error;
             }
           } else if (typeof error === 'string') {
             errorMessage = error;
@@ -230,11 +234,13 @@ export class ResetOwnerPasswordComponent implements OnInit {
           
           this.apiError = errorMessage;
           this.toast.error(errorMessage, 'Error al restablecer contraseña');
-        } else {
-          this.toast.success('Contraseña restablecida con éxito.');
-          this.router.navigate(['/auth/login']);
+          
+          // Unsubscribe to prevent memory leaks
+          loadingSubscription.unsubscribe();
+          errorSubscription.unsubscribe();
         }
       });
+
     } else {
       this.resetPasswordForm.markAllAsTouched();
     }
