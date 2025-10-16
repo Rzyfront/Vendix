@@ -70,8 +70,8 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.forgotOwnerPassword({ organization_slug, email }));
   }
 
-  resetOwnerPassword(token: string, password: string): void {
-    this.store.dispatch(AuthActions.resetOwnerPassword({ token, password }));
+  resetOwnerPassword(token: string, new_password: string): void {
+    this.store.dispatch(AuthActions.resetOwnerPassword({ token, new_password }));
   }
 
   // Synchronous getters for templates

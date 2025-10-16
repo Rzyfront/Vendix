@@ -197,8 +197,8 @@ export class AuthEffects {
   resetOwnerPassword$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.resetOwnerPassword),
-      mergeMap(({ token, password }) =>
-        this.authService.resetOwnerPassword(token, password).pipe(
+      mergeMap(({ token, new_password }) =>
+        this.authService.resetOwnerPassword(token, new_password).pipe(
           map(() => AuthActions.resetOwnerPasswordSuccess()),
           catchError(error => of(AuthActions.resetOwnerPasswordFailure({ error })))
         )

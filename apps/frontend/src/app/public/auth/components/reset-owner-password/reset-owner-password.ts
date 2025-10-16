@@ -9,9 +9,9 @@ import { switchMap, tap } from 'rxjs/operators';
 
 // Custom validator to check if passwords match
 export function passwordsMatchValidator(control: AbstractControl): ValidationErrors | null {
-  const password = control.get('password');
+  const new_password = control.get('new_password');
   const confirmPassword = control.get('confirmPassword');
-  return password && confirmPassword && password.value !== confirmPassword.value ? { passwordsMismatch: true } : null;
+  return new_password && confirmPassword && new_password.value !== confirmPassword.value ? { passwordsMismatch: true } : null;
 }
 
 @Component({
@@ -40,18 +40,18 @@ export function passwordsMatchValidator(control: AbstractControl): ValidationErr
         <form [formGroup]="resetPasswordForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
           <div class="space-y-4">
             <div>
-              <label for="password" class="block text-sm font-medium text-gray-700">
+              <label for="new_password" class="block text-sm font-medium text-gray-700">
                 Nueva Contraseña
               </label>
               <input
-                id="password"
-                formControlName="password"
+                id="new_password"
+                formControlName="new_password"
                 type="password"
-                [class]="getFieldClass('password')"
+                [class]="getFieldClass('new_password')"
                 placeholder="••••••••">
-              @if (hasFieldError('password')) {
+              @if (hasFieldError('new_password')) {
                 <div class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('password') }}
+                  {{ getFieldError('new_password') }}
                 </div>
               }
             </div>
@@ -128,7 +128,7 @@ export class ResetOwnerPasswordComponent implements OnInit {
     private route: ActivatedRoute
   ) {
     this.resetPasswordForm = this.fb.group({
-      password: ['', [Validators.required, Validators.minLength(8)]],
+      new_password: ['', [Validators.required, Validators.minLength(8)]],
       confirmPassword: ['', [Validators.required]]
     }, { validators: passwordsMatchValidator });
   }
@@ -147,8 +147,8 @@ export class ResetOwnerPasswordComponent implements OnInit {
 
   onSubmit(): void {
     if (this.resetPasswordForm.valid && this.token) {
-      const { password } = this.resetPasswordForm.value;
-      this.authFacade.resetOwnerPassword(this.token, password);
+      const { new_password } = this.resetPasswordForm.value;
+      this.authFacade.resetOwnerPassword(this.token, new_password);
 
       this.authFacade.loading$.subscribe(isLoading => {
         this.isLoading = isLoading;

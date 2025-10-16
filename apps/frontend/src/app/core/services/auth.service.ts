@@ -232,8 +232,8 @@ export class AuthService {
   }
 
   // Reset Owner Password
-  resetOwnerPassword(token: string, password: string): Observable<any> {
-    return this.http.post(`${this.API_URL}/reset-owner-password`, { token, password });
+  resetOwnerPassword(token: string, new_password: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/reset-owner-password`, { token, new_password });
   }
 
   // Get current user from store

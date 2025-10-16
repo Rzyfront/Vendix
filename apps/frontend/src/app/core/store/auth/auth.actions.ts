@@ -111,7 +111,7 @@ export const resetOwnerPassword = createAction(
 
   '[Auth] Reset Owner Password',
 
-  props<{ token: string; password: string }>()
+  props<{ token: string; new_password: string }>()
 
 );
 
