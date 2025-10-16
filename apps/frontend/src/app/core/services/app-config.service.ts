@@ -105,12 +105,18 @@ export class AppConfigService {
    * Detección de dominio centralizada (reemplaza DomainDetectorService)
    */
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
-    const currentHostname = hostname || window.location.hostname;
+    let currentHostname = hostname || window.location.hostname;
+
+    // Normalizar hostname - siempre remover 'www.' si está presente
+    if (currentHostname.startsWith('www.')) {
+      currentHostname = currentHostname.substring(4);
+      console.log(`[APP CONFIG] Normalized hostname (removed www): ${currentHostname}`);
+    }
 
     console.log(`[APP CONFIG] Analyzing hostname: ${currentHostname}`);
 
     try {
-      // Consultar API para resolver el dominio
+      // Consultar API para resolver el dominio usando el hostname normalizado
       const domainInfo = await this.resolveDomainFromAPI(currentHostname);
 
       if (!domainInfo) {
@@ -129,6 +135,7 @@ export class AppConfigService {
       throw error;
     }
   }
+
 
   /**
    * Carga configuración del tenant centralizada (reemplaza TenantConfigService)

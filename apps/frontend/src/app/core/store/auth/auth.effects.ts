@@ -200,7 +200,20 @@ export class AuthEffects {
       mergeMap(({ token, new_password }) =>
         this.authService.resetOwnerPassword(token, new_password).pipe(
           map(() => AuthActions.resetOwnerPasswordSuccess()),
-          catchError(error => of(AuthActions.resetOwnerPasswordFailure({ error })))
+          catchError(error => {
+            // Extract specific error message from API response
+            let errorMessage = 'Error al restablecer la contraseña. Por favor, inténtalo de nuevo.';
+            
+            if (error.error?.message?.message) {
+              errorMessage = error.error.message.message;
+            } else if (error.error?.message) {
+              errorMessage = error.error.message;
+            } else if (error.message) {
+              errorMessage = error.message;
+            }
+            
+            return of(AuthActions.resetOwnerPasswordFailure({ error: errorMessage }));
+          })
         )
       )
     )

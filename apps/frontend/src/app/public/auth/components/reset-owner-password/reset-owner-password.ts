@@ -14,6 +14,36 @@ export function passwordsMatchValidator(control: AbstractControl): ValidationErr
   return new_password && confirmPassword && new_password.value !== confirmPassword.value ? { passwordsMismatch: true } : null;
 }
 
+// Custom validator for password strength
+export function passwordStrengthValidator(control: AbstractControl): ValidationErrors | null {
+  const value = control.value;
+  if (!value) {
+    return null;
+  }
+
+  const hasUpperCase = /[A-Z]/.test(value);
+  const hasLowerCase = /[a-z]/.test(value);
+  const hasNumeric = /[0-9]/.test(value);
+  const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value);
+  const isValidLength = value.length >= 8;
+
+  const passwordValid = hasUpperCase && hasLowerCase && hasNumeric && hasSymbol && isValidLength;
+
+  if (!passwordValid) {
+    return {
+      passwordStrength: {
+        hasUpperCase,
+        hasLowerCase,
+        hasNumeric,
+        hasSymbol,
+        isValidLength
+      }
+    };
+  }
+
+  return null;
+}
+
 @Component({
   selector: 'app-reset-owner-password',
   standalone: true,
@@ -36,6 +66,27 @@ export function passwordsMatchValidator(control: AbstractControl): ValidationErr
             Ingresa tu nueva contraseña.
           </p>
         </div>
+
+        <!-- API Error Display -->
+        @if (apiError) {
+          <div class="bg-red-50 border border-red-200 rounded-md p-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </div>
+              <div class="ml-3">
+                <h3 class="text-sm font-medium text-red-800">
+                  Error
+                </h3>
+                <div class="mt-1 text-sm text-red-700">
+                  {{ apiError }}
+                </div>
+              </div>
+            </div>
+          </div>
+        }
 
         <form [formGroup]="resetPasswordForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
           <div class="space-y-4">
@@ -118,6 +169,7 @@ export class ResetOwnerPasswordComponent implements OnInit {
   resetPasswordForm: FormGroup;
   isLoading = false;
   token: string | null = null;
+  apiError: string | null = null;
 
   private toast = inject(ToastService);
 
@@ -128,7 +180,7 @@ export class ResetOwnerPasswordComponent implements OnInit {
     private route: ActivatedRoute
   ) {
     this.resetPasswordForm = this.fb.group({
-      new_password: ['', [Validators.required, Validators.minLength(8)]],
+      new_password: ['', [Validators.required, passwordStrengthValidator]],
       confirmPassword: ['', [Validators.required]]
     }, { validators: passwordsMatchValidator });
   }
@@ -146,6 +198,9 @@ export class ResetOwnerPasswordComponent implements OnInit {
   }
 
   onSubmit(): void {
+    // Clear previous errors
+    this.apiError = null;
+    
     if (this.resetPasswordForm.valid && this.token) {
       const { new_password } = this.resetPasswordForm.value;
       this.authFacade.resetOwnerPassword(this.token, new_password);
@@ -156,7 +211,25 @@ export class ResetOwnerPasswordComponent implements OnInit {
 
       this.authFacade.error$.subscribe(error => {
         if (error) {
-          this.toast.error('Error al restablecer la contraseña. Por favor, inténtalo de nuevo.');
+          // Extract specific error message from API response
+          let errorMessage = 'Error al restablecer la contraseña. Por favor, inténtalo de nuevo.';
+          
+          if (typeof error === 'object' && error !== null) {
+            // Handle error object with nested message structure
+            const errorObj = error as any;
+            if (errorObj.message?.message) {
+              errorMessage = errorObj.message.message;
+            } else if (errorObj.message) {
+              errorMessage = errorObj.message;
+            } else if (errorObj.error?.message) {
+              errorMessage = errorObj.error.message;
+            }
+          } else if (typeof error === 'string') {
+            errorMessage = error;
+          }
+          
+          this.apiError = errorMessage;
+          this.toast.error(errorMessage, 'Error al restablecer contraseña');
         } else {
           this.toast.success('Contraseña restablecida con éxito.');
           this.router.navigate(['/auth/login']);
@@ -188,8 +261,27 @@ export class ResetOwnerPasswordComponent implements OnInit {
       if (field.errors['required']) {
         return 'Este campo es requerido.';
       }
-      if (field.errors['minlength']) {
-        return `La contraseña debe tener al menos ${field.errors['minlength'].requiredLength} caracteres.`;
+      if (field.errors['passwordStrength']) {
+        const strengthErrors = field.errors['passwordStrength'];
+        const requirements = [];
+        
+        if (!strengthErrors.isValidLength) {
+          requirements.push('al menos 8 caracteres');
+        }
+        if (!strengthErrors.hasUpperCase) {
+          requirements.push('una letra mayúscula');
+        }
+        if (!strengthErrors.hasLowerCase) {
+          requirements.push('una letra minúscula');
+        }
+        if (!strengthErrors.hasNumeric) {
+          requirements.push('un número');
+        }
+        if (!strengthErrors.hasSymbol) {
+          requirements.push('un símbolo (!@#$%^&* etc.)');
+        }
+        
+        return `La contraseña debe tener ${requirements.join(', ')}.`;
       }
     }
     return '';

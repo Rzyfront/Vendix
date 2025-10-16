@@ -34,7 +34,7 @@
 - [x] `POST /auth/verify-email` - Verificación de email
 - [x] `POST /auth/resend-verification` - Reenvío de verificación
 - [x] `POST /auth/forgot-password` - Recuperación por organización
-- [x] `POST /auth/reset-password` - Reset de contraseña
+- [x] `POST /auth/reset-owner-password` - Reset de contraseña
 - [x] `POST /auth/change-password` - Cambio de contraseña
 
 **Gestión de Sesiones:**

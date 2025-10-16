@@ -83,7 +83,7 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 PASSWORD RESET LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/reset-password?token=${token}`,
+      `🔗 PASSWORD RESET LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/reset-owner-password?token=${token}`,
     );
 
     return this.sendEmail(to, template.subject, template.html, template.text);

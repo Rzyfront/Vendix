@@ -91,7 +91,7 @@ export class EmailTemplates {
   }
 
   static getPasswordResetTemplate(data: EmailTemplateData) {
-    const resetUrl = `${this.BASE_URL}/auth/reset-password?token=${data.token}`;
+    const resetUrl = `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
 
     return {
       subject: `Restablece tu contraseña en ${this.COMPANY_NAME}`,
