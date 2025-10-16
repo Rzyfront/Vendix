@@ -1,6 +1,6 @@
 import { createReducer, on } from '@ngrx/store';
 import * as AuthActions from './auth.actions';
-import { extractApiErrorMessage } from '../../utils/api-error-handler';
+import { extractApiErrorMessage, NormalizedApiPayload } from '../../utils/api-error-handler';
 
 export interface AuthState {
   user: any | null;
@@ -8,7 +8,7 @@ export interface AuthState {
   permissions: string[];
   roles: string[];
   loading: boolean;
-  error: string | null;
+  error: NormalizedApiPayload | string | null;
   isAuthenticated: boolean;
 }
 
@@ -45,7 +45,8 @@ export const authReducer = createReducer(
   on(AuthActions.loginFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: extractApiErrorMessage(error),
+    // error may already be normalized by effects, but ensure fallback to string
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
     isAuthenticated: false
   })),
 
@@ -73,7 +74,7 @@ export const authReducer = createReducer(
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: extractApiErrorMessage(error),
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
     isAuthenticated: false
   })),
 
@@ -92,7 +93,7 @@ export const authReducer = createReducer(
   on(AuthActions.loadUserFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: extractApiErrorMessage(error)
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
   })),
 
   on(AuthActions.updateUser, (state, { user }) => ({
@@ -141,7 +142,7 @@ export const authReducer = createReducer(
   on(AuthActions.forgotOwnerPasswordFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: extractApiErrorMessage(error)
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
   })),
 
   // Reset Owner Password
@@ -160,6 +161,6 @@ export const authReducer = createReducer(
   on(AuthActions.resetOwnerPasswordFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: extractApiErrorMessage(error)
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
   }))
 );

@@ -5,6 +5,7 @@ import { map, mergeMap, catchError, tap } from 'rxjs/operators';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage, normalizeApiPayload } from '../../utils/api-error-handler';
 import * as AuthActions from './auth.actions';
 
 @Injectable()
@@ -23,6 +24,8 @@ export class AuthEffects {
             if (!response.data) {
               throw new Error('Invalid response data');
             }
+            // response may include a top-level message
+            const apiMessage = response.message;
             return AuthActions.loginSuccess({
               user: response.data.user,
               tokens: {
@@ -30,10 +33,11 @@ export class AuthEffects {
                 refreshToken: response.data.refresh_token
               },
               permissions: response.data.permissions || [],
-              roles: response.data.roles || []
+              roles: response.data.roles || [],
+              message: apiMessage
             });
           }),
-          catchError(error => of(AuthActions.loginFailure({ error })))
+          catchError(error => of(AuthActions.loginFailure({ error: normalizeApiPayload(error) })))
         )
       )
     )
@@ -42,13 +46,18 @@ export class AuthEffects {
   loginSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.loginSuccess),
-      tap(({ user, roles }) => {
+      tap(({ user, roles, message }) => {
+        // Show server message when present
+        if (message) {
+          this.toast.success(message);
+        }
+
         console.log('Login successful, determining redirect based on roles:', roles);
-        
+
         // Determine redirect based on user roles (ensure roles is always an array)
         const userRoles = roles || [];
         let redirectPath = this.determineRedirectPath(userRoles, user);
-        
+
         console.log('Redirecting to:', redirectPath);
         this.router.navigate([redirectPath]).then(success => {
           if (success) {
@@ -110,7 +119,7 @@ export class AuthEffects {
               }
             });
           }),
-          catchError(error => of(AuthActions.refreshTokenFailure({ error })))
+          catchError(error => of(AuthActions.refreshTokenFailure({ error: normalizeApiPayload(error) })))
         )
       )
     )
@@ -190,7 +199,7 @@ export class AuthEffects {
       mergeMap(({ organization_slug, email }) =>
         this.authService.forgotOwnerPassword(organization_slug, email).pipe(
           map(() => AuthActions.forgotOwnerPasswordSuccess()),
-          catchError(error => of(AuthActions.forgotOwnerPasswordFailure({ error })))
+          catchError(error => of(AuthActions.forgotOwnerPasswordFailure({ error: normalizeApiPayload(error) })))
         )
       )
     )
@@ -211,8 +220,8 @@ export class AuthEffects {
             }
           }),
           catchError(error => {
-            // Pass the entire error object to let the reducer extract the message
-            return of(AuthActions.resetOwnerPasswordFailure({ error }));
+            // Serialize error message before dispatching failure action to keep actions serializable
+            return of(AuthActions.resetOwnerPasswordFailure({ error: normalizeApiPayload(error) }));
           })
         )
       )

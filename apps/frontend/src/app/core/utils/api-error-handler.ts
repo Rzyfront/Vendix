@@ -25,16 +25,31 @@ export interface ApiResponse<T = any> {
   };
 }
 
+export interface NormalizedApiPayload {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  statusCode?: number;
+  timestamp?: string;
+}
+
 /**
  * Extrae el mensaje de error de una respuesta de API
  * @param response Respuesta de la API
  * @returns Mensaje de error formateado
  */
 export function extractApiErrorMessage(response: any): string {
+  // Algunos errores HTTP vienen envueltos en un HttpErrorResponse donde
+  // el body real está en `response.error`. Normalizamos ese caso primero.
+  if (response && typeof response === 'object' && response.error && typeof response.error === 'object') {
+    // Reemplazamos `response` por su body para continuar con la extracción
+    response = response.error;
+  }
+
   // Si es una respuesta de API con nuestra estructura estandarizada
   if (response && typeof response === 'object' && 'success' in response) {
     const apiResponse = response as ApiResponse;
-    
+
     if (!apiResponse.success) {
       // Caso 1: Si hay un objeto error con mensaje
       if (apiResponse.error && typeof apiResponse.error === 'object' && apiResponse.error.message) {
@@ -51,7 +66,7 @@ export function extractApiErrorMessage(response: any): string {
       // Caso por defecto
       return 'Error en la operación';
     }
-    
+
     // Si success es true pero hay algún problema, usar el mensaje general
     if (apiResponse.success) {
       return apiResponse.message || 'Operación completada';
@@ -91,6 +106,53 @@ export function extractApiErrorMessage(response: any): string {
   
   // Valor por defecto
   return 'Error desconocido';
+}
+
+/**
+ * Normaliza la carga útil de respuesta de la API para que tenga siempre
+ * una forma predecible y serializable. Útil para despachar a la store.
+ */
+export function normalizeApiPayload(response: any): NormalizedApiPayload {
+  if (!response || typeof response !== 'object') {
+    return { message: String(response) };
+  }
+
+  // Desenvaina HttpErrorResponse si está presente
+  if (response.error && typeof response.error === 'object') {
+    response = response.error;
+  }
+
+  const payload: NormalizedApiPayload = {};
+
+  if ('success' in response) {
+    payload.success = Boolean(response.success);
+  }
+
+  if (typeof response.message === 'string') {
+    payload.message = response.message;
+  } else if (response.error && typeof response.error === 'string') {
+    // caso en el que `error` es string y contiene mensaje
+    payload.message = response.error;
+  }
+
+  // Extraer `error` si existe y es string o contiene message
+  if (typeof response.error === 'string') {
+    payload.error = response.error;
+  } else if (response.error && typeof response.error === 'object' && response.error.message) {
+    payload.error = response.error.message;
+  }
+
+  if (typeof response.statusCode === 'number') {
+    payload.statusCode = response.statusCode;
+  } else if (typeof response.status === 'number') {
+    payload.statusCode = response.status;
+  }
+
+  if (typeof response.timestamp === 'string') {
+    payload.timestamp = response.timestamp;
+  }
+
+  return payload;
 }
 
 /**

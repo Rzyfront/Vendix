@@ -1,4 +1,5 @@
 import { createAction, props } from '@ngrx/store';
+import { NormalizedApiPayload } from '../../utils/api-error-handler';
 
 export const login = createAction(
   '[Auth] Login',
@@ -7,12 +8,12 @@ export const login = createAction(
 
 export const loginSuccess = createAction(
   '[Auth] Login Success',
-  props<{ user: any; tokens: { accessToken: string; refreshToken: string }; permissions?: string[]; roles?: string[] }>()
+  props<{ user: any; tokens: { accessToken: string; refreshToken: string }; permissions?: string[]; roles?: string[]; message?: string }>()
 );
 
 export const loginFailure = createAction(
   '[Auth] Login Failure',
-  props<{ error: any }>()
+  props<{ error: NormalizedApiPayload | string }>()
 );
 
 export const logout = createAction('[Auth] Logout');
@@ -31,7 +32,7 @@ export const refreshTokenSuccess = createAction(
 
 export const refreshTokenFailure = createAction(
   '[Auth] Refresh Token Failure',
-  props<{ error: any }>()
+  props<{ error: NormalizedApiPayload | string }>()
 );
 
 export const loadUser = createAction('[Auth] Load User');
@@ -43,7 +44,7 @@ export const loadUserSuccess = createAction(
 
 export const loadUserFailure = createAction(
   '[Auth] Load User Failure',
-  props<{ error: any }>()
+  props<{ error: NormalizedApiPayload | string }>()
 );
 
 export const updateUser = createAction(
@@ -96,11 +97,8 @@ export const forgotOwnerPasswordSuccess = createAction(
 
 
 export const forgotOwnerPasswordFailure = createAction(
-
   '[Auth] Forgot Owner Password Failure',
-
-  props<{ error: any }>()
-
+  props<{ error: NormalizedApiPayload | string }>()
 );
 
 
@@ -126,9 +124,6 @@ export const resetOwnerPasswordSuccess = createAction(
 
 
 export const resetOwnerPasswordFailure = createAction(
-
   '[Auth] Reset Owner Password Failure',
-
-  props<{ error: any }>()
-
+  props<{ error: NormalizedApiPayload | string }>()
 );

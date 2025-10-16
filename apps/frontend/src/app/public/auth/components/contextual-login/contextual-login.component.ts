@@ -6,7 +6,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { AppConfigService } from '../../../../core/services/app-config.service';
 import { takeUntil } from 'rxjs/operators';
-import { Subject } from 'rxjs';
+import { Subject, Subscription } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 
 export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
@@ -17,6 +17,7 @@ export interface LoginError {
   canRetry: boolean;
   retryAfter?: number;
   details?: string;
+  apiError?: string; // raw `error` field from API (show in toast)
 }
 
 @Component({
@@ -275,6 +276,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   lockoutTime = 180;
   retryCountdown = 0;
   retryTimer: any;
+  apiErrorMessage: string | null = null;
   
   // Context properties
   contextType: 'vendix' | 'organization' | 'store' = 'vendix';
@@ -382,9 +384,39 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
   private handleLoginError(error: any): void {
     this.loginAttempts++;
-    const errorMessage = error?.message || error?.error?.message || error?.error || 'Error de autenticación';
 
-    if (errorMessage.toLowerCase().includes('credenciales inválidas') || errorMessage.toLowerCase().includes('invalid credentials')) {
+    // Extraer separadamente `message` (para UI) y `error` (para toast) de la respuesta API
+    let apiMessage = 'Error de autenticación';
+    let apiErrorText = '';
+
+    if (typeof error === 'object' && error !== null) {
+      const errorObj = error as any;
+      // Preferir el campo `message` para mostrar en pantalla
+      if (errorObj.message?.message) {
+        apiMessage = errorObj.message.message;
+      } else if (typeof errorObj.message === 'string') {
+        apiMessage = errorObj.message;
+      } else if (errorObj.details?.message) {
+        apiMessage = errorObj.details.message;
+      } else if (typeof errorObj.details === 'string') {
+        apiMessage = errorObj.details;
+      }
+
+      // Extraer campo `error` (puede ser string o objeto con message)
+      if (typeof errorObj.error === 'string') {
+        apiErrorText = errorObj.error;
+      } else if (errorObj.error?.message) {
+        apiErrorText = errorObj.error.message;
+      }
+    } else if (typeof error === 'string') {
+      apiMessage = error;
+      apiErrorText = error;
+    }
+
+    const combined = `${apiMessage} ${apiErrorText}`.toLowerCase();
+
+    // Manejar tipos específicos de error basados en el mensaje combinado
+    if (combined.includes('credenciales inválidas') || combined.includes('invalid credentials')) {
       if (this.loginAttempts >= this.maxAttempts) {
         this.setLoginError({
           type: 'too_many_attempts',
@@ -395,45 +427,52 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       } else {
         this.setLoginError({
           type: 'error',
-          message: 'Credenciales inválidas. Verifica tu email y contraseña.',
+          message: apiMessage, // mostrar `message` en pantalla
+          apiError: apiErrorText || undefined, // preferir `error` en toast
           canRetry: true
         });
       }
-    } else if (errorMessage.toLowerCase().includes('email not verified') || errorMessage.toLowerCase().includes('verificar email')) {
+  } else if (combined.includes('email not verified') || combined.includes('verificar email')) {
       this.setLoginError({
         type: 'email_not_verified',
-        message: 'Email no verificado. Revisa tu bandeja de entrada.',
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: false
       });
-    } else if (errorMessage.toLowerCase().includes('too many') || errorMessage.toLowerCase().includes('demasiados') || errorMessage.toLowerCase().includes('cuenta bloqueada')) {
+  } else if (combined.includes('too many') || combined.includes('demasiados') || combined.includes('cuenta bloqueada')) {
       this.setLoginError({
         type: 'too_many_attempts',
-        message: 'Demasiados intentos fallidos. Espera unos minutos.',
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: true,
         retryAfter: this.lockoutTime
       });
-    } else if (errorMessage.toLowerCase().includes('suspended') || errorMessage.toLowerCase().includes('suspendida')) {
+  } else if (combined.includes('suspended') || combined.includes('suspendida')) {
       this.setLoginError({
         type: 'account_suspended',
-        message: 'Cuenta suspendida. Contacta al administrador.',
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: false
       });
-    } else if (errorMessage.toLowerCase().includes('expired') || errorMessage.toLowerCase().includes('expirada')) {
+  } else if (combined.includes('expired') || combined.includes('expirada')) {
       this.setLoginError({
         type: 'password_expired',
-        message: 'Contraseña expirada. Debes cambiarla.',
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: false
       });
-    } else if (errorMessage.toLowerCase().includes('conexión') || errorMessage.toLowerCase().includes('connection')) {
+  } else if (combined.includes('conexión') || combined.includes('connection')) {
       this.setLoginError({
         type: 'network_error',
-        message: 'Error de conexión. Verifica tu conexión a internet.',
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: true
       });
     } else {
       this.setLoginError({
         type: 'error',
-        message: errorMessage,
+        message: apiMessage,
+        apiError: apiErrorText || undefined,
         canRetry: true
       });
     }
@@ -442,28 +481,34 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   private setLoginError(error: LoginError): void {
     this.loginState = error.type;
     this.loginError = error;
+    // Keep a local copy of the API message so transient clears from the facade
+    // don't immediately hide the UI message while the user can retry.
+    this.apiErrorMessage = error.message;
 
     if (error.retryAfter) {
       this.startRetryCountdown(error.retryAfter);
     }
 
-    switch (error.type) {
+  // Prefer the server `error` field in toasts (English/internal code),
+  // but keep `message` for UI display.
+  const toastText = error.apiError || error.message;
+  switch (error.type) {
       case 'network_error':
-        this.toast.error('Error de conexión. Verifica tu conexión a internet.', 'Error de red', 5000);
+          this.toast.error('Error de conexión. Verifica tu conexión a internet.', 'Error de red', 5000);
         break;
       case 'rate_limited':
       case 'too_many_attempts':
-        this.toast.warning(error.message, 'Demasiados intentos', 5000);
+          this.toast.warning(toastText, 'Demasiados intentos', 5000);
         break;
       case 'account_locked':
       case 'account_suspended':
-        this.toast.error(error.message, 'Cuenta no disponible', 5000);
+          this.toast.error(toastText, 'Cuenta no disponible', 5000);
         break;
       case 'email_not_verified':
-        this.toast.info(error.message, 'Verificación requerida', 5000);
+          this.toast.info(toastText, 'Verificación requerida', 5000);
         break;
       default:
-        this.toast.error(error.message, 'Error de inicio de sesión', 5000);
+          this.toast.error(toastText, 'Error de inicio de sesión', 5000);
     }
   }
 
@@ -487,6 +532,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.loginState = 'idle';
     this.loginError = null;
     this.retryCountdown = 0;
+    this.apiErrorMessage = null;
   }
 
 
@@ -565,7 +611,13 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
   onSubmit(): void {
     if (this.loginForm.valid && this.loginState !== 'loading') {
-      this.clearError();
+      // Clear previous transient errors for new attempt
+      this.apiErrorMessage = null;
+      this.loginError = null;
+
+      // Clear previous transient errors for new attempt; rely on the global
+      // authFacade.error$ subscription in ngOnInit to handle errors and toasts.
+      // Avoid creating local subscriptions here to prevent duplicate toasts.
 
       const { vlink, email, password } = this.loginForm.value;
 
@@ -634,6 +686,10 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
   get errorDetails(): string {
     return this.loginError?.details || '';
+  }
+
+  get apiError(): string | null {
+    return this.apiErrorMessage || this.loginError?.message || null;
   }
 
   // Contextual computed properties
