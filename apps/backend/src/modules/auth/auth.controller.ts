@@ -190,7 +190,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() verifyEmailDto: { token: string }) {
     const result = await this.authService.verifyEmail(verifyEmailDto.token);
-    return result;
+    return this.responseService.success(result, result.message);
   }
 
   @Public()
@@ -200,7 +200,7 @@ export class AuthController {
     const result = await this.authService.resendEmailVerification(
       resendDto.email,
     );
-    return result;
+    return this.responseService.success(result, result.message);
   }
 
   // ===== RUTAS DE RECUPERACIÓN DE CONTRASEÑA =====
@@ -213,7 +213,7 @@ export class AuthController {
       forgotDto.email,
       forgotDto.organization_slug,
     );
-    return result;
+    return this.responseService.success(result, result.message);
   }
 
   @Public()
@@ -224,7 +224,7 @@ export class AuthController {
       resetDto.token,
       resetDto.new_password,
     );
-    return result;
+    return this.responseService.success(result, result.message);
   }
 
   @Post('change-password')
@@ -238,7 +238,7 @@ export class AuthController {
       changeDto.current_password,
       changeDto.new_password,
     );
-    return result;
+    return this.responseService.success(result, result.message);
   }
 
   @Get('sessions')
