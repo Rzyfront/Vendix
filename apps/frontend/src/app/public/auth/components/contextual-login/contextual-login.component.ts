@@ -9,6 +9,11 @@ import { takeUntil } from 'rxjs/operators';
 import { Subject, Subscription } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import {
+  InputComponent,
+  ButtonComponent,
+  CardComponent
+} from '../../../../shared/components';
 
 export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
 
@@ -27,7 +32,10 @@ export interface LoginError {
   imports: [
     CommonModule,
     RouterModule,
-    ReactiveFormsModule
+    ReactiveFormsModule,
+    InputComponent,
+    ButtonComponent,
+    CardComponent
   ],
   template: `
     <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="backgroundClass">
@@ -44,188 +52,170 @@ export interface LoginError {
             </div>
           }
 
-          <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
+          <h2 class="mt-6 text-3xl font-extrabold text-text-primary">
             {{ loginTitle }}
           </h2>
           @if (displayName) {
-            <p class="mt-2 text-sm text-gray-600">
+            <p class="mt-2 text-sm text-text-secondary">
               {{ contextDescription }}
             </p>
           }
           @if (!displayName) {
-            <p class="mt-1 text-sm text-gray-500">
+            <p class="mt-1 text-sm text-text-tertiary">
               {{ defaultDescription }}
             </p>
           }
         </div>
 
         <!-- Login Form -->
-        <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
-          <div class="space-y-4">
-            <!-- Vlink Field (only for Vendix context) -->
-            @if (contextType === 'vendix') {
-              <div>
-                <label for="vlink" class="block text-sm font-medium text-gray-700">
-                  Vlink
-                </label>
-                <input
-                  id="vlink"
+        <app-card shadow="md" class="mt-12">
+          <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-8">
+            <div class="space-y-6">
+              <!-- Vlink Field (only for Vendix context) -->
+              @if (contextType === 'vendix') {
+                <app-input
+                  label="Vlink"
                   formControlName="vlink"
                   type="text"
-                  autocomplete="organization"
-                  [class]="getFieldClass('vlink')"
+                  size="lg"
+                  [required]="true"
                   placeholder="mi-organizacion"
-                  (blur)="onFieldBlur('vlink')"
-                  (input)="onFieldInput('vlink')">
-                @if (hasFieldError('vlink')) {
-                  <div class="mt-1 text-sm text-red-600">
-                    {{ getFieldError('vlink') }}
+                  (inputBlur)="onFieldBlur('vlink')"
+                  (inputChange)="onFieldInput('vlink')"
+                  >
+                </app-input>
+              }
+
+              <!-- Email Field -->
+              <app-input
+                [label]="emailLabel"
+                formControlName="email"
+                type="email"
+                size="lg"
+                [required]="true"
+                [placeholder]="emailPlaceholder"
+                (inputBlur)="onFieldBlur('email')"
+                (inputChange)="onFieldInput('email')">
+              </app-input>
+
+              <!-- Password Field -->
+              <app-input
+                label="Contraseña"
+                formControlName="password"
+                type="password"
+                size="lg"
+                [required]="true"
+                placeholder="••••••••"
+                (inputBlur)="onFieldBlur('password')"
+                (inputChange)="onFieldInput('password')">
+              </app-input>
+            </div>
+
+            <!-- Error Display -->
+            @if (hasError || hasFieldErrors) {
+              <div class="rounded-md bg-red-50 p-4 border border-red-200">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
                   </div>
-                }
-                <p class="mt-1 text-xs text-gray-500">
-                  Ingresa el vlink de tu organización o tienda
-                </p>
+                  <div class="ml-3">
+                    <!-- Field Validation Errors -->
+                    @if (hasFieldErrors && !hasError) {
+                      <h3 class="text-sm font-medium text-red-800">
+                        Corrección requerida
+                      </h3>
+                      <div class="mt-2 text-sm text-red-700 space-y-1">
+                        @for (error of getFieldErrors(); track error.field) {
+                          <p>{{ error.message }}</p>
+                        }
+                      </div>
+                    }
+                    
+                    <!-- Login Error Messages -->
+                    @if (hasError) {
+                      <h3 class="text-sm font-medium text-red-800">
+                        {{ errorMessage }}
+                      </h3>
+                      @if (errorDetails) {
+                        <div class="mt-2 text-sm text-red-700">
+                          {{ errorDetails }}
+                        </div>
+                      }
+                      @if (canRetry && retryCountdown > 0) {
+                        <div class="mt-2">
+                          <p class="text-sm text-red-700">
+                            Puedes reintentar en {{ retryCountdown }} segundos
+                          </p>
+                        </div>
+                      }
+                    }
+                  </div>
+                </div>
               </div>
             }
 
-            <!-- Email Field -->
-            <div>
-              <label for="email" class="block text-sm font-medium text-gray-700">
-                {{ emailLabel }}
-              </label>
-              <input
-                id="email"
-                formControlName="email"
-                type="email"
-                autocomplete="email"
-                [class]="getFieldClass('email')"
-                [placeholder]="emailPlaceholder"
-                (blur)="onFieldBlur('email')"
-                (input)="onFieldInput('email')">
-              @if (hasFieldError('email')) {
-                <div class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('email') }}
-                </div>
+            <!-- Submit Button -->
+            <app-button
+              type="submit"
+              variant="primary"
+              size="lg"
+              [disabled]="!isFormValid"
+              [loading]="isLoading"
+              [fullWidth]="true"
+              [showTextWhileLoading]="true"
+              class="mt-4 w-full">
+              @if (isLoading) {
+                Iniciando sesión...
+              } @else {
+                Iniciar Sesión
               }
-            </div>
+            </app-button>
 
-            <!-- Password Field -->
-            <div>
-              <label for="password" class="block text-sm font-medium text-gray-700">
-                Contraseña
-              </label>
-              <input
-                id="password"
-                formControlName="password"
-                type="password"
-                autocomplete="current-password"
-                [class]="getFieldClass('password')"
-                placeholder="••••••••"
-                (blur)="onFieldBlur('password')"
-                (input)="onFieldInput('password')">
-              @if (hasFieldError('password')) {
-                <div class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('password') }}
-                </div>
-              }
-            </div>
-          </div>
-
-          <!-- Error Display -->
-          @if (hasError) {
-            <div class="rounded-md bg-red-50 p-4">
-              <div class="flex">
-                <div class="flex-shrink-0">
-                  <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                  </svg>
-                </div>
-                <div class="ml-3">
-                  <h3 class="text-sm font-medium text-red-800">
-                    {{ errorMessage }}
-                  </h3>
-                  @if (errorDetails) {
-                    <div class="mt-2 text-sm text-red-700">
-                      {{ errorDetails }}
-                    </div>
-                  }
-                  @if (canRetry && retryCountdown > 0) {
-                    <div class="mt-2">
-                      <p class="text-sm text-red-700">
-                        Puedes reintentar en {{ retryCountdown }} segundos
-                      </p>
-                    </div>
-                  }
-                </div>
+            <!-- Actions -->
+            <div class="flex justify-center mt-4">
+              <div class="text-sm">
+                <a
+                  (click)="navigateToForgotPassword()"
+                  class="font-medium text-primary hover:text-primary-dark cursor-pointer">
+                  ¿Olvidaste tu contraseña?
+                </a>
               </div>
             </div>
-          }
 
-          <!-- Actions -->
-          <div class="flex items-center justify-between">
-            <div class="text-sm">
-              <a 
-                (click)="navigateToForgotPassword()" 
-                class="font-medium text-primary hover:text-primary-dark cursor-pointer">
-                ¿Olvidaste tu contraseña?
-              </a>
-            </div>
-          </div>
+            <!-- Special Actions -->
+            @if (loginState === 'email_not_verified') {
+              <div class="text-center">
+                <app-button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="resendVerificationEmail()">
+                  Reenviar email de verificación
+                </app-button>
+              </div>
+            }
 
-          <!-- Submit Button -->
-          <div>
-            <button
-              type="submit"
-              [disabled]="!isFormValid || isLoading"
-              [class]="isLoading 
-                ? 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary/70 cursor-not-allowed' 
-                : 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary'">
-              @if (isLoading) {
-                <span class="flex items-center">
-                  <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Iniciando sesión...
-                </span>
-              }
-              @if (!isLoading) {
-                <span>
-                  Iniciar Sesión
-                </span>
-              }
-            </button>
-          </div>
-
-          <!-- Special Actions -->
-          @if (loginState === 'email_not_verified') {
-            <div class="text-center">
-              <button
-                type="button"
-                (click)="resendVerificationEmail()"
-                class="text-sm font-medium text-primary hover:text-primary-dark">
-                Reenviar email de verificación
-              </button>
-            </div>
-          }
-
-          @if (canRetry && retryCountdown === 0) {
-            <div class="text-center">
-              <button
-                type="button"
-                (click)="retryLogin()"
-                class="text-sm font-medium text-primary hover:text-primary-dark">
-                Reintentar inicio de sesión
-              </button>
-            </div>
-          }
-        </form>
+            @if (canRetry && retryCountdown === 0) {
+              <div class="text-center">
+                <app-button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="retryLogin()">
+                  Reintentar inicio de sesión
+                </app-button>
+              </div>
+            }
+          </form>
+        </app-card>
 
         <!-- Additional Links -->
-        <div class="text-center text-sm text-gray-600">
+        <div class="text-center text-sm text-text-secondary">
           @if (contextType === 'vendix') {
             <p>
-              ¿Necesitas una cuenta corporativa? 
+              ¿Necesitas una cuenta corporativa?
               <a routerLink="/auth/register" class="font-medium text-primary hover:text-primary-dark">
                 Solicitar acceso
               </a>
@@ -234,7 +224,7 @@ export interface LoginError {
 
           @if (contextType === 'organization') {
             <p>
-              ¿Eres cliente? 
+              ¿Eres cliente?
               <a [routerLink]="['/shop']" class="font-medium text-primary hover:text-primary-dark">
                 Accede a nuestra tienda
               </a>
@@ -243,7 +233,7 @@ export interface LoginError {
 
           @if (contextType === 'store') {
             <p>
-              ¿No tienes cuenta? 
+              ¿No tienes cuenta?
               <a [routerLink]="['/auth/register']" class="font-medium text-primary hover:text-primary-dark">
                 Regístrate aquí
               </a>
@@ -258,7 +248,7 @@ export interface LoginError {
 
         <!-- Context Info -->
         @if (displayName) {
-          <div class="text-center text-xs text-gray-500 mt-4">
+          <div class="text-center text-xs text-text-tertiary mt-4">
             <p>{{ contextFooter }}</p>
             <p>Powered by Quickss</p>
           </div>
@@ -539,19 +529,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     localStorage.removeItem('login_lockout_until');
   }
 
-  getFieldClass(fieldName: string): string {
-    const field = this.loginForm.get(fieldName);
-    const baseClasses = 'w-full px-4 py-3 rounded-input border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
-    
-    if (field?.invalid && field?.touched) {
-      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500/50`;
-    } else if (field?.valid && field?.touched && field?.value) {
-      return `${baseClasses} border-green-300 bg-green-50 focus:border-green-500 focus:ring-green-500/50`;
-    } else {
-      return `${baseClasses} border-gray-300 bg-white focus:border-primary focus:ring-primary/50`;
-    }
-  }
-
   onFieldBlur(fieldName: string): void {
     const field = this.loginForm.get(fieldName);
     field?.markAsTouched();
@@ -583,9 +560,43 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     return '';
   }
 
+  getFieldErrors(): { field: string; message: string }[] {
+    const errors: { field: string; message: string }[] = [];
+    
+    const fields = ['vlink', 'email', 'password'];
+    fields.forEach(fieldName => {
+      const field = this.loginForm.get(fieldName);
+      if (field?.errors && field?.touched) {
+        if (field.errors['required']) {
+          let message = '';
+          if (fieldName === 'vlink') {
+            message = 'El vlink es requerido';
+          } else if (fieldName === 'email') {
+            message = 'El email es requerido';
+          } else if (fieldName === 'password') {
+            message = 'La contraseña es requerida';
+          }
+          errors.push({ field: fieldName, message });
+        }
+        if (field.errors['email']) {
+          errors.push({ field: fieldName, message: 'Debe ser un email válido' });
+        }
+        if (field.errors['minlength']) {
+          errors.push({ field: fieldName, message: 'La contraseña debe tener al menos 6 caracteres' });
+        }
+      }
+    });
+    
+    return errors;
+  }
+
   hasFieldError(fieldName: string): boolean {
     const field = this.loginForm.get(fieldName);
     return !!(field?.errors && field?.touched);
+  }
+
+  get hasFieldErrors(): boolean {
+    return this.getFieldErrors().length > 0;
   }
 
   onSubmit(): void {

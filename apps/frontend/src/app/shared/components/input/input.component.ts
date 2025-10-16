@@ -17,7 +17,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
     }
   ],
   template: `
-    <div class="w-full">
+    <div class="w-full mt-4">
       <!-- Label -->
       <label 
         *ngIf="label" 
@@ -138,7 +138,7 @@ export class InputComponent implements ControlValueAccessor {
       'focus:border-primary',
       'disabled:opacity-50',
       'disabled:cursor-not-allowed',
-      'placeholder:text-text-secondary'
+      'placeholder:text-text-muted'
     ];
 
     // Size classes
