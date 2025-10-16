@@ -8,6 +8,7 @@ import { AppConfigService } from '../../../../core/services/app-config.service';
 import { takeUntil } from 'rxjs/operators';
 import { Subject, Subscription } from 'rxjs';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
 
@@ -259,7 +260,7 @@ export interface LoginError {
         @if (displayName) {
           <div class="text-center text-xs text-gray-500 mt-4">
             <p>{{ contextFooter }}</p>
-            <p>Powered by Vendix Platform</p>
+            <p>Powered by Quickss</p>
           </div>
         }
       </div>
@@ -316,7 +317,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
       if (error) {
-        this.handleLoginError(error);
+        // Normalize error to handle both string and NormalizedApiPayload types
+        const normalizedError = typeof error === 'string' ? error : extractApiErrorMessage(error);
+        this.handleLoginError(normalizedError);
       } else {
         // Clear error state when error becomes null (e.g., after retry)
         this.clearError();
@@ -382,36 +385,12 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     // No es necesario actualizarlos aquí nuevamente
   }
 
-  private handleLoginError(error: any): void {
+  private handleLoginError(error: string): void {
     this.loginAttempts++;
 
-    // Extraer separadamente `message` (para UI) y `error` (para toast) de la respuesta API
-    let apiMessage = 'Error de autenticación';
-    let apiErrorText = '';
-
-    if (typeof error === 'object' && error !== null) {
-      const errorObj = error as any;
-      // Preferir el campo `message` para mostrar en pantalla
-      if (errorObj.message?.message) {
-        apiMessage = errorObj.message.message;
-      } else if (typeof errorObj.message === 'string') {
-        apiMessage = errorObj.message;
-      } else if (errorObj.details?.message) {
-        apiMessage = errorObj.details.message;
-      } else if (typeof errorObj.details === 'string') {
-        apiMessage = errorObj.details;
-      }
-
-      // Extraer campo `error` (puede ser string o objeto con message)
-      if (typeof errorObj.error === 'string') {
-        apiErrorText = errorObj.error;
-      } else if (errorObj.error?.message) {
-        apiErrorText = errorObj.error.message;
-      }
-    } else if (typeof error === 'string') {
-      apiMessage = error;
-      apiErrorText = error;
-    }
+    // El error ya está normalizado como string desde la suscripción
+    let apiMessage = error;
+    let apiErrorText = error;
 
     const combined = `${apiMessage} ${apiErrorText}`.toLowerCase();
 

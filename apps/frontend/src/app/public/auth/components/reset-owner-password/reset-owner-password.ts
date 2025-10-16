@@ -6,6 +6,7 @@ import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { of } from 'rxjs';
 import { switchMap, tap } from 'rxjs/operators';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 // Custom validator to check if passwords match
 export function passwordsMatchValidator(control: AbstractControl): ValidationErrors | null {
@@ -213,24 +214,8 @@ export class ResetOwnerPasswordComponent implements OnInit {
       // Subscribe to error state - handle errors without redirecting
       const errorSubscription = this.authFacade.error$.subscribe(error => {
         if (error) {
-          // Extract specific error message from API response
-          let errorMessage = 'Error al restablecer la contraseña. Por favor, inténtalo de nuevo.';
-          
-          if (typeof error === 'object' && error !== null) {
-            // Handle error object with nested message structure
-            const errorObj = error as any;
-            if (errorObj.message?.message) {
-              errorMessage = errorObj.message.message;
-            } else if (errorObj.message) {
-              errorMessage = errorObj.message;
-            } else if (errorObj.error?.message) {
-              errorMessage = errorObj.error.message;
-            } else if (errorObj.error) {
-              errorMessage = errorObj.error;
-            }
-          } else if (typeof error === 'string') {
-            errorMessage = error;
-          }
+          // Normalize error to handle both string and NormalizedApiPayload types
+          const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
           
           this.apiError = errorMessage;
           this.toast.error(errorMessage, 'Error al restablecer contraseña');

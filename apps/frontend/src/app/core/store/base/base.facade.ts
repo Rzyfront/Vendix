@@ -3,6 +3,7 @@ import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { BaseState } from './base.reducer';
 import * as BaseActions from './base.actions';
+import { extractApiErrorMessage } from '../../utils/api-error-handler';
 
 @Injectable()
 export class BaseFacade<T = any> {
@@ -62,7 +63,16 @@ export class BaseFacade<T = any> {
 
   getCurrentError(): any {
     let result: any = null;
-    this.error$.subscribe(error => result = error).unsubscribe();
+    this.error$.subscribe(error => {
+      if (error === null) {
+        result = null;
+      } else if (typeof error === 'string') {
+        result = error;
+      } else {
+        // Handle NormalizedApiPayload by extracting the message
+        result = extractApiErrorMessage(error);
+      }
+    }).unsubscribe();
     return result;
   }
 

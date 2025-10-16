@@ -4,6 +4,7 @@ import { RouterModule, Router } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-forgot-owner-password',
@@ -126,16 +127,26 @@ export class ForgotOwnerPasswordComponent implements OnInit {
       const { vlink, email } = this.forgotPasswordForm.value;
       this.authFacade.forgotOwnerPassword(vlink, email);
 
-      this.authFacade.loading$.subscribe(isLoading => {
+      const loadingSubscription = this.authFacade.loading$.subscribe(isLoading => {
         this.isLoading = isLoading;
       });
 
-      this.authFacade.error$.subscribe(error => {
+      const errorSubscription = this.authFacade.error$.subscribe(error => {
         if (error) {
-          this.toast.error('Error al enviar las instrucciones. Por favor, inténtalo de nuevo.');
+          // Normalize error to handle both string and NormalizedApiPayload types
+          const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.toast.error(errorMessage, 'Error al enviar instrucciones');
+          
+          // Unsubscribe to prevent memory leaks
+          loadingSubscription.unsubscribe();
+          errorSubscription.unsubscribe();
         } else {
           this.toast.success('Si los datos son correctos, recibirás un email con instrucciones.');
           this.router.navigate(['/auth/login']);
+          
+          // Unsubscribe on success as well
+          loadingSubscription.unsubscribe();
+          errorSubscription.unsubscribe();
         }
       });
     } else {

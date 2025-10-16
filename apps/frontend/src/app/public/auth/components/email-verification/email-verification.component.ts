@@ -102,7 +102,7 @@ import { AuthService } from '../../../../core/services/auth.service';
 
         <!-- Context Info -->
         <div class="text-center text-xs text-gray-500 mt-4">
-          <p>Powered by Vendix Platform</p>
+          <p>Powered by Quickss</p>
         </div>
       </div>
     </div>

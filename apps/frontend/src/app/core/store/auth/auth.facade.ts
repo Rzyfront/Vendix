@@ -5,6 +5,7 @@ import { take } from 'rxjs/operators';
 import * as AuthActions from './auth.actions';
 import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
+import { extractApiErrorMessage } from '../../utils/api-error-handler';
 
 @Injectable({
   providedIn: 'root'
@@ -107,7 +108,16 @@ export class AuthFacade {
 
   getError(): string | null {
     let result: string | null = null;
-    this.error$.pipe(take(1)).subscribe(error => result = error);
+    this.error$.pipe(take(1)).subscribe(error => {
+      if (error === null) {
+        result = null;
+      } else if (typeof error === 'string') {
+        result = error;
+      } else {
+        // Handle NormalizedApiPayload by extracting the message
+        result = extractApiErrorMessage(error);
+      }
+    });
     return result;
   }
 
