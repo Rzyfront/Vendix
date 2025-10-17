@@ -82,18 +82,19 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
                 </p>
 
                 <div class="mt-6">
-                  <button
-                    (click)="resendVerificationEmail()"
-                    [disabled]="resendLoading"
-                    class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-50">
+                  <app-button
+                    (clicked)="resendVerificationEmail()"
+                    [loading]="resendLoading"
+                    variant="primary">
                     Reenviar email de verificación
-                    <app-spinner 
-                      *ngIf="resendLoading" 
-                      size="sm" 
-                      color="text-white" 
-                      class="ml-2"
-                    ></app-spinner>
-                  </button>
+                    <ng-container slot="icon">
+                      <app-spinner 
+                        *ngIf="resendLoading" 
+                        size="sm" 
+                        color="text-white"
+                      ></app-spinner>
+                    </ng-container>
+                  </app-button>
                 </div>
               </div>
             </div>
