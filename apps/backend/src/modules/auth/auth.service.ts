@@ -91,7 +91,7 @@ export class AuthService {
 
       //Retornar mesaje con informacion del onboarding pendiente
       throw new ConflictException({
-        message: 'ya tienes un onboarding pendiente',
+        message: 'Ya tienes un onboarding pendiente',
         pendingOnboarding: existingOrganization,
         user: existingUser,
       });

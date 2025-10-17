@@ -47,22 +47,30 @@ export class AuthController {
       ip_address: ip_address || undefined,
       user_agent: user_agent || undefined,
     };
-    const result = await this.authService.registerOwner(
-      registerOwnerDto,
-      client_info,
-    );
+    try {
+      const result = await this.authService.registerOwner(
+        registerOwnerDto,
+        client_info,
+      );
 
-    if (result.wasExistingUser) {
+      if (result.wasExistingUser) {
+        return this.responseService.error(
+          'Ya tienes un registro pendiente. Completa tu onboarding.',
+          'Existing user registration pending',
+        );
+      }
+
+      return this.responseService.success(
+        result,
+        'Bienvenido a Vendix! Tu organización ha sido creada.',
+      );
+    } catch (error) {
       return this.responseService.error(
-        'Ya tienes un registro pendiente. Completa tu onboarding.',
-        'Existing user registration pending',
+        error.message || 'Error al registrar el propietario',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    return this.responseService.success(
-      result,
-      'Bienvenido a Vendix! Tu organización ha sido creada.',
-    );
   }
 
   @Post('register-customer')
@@ -80,14 +88,22 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.registerCustomer(
-      registerCustomerDto,
-      client_info,
-    );
-    return this.responseService.success(
-      result,
-      'Cliente registrado exitosamente en la tienda.',
-    );
+    try {
+      const result = await this.authService.registerCustomer(
+        registerCustomerDto,
+        client_info,
+      );
+      return this.responseService.success(
+        result,
+        'Cliente registrado exitosamente en la tienda.',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al registrar el cliente',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Post('register-staff')
@@ -96,11 +112,19 @@ export class AuthController {
     @Body() registerStaffDto: RegisterStaffDto,
     @CurrentUser() user: any,
   ) {
-    const result = await this.authService.registerStaff(
-      registerStaffDto,
-      user.id,
-    );
-    return this.responseService.success(result.user, result.message);
+    try {
+      const result = await this.authService.registerStaff(
+        registerStaffDto,
+        user.id,
+      );
+      return this.responseService.success(result.user, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al registrar el personal',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Public() // ✅ Permitir acceso sin autenticación
@@ -120,8 +144,9 @@ export class AuthController {
       return this.responseService.success(result, 'Login exitoso');
     } catch (error) {
       return this.responseService.error(
-        'Credenciales inválidas',
-        'Invalid credentials',
+        error.message || 'Error al iniciar sesión',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
   }
@@ -141,23 +166,39 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    const result = await this.authService.refreshToken(
-      refreshTokenDto,
-      client_info,
-    );
-    return this.responseService.success(
-      result,
-      'Token refrescado exitosamente',
-    );
+    try {
+      const result = await this.authService.refreshToken(
+        refreshTokenDto,
+        client_info,
+      );
+      return this.responseService.success(
+        result,
+        'Token refrescado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al refrescar el token',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Get('profile')
   async getProfile(@CurrentUser() user: any) {
-    const profile = await this.authService.getProfile(user.id);
-    return this.responseService.success(
-      profile,
-      'Perfil obtenido exitosamente',
-    );
+    try {
+      const profile = await this.authService.getProfile(user.id);
+      return this.responseService.success(
+        profile,
+        'Perfil obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener el perfil',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Post('logout')
@@ -166,20 +207,36 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() body?: { refresh_token?: string; all_sessions?: boolean },
   ) {
-    const result = await this.authService.logout(
-      user.id,
-      body?.refresh_token,
-      body?.all_sessions,
-    );
-    return this.responseService.success(result.data, result.message);
+    try {
+      const result = await this.authService.logout(
+        user.id,
+        body?.refresh_token,
+        body?.all_sessions,
+      );
+      return this.responseService.success(result.data, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al cerrar sesión',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Get('me')
   async getCurrentUser(@CurrentUser() user: any) {
-    return this.responseService.success(
-      user,
-      'Usuario actual obtenido exitosamente',
-    );
+    try {
+      return this.responseService.success(
+        user,
+        'Usuario actual obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener el usuario actual',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   // ===== RUTAS DE VERIFICACIÓN DE EMAIL =====
@@ -264,21 +321,37 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() changeDto: ChangePasswordDto,
   ) {
-    const result = await this.authService.changePassword(
-      user.id,
-      changeDto.current_password,
-      changeDto.new_password,
-    );
-    return this.responseService.success(result, result.message);
+    try {
+      const result = await this.authService.changePassword(
+        user.id,
+        changeDto.current_password,
+        changeDto.new_password,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al cambiar la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Get('sessions')
   async getUserSessions(@CurrentUser() user: any) {
-    const sessions = await this.authService.getUserSessions(user.id);
-    return this.responseService.success(
-      sessions,
-      'Sesiones obtenidas exitosamente',
-    );
+    try {
+      const sessions = await this.authService.getUserSessions(user.id);
+      return this.responseService.success(
+        sessions,
+        'Sesiones obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las sesiones',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Delete('sessions/:sessionId')
@@ -287,35 +360,51 @@ export class AuthController {
     @CurrentUser() user: any,
     @Param('session_id') session_id: string,
   ) {
-    const result = await this.authService.revokeUserSession(
-      user.id,
-      parseInt(session_id),
-    );
-    return this.responseService.success(result.data, result.message);
+    try {
+      const result = await this.authService.revokeUserSession(
+        user.id,
+        parseInt(session_id),
+      );
+      return this.responseService.success(result.data, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al revocar la sesión',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   // ===== RUTAS DE ONBOARDING =====
 
   @Get('onboarding/status')
   async getOnboardingStatus(@CurrentUser() user: any) {
-    // Verificar que el usuario sea owner
-    const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(
-      (ur) => ur.roles?.name === 'owner',
-    );
+    try {
+      // Verificar que el usuario sea owner
+      const userWithRoles = await this.authService.validateUser(user.id);
+      const isOwner = userWithRoles?.user_roles?.some(
+        (ur) => ur.roles?.name === 'owner',
+      );
 
-    if (!isOwner) {
+      if (!isOwner) {
+        return this.responseService.error(
+          'Solo los propietarios de organización pueden acceder al estado de onboarding.',
+          'Access denied',
+        );
+      }
+
+      const status = await this.authService.getOnboardingStatus(user.id);
+      return this.responseService.success(
+        status,
+        'Estado de onboarding obtenido exitosamente',
+      );
+    } catch (error) {
       return this.responseService.error(
-        'Solo los propietarios de organización pueden acceder al estado de onboarding.',
-        'Access denied',
+        error.message || 'Error al obtener el estado de onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    const status = await this.authService.getOnboardingStatus(user.id);
-    return this.responseService.success(
-      status,
-      'Estado de onboarding obtenido exitosamente',
-    );
   }
 
   @Post('onboarding/create-organization')
@@ -324,24 +413,33 @@ export class AuthController {
     @CurrentUser() user: any,
     @Body() organizationData: any,
   ) {
-    // Verificar que el usuario sea owner
-    const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(
-      (ur) => ur.roles?.name === 'owner',
-    );
+    try {
+      // Verificar que el usuario sea owner
+      const userWithRoles = await this.authService.validateUser(user.id);
+      const isOwner = userWithRoles?.user_roles?.some(
+        (ur) => ur.roles?.name === 'owner',
+      );
 
-    if (!isOwner) {
+      if (!isOwner) {
+        return this.responseService.error(
+          'Solo los propietarios de organización pueden crear organizaciones durante el onboarding.',
+          'Access denied',
+        );
+      }
+
+      const result =
+        await this.authService.createOrganizationDuringOnboarding(
+          user.id,
+          organizationData,
+        );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
       return this.responseService.error(
-        'Solo los propietarios de organización pueden crear organizaciones durante el onboarding.',
-        'Access denied',
+        error.message || 'Error al crear la organización durante el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    const result = await this.authService.createOrganizationDuringOnboarding(
-      user.id,
-      organizationData,
-    );
-    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/setup-organization/:organizationId')
@@ -351,25 +449,34 @@ export class AuthController {
     @Param('organization_id') organization_id: string,
     @Body() setup_data: any,
   ) {
-    // Verificar que el usuario sea owner
-    const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(
-      (ur) => ur.roles?.name === 'owner',
-    );
+    try {
+      // Verificar que el usuario sea owner
+      const userWithRoles = await this.authService.validateUser(user.id);
+      const isOwner = userWithRoles?.user_roles?.some(
+        (ur) => ur.roles?.name === 'owner',
+      );
 
-    if (!isOwner) {
+      if (!isOwner) {
+        return this.responseService.error(
+          'Solo los propietarios de organización pueden configurar organizaciones durante el onboarding.',
+          'Access denied',
+        );
+      }
+
+      const result = await this.authService.setupOrganization(
+        user.id,
+        parseInt(organization_id),
+        setup_data,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
       return this.responseService.error(
-        'Solo los propietarios de organización pueden configurar organizaciones durante el onboarding.',
-        'Access denied',
+        error.message ||
+          'Error al configurar la organización durante el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    const result = await this.authService.setupOrganization(
-      user.id,
-      parseInt(organization_id),
-      setup_data,
-    );
-    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/create-store/:organizationId')
@@ -379,25 +486,33 @@ export class AuthController {
     @Param('organization_id') organization_id: string,
     @Body() store_data: any,
   ) {
-    // Verificar que el usuario sea owner
-    const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(
-      (ur) => ur.roles?.name === 'owner',
-    );
+    try {
+      // Verificar que el usuario sea owner
+      const userWithRoles = await this.authService.validateUser(user.id);
+      const isOwner = userWithRoles?.user_roles?.some(
+        (ur) => ur.roles?.name === 'owner',
+      );
 
-    if (!isOwner) {
+      if (!isOwner) {
+        return this.responseService.error(
+          'Solo los propietarios de organización pueden crear tiendas durante el onboarding.',
+          'Access denied',
+        );
+      }
+
+      const result = await this.authService.createStoreDuringOnboarding(
+        user.id,
+        parseInt(organization_id),
+        store_data,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
       return this.responseService.error(
-        'Solo los propietarios de organización pueden crear tiendas durante el onboarding.',
-        'Access denied',
+        error.message || 'Error al crear la tienda durante el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    const result = await this.authService.createStoreDuringOnboarding(
-      user.id,
-      parseInt(organization_id),
-      store_data,
-    );
-    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/setup-store/:storeId')
@@ -407,25 +522,33 @@ export class AuthController {
     @Param('store_id') store_id: string,
     @Body() setup_data: any,
   ) {
-    // Verificar que el usuario sea owner
-    const userWithRoles = await this.authService.validateUser(user.id);
-    const isOwner = userWithRoles?.user_roles?.some(
-      (ur) => ur.roles?.name === 'owner',
-    );
+    try {
+      // Verificar que el usuario sea owner
+      const userWithRoles = await this.authService.validateUser(user.id);
+      const isOwner = userWithRoles?.user_roles?.some(
+        (ur) => ur.roles?.name === 'owner',
+      );
 
-    if (!isOwner) {
+      if (!isOwner) {
+        return this.responseService.error(
+          'Solo los propietarios de organización pueden configurar tiendas durante el onboarding.',
+          'Access denied',
+        );
+      }
+
+      const result = await this.authService.setupStore(
+        user.id,
+        parseInt(store_id),
+        setup_data,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
       return this.responseService.error(
-        'Solo los propietarios de organización pueden configurar tiendas durante el onboarding.',
-        'Access denied',
+        error.message || 'Error al configurar la tienda durante el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
       );
     }
-
-    const result = await this.authService.setupStore(
-      user.id,
-      parseInt(store_id),
-      setup_data,
-    );
-    return this.responseService.success(result, result.message);
   }
 
   @Post('onboarding/complete')

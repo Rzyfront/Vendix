@@ -5,6 +5,9 @@ import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angula
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { CardComponent } from '../../../../shared/components/card/card.component';
+import { InputComponent } from '../../../../shared/components/input/input.component';
+import { ButtonComponent } from '../../../../shared/components/button/button.component';
 
 @Component({
   selector: 'app-forgot-owner-password',
@@ -12,92 +15,94 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
   imports: [
     CommonModule,
     RouterModule,
-    ReactiveFormsModule
+    ReactiveFormsModule,
+    CardComponent,
+    InputComponent,
+    ButtonComponent
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-blue-50">
-      <div class="max-w-md w-full space-y-8">
-        <div class="text-center">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-green-50">
+      <div class="max-w-sm w-full space-y-8">
+        <!-- Header section with logo and title -->
+        <div class="text-center my-3">
           <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
             <span class="text-white font-bold text-xl">V</span>
           </div>
-          <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
-            Recuperar Contraseña de Propietario
+          <h2 class="mt-6 text-2xl font-extrabold text-text-primary">
+            Recuperar Contraseña
           </h2>
-          <p class="mt-2 text-sm text-gray-600">
+          <p class="mt-2 text-sm text-text-secondary">
             Ingresa el Vlink de tu organización y tu email para recibir instrucciones.
           </p>
         </div>
 
-        <form [formGroup]="forgotPasswordForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
-          <div class="space-y-4">
-            <div>
-              <label for="vlink" class="block text-sm font-medium text-gray-700">
-                Vlink (slug de la organización)
-              </label>
-              <input
-                id="vlink"
-                formControlName="vlink"
-                type="text"
-                autocomplete="organization"
-                [class]="getFieldClass('vlink')"
-                placeholder="mi-organizacion">
-              @if (hasFieldError('vlink')) {
-                <div class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('vlink') }}
-                </div>
-              }
-            </div>
-
-            <div>
-              <label for="email" class="block text-sm font-medium text-gray-700">
-                Email de Propietario
-              </label>
-              <input
-                id="email"
-                formControlName="email"
-                type="email"
-                autocomplete="email"
-                [class]="getFieldClass('email')"
-                placeholder="propietario@empresa.com">
-              @if (hasFieldError('email')) {
-                <div class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('email') }}
-                </div>
-              }
-            </div>
-          </div>
-
-          <div>
-            <button
-              type="submit"
-              [disabled]="!forgotPasswordForm.valid || isLoading"
-              [class]="isLoading
-                ? 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary/70 cursor-not-allowed'
-                : 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary'">
-              @if (isLoading) {
-                <span class="flex items-center">
-                  <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        <!-- Card with form -->
+        <app-card shadow="md" [animateOnLoad]="true" class="mt-8">
+          <form [formGroup]="forgotPasswordForm" (ngSubmit)="onSubmit()" class="space-y-8">
+            <!-- Error message display -->
+            <div *ngIf="error" class="rounded-md bg-red-50 p-4 border border-red-200">
+              <div class="flex">
+                <div class="flex-shrink-0">
+                  <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                   </svg>
-                  Enviando...
-                </span>
-              }
-              @if (!isLoading) {
-                <span>
-                  Enviar Instrucciones
-                </span>
-              }
-            </button>
-          </div>
-        </form>
+                </div>
+                <div class="ml-3">
+                  <h3 class="text-sm font-medium text-red-800">
+                    {{ error }}
+                  </h3>
+                </div>
+              </div>
+            </div>
 
-        <div class="text-center text-sm">
-          <a routerLink="/auth/login" class="font-medium text-primary hover:text-primary-dark">
-            Volver a Iniciar Sesión
-          </a>
-        </div>
+            <div>
+              <app-input
+                label="Vlink"
+                formControlName="vlink"
+                [control]="forgotPasswordForm.get('vlink')"
+                type="text"
+                size="md"
+                placeholder="mi-organizacion"
+              ></app-input>
+
+              <app-input
+                label="Email de Propietario"
+                formControlName="email"
+                [control]="forgotPasswordForm.get('email')"
+                type="email"
+                size="md"
+                placeholder="propietario@empresa.com"
+              ></app-input>
+            </div>
+
+            <app-button
+              type="submit"
+              variant="primary"
+              size="md"
+              [disabled]="!forgotPasswordForm.valid || isLoading"
+              [loading]="isLoading"
+              [fullWidth]="true"
+              [showTextWhileLoading]="true"
+              class="mt-4 w-full">
+              @if (isLoading) {
+                Enviando instrucciones...
+              } @else {
+                Enviar Instrucciones
+              }
+            </app-button>
+
+            <!-- Back to login link -->
+            <div class="flex justify-center mt-4">
+              <div class="text-sm">
+                <a
+                  routerLink="/auth/login"
+                  class="font-medium text-primary hover:text-primary-dark">
+                  Volver a Iniciar Sesión
+                </a>
+              </div>
+            </div>
+          </form>
+        </app-card>
       </div>
     </div>
   `,
@@ -106,6 +111,7 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
 export class ForgotOwnerPasswordComponent implements OnInit {
   forgotPasswordForm: FormGroup;
   isLoading = false;
+  error: string | null = null;
 
   private toast = inject(ToastService);
 
@@ -120,10 +126,21 @@ export class ForgotOwnerPasswordComponent implements OnInit {
     });
   }
 
-  ngOnInit(): void {}
+  ngOnInit(): void {
+    // Subscribe to error changes to display them on screen
+    this.authFacade.error$.subscribe(error => {
+      if (error) {
+        const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
+        this.error = errorMessage;
+      } else {
+        this.error = null;
+      }
+    });
+  }
 
   onSubmit(): void {
     if (this.forgotPasswordForm.valid) {
+      this.error = null; // Clear any previous errors
       const { vlink, email } = this.forgotPasswordForm.value;
       this.authFacade.forgotOwnerPassword(vlink, email);
 
@@ -133,6 +150,7 @@ export class ForgotOwnerPasswordComponent implements OnInit {
 
       const errorSubscription = this.authFacade.error$.subscribe(error => {
         if (error) {
+          // Error is already handled in ngOnInit
           // Normalize error to handle both string and NormalizedApiPayload types
           const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
           this.toast.error(errorMessage, 'Error al enviar instrucciones');
@@ -152,33 +170,5 @@ export class ForgotOwnerPasswordComponent implements OnInit {
     } else {
       this.forgotPasswordForm.markAllAsTouched();
     }
-  }
-
-  getFieldClass(fieldName: string): string {
-    const field = this.forgotPasswordForm.get(fieldName);
-    const baseClasses = 'w-full px-4 py-3 rounded-input border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
-
-    if (field?.invalid && field?.touched) {
-      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500/50`;
-    }
-    return `${baseClasses} border-gray-300 bg-white focus:border-primary focus:ring-primary/50`;
-  }
-
-  hasFieldError(fieldName: string): boolean {
-    const field = this.forgotPasswordForm.get(fieldName);
-    return !!(field?.invalid && field?.touched);
-  }
-
-  getFieldError(fieldName: string): string {
-    const field = this.forgotPasswordForm.get(fieldName);
-    if (field?.errors) {
-      if (field.errors['required']) {
-        return 'Este campo es requerido.';
-      }
-      if (field.errors['email']) {
-        return 'Debe ser un email válido.';
-      }
-    }
-    return '';
   }
 }

@@ -3,7 +3,17 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators, FormGroup } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
+import { ToastService } from '../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { ButtonComponent, InputComponent, CardComponent } from '../../../../shared/components';
+
+type RegistrationState = 'idle' | 'loading' | 'success' | 'error';
+
+interface RegistrationError {
+  type: RegistrationState;
+  message: string;
+  details?: string;
+}
 
 @Component({
   selector: 'app-register-owner',
@@ -83,6 +93,24 @@ import { ButtonComponent, InputComponent, CardComponent } from '../../../../shar
               ></app-input>
             </div>
 
+            <!-- Error Display -->
+            @if (hasError) {
+              <div class="rounded-md bg-red-50 p-4 border border-red-200 mt-4">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    </svg>
+                  </div>
+                  <div class="ml-3">
+                    <h3 class="text-sm font-medium text-red-800">
+                      {{ errorMessage }}
+                    </h3>
+                  </div>
+                </div>
+              </div>
+            }
+
             <div class="pt-4">
               <app-button
                 type="submit"
@@ -131,7 +159,11 @@ export class RegisterOwnerComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private toast = inject(ToastService);
 
+  registrationState: RegistrationState = 'idle';
+  registrationError: RegistrationError | null = null;
+  
   isLoading = false;
 
   registerForm: FormGroup = this.fb.group({
@@ -162,20 +194,27 @@ export class RegisterOwnerComponent {
   onSubmit() {
     if (this.registerForm.valid) {
       this.isLoading = true;
+      this.clearError();
       
       this.authService.registerOwner(this.registerForm.value).subscribe({
         next: (result) => {
           if (result.success) {
             // Redirigir al dashboard después del registro exitoso
+            this.registrationState = 'success';
+            this.toast.success('¡Registro exitoso! Bienvenido a Vendix.');
             this.router.navigate(['/admin']);
           }
           else {
-            // Manejar error (podría mostrar un toast o mensaje de error)
-            console.error('Error en registro:', result.message);
+            // Manejar error (mostrar mensaje de error)
+            if (result.message) {
+              this.handleRegistrationError(result.message);
+            }
           }
         },
         error: (error) => {
-          console.error('Error en registro:', error);
+          // Manejar error de red u otros errores
+          const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.handleRegistrationError(errorMessage);
         },
         complete: () => {
           this.isLoading = false;
@@ -186,6 +225,47 @@ export class RegisterOwnerComponent {
       Object.keys(this.registerForm.controls).forEach(key => {
         this.registerForm.get(key)?.markAsTouched();
       });
+      
+      if (this.registerForm.invalid) {
+        this.toast.warning('Por favor, corrige los errores en el formulario antes de continuar');
+      }
     }
+  }
+
+  private handleRegistrationError(error: string): void {
+    this.registrationState = 'error';
+    this.setRegistrationError({
+      type: 'error',
+      message: error,
+    });
+  }
+
+  private setRegistrationError(error: RegistrationError): void {
+    this.registrationState = error.type;
+    this.registrationError = error;
+    
+    // Mostrar mensaje en toast
+    const toastText = error.message;
+    switch (error.type) {
+      case 'error':
+        this.toast.error(toastText, 'Error de registro', 5000);
+        break;
+      default:
+        this.toast.error(toastText, 'Error', 5000);
+    }
+  }
+
+  private clearError(): void {
+    this.registrationState = 'idle';
+    this.registrationError = null;
+  }
+
+  // Computed properties for template
+  get hasError(): boolean {
+    return this.registrationState === 'error';
+  }
+
+  get errorMessage(): string {
+    return this.registrationError?.message || '';
   }
 }
