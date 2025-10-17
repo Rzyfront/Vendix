@@ -25,7 +25,7 @@ import { CommonModule } from '@angular/common';
       <!-- Body -->
       <div 
         *ngIf="hasBody" 
-        class="px-6 py-4"
+        class="p-6"
         [class.pt-0]="hasHeader"
         [class.pb-0]="hasFooter"
       >
@@ -41,7 +41,22 @@ import { CommonModule } from '@angular/common';
         <ng-content select="[slot=footer]"></ng-content>
       </div>
     </div>
-  `
+  `,
+  styles: [`
+    @keyframes slide-up-fade-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .animate-slide-up-fade-in {
+      animation: slide-up-fade-in 0.4s ease-out forwards;
+    }
+  `]
 })
 export class CardComponent {
   @Input() title?: string;
@@ -49,6 +64,7 @@ export class CardComponent {
   @Input() shadow: 'none' | 'sm' | 'md' | 'lg' | 'xl' = 'md';
   @Input() padding = true;
   @Input() customClasses = '';
+  @Input() animateOnLoad = false;
   // Optional sizing inputs. Accept any valid CSS size (px, %, rem, etc.)
   @Input() width?: string;
   @Input() height?: string;
@@ -73,10 +89,13 @@ export class CardComponent {
 
     const paddingClasses = this.padding ? [] : ['p-0'];
 
+    const animationClasses = this.animateOnLoad ? ['animate-slide-up-fade-in'] : [];
+
     const classes = [
       ...baseClasses,
       ...shadowClasses[this.shadow],
-      ...paddingClasses
+      ...paddingClasses,
+      ...animationClasses
     ];
 
     if (this.customClasses) {

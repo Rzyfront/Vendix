@@ -1,6 +1,6 @@
 import { Component, Input, Output, EventEmitter, forwardRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { ControlValueAccessor, NG_VALUE_ACCESSOR, AbstractControl } from '@angular/forms';
 
 export type InputType = 'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search';
 export type InputSize = 'sm' | 'md' | 'lg';
@@ -65,7 +65,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
 
       <!-- Helper text -->
       <p 
-        *ngIf="helperText && !error" 
+        *ngIf="helperText && !getValidationError()" 
         class="mt-2 text-sm text-text-secondary"
       >
         {{ helperText }}
@@ -73,10 +73,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
 
       <!-- Error message -->
       <p 
-        *ngIf="error" 
+        *ngIf="getValidationError()" 
         class="mt-2 text-sm text-red-600"
       >
-        {{ error }}
+        {{ getValidationError() }}
       </p>
     </div>
   `
@@ -95,6 +95,8 @@ export class InputComponent implements ControlValueAccessor {
   @Input() suffixIcon = false;
   @Input() suffixClickable = false;
   @Input() customClasses = '';
+  @Input() control?: AbstractControl | null;
+
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();
@@ -134,25 +136,26 @@ export class InputComponent implements ControlValueAccessor {
       'duration-200',
       'focus:outline-none',
       'focus:ring-2',
-      'focus:ring-primary/50',
-      'focus:border-primary',
-      'disabled:opacity-50',
-      'disabled:cursor-not-allowed',
       'placeholder:text-text-muted'
     ];
-
+  
     // Size classes
     const sizeClasses = {
       sm: ['px-3', 'py-1.5', 'text-sm'],
       md: ['px-4', 'py-2', 'text-base'],
       lg: ['px-4', 'py-3', 'text-lg']
     };
-
-    // State classes
-    const stateClasses = this.error 
-      ? ['border-destructive', 'focus:border-destructive', 'focus:ring-destructive/30']
-      : ['border-border', 'hover:border-border'];
-
+  
+    // State classes based on control state
+    let stateClasses: string[];
+    if (this.control?.invalid && this.control?.touched) {
+      stateClasses = ['border-destructive', 'focus:border-destructive', 'focus:ring-destructive/30', 'bg-red-50'];
+    } else if (this.control?.valid && this.control?.touched && this.control?.value) {
+      stateClasses = ['border-green-500', 'focus:border-green-500', 'focus:ring-green-500/30', 'bg-green-50'];
+    } else {
+      stateClasses = ['border-border', 'hover:border-border', 'focus:ring-primary/50', 'focus:border-primary'];
+    }
+  
     // Padding adjustments for icons
     const iconPadding = [];
     if (this.prefixIcon) {
@@ -161,19 +164,42 @@ export class InputComponent implements ControlValueAccessor {
     if (this.suffixIcon) {
       iconPadding.push('pr-10');
     }
-
+  
     const classes = [
       ...baseClasses,
       ...sizeClasses[this.size],
       ...stateClasses,
       ...iconPadding
     ];
-
+  
     if (this.customClasses) {
       classes.push(this.customClasses);
     }
-
+  
     return classes.join(' ');
+  }
+
+  getValidationError(): string | null {
+    if (!this.control || !this.control.errors || !this.control.touched) {
+      return null;
+    }
+  
+    const errors = this.control.errors;
+    if (errors['required']) {
+      return 'Este campo es requerido.';
+    }
+    if (errors['email']) {
+      return 'Debe ser un email válido.';
+    }
+    if (errors['minlength']) {
+      return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres.`;
+    }
+    if (errors['pattern']) {
+      return 'El formato es inválido.';
+    }
+  
+    // Fallback for other errors
+    return 'El valor es inválido.';
   }
 
   onInput(event: Event): void {

@@ -66,17 +66,17 @@ export interface LoginError {
         </div>
 
         <!-- Login Form -->
-        <app-card shadow="md" class="mt-20">
+        <app-card shadow="md" class="mt-20" [animateOnLoad]="true">
           <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-8">
-            <div class="space-y-6">
+            <div>
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType === 'vendix') {
                 <app-input
                   label="Vlink"
                   formControlName="vlink"
+                  [control]="loginForm.get('vlink')"
                   type="text"
                   size="md"
-                  [required]="true"
                   placeholder="mi-organizacion"
                   (inputBlur)="onFieldBlur('vlink')"
                   (inputChange)="onFieldInput('vlink')"
@@ -88,9 +88,9 @@ export interface LoginError {
               <app-input
                 [label]="emailLabel"
                 formControlName="email"
+                [control]="loginForm.get('email')"
                 type="email"
                 size="md"
-                [required]="true"
                 [placeholder]="emailPlaceholder"
                 (inputBlur)="onFieldBlur('email')"
                 (inputChange)="onFieldInput('email')">
@@ -100,9 +100,9 @@ export interface LoginError {
               <app-input
                 label="Contraseña"
                 formControlName="password"
+                [control]="loginForm.get('password')"
                 type="password"
                 size="md"
-                [required]="true"
                 placeholder="••••••••"
                 (inputBlur)="onFieldBlur('password')"
                 (inputChange)="onFieldInput('password')">
@@ -110,7 +110,7 @@ export interface LoginError {
             </div>
 
             <!-- Error Display -->
-            @if (hasError || hasFieldErrors) {
+            @if (hasError) {
               <div class="rounded-md bg-red-50 p-4 border border-red-200">
                 <div class="flex">
                   <div class="flex-shrink-0">
@@ -119,24 +119,6 @@ export interface LoginError {
                     </svg>
                   </div>
                   <div class="ml-3">
-                    <!-- Field Validation Errors -->
-                    @if (hasFieldErrors && !hasError) {
-                      <h3 class="text-sm font-medium text-red-800">
-                        Corrección requerida
-                      </h3>
-                      <div class="mt-2 text-sm text-red-700 space-y-1">
-                        @if (getFieldErrors().length > 0) {
-                          <p>{{ getFieldErrors()[0].message }}</p>
-                          <!-- Show progress indicator if there are more errors -->
-                          @if (getTotalFieldErrors() > 1) {
-                            <p class="text-xs text-red-600 mt-1">
-                              ({{ currentErrorIndex + 1 }} de {{ getTotalFieldErrors() }} correcciones)
-                            </p>
-                          }
-                        }
-                      </div>
-                    }
-                    
                     <!-- Login Error Messages -->
                     @if (hasError) {
                       <h3 class="text-sm font-medium text-red-800">
@@ -472,120 +454,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     if (field) {
       field.markAsDirty();
     }
-
-    // Check if the current error has been fixed and move to next error if available
-    this.checkAndAdvanceError();
-  }
-
-  private checkAndAdvanceError(): void {
-    const allErrors = this.getAllFieldErrors();
-    
-    // If there are no errors, reset the index
-    if (allErrors.length === 0) {
-      this.currentErrorIndex = 0;
-      this.previousFieldErrors = [];
-      return;
-    }
-
-    // If the current error index is beyond available errors, reset to first error
-    if (this.currentErrorIndex >= allErrors.length) {
-      this.currentErrorIndex = 0;
-      return;
-    }
-
-    // Check if the current error has been fixed
-    const currentError = allErrors[this.currentErrorIndex];
-    const currentField = this.loginForm.get(currentError.field);
-    
-    if (currentField && !currentField.errors) {
-      // Current error has been fixed, move to next error
-      this.currentErrorIndex++;
-      
-      // If we've fixed all errors, reset to first error for next validation
-      if (this.currentErrorIndex >= allErrors.length) {
-        this.currentErrorIndex = 0;
-      }
-    }
-  }
-
-  private getAllFieldErrors(): { field: string; message: string }[] {
-    const errors: { field: string; message: string }[] = [];
-    
-    const fields = ['vlink', 'email', 'password'];
-    fields.forEach(fieldName => {
-      const field = this.loginForm.get(fieldName);
-      if (field?.errors && field?.touched) {
-        if (field.errors['required']) {
-          let message = '';
-          if (fieldName === 'vlink') {
-            message = 'El vlink es requerido';
-          } else if (fieldName === 'email') {
-            message = 'El email es requerido';
-          } else if (fieldName === 'password') {
-            message = 'La contraseña es requerida';
-          }
-          errors.push({ field: fieldName, message });
-        }
-        if (field.errors['email']) {
-          errors.push({ field: fieldName, message: 'Debe ser un email válido' });
-        }
-        if (field.errors['minlength']) {
-          errors.push({ field: fieldName, message: 'La contraseña debe tener al menos 6 caracteres' });
-        }
-      }
-    });
-    
-    return errors;
-  }
-
-  getFieldError(fieldName: string): string {
-    const field = this.loginForm.get(fieldName);
-    if (field?.errors && field?.touched) {
-      if (field.errors['required']) {
-        if (fieldName === 'vlink') {
-          return 'El vlink es requerido';
-        }
-        return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
-      }
-      if (field.errors['email']) {
-        return 'Debe ser un email válido';
-      }
-      if (field.errors['minlength']) {
-        return 'La contraseña debe tener al menos 6 caracteres';
-      }
-    }
-    return '';
-  }
-
-  getFieldErrors(): { field: string; message: string }[] {
-    const allErrors = this.getAllFieldErrors();
-    
-    // If there are no errors, return empty array
-    if (allErrors.length === 0) {
-      this.currentErrorIndex = 0;
-      return [];
-    }
-    
-    // Ensure current index is within bounds
-    if (this.currentErrorIndex >= allErrors.length) {
-      this.currentErrorIndex = 0;
-    }
-    
-    // Return only the current error
-    return [allErrors[this.currentErrorIndex]];
-  }
-
-  getTotalFieldErrors(): number {
-    return this.getAllFieldErrors().length;
-  }
-
-  hasFieldError(fieldName: string): boolean {
-    const field = this.loginForm.get(fieldName);
-    return !!(field?.errors && field?.touched);
-  }
-
-  get hasFieldErrors(): boolean {
-    return this.getFieldErrors().length > 0;
   }
 
   onSubmit(): void {

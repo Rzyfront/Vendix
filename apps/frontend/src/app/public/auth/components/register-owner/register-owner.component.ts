@@ -3,16 +3,17 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators, FormGroup } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
+import { ButtonComponent, InputComponent, CardComponent } from '../../../../shared/components';
 
 @Component({
   selector: 'app-register-owner',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, InputComponent, ButtonComponent, CardComponent],
   template: `
     <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-green-50">
-      <div class="max-w-md w-full space-y-8">
+      <div class="max-w-2xl w-full space-y-8">
         <!-- Branding -->
-        <div class="text-center">
+        <div class="text-center my-3">
           <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
             <span class="text-white font-bold text-xl">V</span>
           </div>
@@ -25,150 +26,92 @@ import { AuthService } from '../../../../core/services/auth.service';
         </div>
 
         <!-- Registration Form -->
-        <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="mt-8 space-y-6 bg-white p-8 rounded-lg shadow-lg">
-          <div class="space-y-4">
-            <!-- Información de la organización -->
+        <app-card [animateOnLoad]="true" shadow="lg">
+          <form [formGroup]="registerForm" (ngSubmit)="onSubmit()">
             <div>
-              <label for="organization_name" class="block text-sm font-medium text-gray-700">
-                Nombre de la organización
-              </label>
-              <input
-                id="organization_name"
-                name="organization_name"
-                type="text"
+              <!-- Información de la organización -->
+              <app-input
+                label="Nombre de la organización"
                 formControlName="organization_name"
-                [class]="getFieldClass('organization_name')"
+                [control]="registerForm.get('organization_name')"
+                type="text"
                 placeholder="Mi Empresa S.A.S"
-                (blur)="onFieldBlur('organization_name')"
-                (input)="onFieldInput('organization_name')"
-              >
-              <div *ngIf="hasFieldError('organization_name')" class="mt-1 text-sm text-red-600">
-                {{ getFieldError('organization_name') }}
-              </div>
-            </div>
+              ></app-input>
 
-            <!-- Información personal -->
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label for="first_name" class="block text-sm font-medium text-gray-700">
-                  Nombre
-                </label>
-                <input
-                  id="first_name"
-                  name="first_name"
-                  type="text"
+              <!-- Información personal -->
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  label="Nombre"
                   formControlName="first_name"
-                  [class]="getFieldClass('first_name')"
-                  placeholder="Juan"
-                  (blur)="onFieldBlur('first_name')"
-                  (input)="onFieldInput('first_name')"
-                >
-                <div *ngIf="hasFieldError('first_name')" class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('first_name') }}
-                </div>
-              </div>
-
-              <div>
-                <label for="last_name" class="block text-sm font-medium text-gray-700">
-                  Apellido
-                </label>
-                <input
-                  id="last_name"
-                  name="last_name"
+                  [control]="registerForm.get('first_name')"
                   type="text"
+                  placeholder="Juan"
+                ></app-input>
+
+                <app-input
+                  label="Apellido"
                   formControlName="last_name"
-                  [class]="getFieldClass('last_name')"
+                  [control]="registerForm.get('last_name')"
+                  type="text"
                   placeholder="Pérez"
-                  (blur)="onFieldBlur('last_name')"
-                  (input)="onFieldInput('last_name')"
-                >
-                <div *ngIf="hasFieldError('last_name')" class="mt-1 text-sm text-red-600">
-                  {{ getFieldError('last_name') }}
-                </div>
+                ></app-input>
               </div>
-            </div>
 
-            <div>
-              <label for="email" class="block text-sm font-medium text-gray-700">
-                Correo electrónico
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                formControlName="email"
-                [class]="getFieldClass('email')"
-                placeholder="usuario@email.com"
-                (blur)="onFieldBlur('email')"
-                (input)="onFieldInput('email')"
-              >
-              <div *ngIf="hasFieldError('email')" class="mt-1 text-sm text-red-600">
-                {{ getFieldError('email') }}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  label="Correo electrónico"
+                  formControlName="email"
+                  [control]="registerForm.get('email')"
+                  type="email"
+                  placeholder="usuario@email.com"
+                ></app-input>
+
+                <app-input
+                  label="Teléfono (opcional)"
+                  formControlName="phone"
+                  type="tel"
+                  placeholder="+57 123 456 7890"
+                ></app-input>
               </div>
-            </div>
 
-            <div>
-              <label for="phone" class="block text-sm font-medium text-gray-700">
-                Teléfono (opcional)
-              </label>
-              <input
-                id="phone"
-                name="phone"
-                type="tel"
-                formControlName="phone"
-                class="w-full px-4 py-3 rounded-input border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary text-gray-900 placeholder-gray-500 transition-all duration-300"
-                placeholder="+57 123 456 7890"
-              >
-            </div>
-
-            <div>
-              <label for="password" class="block text-sm font-medium text-gray-700">
-                Contraseña
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
+              <app-input
+                label="Contraseña"
                 formControlName="password"
-                [class]="getFieldClass('password')"
+                [control]="registerForm.get('password')"
+                type="password"
                 placeholder="••••••••"
-                (blur)="onFieldBlur('password')"
-                (input)="onFieldInput('password')"
-              >
-              <div *ngIf="hasFieldError('password')" class="mt-1 text-sm text-red-600">
-                {{ getFieldError('password') }}
-              </div>
+              ></app-input>
             </div>
-          </div>
 
-          <div>
-            <button
-              type="submit"
-              [disabled]="registerForm.invalid || isLoading"
-              [class]="isLoading
-                ? 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary/70 cursor-not-allowed'
-                : 'w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary'"
-            >
-              <span *ngIf="isLoading" class="flex items-center">
-                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Creando cuenta...
-              </span>
-              <span *ngIf="!isLoading">Crear cuenta</span>
-            </button>
-          </div>
+            <div class="pt-4">
+              <app-button
+                type="submit"
+                variant="primary"
+                size="md"
+                [disabled]="registerForm.invalid"
+                [loading]="isLoading"
+                [fullWidth]="true"
+                [showTextWhileLoading]="true"
+                class="mt-4 w-full">
+                @if (!isLoading) {
+                  <span>Crear cuenta</span>
+                }
+                @if (isLoading) {
+                  <span>Creando cuenta...</span>
+                }
+              </app-button>
+            </div>
 
-          <div class="text-center text-sm text-gray-600">
-            <p>
-              ¿Ya tienes una cuenta?
-              <a [routerLink]="['/auth', 'login']" class="font-medium text-primary hover:text-primary-dark">
-                Inicia sesión
-              </a>
-            </p>
-          </div>
-        </form>
+            <div class="text-center text-sm text-gray-600 pt-4">
+              <p>
+                ¿Ya tienes una cuenta?
+                <a [routerLink]="['/auth', 'login']" class="font-medium text-primary hover:text-primary-dark">
+                  Inicia sesión
+                </a>
+              </p>
+            </div>
+          </form>
+        </app-card>
 
         <!-- Context Info -->
         <div class="text-center text-xs text-gray-500 mt-4">
@@ -204,19 +147,6 @@ export class RegisterOwnerComponent {
     ]]
   });
 
-  getFieldClass(fieldName: string): string {
-    const field = this.registerForm.get(fieldName);
-    const baseClasses = 'w-full px-4 py-3 rounded-input border transition-all duration-300 focus:outline-none focus:ring-2 text-gray-900 placeholder-gray-500';
-    
-    if (field?.invalid && field?.touched) {
-      return `${baseClasses} border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-500/50`;
-    } else if (field?.valid && field?.touched && field?.value) {
-      return `${baseClasses} border-green-300 bg-green-50 focus:border-green-500 focus:ring-green-500/50`;
-    } else {
-      return `${baseClasses} border-gray-300 bg-white focus:border-primary focus:ring-primary/50`;
-    }
-  }
-
   onFieldBlur(fieldName: string): void {
     const field = this.registerForm.get(fieldName);
     field?.markAsTouched();
@@ -229,33 +159,6 @@ export class RegisterOwnerComponent {
     }
   }
 
-  getFieldError(fieldName: string): string {
-    const field = this.registerForm.get(fieldName);
-    if (field?.errors && field?.touched) {
-      if (field.errors['required']) {
-        if (fieldName === 'organization_name') {
-          return 'El nombre de la organización es requerido';
-        }
-        return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
-      }
-      if (field.errors['email']) {
-        return 'Debe ser un email válido';
-      }
-      if (field.errors['minlength']) {
-        return 'La contraseña debe tener al menos 8 caracteres';
-      }
-      if (field.errors['pattern']) {
-        return 'La contraseña debe contener al menos un carácter especial y una letra mayúscula';
-      }
-    }
-    return '';
-  }
-
-  hasFieldError(fieldName: string): boolean {
-    const field = this.registerForm.get(fieldName);
-    return !!(field?.errors && field?.touched);
-  }
-
   onSubmit() {
     if (this.registerForm.valid) {
       this.isLoading = true;
@@ -265,7 +168,8 @@ export class RegisterOwnerComponent {
           if (result.success) {
             // Redirigir al dashboard después del registro exitoso
             this.router.navigate(['/admin']);
-          } else {
+          }
+          else {
             // Manejar error (podría mostrar un toast o mensaje de error)
             console.error('Error en registro:', result.message);
           }
@@ -277,7 +181,8 @@ export class RegisterOwnerComponent {
           this.isLoading = false;
         }
       });
-    } else {
+    }
+    else {
       Object.keys(this.registerForm.controls).forEach(key => {
         this.registerForm.get(key)?.markAsTouched();
       });
