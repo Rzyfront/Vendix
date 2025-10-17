@@ -75,6 +75,14 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.resetOwnerPassword({ token, new_password }));
   }
 
+  verifyEmail(token: string): void {
+    this.store.dispatch(AuthActions.verifyEmail({ token }));
+  }
+
+  resendVerification(email: string): void {
+    this.store.dispatch(AuthActions.resendVerificationEmail({ email }));
+  }
+
   // Synchronous getters for templates
   getCurrentUser(): any {
     let result: any = null;

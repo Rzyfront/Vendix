@@ -127,3 +127,33 @@ export const resetOwnerPasswordFailure = createAction(
   '[Auth] Reset Owner Password Failure',
   props<{ error: NormalizedApiPayload | string }>()
 );
+
+// Verify Email
+export const verifyEmail = createAction(
+  '[Auth] Verify Email',
+  props<{ token: string }>()
+);
+
+export const verifyEmailSuccess = createAction(
+  '[Auth] Verify Email Success'
+);
+
+export const verifyEmailFailure = createAction(
+  '[Auth] Verify Email Failure',
+  props<{ error: NormalizedApiPayload | string }>()
+);
+
+// Resend Verification Email
+export const resendVerificationEmail = createAction(
+  '[Auth] Resend Verification Email',
+  props<{ email: string }>()
+);
+
+export const resendVerificationEmailSuccess = createAction(
+  '[Auth] Resend Verification Email Success'
+);
+
+export const resendVerificationEmailFailure = createAction(
+  '[Auth] Resend Verification Email Failure',
+  props<{ error: NormalizedApiPayload | string }>()
+);

@@ -239,6 +239,50 @@ export class AuthEffects {
     { dispatch: false }
   );
 
+  verifyEmail$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.verifyEmail),
+      mergeMap(({ token }) =>
+        this.authService.verifyEmail(token).pipe(
+          map(() => AuthActions.verifyEmailSuccess()),
+          catchError(error => of(AuthActions.verifyEmailFailure({ error: normalizeApiPayload(error) })))
+        )
+      )
+    )
+  );
+
+  verifyEmailSuccess$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.verifyEmailSuccess),
+      tap(() => {
+        this.toast.success('Email verificado con éxito.', 'Verificación exitosa');
+      })
+    ),
+    { dispatch: false }
+  );
+
+  resendVerificationEmail$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resendVerificationEmail),
+      mergeMap(({ email }) =>
+        this.authService.resendVerification(email).pipe(
+          map(() => AuthActions.resendVerificationEmailSuccess()),
+          catchError(error => of(AuthActions.resendVerificationEmailFailure({ error: normalizeApiPayload(error) })))
+        )
+      )
+    )
+  );
+
+  resendVerificationEmailSuccess$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resendVerificationEmailSuccess),
+      tap(() => {
+        this.toast.success('Email de verificación reenviado.', 'Email enviado');
+      })
+    ),
+    { dispatch: false }
+  );
+
   // Helper method to determine redirect path based on user roles
   private determineRedirectPath(roles: string[], user: any): string {
     console.log('Determining redirect path for roles:', roles, 'user:', user);

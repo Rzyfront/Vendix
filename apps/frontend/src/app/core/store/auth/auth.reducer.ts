@@ -162,5 +162,43 @@ export const authReducer = createReducer(
     ...state,
     loading: false,
     error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+  })),
+
+  // Verify Email
+  on(AuthActions.verifyEmail, (state) => ({
+    ...state,
+    loading: true,
+    error: null
+  })),
+
+  on(AuthActions.verifyEmailSuccess, (state) => ({
+    ...state,
+    loading: false,
+    error: null
+  })),
+
+  on(AuthActions.verifyEmailFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+  })),
+
+  // Resend Verification Email
+  on(AuthActions.resendVerificationEmail, (state) => ({
+    ...state,
+    loading: true,
+    error: null
+  })),
+
+  on(AuthActions.resendVerificationEmailSuccess, (state) => ({
+    ...state,
+    loading: false,
+    error: null
+  })),
+
+  on(AuthActions.resendVerificationEmailFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
   }))
 );
