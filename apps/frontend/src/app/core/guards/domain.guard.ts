@@ -3,6 +3,7 @@ import { CanMatchFn, Route, UrlSegment, Router, UrlTree } from '@angular/router'
 import { Observable, of } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
 import { AppConfigService } from '../services/app-config.service';
+import { AccessService } from '../services/access.service';
 import { DomainConfig, AppEnvironment, DomainType } from '../models/domain-config.interface';
 
 /**
@@ -11,40 +12,34 @@ import { DomainConfig, AppEnvironment, DomainType } from '../models/domain-confi
  */
 @Injectable({ providedIn: 'root' })
 export class DomainGuardService {
-  constructor(
-    private appConfig: AppConfigService,
-    private router: Router
-  ) {}
+  private appConfig = inject(AppConfigService);
+  private router = inject(Router);
+  private accessService = inject(AccessService);
 
   /**
    * Maneja la lógica principal del guard
    */
   async canMatch(route: Route, segments: UrlSegment[]): Promise<boolean | UrlTree> {
+    // Si el usuario está autenticado, permitir acceso SIN redirección
+    const isAuthenticated = await this.accessService.isAuthenticated().toPromise();
+    if (isAuthenticated) {
+      console.log('[DOMAIN GUARD] Usuario autenticado, permitiendo acceso sin redirección');
+      return true;
+    }
+    // ...lógica original pre-login...
     try {
-      // Si la aplicación no está inicializada, permitir el acceso para que se inicialice
       if (!this.appConfig.isInitialized()) {
         console.log('[DOMAIN GUARD] App not initialized, allowing access for initialization');
         return true;
       }
-
       const appConfig = this.appConfig.getCurrentConfig();
-      
       if (!appConfig) {
         console.warn('[DOMAIN GUARD] No app config available, allowing access');
         return true;
       }
-
       const currentPath = this.buildPathFromSegments(segments);
       const atRoot = segments.length === 0;
-
-      console.log('[DOMAIN GUARD] Checking access:', {
-        environment: appConfig.environment,
-        currentPath,
-        atRoot,
-        routeData: route.data
-      });
-
-      // Verificar si el entorno actual coincide con los entornos permitidos en la ruta
+      // ...existing code...
       if (route.data?.['environments']) {
         const allowedEnvironments = route.data['environments'] as AppEnvironment[];
         if (!allowedEnvironments.includes(appConfig.environment)) {
@@ -52,8 +47,6 @@ export class DomainGuardService {
           return this.redirectToDefaultRoute(appConfig.environment);
         }
       }
-
-      // Manejar redirección desde raíz basada en el entorno
       if (atRoot) {
         const redirectUrl = this.getRootRedirectUrl(appConfig.environment, appConfig.domainConfig);
         if (redirectUrl && redirectUrl !== '/') {
@@ -61,19 +54,14 @@ export class DomainGuardService {
           return this.router.parseUrl(redirectUrl);
         }
       }
-
-      // Verificar acceso basado en el contexto del dominio
       const hasDomainAccess = await this.checkDomainAccess(appConfig.domainConfig, currentPath);
       if (!hasDomainAccess) {
         console.log('[DOMAIN GUARD] Domain access denied, redirecting to default');
         return this.redirectToDefaultRoute(appConfig.environment);
       }
-
       return true;
-
     } catch (error) {
       console.error('[DOMAIN GUARD] Error checking domain access:', error);
-      // En caso de error, permitir el acceso y dejar que la aplicación maneje el error
       return true;
     }
   }

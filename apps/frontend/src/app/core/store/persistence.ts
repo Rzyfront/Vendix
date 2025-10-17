@@ -26,7 +26,7 @@ const DEFAULT_CONFIG: PersistenceConfig = {
   },
   auth: {
     enabled: true,
-    keys: ['user', 'tokens'] // Persist tokens for session persistence
+    keys: ['user', 'tokens', 'roles', 'permissions'] // Persist tokens for session persistence
   }
 };
 

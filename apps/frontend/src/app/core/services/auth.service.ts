@@ -1,10 +1,12 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap, map } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { TenantFacade } from '../store/tenant/tenant.facade';
+import { AppConfigService } from './app-config.service';
+import { NavigationService } from './navigation.service';
 import * as AuthActions from '../store/auth/auth.actions';
 import { environment } from '../../../environments/environment';
 
@@ -104,6 +106,9 @@ export interface AuthResponse {
 })
 export class AuthService {
   private readonly API_URL = `${environment.apiUrl}/api/auth`;
+
+  private appConfig = inject(AppConfigService);
+  private navigationService = inject(NavigationService);
 
   constructor(
     private http: HttpClient,
@@ -263,15 +268,32 @@ export class AuthService {
     return tokens?.refreshToken || null;
   }
 
-  // Redirect after login based on user role
+  // Redirect after login based on user role and context
   redirectAfterLogin(): void {
-    console.log('Redirecting to admin dashboard...');
-    // Always redirect to admin dashboard after login
-    this.router.navigate(['/admin/dashboard']).then(success => {
+    console.log('[AUTH SERVICE] Redirección post-login iniciada');
+    
+    const user = this.getCurrentUser();
+    const domainConfig = this.appConfig.getCurrentConfig()?.domainConfig;
+    // Obtener tenantContext desde AppConfigService
+    const tenantContext = this.appConfig.getCurrentConfig()?.tenantConfig || null;
+
+    if (!user || !domainConfig) {
+      console.warn('[AUTH SERVICE] No se pudo obtener contexto para redirección, usando fallback');
+      this.router.navigate(['/admin']);
+      return;
+    }
+
+    this.navigationService.navigateAfterLogin(
+      user.roles || [],
+      domainConfig,
+      tenantContext
+    ).then(success => {
       if (success) {
-        console.log('Successfully navigated to admin dashboard');
+        console.log('[AUTH SERVICE] Redirección post-login exitosa');
       } else {
-        console.error('Failed to navigate to admin dashboard');
+        console.error('[AUTH SERVICE] Error en redirección post-login');
+        // Fallback a ruta por defecto
+        this.router.navigate(['/admin']);
       }
     });
   }

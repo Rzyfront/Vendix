@@ -1,55 +1,35 @@
 import { Injectable, inject } from '@angular/core';
 import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router, UrlTree } from '@angular/router';
 import { Observable, of } from 'rxjs';
-import { map, switchMap, take, catchError } from 'rxjs/operators';
-import { AuthFacade } from '../store/auth/auth.facade';
+import { map, switchMap, take, catchError, filter } from 'rxjs/operators';
+import { AccessService } from '../services/access.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AuthGuard implements CanActivate {
-  private authFacade = inject(AuthFacade);
+  private accessService = inject(AccessService);
   private router = inject(Router);
 
   canActivate(
     route: ActivatedRouteSnapshot,
     state: RouterStateSnapshot
-  ): Observable<boolean | UrlTree> | Promise<boolean | UrlTree> | boolean | UrlTree {
-    
-    console.log('[AUTH GUARD] Checking authentication for route:', {
-      path: route.routeConfig?.path,
-      url: state.url,
-      data: route.data
-    });
+  ): Observable<boolean | UrlTree> {
+    console.log('[AUTH GUARD] Checking auth for route:', state.url);
 
-    return this.authFacade.isAuthenticated$.pipe(
-      take(1),
+    return this.accessService.isAuthenticated().pipe(
       switchMap(isAuthenticated => {
         if (!isAuthenticated) {
-          console.log('[AUTH GUARD] User not authenticated, redirecting to login');
-          return this.redirectToLogin(state.url);
+          console.log('[AUTH GUARD] User not authenticated, redirecting to login.');
+          return of(this.router.createUrlTree(['/auth/login'], {
+            queryParams: { returnUrl: state.url }
+          }));
         }
-
-        // Usuario autenticado, verificar permisos básicos
-        const user = this.authFacade.getCurrentUser();
-        const userRoles = user?.roles || [];
-        
-        // Verificar permisos básicos para la ruta
-        const routeAllowed = this.checkBasicRoutePermissions(state.url, userRoles);
-        
-        if (!routeAllowed) {
-          console.warn('[AUTH GUARD] Route not allowed for user:', {
-            route: state.url,
-            userRoles
-          });
-          return of(this.router.createUrlTree(['/access-denied']));
-        }
-
-        console.log('[AUTH GUARD] Route allowed, proceeding');
+        // Si está autenticado, permitir acceso
         return of(true);
       }),
       catchError(error => {
-        console.error('[AUTH GUARD] Error checking authentication:', error);
+        console.error('[AUTH GUARD] Error in auth guard:', error);
         return of(this.router.createUrlTree(['/auth/login']));
       })
     );

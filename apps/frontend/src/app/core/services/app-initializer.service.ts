@@ -62,13 +62,16 @@ export class AppInitializerService {
         
         if (hasUser && hasTokens) {
           // Dispatch action to restore auth state immediately
-          this.authFacade.restoreAuthState(parsedState.user, parsedState.tokens);
+          this.authFacade.restoreAuthState(parsedState.user, parsedState.tokens, parsedState.permissions, parsedState.roles);
           return true;
         }
       }
     } catch (error) {
       console.warn('[APP INITIALIZER] Error checking persisted auth:', error);
     }
+
+    // If no state was restored, ensure loading is set to false
+    this.authFacade.setLoading(false);
     return false;
   }
 

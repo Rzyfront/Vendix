@@ -42,8 +42,14 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <path *ngSwitchCase="'user'" d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
         <path *ngSwitchCase="'lock'" d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/>
         <path *ngSwitchCase="'home'" d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <path *ngSwitchCase="'building'" d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18"/>
+        <path *ngSwitchCase="'users'" d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m8-12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 11v-2a4 4 0 0 0-4-4h-2m-4 0a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
         <path *ngSwitchCase="'settings'" d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
         <circle *ngSwitchCase="'settings'" cx="12" cy="12" r="3"/>
+        <path *ngSwitchCase="'chart-line'" d="M3 3v18h18M21 16l-5-5-5 5-4-4-3 3"/>
+        <path *ngSwitchCase="'credit-card'" d="M3 6h18M3 10h18M3 14h18M5 18h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/>
+        <path *ngSwitchCase="'headset'" d="M22 16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v6z"/>
+        <path *ngSwitchCase="'circle'" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z"/>
         
         <!-- Commerce icons -->
         <path *ngSwitchCase="'cart'" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0-2.5 1.5M7 13v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6"/>

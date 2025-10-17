@@ -17,7 +17,7 @@ export const initialAuthState: AuthState = {
   tokens: null,
   permissions: [],
   roles: [],
-  loading: false,
+  loading: true,
   error: null,
   isAuthenticated: false
 };

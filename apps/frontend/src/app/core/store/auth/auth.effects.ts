@@ -46,13 +46,19 @@ export class AuthEffects {
   loginSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.loginSuccess),
-      tap(({ user, roles, message }) => {
+      tap(async ({ user, roles, message }) => {
         // Show server message when present
         if (message) {
           this.toast.success(message);
         }
 
         console.log('Login successful, determining redirect based on roles:', roles);
+
+        // Reconfigura rutas dinámicas con la nueva configuración del usuario
+        const routeManager = (window as any).vendixRouteManager as import('../../services/route-manager.service').RouteManagerService;
+        if (routeManager && typeof routeManager.configureDynamicRoutes === 'function') {
+          await routeManager.configureDynamicRoutes();
+        }
 
         // Determine redirect based on user roles (ensure roles is always an array)
         const userRoles = roles || [];

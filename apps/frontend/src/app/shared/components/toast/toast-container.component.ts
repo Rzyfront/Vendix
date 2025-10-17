@@ -20,8 +20,12 @@ import { ToastService } from './toast.service';
               <span [innerHTML]="iconFor(t.variant)"></span>
             </div>
             <div class="flex-1">
-              <p *ngIf="t.title" class="text-sm font-semibold">{{ t.title }}</p>
-              <p *ngIf="t.description" class="text-sm text-text-secondary mt-0.5">{{ t.description }}</p>
+              @if (t.title) {
+                <p class="text-sm font-semibold">{{ t.title }}</p>
+              }
+              @if (t.description) {
+                <p class="text-sm text-text-secondary mt-0.5">{{ t.description }}</p>
+              }
             </div>
             <button class="text-text-secondary hover:text-text-primary" (click)="dismiss(t.id)" aria-label="Close">
               ×

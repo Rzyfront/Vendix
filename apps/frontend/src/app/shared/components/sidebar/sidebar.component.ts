@@ -1,10 +1,12 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
+import { IconComponent } from '../icon/icon.component';
 
 export interface MenuItem {
   label: string;
   icon: string;
+  iconSize?: number | string;
   route?: string;
   children?: MenuItem[];
   badge?: string;
@@ -13,62 +15,51 @@ export interface MenuItem {
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   template: `
-    <aside [class]="'sidebar ' + (collapsed ? 'collapsed' : '')"
-           [style]="{ 'border-color': 'var(--border)' }">
+    <aside [class]="'sidebar ' + (collapsed ? 'collapsed' : '')">
       <!-- Logo Section -->
-      <div class="p-4 border-b flex items-center gap-3" [style]="{ 'border-color': 'var(--border)' }">
-        <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-             [style]="{ 'background-color': 'var(--primary)' }">
-          <i class="fas fa-store text-white text-lg"></i>
+      <div class="sidebar-header">
+        <div class="logo-container">
+          <app-icon name="store" [size]="20" class="text-primary-foreground"></app-icon>
         </div>
-        <div class="logo-text">
-          <h1 class="font-bold text-lg" [style]="{ 'color': 'var(--text)' }">{{ title }}</h1>
-          <div class="text-xs font-mono mt-1 flex items-center gap-2" [style]="{ 'color': 'var(--muted-foreground)' }">
-            <a [href]="'/' + vlink" target="_blank" rel="noopener noreferrer" aria-label="Open vlink in new tab"
-               class="text-xs text-muted hover:underline" [style]="{ 'color': 'var(--muted-foreground)' }">
-              <i class="fas fa-link"></i>
-            </a>
-          </div>
+        <div class="logo-text-container">
+          <h1 class="org-name">{{ title }}</h1>
+          <a [href]="'/' + vlink" target="_blank" rel="noopener noreferrer" class="vlink">
+            <span class="truncate">{{ vlink }}</span>
+            <app-icon name="link-2" [size]="12"></app-icon>
+          </a>
         </div>
       </div>
-      
+
       <!-- Menu Items -->
-      <nav class="flex-1 overflow-y-auto p-3">
-        <ul class="space-y-1">
+      <nav class="menu-wrapper">
+        <ul class="menu-list">
           <li *ngFor="let item of menuItems">
             <ng-container *ngIf="!item.children">
-              <a [routerLink]="item.route" 
+              <a [routerLink]="item.route"
                  routerLinkActive="active"
-                 class="menu-item flex items-center gap-3 px-3 py-2.5 rounded-lg"
-                 [style]="{ 'color': 'var(--text)' }">
-                <i [class]="item.icon + ' w-5 flex-shrink-0'"></i>
-                <span class="menu-text flex-1">{{ item.label }}</span>
-                <span *ngIf="item.badge" 
-                      class="badge text-xs px-2 py-0.5 rounded-full text-white"
-                      [style]="{ 'background-color': 'var(--secondary)' }">
-                  {{ item.badge }}
-                </span>
+                 #rla="routerLinkActive"
+                 [class.active]="rla.isActive"
+                 class="menu-item">
+                <app-icon [name]="item.icon" [size]="item.iconSize || 20" class="flex-shrink-0"></app-icon>
+                <span class="menu-text">{{ item.label }}</span>
+                <span *ngIf="item.badge" class="badge">{{ item.badge }}</span>
               </a>
             </ng-container>
 
             <ng-container *ngIf="item.children">
-              <button (click)="toggleSubmenu(item.label)"
-                      class="menu-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg"
-                      [style]="{ 'color': 'var(--text)' }">
-                <i [class]="item.icon + ' w-5 flex-shrink-0'"></i>
-                <span class="menu-text flex-1 text-left">{{ item.label }}</span>
-                <i class="fas fa-chevron-right chevron text-xs" 
-                   [class.rotated]="isSubmenuOpen(item.label)"></i>
+              <button (click)="toggleSubmenu(item.label)" class="menu-item">
+                <app-icon [name]="item.icon" [size]="item.iconSize || 20" class="flex-shrink-0"></app-icon>
+                <span class="menu-text">{{ item.label }}</span>
+                <app-icon name="chevron-right" [size]="16" class="chevron" [class.rotated]="isSubmenuOpen(item.label)"></app-icon>
               </button>
-              <ul [class]="'submenu ml-8 mt-1 space-y-1 ' + (isSubmenuOpen(item.label) ? 'open' : '')">
-                <li *ngFor="let child of item.children">
-                  <a [routerLink]="child.route" 
+              <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
+                <li *ngFor="let child of item.children" class="submenu-item">
+                  <a [routerLink]="child.route"
                      routerLinkActive="active"
-                     class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg hover:bg-gray-50"
-                     [style]="{ 'color': 'var(--secondary)' }">
-                    <i class="fas fa-circle text-xs"></i>
+                     #rlaChild="routerLinkActive"
+                     [class.active]="rlaChild.isActive">
                     <span>{{ child.label }}</span>
                   </a>
                 </li>

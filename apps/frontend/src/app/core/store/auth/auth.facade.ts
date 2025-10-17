@@ -63,8 +63,8 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.clearAuthState());
   }
 
-  restoreAuthState(user: any, tokens: { accessToken: string; refreshToken: string }): void {
-    this.store.dispatch(AuthActions.restoreAuthState({ user, tokens }));
+  restoreAuthState(user: any, tokens: { accessToken: string; refreshToken: string }, permissions?: string[], roles?: string[]): void {
+    this.store.dispatch(AuthActions.restoreAuthState({ user, tokens, permissions, roles }));
   }
 
   forgotOwnerPassword(organization_slug: string, email: string): void {
@@ -127,6 +127,10 @@ export class AuthFacade {
       }
     });
     return result;
+  }
+
+  setLoading(loading: boolean): void {
+    this.store.dispatch(AuthActions.setLoading({ loading }));
   }
 
   setAuthError(error: string | null): void {
