@@ -13,8 +13,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <!-- Sidebar -->
       <app-sidebar
         [menuItems]="menuItems"
+        [title]="organizationName"
         subtitle="Organization Admin"
-        [vlink]="currentVlink"
+        [vlink]="organizationSlug"
         [collapsed]="sidebarCollapsed">
       </app-sidebar>
       
@@ -30,7 +31,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
         </app-header>
         
         <!-- Page Content -->
-        <main class="flex-1 overflow-y-auto p-6" style="background-color: var(--background);">
+        <main class="flex-1 overflow-y-auto px-4 py-2" style="background-color: var(--background);">
           <router-outlet></router-outlet>
         </main>
       </div>
@@ -42,6 +43,8 @@ export class OrganizationAdminLayoutComponent {
   sidebarCollapsed = false;
   currentPageTitle = 'Organization Dashboard';
   currentVlink = 'organization-admin';
+  organizationName = 'Acme Corporation';
+  organizationSlug = 'acme-corp';
   
   breadcrumb = {
     parent: 'Organization',

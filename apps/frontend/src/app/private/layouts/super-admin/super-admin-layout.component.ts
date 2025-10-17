@@ -13,6 +13,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <!-- Sidebar -->
       <app-sidebar
         [menuItems]="menuItems"
+        [title]="platformTitle"
         subtitle="Super Admin"
         [vlink]="currentVlink"
         [collapsed]="sidebarCollapsed">
@@ -30,7 +31,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
         </app-header>
         
         <!-- Page Content -->
-        <main class="flex-1 overflow-y-auto p-6" style="background-color: var(--background);">
+        <main class="flex-1 overflow-y-auto px-4 py-2" style="background-color: var(--background);">
           <router-outlet></router-outlet>
         </main>
       </div>
@@ -42,6 +43,7 @@ export class SuperAdminLayoutComponent {
   sidebarCollapsed = false;
   currentPageTitle = 'Super Admin Dashboard';
   currentVlink = 'super-admin';
+  platformTitle = 'Vendix Platform';
   
   breadcrumb = {
     parent: 'Super Admin',

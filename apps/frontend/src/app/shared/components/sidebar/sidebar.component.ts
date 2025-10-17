@@ -24,9 +24,13 @@ export interface MenuItem {
           <i class="fas fa-store text-white text-lg"></i>
         </div>
         <div class="logo-text">
-          <h1 class="font-bold text-lg" [style]="{ 'color': 'var(--text)' }">Vendix Corp</h1>
-          <span class="text-xs" [style]="{ 'color': 'var(--secondary)' }">{{ subtitle }}</span>
-          <span class="text-xs font-mono mt-1" [style]="{ 'color': 'var(--muted-foreground)' }">{{ vlink }}</span>
+          <h1 class="font-bold text-lg" [style]="{ 'color': 'var(--text)' }">{{ title }}</h1>
+          <div class="text-xs font-mono mt-1 flex items-center gap-2" [style]="{ 'color': 'var(--muted-foreground)' }">
+            <a [href]="'/' + vlink" target="_blank" rel="noopener noreferrer" aria-label="Open vlink in new tab"
+               class="text-xs text-muted hover:underline" [style]="{ 'color': 'var(--muted-foreground)' }">
+              <i class="fas fa-link"></i>
+            </a>
+          </div>
         </div>
       </div>
       
@@ -79,7 +83,7 @@ export interface MenuItem {
 })
 export class SidebarComponent {
   @Input() menuItems: MenuItem[] = [];
-  @Input() subtitle: string = 'Admin Panel';
+  @Input() title: string = 'Vendix Corp';
   @Input() vlink: string = 'vlink-slug';
   @Input() collapsed: boolean = false;
 

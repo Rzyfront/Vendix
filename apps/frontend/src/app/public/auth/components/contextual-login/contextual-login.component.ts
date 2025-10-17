@@ -20,8 +20,6 @@ export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_err
 export interface LoginError {
   type: LoginState;
   message: string;
-  canRetry: boolean;
-  retryAfter?: number;
   details?: string;
   apiError?: string; // raw `error` field from API (show in toast)
 }
@@ -39,12 +37,12 @@ export interface LoginError {
   ],
   template: `
     <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="backgroundClass">
-      <div class="max-w-md w-full space-y-8">
+      <div class="max-w-sm w-full space-y-8">
         <!-- Contextual Branding -->
-        <div class="text-center">
+        <div class="text-center my-3">
           @if (logoUrl) {
             <div class="mx-auto h-16 w-16 flex items-center justify-center mb-4">
-              <img [src]="logoUrl" [alt]="displayName" class="h-15 w-15 rounded-md">
+              <img [src]="logoUrl" [alt]="displayName" class="h-14 w-14 rounded-md">
             </div>
           } @else {
             <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
@@ -52,7 +50,7 @@ export interface LoginError {
             </div>
           }
 
-          <h2 class="mt-6 text-3xl font-extrabold text-text-primary">
+          <h2 class="mt-6 text-2xl font-extrabold text-text-primary">
             {{ loginTitle }}
           </h2>
           @if (displayName) {
@@ -68,7 +66,7 @@ export interface LoginError {
         </div>
 
         <!-- Login Form -->
-        <app-card shadow="md" class="mt-12">
+        <app-card shadow="md" class="mt-20">
           <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-8">
             <div class="space-y-6">
               <!-- Vlink Field (only for Vendix context) -->
@@ -77,7 +75,7 @@ export interface LoginError {
                   label="Vlink"
                   formControlName="vlink"
                   type="text"
-                  size="lg"
+                  size="md"
                   [required]="true"
                   placeholder="mi-organizacion"
                   (inputBlur)="onFieldBlur('vlink')"
@@ -91,7 +89,7 @@ export interface LoginError {
                 [label]="emailLabel"
                 formControlName="email"
                 type="email"
-                size="lg"
+                size="md"
                 [required]="true"
                 [placeholder]="emailPlaceholder"
                 (inputBlur)="onFieldBlur('email')"
@@ -103,7 +101,7 @@ export interface LoginError {
                 label="Contraseña"
                 formControlName="password"
                 type="password"
-                size="lg"
+                size="md"
                 [required]="true"
                 placeholder="••••••••"
                 (inputBlur)="onFieldBlur('password')"
@@ -127,8 +125,14 @@ export interface LoginError {
                         Corrección requerida
                       </h3>
                       <div class="mt-2 text-sm text-red-700 space-y-1">
-                        @for (error of getFieldErrors(); track error.field) {
-                          <p>{{ error.message }}</p>
+                        @if (getFieldErrors().length > 0) {
+                          <p>{{ getFieldErrors()[0].message }}</p>
+                          <!-- Show progress indicator if there are more errors -->
+                          @if (getTotalFieldErrors() > 1) {
+                            <p class="text-xs text-red-600 mt-1">
+                              ({{ currentErrorIndex + 1 }} de {{ getTotalFieldErrors() }} correcciones)
+                            </p>
+                          }
                         }
                       </div>
                     }
@@ -143,13 +147,6 @@ export interface LoginError {
                           {{ errorDetails }}
                         </div>
                       }
-                      @if (canRetry && retryCountdown > 0) {
-                        <div class="mt-2">
-                          <p class="text-sm text-red-700">
-                            Puedes reintentar en {{ retryCountdown }} segundos
-                          </p>
-                        </div>
-                      }
                     }
                   </div>
                 </div>
@@ -160,7 +157,7 @@ export interface LoginError {
             <app-button
               type="submit"
               variant="primary"
-              size="lg"
+              size="md"
               [disabled]="!isFormValid"
               [loading]="isLoading"
               [fullWidth]="true"
@@ -184,30 +181,6 @@ export interface LoginError {
               </div>
             </div>
 
-            <!-- Special Actions -->
-            @if (loginState === 'email_not_verified') {
-              <div class="text-center">
-                <app-button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="resendVerificationEmail()">
-                  Reenviar email de verificación
-                </app-button>
-              </div>
-            }
-
-            @if (canRetry && retryCountdown === 0) {
-              <div class="text-center">
-                <app-button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="retryLogin()">
-                  Reintentar inicio de sesión
-                </app-button>
-              </div>
-            }
           </form>
         </app-card>
 
@@ -265,9 +238,11 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   loginAttempts = 0;
   maxAttempts = 5;
   lockoutTime = 180;
-  retryCountdown = 0;
-  retryTimer: any;
   apiErrorMessage: string | null = null;
+  
+  // Error tracking for showing one correction at a time
+  currentErrorIndex = 0;
+  previousFieldErrors: { field: string; message: string }[] = [];
   
   // Context properties
   contextType: 'vendix' | 'organization' | 'store' = 'vendix';
@@ -389,60 +364,50 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       if (this.loginAttempts >= this.maxAttempts) {
         this.setLoginError({
           type: 'too_many_attempts',
-          message: `Demasiados intentos fallidos. Espera ${this.lockoutTime / 60} minutos.`,
-          canRetry: true,
-          retryAfter: this.lockoutTime
+          message: `Demasiados intentos fallidos. Espera ${this.lockoutTime / 60} minutos.`
         });
       } else {
         this.setLoginError({
           type: 'error',
           message: apiMessage, // mostrar `message` en pantalla
-          apiError: apiErrorText || undefined, // preferir `error` en toast
-          canRetry: true
+          apiError: apiErrorText || undefined // preferir `error` en toast
         });
       }
   } else if (combined.includes('email not verified') || combined.includes('verificar email')) {
       this.setLoginError({
         type: 'email_not_verified',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: false
+        apiError: apiErrorText || undefined
       });
   } else if (combined.includes('too many') || combined.includes('demasiados') || combined.includes('cuenta bloqueada')) {
       this.setLoginError({
         type: 'too_many_attempts',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: true,
-        retryAfter: this.lockoutTime
+        apiError: apiErrorText || undefined
       });
   } else if (combined.includes('suspended') || combined.includes('suspendida')) {
       this.setLoginError({
         type: 'account_suspended',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: false
+        apiError: apiErrorText || undefined
       });
   } else if (combined.includes('expired') || combined.includes('expirada')) {
       this.setLoginError({
         type: 'password_expired',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: false
+        apiError: apiErrorText || undefined
       });
   } else if (combined.includes('conexión') || combined.includes('connection')) {
       this.setLoginError({
         type: 'network_error',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: true
+        apiError: apiErrorText || undefined
       });
     } else {
       this.setLoginError({
         type: 'error',
         message: apiMessage,
-        apiError: apiErrorText || undefined,
-        canRetry: true
+        apiError: apiErrorText || undefined
       });
     }
   }
@@ -454,9 +419,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     // don't immediately hide the UI message while the user can retry.
     this.apiErrorMessage = error.message;
 
-    if (error.retryAfter) {
-      this.startRetryCountdown(error.retryAfter);
-    }
 
   // Prefer the server `error` field in toasts (English/internal code),
   // but keep `message` for UI display.
@@ -481,26 +443,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
   }
 
-  private startRetryCountdown(seconds: number): void {
-    this.retryCountdown = seconds;
-    if (this.retryTimer) {
-      clearInterval(this.retryTimer);
-    }
-
-    this.retryTimer = setInterval(() => {
-      this.retryCountdown--;
-      if (this.retryCountdown <= 0) {
-        clearInterval(this.retryTimer);
-        this.retryTimer = undefined;
-        this.clearError();
-      }
-    }, 1000);
-  }
-
   private clearError(): void {
     this.loginState = 'idle';
     this.loginError = null;
-    this.retryCountdown = 0;
     this.apiErrorMessage = null;
   }
 
@@ -508,18 +453,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
-    if (this.retryTimer) {
-      clearInterval(this.retryTimer);
-    }
-  }
-
-  retryLogin(): void {
-    if (this.canRetry && this.retryCountdown === 0) {
-      this.clearError();
-      this.onSubmit();
-    } else if (this.retryCountdown > 0) {
-      this.toast.info(`Espera ${this.retryCountdown} segundos antes de reintentar`, 'Tiempo de espera');
-    }
   }
 
   resetForm(): void {
@@ -539,28 +472,43 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     if (field) {
       field.markAsDirty();
     }
+
+    // Check if the current error has been fixed and move to next error if available
+    this.checkAndAdvanceError();
   }
 
-  getFieldError(fieldName: string): string {
-    const field = this.loginForm.get(fieldName);
-    if (field?.errors && field?.touched) {
-      if (field.errors['required']) {
-        if (fieldName === 'vlink') {
-          return 'El vlink es requerido';
-        }
-        return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
-      }
-      if (field.errors['email']) {
-        return 'Debe ser un email válido';
-      }
-      if (field.errors['minlength']) {
-        return 'La contraseña debe tener al menos 6 caracteres';
+  private checkAndAdvanceError(): void {
+    const allErrors = this.getAllFieldErrors();
+    
+    // If there are no errors, reset the index
+    if (allErrors.length === 0) {
+      this.currentErrorIndex = 0;
+      this.previousFieldErrors = [];
+      return;
+    }
+
+    // If the current error index is beyond available errors, reset to first error
+    if (this.currentErrorIndex >= allErrors.length) {
+      this.currentErrorIndex = 0;
+      return;
+    }
+
+    // Check if the current error has been fixed
+    const currentError = allErrors[this.currentErrorIndex];
+    const currentField = this.loginForm.get(currentError.field);
+    
+    if (currentField && !currentField.errors) {
+      // Current error has been fixed, move to next error
+      this.currentErrorIndex++;
+      
+      // If we've fixed all errors, reset to first error for next validation
+      if (this.currentErrorIndex >= allErrors.length) {
+        this.currentErrorIndex = 0;
       }
     }
-    return '';
   }
 
-  getFieldErrors(): { field: string; message: string }[] {
+  private getAllFieldErrors(): { field: string; message: string }[] {
     const errors: { field: string; message: string }[] = [];
     
     const fields = ['vlink', 'email', 'password'];
@@ -588,6 +536,47 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     });
     
     return errors;
+  }
+
+  getFieldError(fieldName: string): string {
+    const field = this.loginForm.get(fieldName);
+    if (field?.errors && field?.touched) {
+      if (field.errors['required']) {
+        if (fieldName === 'vlink') {
+          return 'El vlink es requerido';
+        }
+        return `${fieldName === 'email' ? 'El email' : 'La contraseña'} es requerida`;
+      }
+      if (field.errors['email']) {
+        return 'Debe ser un email válido';
+      }
+      if (field.errors['minlength']) {
+        return 'La contraseña debe tener al menos 6 caracteres';
+      }
+    }
+    return '';
+  }
+
+  getFieldErrors(): { field: string; message: string }[] {
+    const allErrors = this.getAllFieldErrors();
+    
+    // If there are no errors, return empty array
+    if (allErrors.length === 0) {
+      this.currentErrorIndex = 0;
+      return [];
+    }
+    
+    // Ensure current index is within bounds
+    if (this.currentErrorIndex >= allErrors.length) {
+      this.currentErrorIndex = 0;
+    }
+    
+    // Return only the current error
+    return [allErrors[this.currentErrorIndex]];
+  }
+
+  getTotalFieldErrors(): number {
+    return this.getAllFieldErrors().length;
   }
 
   hasFieldError(fieldName: string): boolean {
@@ -639,15 +628,6 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
   }
 
-  resendVerificationEmail(): void {
-    const email = this.loginForm.get('email')?.value;
-    if (email && this.loginForm.get('email')?.valid) {
-      // This would need to be implemented in AuthService
-      this.toast.warning('Función de reenvío de verificación no implementada aún');
-    } else {
-      this.toast.warning('Ingresa un email válido primero');
-    }
-  }
 
   navigateToForgotPassword(): void {
     this.router.navigate(['/auth/forgot-owner-password']);
@@ -658,16 +638,12 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     return this.loginState !== 'idle' && this.loginState !== 'loading' && this.loginState !== 'success';
   }
 
-  get canRetry(): boolean {
-    return this.loginError?.canRetry || false;
-  }
-
   get isLoading(): boolean {
     return this.loginState === 'loading';
   }
 
   get isFormValid(): boolean {
-    return this.loginForm.valid && this.loginState !== 'loading' && !this.hasError;
+    return this.loginForm.valid && this.loginState !== 'loading';
   }
 
   get errorMessage(): string {

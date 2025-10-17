@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div [class]="cardClasses">
+  <div [class]="cardClasses" [ngStyle]="cardStyles">
       <!-- Header -->
       <div 
         *ngIf="hasHeader" 
@@ -49,10 +49,14 @@ export class CardComponent {
   @Input() shadow: 'none' | 'sm' | 'md' | 'lg' | 'xl' = 'md';
   @Input() padding = true;
   @Input() customClasses = '';
+  // Optional sizing inputs. Accept any valid CSS size (px, %, rem, etc.)
+  @Input() width?: string;
+  @Input() height?: string;
+  @Input() maxWidth?: string;
 
   get cardClasses(): string {
     const baseClasses = [
-      'bg-background',
+      'bg-white',
       'border',
       'border-border',
       'rounded-lg',
@@ -92,5 +96,13 @@ export class CardComponent {
 
   get hasFooter(): boolean {
     return false; // Will be determined by content projection
+  }
+
+  get cardStyles(): { [key: string]: string } | null {
+    const styles: { [key: string]: string } = {};
+    if (this.width) styles['width'] = this.width;
+    if (this.height) styles['height'] = this.height;
+    if (this.maxWidth) styles['max-width'] = this.maxWidth;
+    return Object.keys(styles).length ? styles : null;
   }
 }

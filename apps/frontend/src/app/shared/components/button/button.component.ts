@@ -69,7 +69,7 @@ export class ButtonComponent {
   get buttonClasses(): string {
     const baseClasses = [
       'font-medium',
-      'rounded-lg',
+      'rounded-sm',
       'transition-all',
       'duration-200',
       'focus:outline-none',

@@ -28,16 +28,16 @@ export class EmailTemplates {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Verificación de Email</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-            .container { max-width: 600px; margin: 0 auto; background-color: white; }
-            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center; }
-            .header h1 { color: white; margin: 0; font-size: 28px; font-weight: 600; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F4F4F4; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #B0B0B0; border-radius: 8px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 20px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 600; }
             .content { padding: 40px 20px; }
-            .welcome { font-size: 18px; color: #374151; margin-bottom: 20px; }
-            .message { color: #6b7280; line-height: 1.6; margin-bottom: 30px; }
-            .button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; }
-            .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 14px; }
-            .divider { border-top: 1px solid #e5e7eb; margin: 30px 0; }
+            .welcome { font-size: 18px; color: #222222; margin-bottom: 20px; font-weight: 600; }
+            .message { color: #222222; line-height: 1.6; margin-bottom: 30px; }
+            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+            .footer { background-color: #F4F4F4; padding: 20px; text-align: center; color: #222222; font-size: 14px; border-top: 1px solid #B0B0B0; }
+            .divider { border-top: 1px solid #B0B0B0; margin: 30px 0; }
           </style>
         </head>
         <body>
@@ -61,7 +61,7 @@ export class EmailTemplates {
               <div class="divider"></div>
               <div class="message" style="font-size: 14px;">
                 Si el botón no funciona, copia y pega este enlace en tu navegador:<br>
-                <a href="${verificationUrl}" style="color: #667eea; word-break: break-all;">${verificationUrl}</a>
+                <a href="${verificationUrl}" style="color: #2F6F4E; word-break: break-all;">${verificationUrl}</a>
               </div>
             </div>
             <div class="footer">
@@ -103,17 +103,17 @@ export class EmailTemplates {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Restablecer Contraseña</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-            .container { max-width: 600px; margin: 0 auto; background-color: white; }
-            .header { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 40px 20px; text-align: center; }
-            .header h1 { color: white; margin: 0; font-size: 28px; font-weight: 600; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F4F4F4; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #B0B0B0; border-radius: 8px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 20px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 600; }
             .content { padding: 40px 20px; }
-            .welcome { font-size: 18px; color: #374151; margin-bottom: 20px; }
-            .message { color: #6b7280; line-height: 1.6; margin-bottom: 30px; }
-            .button { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; }
-            .warning { background-color: #fef3c7; border: 1px solid #f59e0b; padding: 16px; border-radius: 8px; color: #92400e; margin: 20px 0; }
-            .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 14px; }
-            .divider { border-top: 1px solid #e5e7eb; margin: 30px 0; }
+            .welcome { font-size: 18px; color: #222222; margin-bottom: 20px; font-weight: 600; }
+            .message { color: #222222; line-height: 1.6; margin-bottom: 30px; }
+            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+            .warning { background-color: #fef3c7; border: 1px solid #B0B0B0; padding: 16px; border-radius: 8px; color: #222222; margin: 20px 0; }
+            .footer { background-color: #F4F4F4; padding: 20px; text-align: center; color: #222222; font-size: 14px; border-top: 1px solid #B0B0B0; }
+            .divider { border-top: 1px solid #B0B0B0; margin: 30px 0; }
           </style>
         </head>
         <body>
@@ -136,7 +136,7 @@ export class EmailTemplates {
               <div class="divider"></div>
               <div class="message" style="font-size: 14px;">
                 Si el botón no funciona, copia y pega este enlace en tu navegador:<br>
-                <a href="${resetUrl}" style="color: #f59e0b; word-break: break-all;">${resetUrl}</a>
+                <a href="${resetUrl}" style="color: #2F6F4E; word-break: break-all;">${resetUrl}</a>
               </div>
             </div>
             <div class="footer">
@@ -179,17 +179,17 @@ export class EmailTemplates {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Bienvenido</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-            .container { max-width: 600px; margin: 0 auto; background-color: white; }
-            .header { background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 20px; text-align: center; }
-            .header h1 { color: white; margin: 0; font-size: 28px; font-weight: 600; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F4F4F4; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #B0B0B0; border-radius: 8px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 20px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 600; }
             .content { padding: 40px 20px; }
-            .welcome { font-size: 22px; color: #374151; margin-bottom: 20px; text-align: center; }
-            .message { color: #6b7280; line-height: 1.6; margin-bottom: 30px; }
-            .button { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; }
-            .features { background-color: #f0fdf4; padding: 20px; border-radius: 8px; margin: 30px 0; }
-            .feature { margin: 15px 0; }
-            .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 14px; }
+            .welcome { font-size: 22px; color: #222222; margin-bottom: 20px; text-align: center; font-weight: 600; }
+            .message { color: #222222; line-height: 1.6; margin-bottom: 30px; }
+            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+            .features { background-color: #F4F4F4; padding: 20px; border-radius: 8px; margin: 30px 0; border: 1px solid #B0B0B0; }
+            .feature { margin: 15px 0; color: #222222; }
+            .footer { background-color: #F4F4F4; padding: 20px; text-align: center; color: #222222; font-size: 14px; border-top: 1px solid #B0B0B0; }
           </style>
         </head>
         <body>
@@ -204,7 +204,7 @@ export class EmailTemplates {
                 y aprovechar todas nuestras herramientas para hacer crecer tu empresa.
               </div>
               <div class="features">
-                <h3 style="color: #059669; margin-top: 0;">¿Qué puedes hacer ahora?</h3>
+                <h3 style="color: #2F6F4E; margin-top: 0;">¿Qué puedes hacer ahora?</h3>
                 <div class="feature">✅ Configurar tu organización</div>
                 <div class="feature">🏪 Crear y configurar tus tiendas</div>
                 <div class="feature">📦 Gestionar tu inventario</div>
@@ -285,17 +285,17 @@ export class EmailTemplates {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Continúa tu Configuración</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #f8fafc; }
-            .container { max-width: 600px; margin: 0 auto; background-color: white; }
-            .header { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); padding: 40px 20px; text-align: center; }
-            .header h1 { color: white; margin: 0; font-size: 28px; font-weight: 600; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F4F4F4; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #B0B0B0; border-radius: 8px; overflow: hidden; }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 20px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 600; }
             .content { padding: 40px 20px; }
-            .welcome { font-size: 18px; color: #374151; margin-bottom: 20px; }
-            .message { color: #6b7280; line-height: 1.6; margin-bottom: 30px; }
-            .button { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; }
-            .progress { background-color: #f3f4f6; height: 8px; border-radius: 4px; margin: 20px 0; }
-            .progress-bar { background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); height: 100%; border-radius: 4px; width: 66%; }
-            .footer { background-color: #f9fafb; padding: 20px; text-align: center; color: #9ca3af; font-size: 14px; }
+            .welcome { font-size: 18px; color: #222222; margin-bottom: 20px; font-weight: 600; }
+            .message { color: #222222; line-height: 1.6; margin-bottom: 30px; }
+            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 16px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+            .progress { background-color: #F4F4F4; height: 8px; border-radius: 4px; margin: 20px 0; border: 1px solid #B0B0B0; }
+            .progress-bar { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); height: 100%; border-radius: 4px; width: 66%; }
+            .footer { background-color: #F4F4F4; padding: 20px; text-align: center; color: #222222; font-size: 14px; border-top: 1px solid #B0B0B0; }
           </style>
         </head>
         <body>
@@ -310,7 +310,7 @@ export class EmailTemplates {
                 ${stepInfo.message}
               </div>
               <div style="margin: 20px 0;">
-                <div style="font-size: 14px; color: #6b7280; margin-bottom: 8px;">Progreso de configuración:</div>
+                <div style="font-size: 14px; color: #222222; margin-bottom: 8px;">Progreso de configuración:</div>
                 <div class="progress">
                   <div class="progress-bar"></div>
                 </div>

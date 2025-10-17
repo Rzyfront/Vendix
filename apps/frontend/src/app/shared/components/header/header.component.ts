@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <header class="header-container px-6 py-4" [style]="{ 'border-color': 'var(--border)' }">
+    <header class="header-container px-4 py-3">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-4">
           <!-- Toggle Sidebar Button -->
@@ -28,7 +28,7 @@ import { CommonModule } from '@angular/common';
         </div>
         
         <!-- Clean user badge in top right corner -->
-        <div class="user-badge-container flex items-center gap-3">
+        <div class="user-badge-container flex items-center gap-3 rounded-lg">
           <div class="text-right">
             <p class="text-sm font-medium" [style]="{ 'color': 'var(--text)' }">{{ user?.name || 'Usuario' }}</p>
             <p class="text-xs" [style]="{ 'color': 'var(--secondary)' }">{{ user?.role || 'Administrador' }}</p>

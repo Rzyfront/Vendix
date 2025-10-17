@@ -129,7 +129,7 @@ export class InputComponent implements ControlValueAccessor {
       'block',
       'w-full',
       'border',
-      'rounded-lg',
+      'rounded-sm',
       'transition-colors',
       'duration-200',
       'focus:outline-none',
