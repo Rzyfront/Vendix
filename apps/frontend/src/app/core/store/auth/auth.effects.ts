@@ -239,6 +239,19 @@ export class AuthEffects {
     { dispatch: false }
   );
 
+  resetOwnerPasswordFailure$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.resetOwnerPasswordFailure),
+      tap(({ error }) => {
+        const errorMessage = typeof error === 'string' 
+          ? error 
+          : extractApiErrorMessage(error);
+        this.toast.error(errorMessage, 'Error al restablecer contraseña');
+      })
+    ),
+    { dispatch: false }
+  );
+
   verifyEmail$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.verifyEmail),

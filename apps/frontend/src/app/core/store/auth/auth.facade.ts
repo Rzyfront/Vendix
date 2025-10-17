@@ -129,6 +129,10 @@ export class AuthFacade {
     return result;
   }
 
+  setAuthError(error: string | null): void {
+    this.store.dispatch(AuthActions.setError({ error }));
+  }
+
   getTokens(): { accessToken: string; refreshToken: string } | null {
     let result: { accessToken: string; refreshToken: string } | null = null;
     this.tokens$.pipe(take(1)).subscribe(tokens => result = tokens);

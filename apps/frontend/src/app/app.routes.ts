@@ -26,14 +26,6 @@ export const routes: Routes = [
     canActivate: [DomainGuard],
     component: VendixLandingComponent // Componente placeholder, será reemplazado dinámicamente
   },
-
-  // Ruta específica para verificación de email desde parámetros de consulta
-  {
-    path: 'verify-email',
-    loadComponent: () => import('./public/auth/components/email-verification/email-verification.component').then(c => c.EmailVerificationComponent),
-    data: { isPublic: true }
-  },
-
   // Rutas de autenticación contextual
   {
     path: 'auth',
@@ -57,7 +49,12 @@ export const routes: Routes = [
         path: 'reset-owner-password',
         loadComponent: () => import('./public/auth/components/reset-owner-password/reset-owner-password').then(c => c.ResetOwnerPasswordComponent),
         data: { isPublic: true }
-      }
+      },
+      {
+        path: 'verify-email',
+        loadComponent: () => import('./public/auth/components/email-verification/email-verification.component').then(c => c.EmailVerificationComponent),
+        data: { isPublic: true }
+      },
     ]
   },
 

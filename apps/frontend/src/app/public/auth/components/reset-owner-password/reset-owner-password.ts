@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, AbstractControl, ValidationErrors } from '@angular/forms';
@@ -152,7 +152,7 @@ export function passwordStrengthValidator(control: AbstractControl): ValidationE
   `,
   styleUrls: []
 })
-export class ResetOwnerPasswordComponent implements OnInit {
+export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
   resetPasswordForm: FormGroup;
   isLoading = false;
   token: string | null = null;
@@ -172,7 +172,15 @@ export class ResetOwnerPasswordComponent implements OnInit {
     }, { validators: passwordsMatchValidator });
   }
 
+  ngOnDestroy(): void {
+    // Clear error state when component is destroyed to prevent affecting other components
+    this.authFacade.setAuthError(null);
+  }
+
   ngOnInit(): void {
+    // Clear any previous error state when component initializes to avoid showing old errors
+    this.authFacade.setAuthError(null);
+    
     this.route.queryParamMap.pipe(
       tap(params => {
         this.token = params.get('token');
@@ -195,7 +203,8 @@ export class ResetOwnerPasswordComponent implements OnInit {
   }
 
   onSubmit(): void {
-    // Clear previous errors
+    // Clear any previous error state before making the request
+    this.authFacade.setAuthError(null);
     this.error = null;
     
     if (this.resetPasswordForm.valid && this.token) {
@@ -207,25 +216,20 @@ export class ResetOwnerPasswordComponent implements OnInit {
         this.isLoading = isLoading;
       });
 
-      // Subscribe to error state - handle errors with toast and on-screen display
+      // Subscribe to error state - only handle errors with on-screen display (toast is handled by effects)
       const errorSubscription = this.authFacade.error$.subscribe(error => {
         if (error) {
           // Error is already handled in ngOnInit for on-screen display
           // Normalize error to handle both string and NormalizedApiPayload types
           const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
-          this.toast.error(errorMessage, 'Error al restablecer contraseña');
+          this.error = errorMessage;
           
           // Unsubscribe to prevent memory leaks
           loadingSubscription.unsubscribe();
           errorSubscription.unsubscribe();
         } else {
-          // Success case - password reset
-          this.toast.success('Tu contraseña ha sido restablecida exitosamente.', '¡Contraseña restablecida!');
-          this.router.navigate(['/auth/login']);
-          
-          // Unsubscribe on success as well
-          loadingSubscription.unsubscribe();
-          errorSubscription.unsubscribe();
+          // Only clear the error if there was a previous error
+          this.error = null;
         }
       });
 
