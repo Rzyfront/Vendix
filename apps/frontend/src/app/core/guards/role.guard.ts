@@ -2,7 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router, UrlTree } from '@angular/router';
 import { Observable, of } from 'rxjs';
 import { map, switchMap, take, catchError } from 'rxjs/operators';
-import { AccessService } from '../services/access.service';
+import { AuthFacade } from '../store/auth/auth.facade';
+import { ToastService } from '../../shared/components/toast/toast.service';
 
 export interface RoleGuardConfig {
   roles?: string[];
@@ -16,8 +17,9 @@ export interface RoleGuardConfig {
   providedIn: 'root'
 })
 export class RoleGuard implements CanActivate {
-  private accessService = inject(AccessService);
+  private authFacade = inject(AuthFacade);
   private router = inject(Router);
+  private toast = inject(ToastService);
 
   canActivate(
     route: ActivatedRouteSnapshot,
@@ -32,26 +34,24 @@ export class RoleGuard implements CanActivate {
       data: route.data
     });
 
-    return this.accessService.isAuthenticated().pipe(
+    return this.authFacade.isAuthenticated$.pipe(
+      take(1),
       switchMap(isAuthenticated => {
         if (!isAuthenticated) {
           console.log('[ROLE GUARD] User not authenticated, redirecting to login');
           return this.redirectToLogin(state.url);
         }
         // Verificar roles
-        return this.accessService.hasRole(config.roles ?? []).pipe(
-          map(hasRole => {
-            if (hasRole) {
+        return this.authFacade.userRoles$.pipe(
+          take(1),
+          map(userRoles => {
+            const hasRequiredRole = config.roles!.length === 0 || userRoles.some(r => config.roles!.includes(r));
+            if (hasRequiredRole) {
               console.log('[ROLE GUARD] Permission granted for route');
               return true;
             }
-            // Usuario autenticado pero sin rol: solo toast, no redirigir
-            this.accessService['toast'].error('No tienes acceso a esta sección.');
+            this.toast.error('No tienes acceso a esta sección.');
             return false;
-          }),
-          catchError(error => {
-            console.error('[ROLE GUARD] Error checking roles:', error);
-            return of(false);
           })
         );
       }),

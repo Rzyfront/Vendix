@@ -33,7 +33,7 @@ export class AuthEffects {
                 refreshToken: response.data.refresh_token
               },
               permissions: response.data.permissions || [],
-              roles: response.data.roles || [],
+              roles: response.data.user.roles || [],
               message: apiMessage
             });
           }),

@@ -172,6 +172,28 @@ export class AuthService {
           onboarding_completed: false,
         },
       });
+      // Crear user_settings para el owner con config app ORG_ADMIN
+      await tx.user_settings.create({
+        data: {
+          user_id: user.id,
+          config: {
+            app: 'ORG_ADMIN',
+            panel_ui: {
+              stores: true,
+              users: true,
+              dashboard: true,
+              orders: true,
+              analytics: true,
+              reports: true,
+              inventory: true,
+              billing: true,
+              ecommerce: true,
+              audit: true,
+              settings: true
+            }
+          }
+        }
+      });
 
       // Asignar rol owner al usuario (si no lo tiene ya)
       const existingUserRole = await tx.user_roles.findFirst({
@@ -303,6 +325,7 @@ export class AuthService {
   async registerCustomer(
     registerCustomerDto: RegisterCustomerDto,
     client_info?: { ip_address?: string; user_agent?: string },
+    app: string = 'STORE_ECOMMERCE',
   ) {
     const { email, password, first_name, last_name, store_id } =
       registerCustomerDto;
@@ -350,6 +373,50 @@ export class AuthService {
         email_verified: false,
         organization_id: store.organization_id,
       },
+    });
+
+    // Crear user_settings para el usuario customer
+    let panel_ui = {};
+    if (app === 'ORG_ADMIN') {
+      panel_ui = {
+        stores: true,
+        users: true,
+        dashboard: true,
+        orders: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        audit: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ADMIN') {
+      panel_ui = {
+        pos: true,
+        users: true,
+        dashboard: true,
+        analytics: true,
+        reports: true,
+        billing: true,
+        ecommerce: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ECOMMERCE') {
+      panel_ui = {
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true
+      };
+    }
+    await this.prismaService.user_settings.create({
+      data: {
+        user_id: user.id,
+        config: { app, panel_ui }
+      }
     });
 
     // Asignar rol customer al usuario
@@ -471,6 +538,7 @@ export class AuthService {
   async registerStaff(
     registerStaffDto: RegisterStaffDto,
     admin_user_id: number,
+    app: string = 'STORE_ADMIN',
   ) {
     const { email, password, first_name, last_name, role, store_id } =
       registerStaffDto;
@@ -580,6 +648,50 @@ export class AuthService {
         email_verified: true, // Staff creado por admin, email ya verificado
         state: 'active',
       },
+    });
+
+    // Crear user_settings para el usuario staff
+    let panel_ui = {};
+    if (app === 'ORG_ADMIN') {
+      panel_ui = {
+        stores: true,
+        users: true,
+        dashboard: true,
+        orders: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        audit: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ADMIN') {
+      panel_ui = {
+        pos: true,
+        users: true,
+        dashboard: true,
+        analytics: true,
+        reports: true,
+        billing: true,
+        ecommerce: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ECOMMERCE') {
+      panel_ui = {
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true
+      };
+    }
+    await this.prismaService.user_settings.create({
+      data: {
+        user_id: user.id,
+        config: { app, panel_ui }
+      }
     });
 
     // Asignar rol
@@ -823,11 +935,17 @@ export class AuthService {
       data: { last_login: new Date() },
     });
 
+    // Obtener user_settings
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: user.id }
+    });
+
     // Remover password del response
     const { password: _, ...userWithoutPassword } = user;
 
     return {
       user: userWithoutPassword,
+      user_settings: userSettings,
       ...tokens,
     };
   }

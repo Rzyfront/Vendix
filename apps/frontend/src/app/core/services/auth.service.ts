@@ -7,8 +7,10 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { TenantFacade } from '../store/tenant/tenant.facade';
 import { AppConfigService } from './app-config.service';
 import { NavigationService } from './navigation.service';
-import * as AuthActions from '../store/auth/auth.actions';
 import { environment } from '../../../environments/environment';
+import { AppEnvironment } from '../models/domain-config.interface';
+
+// --- NEW, GRANULAR INTERFACES ---
 
 export interface LoginDto {
   email: string;
@@ -16,6 +18,43 @@ export interface LoginDto {
   store_slug?: string;
   organization_slug?: string;
 }
+
+export interface User {
+  id: number;
+  first_name: string;
+  last_name: string;
+  username: string;
+  email: string;
+  state: string;
+  roles?: string[]; // Added from token decoding
+}
+
+export interface UserSettings {
+  id: number;
+  user_id: number;
+  config: {
+    app: AppEnvironment; // Use the existing AppEnvironment enum
+    panel_ui: { [key: string]: boolean };
+  };
+}
+
+export interface AuthResponse {
+  success: boolean;
+  message: string;
+  data: {
+    user: User;
+    user_settings: UserSettings;
+    access_token: string;
+    refresh_token: string;
+    token_type: 'Bearer';
+    expires_in: number;
+    permissions?: string[]; // Permissions from token
+  } | null;
+  error?: string;
+  meta?: any;
+}
+
+// --- OTHER DTOs ---
 
 export interface RegisterOwnerDto {
   organization_name: string;
@@ -43,63 +82,6 @@ export interface RegisterCustomerDto {
   storeId: number;
 }
 
-export interface User {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  roles: string[];
-  isActive: boolean;
-  emailVerified: boolean;
-}
-
-export interface BackendUser {
-  id: number;
-  username: string;
-  email: string;
-  state: string;
-  last_login: string;
-  failed_login_attempts: number;
-  locked_until: string | null;
-  email_verified: boolean;
-  two_factor_enabled: boolean;
-  two_factor_secret: string | null;
-  created_at: string;
-  updated_at: string;
-  first_name: string;
-  last_name: string;
-  onboarding_completed: boolean;
-  organization_id: number;
-  user_roles: Array<{
-    id: number;
-    user_id: number;
-    role_id: number;
-    roles: {
-      id: number;
-      name: string;
-      description: string;
-      is_system_role: boolean;
-      created_at: string;
-      updated_at: string;
-      role_permissions: any[];
-    };
-  }>;
-  organizations: any;
-}
-
-export interface AuthResponse {
-  success: boolean;
-  message: string;
-  data: {
-    access_token: string;
-    refresh_token: string;
-    user: BackendUser;
-    permissions?: string[];
-    roles?: string[];
-  } | null;
-  error: string;
-  meta?: any;
-}
 
 @Injectable({
   providedIn: 'root'
@@ -107,7 +89,7 @@ export interface AuthResponse {
 export class AuthService {
   private readonly API_URL = `${environment.apiUrl}/api/auth`;
 
-  private appConfig = inject(AppConfigService);
+  private appConfigService = inject(AppConfigService);
   private navigationService = inject(NavigationService);
 
   constructor(
@@ -118,9 +100,8 @@ export class AuthService {
     private tenantFacade: TenantFacade
   ) {}
 
-  // Login - auto-populates organization_slug/store_slug from current domain
+  // Login - Refactored for layered config and granular caching
   login(loginDto: LoginDto): Observable<AuthResponse> {
-    // Auto-populate organization_slug/store_slug from current domain if not provided
     const enrichedLoginDto = { ...loginDto };
 
     if (!enrichedLoginDto.organization_slug && !enrichedLoginDto.store_slug) {
@@ -131,52 +112,41 @@ export class AuthService {
       }
     }
 
-    return this.http.post<any>(`${this.API_URL}/login`, enrichedLoginDto)
+    return this.http.post<AuthResponse>(`${this.API_URL}/login`, enrichedLoginDto)
       .pipe(
-        map((response: any) => {
-          // Check if response has success: false (error case)
-          if (response.success === false) {
+        map(response => {
+          if (!response.success || !response.data) {
             throw new Error(response.message || 'Login failed');
           }
 
-          if (response.data) {
-            // Transform backend user object to frontend User interface
-            const backendUser = response.data.user;
+          const { user, user_settings, access_token, refresh_token } = response.data;
 
-            const frontendUser: User = {
-              id: backendUser.id.toString(),
-              email: backendUser.email,
-              firstName: backendUser.first_name,
-              lastName: backendUser.last_name,
-              roles: backendUser.user_roles?.map((ur: any) => ur.roles.name) || [],
-              isActive: backendUser.state === 'active',
-              emailVerified: backendUser.email_verified
-            };
+          // --- Layer 3: Update App Environment from User Settings ---
+          this.appConfigService.updateEnvironmentForUser(user_settings.config.app);
 
-            // Extract permissions and roles from JWT token
-            const decodedToken = this.decodeJwtToken(response.data.access_token);
-            const permissions = decodedToken?.permissions || [];
-            const roles = decodedToken?.roles || [];
-
-            // Set tokens in localStorage for interceptor
-            if (typeof localStorage !== 'undefined') {
-              localStorage.setItem('access_token', response.data.access_token);
-              localStorage.setItem('refresh_token', response.data.refresh_token);
-            }
-
-            // Return the transformed response for the effect to handle
-            return {
-              ...response,
-              data: {
-                ...response.data,
-                user: frontendUser,
-                permissions,
-                roles
-              }
-            };
+          // --- Granular Caching ---
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', refresh_token);
+            localStorage.setItem('vendix_user_info', JSON.stringify(user));
           }
 
-          return response;
+          // --- Data for NgRx Store ---
+          // Decode token to get roles and permissions for the session
+          const decodedToken = this.decodeJwtToken(access_token);
+          const permissions = decodedToken?.permissions || [];
+          const roles = decodedToken?.roles || [];
+          user.roles = roles; // Attach roles to the user object for the session
+
+          // Return the transformed data for the NgRx effect
+          return {
+            ...response,
+            data: {
+              ...response.data,
+              user,
+              permissions,
+            }
+          };
         })
       );
   }
@@ -273,9 +243,9 @@ export class AuthService {
     console.log('[AUTH SERVICE] Redirección post-login iniciada');
     
     const user = this.getCurrentUser();
-    const domainConfig = this.appConfig.getCurrentConfig()?.domainConfig;
+    const domainConfig = this.appConfigService.getCurrentConfig()?.domainConfig;
     // Obtener tenantContext desde AppConfigService
-    const tenantContext = this.appConfig.getCurrentConfig()?.tenantConfig || null;
+    const tenantContext = this.appConfigService.getCurrentConfig()?.tenantConfig || null;
 
     if (!user || !domainConfig) {
       console.warn('[AUTH SERVICE] No se pudo obtener contexto para redirección, usando fallback');

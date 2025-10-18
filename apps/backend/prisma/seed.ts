@@ -13,109 +13,12 @@ async function main() {
   await prisma.role_permissions.deleteMany({});
   await prisma.user_roles.deleteMany({});
   await prisma.store_users.deleteMany({});
+
   await prisma.domain_settings.deleteMany({});
   await prisma.addresses.deleteMany({});
-  await prisma.store_settings.deleteMany({});
-  await prisma.refresh_tokens.deleteMany({});
-  await prisma.login_attempts.deleteMany({});
-  await prisma.users.deleteMany({});
-  await prisma.stores.deleteMany({});
-  await prisma.organizations.deleteMany({});
-  await prisma.roles.deleteMany({});
-  await prisma.permissions.deleteMany({});
 
-  // 1. Crear permisos expandidos para todos los módulos
-  console.log('📝 Creando permisos expandidos...');
   const permissions = [
-    // Usuarios
-    { name: 'users.read', description: 'Ver usuarios', path: '/api/users', method: 'GET' },
-    { name: 'users.create', description: 'Crear usuarios', path: '/api/users', method: 'POST' },
-    { name: 'users.update', description: 'Actualizar usuarios', path: '/api/users/:id', method: 'PUT' },
-    { name: 'users.delete', description: 'Eliminar usuarios', path: '/api/users/:id', method: 'DELETE' },
-    { name: 'users.profile', description: 'Ver perfil de usuario', path: '/api/users/profile', method: 'GET' },
-    
-    // Direcciones
-    { name: 'addresses.read', description: 'Ver direcciones', path: '/api/addresses', method: 'GET' },
-    { name: 'addresses.create', description: 'Crear direcciones', path: '/api/addresses', method: 'POST' },
-    { name: 'addresses.update', description: 'Actualizar direcciones', path: '/api/addresses/:id', method: 'PUT' },
-    { name: 'addresses.delete', description: 'Eliminar direcciones', path: '/api/addresses/:id', method: 'DELETE' },
-    
-    // Organizaciones
-    { name: 'organizations.read', description: 'Ver organizaciones', path: '/api/organizations', method: 'GET' },
-    { name: 'organizations.create', description: 'Crear organizaciones', path: '/api/organizations', method: 'POST' },
-    { name: 'organizations.update', description: 'Actualizar organizaciones', path: '/api/organizations/:id', method: 'PUT' },
-    { name: 'organizations.delete', description: 'Eliminar organizaciones', path: '/api/organizations/:id', method: 'DELETE' },
-    { name: 'organizations.settings', description: 'Gestionar configuración de organizaciones', path: '/api/organizations/:id/settings', method: 'PUT' },
-    
-    // Tiendas
-    { name: 'stores.read', description: 'Ver tiendas', path: '/api/stores', method: 'GET' },
-    { name: 'stores.create', description: 'Crear tiendas', path: '/api/stores', method: 'POST' },
-    { name: 'stores.update', description: 'Actualizar tiendas', path: '/api/stores/:id', method: 'PUT' },
-    { name: 'stores.delete', description: 'Eliminar tiendas', path: '/api/stores/:id', method: 'DELETE' },
-    { name: 'stores.settings', description: 'Gestionar configuración de tiendas', path: '/api/stores/:id/settings', method: 'PUT' },
-    
-    // Roles
-    { name: 'roles.read', description: 'Ver roles', path: '/api/roles', method: 'GET' },
-    { name: 'roles.create', description: 'Crear roles', path: '/api/roles', method: 'POST' },
-    { name: 'roles.update', description: 'Actualizar roles', path: '/api/roles/:id', method: 'PUT' },
-    { name: 'roles.delete', description: 'Eliminar roles', path: '/api/roles/:id', method: 'DELETE' },
-    { name: 'roles.permissions', description: 'Gestionar permisos de roles', path: '/api/roles/:id/permissions', method: 'PUT' },
-    
-    // Permisos
-    { name: 'permissions.read', description: 'Ver permisos', path: '/api/permissions', method: 'GET' },
-    { name: 'permissions.create', description: 'Crear permisos', path: '/api/permissions', method: 'POST' },
-    { name: 'permissions.update', description: 'Actualizar permisos', path: '/api/permissions/:id', method: 'PUT' },
-    { name: 'permissions.delete', description: 'Eliminar permisos', path: '/api/permissions/:id', method: 'DELETE' },
-    
-    // Dominios
-    { name: 'domains.read', description: 'Ver dominios', path: '/api/domains', method: 'GET' },
-    { name: 'domains.create', description: 'Crear dominios', path: '/api/domains', method: 'POST' },
-    { name: 'domains.update', description: 'Actualizar dominios', path: '/api/domains/:id', method: 'PUT' },
-    { name: 'domains.delete', description: 'Eliminar dominios', path: '/api/domains/:id', method: 'DELETE' },
-    { name: 'domains.verify', description: 'Verificar dominios', path: '/api/domains/:id/verify', method: 'POST' },
-    
-    // Productos
-    { name: 'products.read', description: 'Ver productos', path: '/api/products', method: 'GET' },
-    { name: 'products.create', description: 'Crear productos', path: '/api/products', method: 'POST' },
-    { name: 'products.update', description: 'Actualizar productos', path: '/api/products/:id', method: 'PUT' },
-    { name: 'products.delete', description: 'Eliminar productos', path: '/api/products/:id', method: 'DELETE' },
-    
-    // Categorías
-    { name: 'categories.read', description: 'Ver categorías', path: '/api/categories', method: 'GET' },
-    { name: 'categories.create', description: 'Crear categorías', path: '/api/categories', method: 'POST' },
-    { name: 'categories.update', description: 'Actualizar categorías', path: '/api/categories/:id', method: 'PUT' },
-    { name: 'categories.delete', description: 'Eliminar categorías', path: '/api/categories/:id', method: 'DELETE' },
-    
-    // Marcas
-    { name: 'brands.read', description: 'Ver marcas', path: '/api/brands', method: 'GET' },
-    { name: 'brands.create', description: 'Crear marcas', path: '/api/brands', method: 'POST' },
-    { name: 'brands.update', description: 'Actualizar marcas', path: '/api/brands/:id', method: 'PUT' },
-    { name: 'brands.delete', description: 'Eliminar marcas', path: '/api/brands/:id', method: 'DELETE' },
-    
-    // Inventario
-    { name: 'inventory.read', description: 'Ver inventario', path: '/api/inventory', method: 'GET' },
-    { name: 'inventory.update', description: 'Actualizar inventario', path: '/api/inventory/:id', method: 'PUT' },
-    { name: 'inventory.transactions', description: 'Ver transacciones de inventario', path: '/api/inventory/transactions', method: 'GET' },
-    
-    // Pedidos
-    { name: 'orders.read', description: 'Ver pedidos', path: '/api/orders', method: 'GET' },
-    { name: 'orders.create', description: 'Crear pedidos', path: '/api/orders', method: 'POST' },
-    { name: 'orders.update', description: 'Actualizar pedidos', path: '/api/orders/:id', method: 'PUT' },
-    { name: 'orders.delete', description: 'Eliminar pedidos', path: '/api/orders/:id', method: 'DELETE' },
-    
-    // Pagos
-    { name: 'payments.read', description: 'Ver pagos', path: '/api/payments', method: 'GET' },
-    { name: 'payments.process', description: 'Procesar pagos', path: '/api/payments/:id/process', method: 'POST' },
-    { name: 'payments.refund', description: 'Reembolsar pagos', path: '/api/payments/:id/refund', method: 'POST' },
-    
-    // Auditoría
-    { name: 'audit.read', description: 'Ver logs de auditoría', path: '/api/audit', method: 'GET' },
-    
-    // Autenticación
-    { name: 'auth.login', description: 'Iniciar sesión', path: '/api/auth/login', method: 'POST' },
-    { name: 'auth.register', description: 'Registrarse', path: '/api/auth/register', method: 'POST' },
-    { name: 'auth.refresh', description: 'Refrescar token', path: '/api/auth/refresh', method: 'POST' },
-    { name: 'auth.logout', description: 'Cerrar sesión', path: '/api/auth/logout', method: 'POST' },
+    // ...otros permisos...
     { name: 'auth.password.reset', description: 'Restablecer contraseña', path: '/api/auth/password/reset', method: 'POST' },
     { name: 'auth.verify.email', description: 'Verificar email', path: '/api/auth/verify-email', method: 'POST' },
   ];
@@ -495,6 +398,9 @@ async function main() {
   const techStore3: any = createdStores[4];
   const fashionStore1: any = createdStores[5];
   const fashionStore2: any = createdStores[6];
+
+
+  // ...existing code...
   const gourmetStore1: any = createdStores[7];
   const homeStore1: any = createdStores[8];
 
@@ -690,7 +596,6 @@ async function main() {
         organization_id: user.organization_id,
       },
     });
-    
     // Asignar roles
     for (const roleId of user.roles) {
       await prisma.user_roles.upsert({
@@ -699,7 +604,89 @@ async function main() {
         create: { user_id: createdUser.id, role_id: roleId },
       });
     }
-    
+    // Configuración de user_settings según rol
+    let app = 'VENDIX_LANDING';
+  let panel_ui = {};
+    if (user.roles.includes(superAdminRole.id)) {
+      app = 'VENDIX_ADMIN';
+      panel_ui = {
+        superadmin: true,
+        tenants: true,
+        dashboard: true,
+        user_management: true,
+        billing: true,
+        system_analytics: true
+      };
+    } else if (user.roles.includes(ownerRole.id)) {
+      app = 'ORG_ADMIN';
+      panel_ui = {
+        stores: true,
+        users: true,
+        dashboard: true,
+        orders: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        audit: true,
+        settings: true
+      };
+    } else if (user.roles.includes(adminRole.id)) {
+      app = 'ORG_ADMIN';
+      panel_ui = {
+        stores: true,
+        users: true,
+        dashboard: true,
+        orders: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        audit: true,
+        settings: true
+      };
+    } else if (user.roles.includes(managerRole.id)) {
+      app = 'STORE_ADMIN';
+      panel_ui = {
+        pos: true,
+        users: true,
+        dashboard: true,
+        analytics: true,
+        reports: true,
+        billing: true,
+        ecommerce: true,
+        settings: true
+      };
+    } else if (user.roles.includes(customerRole.id)) {
+      app = 'STORE_ECOMMERCE';
+      panel_ui = {
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true
+      };
+    } else {
+      // Otros roles (supervisor, employee, etc.)
+      app = 'VENDIX_LANDING';
+      panel_ui = {
+        dashboard: false
+      };
+    }
+    await prisma.user_settings.upsert({
+      where: { user_id: createdUser.id },
+      update: {},
+      create: {
+        user_id: createdUser.id,
+        config: {
+          app,
+          panel_ui: panel_ui
+        }
+      }
+    });
     createdUsers.push(createdUser);
   }
 

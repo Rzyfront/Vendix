@@ -38,11 +38,22 @@ model users {
   user_roles                user_roles[]
   user_sessions             user_sessions[]
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  user_settings             user_settings?
 
   @@index([onboarding_completed])
   @@index([email_verified])
   @@index([state])
 }
+
+model user_settings {
+  id         Int      @id @default(autoincrement())
+  user_id    Int      @unique
+  config     Json
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+  user       users     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
 
 /// Relación flexible entre usuarios y tiendas (clientes, staff, managers, etc)
 model store_users {

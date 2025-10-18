@@ -18,7 +18,7 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto) {
-    const { organization_id, email, password, ...rest } = createUserDto;
+  const { organization_id, email, password, app = 'VENDIX_LANDING', ...rest } = createUserDto;
 
     const existingUser = await this.prisma.users.findFirst({
       where: { email, organization_id },
@@ -49,6 +49,50 @@ export class UsersService {
         email: true,
         state: true,
       },
+    });
+
+    // Crear user_settings con el app indicado
+    let panel_ui = {};
+    if (app === 'ORG_ADMIN') {
+      panel_ui = {
+        stores: true,
+        users: true,
+        dashboard: true,
+        orders: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        audit: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ADMIN') {
+      panel_ui = {
+        pos: true,
+        users: true,
+        dashboard: true,
+        analytics: true,
+        reports: true,
+        billing: true,
+        ecommerce: true,
+        settings: true
+      };
+    } else if (app === 'STORE_ECOMMERCE') {
+      panel_ui = {
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true
+      };
+    }
+    await this.prisma.user_settings.create({
+      data: {
+        user_id: user.id,
+        config: { app, panel_ui }
+      }
     });
 
     // Generate email verification token

@@ -1,6 +1,7 @@
 import { Injectable, Inject, DOCUMENT } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { TenantConfig, BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
+import { AppConfig } from './app-config.service'; // Import AppConfig
 
 @Injectable({
   providedIn: 'root'
@@ -15,25 +16,36 @@ export class ThemeService {
   constructor(@Inject(DOCUMENT) private document: Document) {}
 
   /**
-   * Aplica la configuración completa del tenant
+   * Aplica la configuración completa de la app (theme, branding, seo)
    */
-  async applyTenantConfiguration(tenantConfig: TenantConfig): Promise<void> {
+  async applyAppConfiguration(appConfig: AppConfig): Promise<void> {
     try {
-      console.log('[THEME SERVICE] Applying tenant configuration:', tenantConfig);
+      console.log('[THEME SERVICE] Applying app configuration:', appConfig);
       
-      // 1. Aplicar tema base
-      await this.applyTheme(tenantConfig.theme);
+      // Use the sanitized branding object from AppConfig
+      if (appConfig.branding) {
+        await this.applyBranding(appConfig.branding);
+      } else {
+        console.warn('[THEME SERVICE] App configuration is missing \'branding\' object. Skipping branding application.');
+      }
+
+      // Theme and SEO still come from the nested tenantConfig
+      if (appConfig.tenantConfig?.theme) {
+        await this.applyTheme(appConfig.tenantConfig.theme);
+      } else {
+        console.warn('[THEME SERVICE] Tenant configuration is missing \'theme\' object. Skipping theme application.');
+      }
       
-      // 2. Aplicar branding
-      await this.applyBranding(tenantConfig.branding);
+      if (appConfig.tenantConfig?.seo) {
+        this.applySEOConfiguration(appConfig.tenantConfig.seo);
+      } else {
+        console.warn('[THEME SERVICE] Tenant configuration is missing \'seo\' object. Skipping SEO application.');
+      }
       
-      // 3. Configurar SEO
-      this.applySEOConfiguration(tenantConfig.seo);
-      
-      console.log('[THEME SERVICE] Tenant configuration applied successfully');
+      console.log('[THEME SERVICE] App configuration applied successfully');
       
     } catch (error) {
-      console.error('[THEME SERVICE] Error applying tenant configuration:', error);
+      console.error('[THEME SERVICE] Error applying app configuration:', error);
       throw error;
     }
   }
@@ -69,31 +81,28 @@ export class ThemeService {
   async applyBranding(brandingConfig: BrandingConfig): Promise<void> {
     console.log('[THEME SERVICE] Applying branding configuration');
     
-    // Aplicar colores personalizados
-    this.applyBrandingColors(brandingConfig.colors);
-    
-    // Cargar fuentes personalizadas
-    if (brandingConfig.fonts.primary) {
-      await this.loadFont(brandingConfig.fonts.primary);
+    // Add defensive checks for nested properties
+    if (brandingConfig.colors) {
+      this.applyBrandingColors(brandingConfig.colors);
     }
-    
-    if (brandingConfig.fonts.secondary) {
-      await this.loadFont(brandingConfig.fonts.secondary);
+
+    if (brandingConfig.fonts) {
+      if (brandingConfig.fonts.primary) {
+        await this.loadFont(brandingConfig.fonts.primary);
+      }
+      if (brandingConfig.fonts.secondary) {
+        await this.loadFont(brandingConfig.fonts.secondary);
+      }
+      if (brandingConfig.fonts.headings) {
+        await this.loadFont(brandingConfig.fonts.headings);
+      }
+      this.applyBrandingFonts(brandingConfig.fonts);
     }
-    
-    if (brandingConfig.fonts.headings) {
-      await this.loadFont(brandingConfig.fonts.headings);
-    }
-    
-    // Aplicar fuentes personalizadas
-    this.applyBrandingFonts(brandingConfig.fonts);
-    
-    // Inyectar CSS personalizado
+
     if (brandingConfig.customCSS) {
       this.injectCustomCSS(brandingConfig.customCSS, 'custom-branding');
     }
-    
-    // Actualizar favicon
+
     if (brandingConfig.favicon) {
       this.updateFavicon(brandingConfig.favicon);
     }

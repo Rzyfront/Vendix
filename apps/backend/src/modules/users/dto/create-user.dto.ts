@@ -12,6 +12,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { user_state_enum } from '@prisma/client';
 
 export class CreateUserDto {
+  @ApiPropertyOptional({ example: 'STORE_ADMIN', description: 'App para la configuración de usuario' })
+  @IsOptional()
+  @IsString()
+  app?: string;
   @ApiProperty({ example: 1, description: 'ID de la organización' })
   @IsInt()
   organization_id: number;

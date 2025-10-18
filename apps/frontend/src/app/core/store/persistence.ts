@@ -1,138 +1,56 @@
-import { Injectable } from '@angular/core';
-import { ActionReducer, MetaReducer } from '@ngrx/store';
-import { TenantState } from './tenant/tenant.reducer';
 import { AuthState } from './auth/auth.reducer';
+import { User } from '../services/auth.service';
 
-// Storage keys
-const TENANT_STORAGE_KEY = 'vendix_tenant_state';
-const AUTH_STORAGE_KEY = 'vendix_auth_state';
+// --- NEW, SIMPLIFIED HYDRATION LOGIC ---
 
-// Persistence configuration
-export interface PersistenceConfig {
-  tenant: {
-    enabled: boolean;
-    keys: (keyof TenantState)[];
-  };
-  auth: {
-    enabled: boolean;
-    keys: (keyof AuthState)[];
-  };
-}
+/**
+ * Rehydrates the authentication state from granular localStorage keys.
+ * This is the single source of truth for re-creating the session on page load.
+ */
+export function hydrateAuthState(): Partial<AuthState> {
+  try {
+    const userJson = localStorage.getItem('vendix_user_info');
+    const accessToken = localStorage.getItem('access_token');
+    const refreshToken = localStorage.getItem('refresh_token');
 
-const DEFAULT_CONFIG: PersistenceConfig = {
-  tenant: {
-    enabled: true,
-    keys: ['domainConfig', 'tenantConfig', 'environment']
-  },
-  auth: {
-    enabled: true,
-    keys: ['user', 'tokens', 'roles', 'permissions'] // Persist tokens for session persistence
-  }
-};
-
-@Injectable({
-  providedIn: 'root'
-})
-export class StorePersistenceService {
-
-  // Save state to localStorage
-  saveState(key: string, state: any): void {
-    try {
-      const serializedState = JSON.stringify(state);
-      localStorage.setItem(key, serializedState);
-    } catch (error) {
-      console.warn(`Failed to save state to localStorage:`, error);
+    if (userJson && accessToken && refreshToken) {
+      const user: User = JSON.parse(userJson);
+      console.log('[HYDRATE] Auth state rehydrated for user:', user.email);
+      return {
+        user: user,
+        tokens: { accessToken, refreshToken },
+        roles: user.roles || [],
+        // Permissions can be re-fetched or decoded from token if needed upon app load
+        permissions: [],
+        loading: false,
+        error: null,
+      };
     }
+  } catch (error) {
+    console.warn('[HYDRATE] Failed to rehydrate auth state from localStorage:', error);
+    // Clear potentially corrupted keys
+    localStorage.removeItem('vendix_user_info');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
   }
 
-  // Load state from localStorage
-  loadState(key: string): any {
-    try {
-      const serializedState = localStorage.getItem(key);
-      if (serializedState) {
-        return JSON.parse(serializedState);
-      }
-    } catch (error) {
-      console.warn(`Failed to load state from localStorage:`, error);
-    }
-    return null;
-  }
-
-  // Clear persisted state
-  clearState(key: string): void {
-    try {
-      localStorage.removeItem(key);
-    } catch (error) {
-      console.warn(`Failed to clear state from localStorage:`, error);
-    }
-  }
-
-  // Clear all persisted state
-  clearAllState(): void {
-    this.clearState(TENANT_STORAGE_KEY);
-    this.clearState(AUTH_STORAGE_KEY);
-  }
-}
-
-// Meta reducer for tenant state persistence
-export function tenantPersistenceMetaReducer(
-  persistenceService: StorePersistenceService,
-  config: PersistenceConfig = DEFAULT_CONFIG
-): MetaReducer<TenantState> {
-  return (reducer: ActionReducer<TenantState>) => {
-    return (state, action) => {
-      const newState = reducer(state, action);
-
-      // Only persist if enabled
-      if (config.tenant.enabled) {
-        const stateToPersist: Partial<TenantState> = {};
-
-        config.tenant.keys.forEach(key => {
-          if (newState && key in newState) {
-            (stateToPersist as any)[key] = newState[key];
-          }
-        });
-
-        persistenceService.saveState(TENANT_STORAGE_KEY, stateToPersist);
-      }
-
-      return newState;
-    };
+  // Return default initial state if hydration fails
+  return {
+    user: null,
+    tokens: null,
+    roles: [],
+    permissions: [],
+    loading: false,
+    error: null,
   };
 }
 
-// Meta reducer for auth state persistence
-export function authPersistenceMetaReducer(
-  persistenceService: StorePersistenceService,
-  config: PersistenceConfig = DEFAULT_CONFIG
-): MetaReducer<AuthState> {
-  return (reducer: ActionReducer<AuthState>) => {
-    return (state, action) => {
-      const newState = reducer(state, action);
-
-      // Only persist if enabled
-      if (config.auth.enabled) {
-        const stateToPersist: Partial<AuthState> = {};
-
-        config.auth.keys.forEach(key => {
-          if (newState && key in newState) {
-            (stateToPersist as any)[key] = newState[key];
-          }
-        });
-
-        persistenceService.saveState(AUTH_STORAGE_KEY, stateToPersist);
-      }
-
-      return newState;
-    };
-  };
-}
-
-// Hydration functions for initial state
-export function getPersistedTenantState(persistenceService: StorePersistenceService): Partial<TenantState> | undefined {
-  return persistenceService.loadState(TENANT_STORAGE_KEY);
-}
-
-export function getPersistedAuthState(persistenceService: StorePersistenceService): Partial<AuthState> | undefined {
-  return persistenceService.loadState(AUTH_STORAGE_KEY);
+/**
+ * NOTE: Tenant state hydration is no longer needed.
+ * AppConfigService is now the single source of truth for domain and tenant configuration,
+ * simplifying the state management flow.
+ */
+export function hydrateTenantState() {
+  // Returns an empty object, as the state will be populated by AppConfigService via actions.
+  return {};
 }

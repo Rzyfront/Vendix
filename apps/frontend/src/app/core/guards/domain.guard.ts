@@ -1,9 +1,9 @@
 import { Injectable, inject } from '@angular/core';
 import { CanMatchFn, Route, UrlSegment, Router, UrlTree } from '@angular/router';
-import { Observable, of } from 'rxjs';
+import { Observable, of, firstValueFrom } from 'rxjs';
 import { map, catchError, switchMap } from 'rxjs/operators';
 import { AppConfigService } from '../services/app-config.service';
-import { AccessService } from '../services/access.service';
+import { AuthFacade } from '../store/auth/auth.facade';
 import { DomainConfig, AppEnvironment, DomainType } from '../models/domain-config.interface';
 
 /**
@@ -14,14 +14,14 @@ import { DomainConfig, AppEnvironment, DomainType } from '../models/domain-confi
 export class DomainGuardService {
   private appConfig = inject(AppConfigService);
   private router = inject(Router);
-  private accessService = inject(AccessService);
+  private authFacade = inject(AuthFacade);
 
   /**
    * Maneja la lógica principal del guard
    */
   async canMatch(route: Route, segments: UrlSegment[]): Promise<boolean | UrlTree> {
     // Si el usuario está autenticado, permitir acceso SIN redirección
-    const isAuthenticated = await this.accessService.isAuthenticated().toPromise();
+    const isAuthenticated = await firstValueFrom(this.authFacade.isAuthenticated$);
     if (isAuthenticated) {
       console.log('[DOMAIN GUARD] Usuario autenticado, permitiendo acceso sin redirección');
       return true;

@@ -1,14 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot, Router, UrlTree } from '@angular/router';
 import { Observable, of } from 'rxjs';
-import { map, switchMap, take, catchError, filter } from 'rxjs/operators';
-import { AccessService } from '../services/access.service';
+import { map, switchMap, take, catchError } from 'rxjs/operators';
+import { AuthFacade } from '../store/auth/auth.facade';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AuthGuard implements CanActivate {
-  private accessService = inject(AccessService);
+  private authFacade = inject(AuthFacade);
   private router = inject(Router);
 
   canActivate(
@@ -17,7 +17,8 @@ export class AuthGuard implements CanActivate {
   ): Observable<boolean | UrlTree> {
     console.log('[AUTH GUARD] Checking auth for route:', state.url);
 
-    return this.accessService.isAuthenticated().pipe(
+    return this.authFacade.isAuthenticated$.pipe(
+      take(1),
       switchMap(isAuthenticated => {
         if (!isAuthenticated) {
           console.log('[AUTH GUARD] User not authenticated, redirecting to login.');

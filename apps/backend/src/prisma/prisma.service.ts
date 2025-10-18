@@ -238,6 +238,9 @@ export class PrismaService implements OnModuleInit {
   get store_settings() {
     return this.client.store_settings;
   }
+  get user_settings() {
+    return this.client.user_settings;
+  }
   get store_users() {
     return this.client.store_users;
   }

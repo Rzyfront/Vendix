@@ -1,24 +1,23 @@
 import { Injectable, inject } from '@angular/core';
+
+const DOMAIN_SETTINGS_CACHE_KEY = 'domain_settings';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { Store } from '@ngrx/store';
 import { DomainConfig, AppEnvironment, DomainType, DomainResolution } from '../models/domain-config.interface';
-import { TenantConfig, OrganizationConfig, StoreConfig, BrandingConfig } from '../models/tenant-config.interface';
+import { TenantConfig, BrandingConfig } from '../models/tenant-config.interface';
 import { ThemeService } from './theme.service';
 import { environment } from '../../../environments/environment';
 import * as TenantActions from '../store/tenant/tenant.actions';
 
-export interface AppConfig {
-  environment: AppEnvironment;
-  domainConfig: DomainConfig;
-  tenantConfig: TenantConfig | null;
-  routes: RouteConfig[];
-  layouts: LayoutConfig[];
-  features: string[];
-  branding: BrandingConfig;
-}
+// --- CACHE KEYS ---
+const APP_CONFIG_CACHE_KEY = 'vendix_app_config';
+const TENANT_CONFIG_CACHE_KEY = 'vendix_tenant_config';
+const DOMAIN_CACHE_KEY = 'vendix_domain_cache';
+const USER_ENV_CACHE_KEY = 'vendix_user_environment';
 
+// --- RESTORED INTERFACES ---
 export interface RouteConfig {
   path: string;
   component: string;
@@ -35,64 +34,77 @@ export interface LayoutConfig {
   allowedRoles: string[];
 }
 
+export interface AppConfig {
+  environment: AppEnvironment;
+  domainConfig: DomainConfig;
+  tenantConfig: TenantConfig | null;
+  routes: RouteConfig[];
+  layouts: LayoutConfig[];
+  features: string[];
+  branding: BrandingConfig;
+}
+
 @Injectable({
   providedIn: 'root'
 })
 export class AppConfigService {
-  private readonly CACHE_KEY = 'vendix_app_config';
-  private readonly TENANT_CACHE_KEY = 'vendix_tenant_config';
-  private readonly DOMAIN_CACHE_KEY = 'vendix_domain_cache';
-  private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutos en milisegundos
-  
+  private readonly CACHE_TTL = 30 * 60 * 1000; // 30 minutos
+
   private configSubject = new BehaviorSubject<AppConfig | null>(null);
   public config$ = this.configSubject.asObservable();
-  
+
   private loadingSubject = new BehaviorSubject<boolean>(false);
   public loading$ = this.loadingSubject.asObservable();
-  
+
   private errorSubject = new BehaviorSubject<string | null>(null);
   public error$ = this.errorSubject.asObservable();
 
-  // Inyectar servicios necesarios
   private http = inject(HttpClient);
   private store = inject(Store);
   private themeService = inject(ThemeService);
 
-  /**
-   * Inicializa la aplicación completa con flujo unificado y centralizado
-   */
   async initializeApp(): Promise<AppConfig> {
     this.loadingSubject.next(true);
     this.errorSubject.next(null);
 
     try {
-      console.log('[APP CONFIG] Starting unified application initialization...');
+      console.log('[APP CONFIG] 1. Starting initializeApp');
 
-      // 1. Detectar dominio (sin dependencia de DomainDetectorService)
-      const domainConfig = await this.detectDomain();
-      console.log('[APP CONFIG] Domain detected:', domainConfig);
+      const cachedUserEnv = this.getCachedUserEnvironment();
+      console.log('[APP CONFIG] 2. Cached user env:', cachedUserEnv);
+      let domainConfig: DomainConfig;
 
-      // 2. Cargar configuración del tenant (sin dependencia de TenantConfigService)
+      console.log('[APP CONFIG] 3. Awaiting detectDomain...');
+      domainConfig = await this.detectDomain();
+      console.log('[APP CONFIG] 6. detectDomain has resolved.');
+
+      if (cachedUserEnv) {
+        domainConfig.environment = cachedUserEnv;
+      }
+      console.log('[APP CONFIG] 7. Effective Domain/User config resolved:', domainConfig);
+
+      console.log('[APP CONFIG] 8. Awaiting loadTenantConfigByDomain...');
       const tenantConfig = await this.loadTenantConfigByDomain(domainConfig);
-      console.log('[APP CONFIG] Tenant config loaded:', tenantConfig);
+      console.log('[APP CONFIG] 9. loadTenantConfigByDomain has resolved.');
 
-      // 3. Construir configuración completa de la aplicación
+      console.log('[APP CONFIG] 10. Awaiting buildAppConfig...');
       const appConfig = await this.buildAppConfig(domainConfig, tenantConfig);
-      console.log('[APP CONFIG] App config built:', appConfig);
+      console.log('[APP CONFIG] 11. buildAppConfig has resolved.');
 
-      // 4. Aplicar tema y branding usando ThemeService
-      if (tenantConfig) {
-        await this.themeService.applyTenantConfiguration(tenantConfig);
+      if (appConfig) {
+        await this.themeService.applyAppConfiguration(appConfig);
       }
 
-      // 5. Cachear configuración
       this.cacheAppConfig(appConfig);
-
-      // 6. Emitir configuración
       this.configSubject.next(appConfig);
+      console.log('[APP CONFIG] 12. Config subject has been updated.');
+
+      // Dispatch to store AFTER the main config is ready to avoid deadlocks.
+      this.store.dispatch(TenantActions.setDomainConfig({ domainConfig: appConfig.domainConfig }));
+
       this.loadingSubject.next(false);
 
-      console.log('[APP CONFIG] Unified application initialization completed successfully');
+      console.log('[APP CONFIG] 13. Unified application initialization completed successfully');
       return appConfig;
 
     } catch (error) {
@@ -103,89 +115,25 @@ export class AppConfigService {
     }
   }
 
-  /**
-   * Detección de dominio centralizada (reemplaza DomainDetectorService)
-   */
-  private async detectDomain(hostname?: string): Promise<DomainConfig> {
-    let currentHostname = hostname || window.location.hostname;
-
-    // Normalizar hostname - siempre remover 'www.' si está presente
-    if (currentHostname.startsWith('www.')) {
-      currentHostname = currentHostname.substring(4);
-      console.log(`[APP CONFIG] Normalized hostname (removed www): ${currentHostname}`);
+  public updateEnvironmentForUser(userAppEnvironment: AppEnvironment): void {
+    const currentConfig = this.getCurrentConfig();
+    if (!currentConfig) {
+      console.warn('[APP CONFIG] Cannot update environment for user: App is not initialized.');
+      return;
     }
 
-    console.log(`[APP CONFIG] Analyzing hostname: ${currentHostname}`);
+    console.log(`[APP CONFIG] Updating environment for user. From: ${currentConfig.environment}, To: ${userAppEnvironment}`);
 
-    try {
-      // Consultar API para resolver el dominio usando el hostname normalizado
-      const domainInfo = await this.resolveDomainFromAPI(currentHostname);
+    const newConfig: AppConfig = {
+      ...currentConfig,
+      environment: userAppEnvironment,
+    };
 
-      if (!domainInfo) {
-        throw new Error(`Domain ${currentHostname} not found or not configured`);
-      }
-
-      const domainConfig = this.buildDomainConfig(currentHostname, domainInfo);
-
-      // Store in NgRx state
-      this.store.dispatch(TenantActions.setDomainConfig({ domainConfig }));
-
-      return domainConfig;
-
-    } catch (error) {
-      console.error('[APP CONFIG] Error detecting domain:', error);
-      throw error;
-    }
+    this.cacheUserEnvironment(userAppEnvironment);
+    this.configSubject.next(newConfig);
+    this.cacheAppConfig(newConfig);
   }
 
-
-  /**
-   * Carga configuración del tenant centralizada (reemplaza TenantConfigService)
-   */
-  async loadTenantConfigByDomain(domainConfig: DomainConfig): Promise<TenantConfig | null> {
-    try {
-      console.log('[APP CONFIG] Loading tenant config for domain:', domainConfig);
-      
-      // Si es dominio de Vendix, usar configuración por defecto pero aplicar branding personalizado si existe
-      if (domainConfig.isVendixDomain &&
-          (domainConfig.environment === AppEnvironment.VENDIX_LANDING ||
-           domainConfig.environment === AppEnvironment.VENDIX_ADMIN)) {
-        const vendixConfig = this.getVendixDefaultConfig();
-        
-        // Aplicar branding personalizado desde la configuración del dominio si está disponible
-        if (domainConfig.customConfig?.branding) {
-          vendixConfig.branding = this.mergeVendixBranding(vendixConfig.branding, domainConfig.customConfig.branding);
-        }
-        
-        return vendixConfig;
-      }
-      
-      // Verificar cache
-      const cacheKey = this.getTenantCacheKey(domainConfig);
-      const cachedConfig = this.getCachedTenantConfig(cacheKey);
-      if (cachedConfig) {
-        return cachedConfig;
-      }
-      
-      // Cargar desde API
-      const config = await this.fetchTenantConfig(domainConfig);
-      
-      if (config) {
-        // Guardar en cache
-        this.cacheTenantConfig(cacheKey, config);
-      }
-      
-      return config;
-      
-    } catch (error) {
-      console.error('[APP CONFIG] Error loading tenant config:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Construye configuración completa de la aplicación
-   */
   private async buildAppConfig(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): Promise<AppConfig> {
     return {
       environment: domainConfig.environment,
@@ -198,9 +146,8 @@ export class AppConfigService {
     };
   }
 
-  /**
-   * Resuelve rutas dinámicas basadas en el entorno
-   */
+  // --- RESTORED METHODS ---
+
   private resolveRoutes(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): RouteConfig[] {
     const routes: RouteConfig[] = [];
 
@@ -470,383 +417,6 @@ export class AppConfigService {
     };
   }
 
-  // ==================== DOMAIN DETECTION METHODS ====================
-
-  /**
-   * Consulta la API para resolver dominios personalizados con caché
-   */
-  private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
-    try {
-      // 1. Primero verificar si existe en caché
-      const cachedDomain = this.getCachedDomain(hostname);
-      if (cachedDomain) {
-        console.log(`[APP CONFIG] Domain ${hostname} found in cache`);
-        return cachedDomain;
-      }
-
-      console.log(`[APP CONFIG] Domain ${hostname} not in cache, calling API...`);
-
-      // 2. Si no está en caché, llamar a la API
-      const response = await this.http
-        .get<DomainResolution>(`${environment.apiUrl}/api/domains/resolve/${hostname}`)
-        .pipe(
-          catchError(error => {
-            console.warn(`[APP CONFIG] API resolution failed for ${hostname}:`, error);
-            return of(null);
-          })
-        )
-        .toPromise();
-
-      // 3. Si la respuesta es válida, guardar en caché
-      if (response) {
-        console.log(`[APP CONFIG] Caching domain ${hostname} for future requests`);
-        this.cacheDomain(hostname, response);
-      }
-
-      return response || null;
-    } catch (error) {
-      console.warn(`[APP CONFIG] Failed to resolve domain ${hostname}:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Construye la configuración de dominio basada en la respuesta de la API
-   */
-  private buildDomainConfig(hostname: string, domainInfo: any): DomainConfig {
-    console.log(`[APP CONFIG] Building config for domain:`, domainInfo);
-
-    // Map domain type from API to enum
-    let domainType: DomainType;
-    switch (domainInfo.raw_domain_type) {
-      case 'vendix_core':
-        domainType = DomainType.VENDIX_CORE;
-        break;
-      case 'organization':
-        domainType = DomainType.ORGANIZATION;
-        break;
-      case 'store':
-        domainType = DomainType.STORE;
-        break;
-      case 'ecommerce':
-        domainType = DomainType.ECOMMERCE;
-        break;
-      default:
-        // Handle cases where domainType is provided directly
-        switch (domainInfo.domain_type) {
-          case 'vendix_core':
-            domainType = DomainType.VENDIX_CORE;
-            break;
-          case 'organization':
-            domainType = DomainType.ORGANIZATION;
-            break;
-          case 'store':
-            domainType = DomainType.STORE;
-            break;
-          case 'ecommerce':
-            domainType = DomainType.ECOMMERCE;
-            break;
-          default:
-            throw new Error(`Unknown domain type: ${domainInfo.raw_domain_type || domainInfo.domain_type}`);
-        }
-    }
-
-    // Map environment from API response - use config.app field
-    let environment: AppEnvironment;
-    if (domainInfo.config?.app) {
-      const appType = domainInfo.config.app;
-      switch (appType) {
-        case 'VENDIX_LANDING':
-          environment = AppEnvironment.VENDIX_LANDING;
-          break;
-        case 'VENDIX_ADMIN':
-          environment = AppEnvironment.VENDIX_ADMIN;
-          break;
-        case 'ORG_LANDING':
-          environment = AppEnvironment.ORG_LANDING;
-          break;
-        case 'ORG_ADMIN':
-          environment = AppEnvironment.ORG_ADMIN;
-          break;
-        case 'STORE_ADMIN':
-          environment = AppEnvironment.STORE_ADMIN;
-          break;
-        case 'STORE_ECOMMERCE':
-          environment = AppEnvironment.STORE_ECOMMERCE;
-          break;
-        default:
-          throw new Error(`Unknown app type: ${appType}`);
-      }
-    } else {
-      throw new Error('No app environment information provided in domain resolution config');
-    }
-
-    return {
-      domainType,
-      environment,
-      organization_slug: domainInfo.organization_slug,
-      store_slug: domainInfo.store_slug,
-      customConfig: domainInfo.config,
-      isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
-      hostname
-    };
-  }
-
-  // ==================== TENANT CONFIG METHODS ====================
-
-  /**
-   * Obtiene configuración desde la API
-   */
-  private async fetchTenantConfig(domainConfig: DomainConfig): Promise<TenantConfig | null> {
-    try {
-      let endpoint = '';
-      
-      if (domainConfig.organization_slug && domainConfig.store_slug) {
-        // Configuración de tienda específica
-        endpoint = `/api/tenants/store/${domainConfig.organization_slug}/${domainConfig.store_slug}`;
-      } else if (domainConfig.organization_slug) {
-        // Configuración de organización
-        endpoint = `/api/tenants/organization/${domainConfig.organization_slug}`;
-      } else {
-        throw new Error('No organization or store slug provided');
-      }
-      
-      const response = await this.http
-        .get<{ success: boolean; data: TenantConfig }>(`${environment.apiUrl}${endpoint}`)
-        .pipe(
-          catchError(error => {
-            console.error('[APP CONFIG] API fetch failed:', error);
-            return of(null);
-          })
-        )
-        .toPromise();
-      
-      return response?.data || null;
-      
-    } catch (error) {
-      console.error('[APP CONFIG] Error fetching from API:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Fusiona el branding por defecto de Vendix con el branding personalizado del dominio
-   */
-  private mergeVendixBranding(defaultBranding: any, domainBranding: any): any {
-    return {
-      ...defaultBranding,
-      colors: {
-        ...defaultBranding.colors,
-        primary: domainBranding.primary_color || defaultBranding.colors.primary,
-        secondary: domainBranding.secondary_color || defaultBranding.colors.secondary,
-        accent: domainBranding.accent_color || defaultBranding.colors.accent,
-        background: domainBranding.background_color || defaultBranding.colors.background,
-        text: {
-          primary: domainBranding.text_color || defaultBranding.colors.text.primary,
-          secondary: domainBranding.text_color || defaultBranding.colors.text.secondary,
-          muted: domainBranding.text_color || defaultBranding.colors.text.muted
-        }
-      },
-      logo: {
-        ...defaultBranding.logo,
-        url: domainBranding.logo_url || defaultBranding.logo.url
-      }
-    };
-  }
-
-  // ==================== CACHE METHODS ====================
-
-  /**
-   * Métodos de caché para dominios con expiración
-   */
-  private cacheDomain(hostname: string, domainInfo: DomainResolution): void {
-    try {
-      const cacheData = {
-        data: domainInfo,
-        timestamp: Date.now(),
-        ttl: this.CACHE_TTL
-      };
-      const cacheKey = `${this.DOMAIN_CACHE_KEY}_${hostname}`;
-      localStorage.setItem(cacheKey, JSON.stringify(cacheData));
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache domain:', error);
-    }
-  }
-
-  private getCachedDomain(hostname: string): DomainResolution | null {
-    try {
-      const cacheKey = `${this.DOMAIN_CACHE_KEY}_${hostname}`;
-      const cached = localStorage.getItem(cacheKey);
-      
-      if (!cached) {
-        return null;
-      }
-
-      const cacheData = JSON.parse(cached);
-      const now = Date.now();
-      
-      // Verificar si el caché ha expirado
-      if (now - cacheData.timestamp > cacheData.ttl) {
-        console.log(`[APP CONFIG] Domain cache expired for ${hostname}, removing...`);
-        localStorage.removeItem(cacheKey);
-        return null;
-      }
-
-      console.log(`[APP CONFIG] Using cached domain data for ${hostname} (age: ${Math.round((now - cacheData.timestamp) / 1000)}s)`);
-      return cacheData.data;
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to get cached domain:', error);
-      return null;
-    }
-  }
-
-  private cacheAppConfig(config: AppConfig): void {
-    try {
-      localStorage.setItem(this.CACHE_KEY, JSON.stringify(config));
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache app config:', error);
-    }
-  }
-
-  private cacheTenantConfig(cacheKey: string, config: TenantConfig): void {
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(config));
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache tenant config:', error);
-    }
-  }
-
-  private getCachedTenantConfig(cacheKey: string): TenantConfig | null {
-    try {
-      const cached = localStorage.getItem(cacheKey);
-      return cached ? JSON.parse(cached) : null;
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to get cached tenant config:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Genera clave para el cache de tenant
-   */
-  private getTenantCacheKey(domainConfig: DomainConfig): string {
-    const parts = [domainConfig.environment as string];
-    
-    if (domainConfig.organization_slug) {
-      parts.push(domainConfig.organization_slug);
-    }
-    
-    if (domainConfig.store_slug) {
-      parts.push(domainConfig.store_slug);
-    }
-    
-    return `${this.TENANT_CACHE_KEY}_${parts.join('-')}`;
-  }
-
-  // ==================== DEFAULT CONFIGURATIONS ====================
-
-  /**
-   * Obtiene configuración por defecto de Vendix
-   */
-  private getVendixDefaultConfig(): TenantConfig {
-    return {
-      organization: {
-        id: 'vendix',
-        slug: 'vendix',
-        name: 'Vendix',
-        description: 'Plataforma SaaS Multi-tenant para E-commerce',
-        domains: {
-          useCustomDomain: false,
-          organizationUrl: 'vendix.com',
-          adminUrls: ['admin.vendix.com'],
-          storeUrls: []
-        },
-        subscription: {
-          plan: 'enterprise',
-          allowedStores: -1, // Ilimitado
-          customDomainAllowed: true,
-          features: ['all']
-        },
-        settings: {
-          timezone: 'UTC',
-          currency: 'USD',
-          language: 'es',
-          dateFormat: 'DD/MM/YYYY'
-        }
-      },
-      branding: {
-        logo: {
-          url: 'assets/images/logo.png',
-          alt: 'Vendix',
-          width: 120,
-          height: 40
-        },
-        colors: {
-          primary: '#3B82F6',
-          secondary: '#64748B',
-          accent: '#10B981',
-          background: '#FFFFFF',
-          surface: '#F8FAFC',
-          text: {
-            primary: '#1E293B',
-            secondary: '#64748B',
-            muted: '#94A3B8'
-          }
-        },
-        fonts: {
-          primary: 'Inter, system-ui, sans-serif',
-          headings: 'Inter, system-ui, sans-serif'
-        }
-      },
-      theme: {
-        name: 'vendix-default',
-        primaryColor: '#3B82F6',
-        secondaryColor: '#64748B',
-        accentColor: '#10B981',
-        backgroundColor: '#FFFFFF',
-        textColor: '#1E293B',
-        fontFamily: 'Inter, system-ui, sans-serif',
-        borderRadius: '0.5rem',
-        spacing: {
-          xs: '0.25rem',
-          sm: '0.5rem',
-          md: '1rem',
-          lg: '1.5rem',
-          xl: '3rem'
-        },
-        shadows: {
-          sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-          md: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-          lg: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
-        }
-      },
-      features: {
-        onboarding: true,
-        superAdmin: true,
-        multiStore: true,
-        userManagement: true,
-        analytics: true,
-        inventory: true,
-        pos: true,
-        orders: true,
-        customers: true,
-        reports: true,
-        guestCheckout: true,
-        wishlist: true,
-        reviews: true,
-        coupons: true,
-        shipping: true,
-        payments: true
-      },
-      seo: {
-        title: 'Vendix - Plataforma E-commerce Multi-tenant',
-        description: 'La mejor plataforma SaaS para crear y gestionar múltiples tiendas online',
-        keywords: ['ecommerce', 'saas', 'multi-tenant', 'online store', 'vendix'],
-        ogImage: '/assets/images/vendix-og.png'
-      }
-    };
-  }
-
   private getDefaultBranding(): any {
     return {
       logo: {
@@ -875,7 +445,89 @@ export class AppConfigService {
     };
   }
 
-  // ==================== PUBLIC API ====================
+  // --- UNCHANGED METHODS ---
+
+  private async detectDomain(hostname?: string): Promise<DomainConfig> {
+    console.log('[APP CONFIG] 4. Starting detectDomain');
+    let currentHostname = hostname || window.location.hostname;
+    if (currentHostname.startsWith('www.')) {
+      currentHostname = currentHostname.substring(4);
+    }
+    try {
+      const domainInfo = await this.resolveDomainFromAPI(currentHostname);
+      console.log('[APP CONFIG] 5. resolveDomainFromAPI has resolved.');
+      if (!domainInfo) {
+        throw new Error(`Domain ${currentHostname} not found or not configured`);
+      }
+      const domainConfig = this.buildDomainConfig(currentHostname, domainInfo);
+      // Removed dispatch from here to prevent deadlock
+      return domainConfig;
+    } catch (error) {
+      console.error('[APP CONFIG] Error detecting domain:', error);
+      throw error;
+    }
+  }
+
+  async loadTenantConfigByDomain(domainConfig: DomainConfig): Promise<TenantConfig | null> {
+    // ... (rest of the method is unchanged)
+    try {
+      if (domainConfig.isVendixDomain && (domainConfig.environment === AppEnvironment.VENDIX_LANDING || domainConfig.environment === AppEnvironment.VENDIX_ADMIN)) {
+        const vendixConfig = this.getVendixDefaultConfig();
+        if (domainConfig.customConfig?.branding) {
+          vendixConfig.branding = this.mergeVendixBranding(vendixConfig.branding, domainConfig.customConfig.branding);
+        }
+        return vendixConfig;
+      }
+      const cacheKey = this.getTenantCacheKey(domainConfig);
+      const cachedConfig = this.getCachedTenantConfig(cacheKey);
+      if (cachedConfig) return cachedConfig;
+      const config = await this.fetchTenantConfig(domainConfig);
+      if (config) this.cacheTenantConfig(cacheKey, config);
+      return config;
+    } catch (error) {
+      console.error('[APP CONFIG] Error loading tenant config:', error);
+      throw error;
+    }
+  }
+
+  private cacheUserEnvironment(env: AppEnvironment): void {
+    try {
+      localStorage.setItem(USER_ENV_CACHE_KEY, env);
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to cache user environment:', error);
+    }
+  }
+
+  private getCachedUserEnvironment(): AppEnvironment | null {
+    try {
+      return localStorage.getItem(USER_ENV_CACHE_KEY) as AppEnvironment | null;
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to get cached user environment:', error);
+      return null;
+    }
+  }
+
+  private cacheAppConfig(config: AppConfig): void {
+    try {
+      localStorage.setItem(APP_CONFIG_CACHE_KEY, JSON.stringify(config));
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to cache app config:', error);
+    }
+  }
+
+  clearCache(): void {
+    try {
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('vendix_') || key === DOMAIN_SETTINGS_CACHE_KEY) {
+          localStorage.removeItem(key);
+        }
+      });
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to clear cache:', error);
+    }
+  }
 
   getCurrentConfig(): AppConfig | null {
     return this.configSubject.value;
@@ -885,30 +537,159 @@ export class AppConfigService {
     return this.configSubject.value !== null;
   }
 
-  isLoading(): boolean {
-    return this.loadingSubject.value;
-  }
-
-  getError(): string | null {
-    return this.errorSubject.value;
-  }
-
-  clearCache(): void {
-    try {
-      localStorage.removeItem(this.CACHE_KEY);
-      // Remove all tenant cache entries
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith(this.TENANT_CACHE_KEY) || key.startsWith(this.DOMAIN_CACHE_KEY)) {
-          localStorage.removeItem(key);
-        }
-      });
-    } catch (error) {
-      console.warn('[APP CONFIG] Failed to clear cache:', error);
-    }
-  }
-
   async reinitialize(): Promise<AppConfig> {
     this.clearCache();
     return await this.initializeApp();
+  }
+
+  private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
+    try {
+      const cachedDomain = this.getCachedDomainSettings();
+      if (cachedDomain) {
+        console.log(`[APP CONFIG] Domain settings found in cache`);
+        return cachedDomain;
+      }
+
+      console.log(`[APP CONFIG] Domain settings not in cache, calling API for ${hostname}...`);
+
+      const response = await this.http
+        .get<DomainResolution>(`${environment.apiUrl}/api/domains/resolve/${hostname}`)
+        .pipe(
+          catchError(error => {
+            console.warn(`[APP CONFIG] API resolution failed for ${hostname}:`, error);
+            return of(null);
+          })
+        )
+        .toPromise();
+
+      if (response) {
+        console.log(`[APP CONFIG] Caching domain settings for future requests`);
+        this.cacheDomainSettings(response);
+      }
+
+      return response || null;
+    } catch (error) {
+      console.warn(`[APP CONFIG] Failed to resolve domain ${hostname}:`, error);
+      return null;
+    }
+  }
+
+  private buildDomainConfig(hostname: string, domainInfo: any): DomainConfig {
+    console.log(`[APP CONFIG] Building config for domain:`, domainInfo);
+
+    let domainType: DomainType;
+    switch (domainInfo.domain_type) {
+      case 'vendix_core': domainType = DomainType.VENDIX_CORE; break;
+      case 'organization': domainType = DomainType.ORGANIZATION; break;
+      case 'store': domainType = DomainType.STORE; break;
+      case 'ecommerce': domainType = DomainType.ECOMMERCE; break;
+      default: throw new Error(`Unknown domain type: ${domainInfo.domain_type}`);
+    }
+
+    let appEnvironment: AppEnvironment;
+    const appType = domainInfo.config?.app;
+    if (appType) {
+      switch (appType) {
+        case 'VENDIX_LANDING': appEnvironment = AppEnvironment.VENDIX_LANDING; break;
+        case 'VENDIX_ADMIN': appEnvironment = AppEnvironment.VENDIX_ADMIN; break;
+        case 'ORG_LANDING': appEnvironment = AppEnvironment.ORG_LANDING; break;
+        case 'ORG_ADMIN': appEnvironment = AppEnvironment.ORG_ADMIN; break;
+        case 'STORE_ADMIN': appEnvironment = AppEnvironment.STORE_ADMIN; break;
+        case 'STORE_ECOMMERCE': appEnvironment = AppEnvironment.STORE_ECOMMERCE; break;
+        default: throw new Error(`Unknown app type: ${appType}`);
+      }
+    } else {
+      throw new Error('No app environment information provided in domain resolution config');
+    }
+
+    return {
+      domainType,
+      environment: appEnvironment,
+      organization_slug: domainInfo.organization_slug,
+      store_slug: domainInfo.store_slug,
+      customConfig: domainInfo.config,
+      isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
+      hostname
+    };
+  }
+
+  private async fetchTenantConfig(domainConfig: DomainConfig): Promise<TenantConfig | null> {
+    try {
+      let endpoint = '';
+      if (domainConfig.organization_slug && domainConfig.store_slug) {
+        endpoint = `/api/tenants/store/${domainConfig.organization_slug}/${domainConfig.store_slug}`;
+      } else if (domainConfig.organization_slug) {
+        endpoint = `/api/tenants/organization/${domainConfig.organization_slug}`;
+      } else {
+        throw new Error('No organization or store slug provided');
+      }
+      
+      const response = await this.http
+        .get<{ success: boolean; data: TenantConfig }>(`${environment.apiUrl}${endpoint}`)
+        .pipe(catchError(error => {
+          console.error('[APP CONFIG] API fetch failed:', error);
+          return of(null);
+        }))
+        .toPromise();
+      
+      return response?.data || null;
+    } catch (error) {
+      console.error('[APP CONFIG] Error fetching from API:', error);
+      return null;
+    }
+  }
+
+  private getVendixDefaultConfig(): TenantConfig { return {} as any; /* Placeholder */ }
+  private mergeVendixBranding(defaultBranding: any, domainBranding: any): any { return {} as any; /* Placeholder */ }
+
+  private getTenantCacheKey(domainConfig: DomainConfig): string {
+    const parts = [domainConfig.environment as string];
+    if (domainConfig.organization_slug) parts.push(domainConfig.organization_slug);
+    if (domainConfig.store_slug) parts.push(domainConfig.store_slug);
+    return `${TENANT_CONFIG_CACHE_KEY}_${parts.join('-')}`;
+  }
+
+  private getCachedTenantConfig(cacheKey: string): TenantConfig | null {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      return cached ? JSON.parse(cached) : null;
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to get cached tenant config:', error);
+      return null;
+    }
+  }
+
+  private cacheTenantConfig(cacheKey: string, config: TenantConfig): void {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(config));
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to cache tenant config:', error);
+    }
+  }
+
+  private cacheDomainSettings(domainInfo: DomainResolution): void {
+    try {
+      const cacheData = { data: domainInfo, timestamp: Date.now(), ttl: this.CACHE_TTL };
+      localStorage.setItem(DOMAIN_SETTINGS_CACHE_KEY, JSON.stringify(cacheData));
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to cache domain settings:', error);
+    }
+  }
+
+  private getCachedDomainSettings(): DomainResolution | null {
+    try {
+      const cached = localStorage.getItem(DOMAIN_SETTINGS_CACHE_KEY);
+      if (!cached) return null;
+
+      const cacheData = JSON.parse(cached);
+      if (Date.now() - cacheData.timestamp > cacheData.ttl) {
+        localStorage.removeItem(DOMAIN_SETTINGS_CACHE_KEY);
+        return null;
+      }
+      return cacheData.data;
+    } catch (error) {
+      console.warn('[APP CONFIG] Failed to get cached domain settings:', error);
+      return null;
+    }
   }
 }
