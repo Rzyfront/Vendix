@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
 import { DomainGuard } from './core/guards/domain.guard';
 import { AuthGuard } from './core/guards/auth.guard';
-import { RoleGuard } from './core/guards/role.guard';
+
 
 // Importaciones de componentes para referencia estática
 import { VendixLandingComponent } from './public/landing/vendix-landing/vendix-landing.component';
@@ -61,7 +61,7 @@ export const routes: Routes = [
   // Rutas de administración con guards específicos y layouts
   {
     path: 'superadmin',
-    canActivate: [AuthGuard, RoleGuard],
+    canActivate: [AuthGuard],
     data: {
       roles: ['super_admin'],
       redirectTo: '/'
@@ -133,7 +133,7 @@ export const routes: Routes = [
 
   {
     path: 'admin',
-    canActivate: [AuthGuard, RoleGuard],
+    canActivate: [AuthGuard],
     data: {
       roles: ['owner', 'admin', 'manager'],
       anyRole: true,

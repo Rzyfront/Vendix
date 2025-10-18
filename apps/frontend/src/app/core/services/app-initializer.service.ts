@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { AppConfigService } from './app-config.service';
+import { AuthService } from './auth.service'; // Import AuthService
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 
 @Injectable({
@@ -12,29 +13,33 @@ export class AppInitializerService {
 
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
-  private appConfig = inject(AppConfigService);
+  private appConfigService = inject(AppConfigService);
+  private authService = inject(AuthService); // Inject AuthService
 
-  /**
-   * Inicializa la aplicación completa - FLUJO SIMPLIFICADO Y CENTRALIZADO
-   */
   async initializeApp(): Promise<void> {
     try {
-      // Reset any previous error
       this.initializationError = null;
-
       console.log('[APP INITIALIZER] Starting simplified initialization flow');
 
-      // 1. Check if user is already authenticated from persisted state
       const isAuthenticated = this.checkPersistedAuth();
       console.log('[APP INITIALIZER] Persisted auth check:', isAuthenticated);
 
-      // 2. INICIALIZACIÓN CENTRALIZADA - AppConfigService maneja todo
-      const appConfig = await this.appConfig.initializeApp();
+      const appConfig = await this.appConfigService.initializeApp();
       console.log('[APP INITIALIZER] App configuration resolved:', appConfig);
 
-      // 3. If user is authenticated, redirect to appropriate environment
       if (isAuthenticated) {
-        console.log('[APP INITIALIZER] User is authenticated, redirecting...');
+        console.log('[APP INITIALIZER] User is authenticated, validating environment access...');
+        const user = this.authFacade.getCurrentUser();
+        const userRoles = user?.roles || [];
+        const userEnv = appConfig.environment;
+
+        if (!this.authService.validateUserEnvironmentAccess(userRoles, userEnv)) {
+          console.error(`[APP INITIALIZER] Invalid session: User with roles [${userRoles.join(', ')}] cannot access environment ${userEnv}. Clearing session.`);
+          this.appConfigService.clearCache();
+          window.location.reload(); // Force a reload to a clean state
+          return; // Stop further execution
+        }
+
         await this.redirectAuthenticatedUser(appConfig.domainConfig);
       }
 
@@ -43,7 +48,6 @@ export class AppInitializerService {
     } catch (error) {
       console.error('[APP INITIALIZER] Error during initialization:', error);
       this.initializationError = error;
-      // Don't throw - let the app handle the error state
     }
   }
 
@@ -198,7 +202,7 @@ export class AppInitializerService {
     console.log('[APP INITIALIZER] Reinitializing application...');
     
     // Reinicializar usando AppConfigService centralizado
-    await this.appConfig.reinitialize();
+    await this.appConfigService.reinitialize();
     await this.initializeApp();
   }
 
@@ -206,6 +210,6 @@ export class AppInitializerService {
    * Verifica si la aplicación está completamente inicializada
    */
   isAppInitialized(): boolean {
-    return this.appConfig.isInitialized();
+    return this.appConfigService.isInitialized();
   }
 }

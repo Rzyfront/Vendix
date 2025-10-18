@@ -7,7 +7,7 @@ import { DomainConfig, AppEnvironment } from '../models/domain-config.interface'
 // Guards imports - simplified
 import { DomainGuard } from '../guards/domain.guard';
 import { AuthGuard } from '../guards/auth.guard';
-import { RoleGuard } from '../guards/role.guard';
+
 
 // Component imports for dynamic loading
 import { VendixLandingComponent } from '../../public/landing/vendix-landing/vendix-landing.component';
@@ -128,7 +128,7 @@ export class RouteManagerService {
   private registerGuards(): void {
     this.guardRegistry.set('DomainGuard', DomainGuard);
     this.guardRegistry.set('AuthGuard', AuthGuard);
-    this.guardRegistry.set('RoleGuard', RoleGuard);
+
   }
 
   /**

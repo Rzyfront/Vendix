@@ -138,6 +138,13 @@ export class AuthService {
           const roles = decodedToken?.roles || [];
           user.roles = roles; // Attach roles to the user object for the session
 
+          // --- NEW: Validate that the user's role is allowed for the target environment ---
+          if (!this.validateUserEnvironmentAccess(roles, user_settings.config.app)) {
+            // Clear any cached data from the failed login
+            this.appConfigService.clearCache();
+            throw new Error(`Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`);
+          }
+
           // Return the transformed data for the NgRx effect
           return {
             ...response,
@@ -149,6 +156,43 @@ export class AuthService {
           };
         })
       );
+  }
+
+  /**
+   * NEW: Validates if the user's roles grant access to the target AppEnvironment.
+   * @param userRoles The roles of the user.
+   * @param targetEnv The AppEnvironment from the user's settings.
+   * @returns `true` if access is allowed, `false` otherwise.
+   */
+  public validateUserEnvironmentAccess(userRoles: string[], targetEnv: string): boolean {
+    if (!userRoles || userRoles.length === 0) {
+      return false; // No roles, no access
+    }
+
+    // Get the primary role for simplicity
+    const primaryRole = userRoles[0];
+
+    switch (primaryRole) {
+      case 'super_admin':
+        return targetEnv === 'VENDIX_ADMIN';
+      
+      case 'admin':
+      case 'owner':
+        return targetEnv === 'ORG_ADMIN' || targetEnv === 'STORE_ADMIN';
+
+      case 'manager':
+        return targetEnv === 'STORE_ADMIN';
+
+      case 'employee':
+        return targetEnv === 'STORE_ADMIN';
+
+      case 'customer':
+        return targetEnv === 'STORE_ECOMMERCE';
+
+      default:
+        // For any other custom role, default to STORE_ADMIN access
+        return targetEnv === 'STORE_ADMIN';
+    }
   }
 
   // Register Owner
