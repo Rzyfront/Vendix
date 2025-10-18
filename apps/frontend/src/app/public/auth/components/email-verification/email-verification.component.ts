@@ -1,7 +1,9 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
@@ -105,7 +107,7 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
   `,
   styleUrls: []
 })
-export class EmailVerificationComponent implements OnInit {
+export class EmailVerificationComponent implements OnInit, OnDestroy {
   verificationStatus: 'pending' | 'success' | 'error' = 'pending';
   isLoading = true;
   error: string | null = null;
@@ -115,10 +117,16 @@ export class EmailVerificationComponent implements OnInit {
   private toast = inject(ToastService);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private destroy$ = new Subject<void>();
 
   constructor(
     private authFacade: AuthFacade
   ) {}
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
 
   ngOnInit(): void {
     // Get the token from the route parameters
@@ -138,35 +146,31 @@ export class EmailVerificationComponent implements OnInit {
   private verifyEmail(): void {
     this.authFacade.verifyEmail(this.token!);
 
-    const loadingSubscription = this.authFacade.loading$.subscribe(isLoading => {
-      this.isLoading = isLoading;
-    });
+    this.authFacade.loading$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isLoading => {
+        this.isLoading = isLoading;
+      });
 
-    const errorSubscription = this.authFacade.error$.subscribe(error => {
-      if (error) {
-        // Normalize error to handle both string and NormalizedApiPayload types
-        const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
-        this.error = errorMessage;
-        this.verificationStatus = 'error';
-        this.isLoading = false;
-        
-        this.toast.error(errorMessage, 'Error de verificación');
-        
-        // Unsubscribe to prevent memory leaks
-        loadingSubscription.unsubscribe();
-        errorSubscription.unsubscribe();
-      } else {
-        // Success case - email verified
-        this.verificationStatus = 'success';
-        this.isLoading = false;
-        
-        this.toast.success('Tu email ha sido verificado exitosamente.', 'Verificación exitosa');
-        
-        // Unsubscribe on success as well
-        loadingSubscription.unsubscribe();
-        errorSubscription.unsubscribe();
-      }
-    });
+    this.authFacade.error$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(error => {
+        if (error) {
+          // Normalize error to handle both string and NormalizedApiPayload types
+          const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.error = errorMessage;
+          this.verificationStatus = 'error';
+          this.isLoading = false;
+          
+          this.toast.error(errorMessage, 'Error de verificación');
+        } else {
+          // Success case - email verified
+          this.verificationStatus = 'success';
+          this.isLoading = false;
+          
+          this.toast.success('Tu email ha sido verificado exitosamente.', 'Verificación exitosa');
+        }
+      });
   }
 
   get verificationMessage(): string {
@@ -191,27 +195,23 @@ export class EmailVerificationComponent implements OnInit {
     this.resendLoading = true;
     this.authFacade.resendVerification(email);
 
-    const loadingSubscription = this.authFacade.loading$.subscribe(isLoading => {
-      this.resendLoading = isLoading;
-    });
+    this.authFacade.loading$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isLoading => {
+        this.resendLoading = isLoading;
+      });
 
-    const errorSubscription = this.authFacade.error$.subscribe(error => {
-      if (error) {
-        // Normalize error to handle both string and NormalizedApiPayload types
-        const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
-        this.toast.error(errorMessage, 'Error al reenviar email');
-        
-        // Unsubscribe to prevent memory leaks
-        loadingSubscription.unsubscribe();
-        errorSubscription.unsubscribe();
-      } else {
-        // Success case - email resent
-        this.toast.success('Email de verificación reenviado exitosamente.', 'Email enviado');
-        
-        // Unsubscribe on success as well
-        loadingSubscription.unsubscribe();
-        errorSubscription.unsubscribe();
-      }
-    });
+    this.authFacade.error$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(error => {
+        if (error) {
+          // Normalize error to handle both string and NormalizedApiPayload types
+          const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.toast.error(errorMessage, 'Error al reenviar email');
+        } else {
+          // Success case - email resent
+          this.toast.success('Email de verificación reenviado exitosamente.', 'Email enviado');
+        }
+      });
   }
 }

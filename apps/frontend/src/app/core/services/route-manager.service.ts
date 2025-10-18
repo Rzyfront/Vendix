@@ -17,6 +17,13 @@ import { OrganizationsComponent as OrganizationsManagementComponent } from '../.
 import { DashboardComponent as OrganizationDashboardComponent } from '../../private/modules/organization/dashboard/dashboard.component';
 import { DashboardComponent as StoreDashboardComponent } from '../../private/modules/store/dashboard/dashboard.component';
 
+// Auth components for static routes
+import { ContextualLoginComponent } from '../../public/auth/components/contextual-login/contextual-login.component';
+import { RegisterOwnerComponent } from '../../public/auth/components/register-owner/register-owner.component';
+import { ForgotOwnerPasswordComponent } from '../../public/auth/components/forgot-owner-password/forgot-owner-password';
+import { ResetOwnerPasswordComponent } from '../../public/auth/components/reset-owner-password/reset-owner-password';
+import { EmailVerificationComponent } from '../../public/auth/components/email-verification/email-verification.component';
+
 // Layout components
 import { SuperAdminLayoutComponent } from '../../private/layouts/super-admin/super-admin-layout.component';
 import { OrganizationAdminLayoutComponent } from '../../private/layouts/organization-admin/organization-admin-layout.component';
@@ -85,9 +92,12 @@ export class RouteManagerService {
     this.componentRegistry.set('StoreEcommerceComponent', StorefrontComponent);
     this.componentRegistry.set('OrgEcommerceComponent', OrgLandingComponent);
     
-    // Auth components
-    this.componentRegistry.set('ContextualLoginComponent', () =>
-      import('../../public/auth/components/contextual-login/contextual-login.component').then(c => c.ContextualLoginComponent));
+    // Auth components - always available
+    this.componentRegistry.set('ContextualLoginComponent', ContextualLoginComponent);
+    this.componentRegistry.set('RegisterOwnerComponent', RegisterOwnerComponent);
+    this.componentRegistry.set('ForgotOwnerPasswordComponent', ForgotOwnerPasswordComponent);
+    this.componentRegistry.set('ResetOwnerPasswordComponent', ResetOwnerPasswordComponent);
+    this.componentRegistry.set('EmailVerificationComponent', EmailVerificationComponent);
   }
 
   /**
@@ -152,6 +162,10 @@ export class RouteManagerService {
   private buildDynamicRoutes(appConfig: any): Routes {
     const routes: Routes = [];
 
+    // Always add static auth routes first - these should be available in all environments
+    const staticAuthRoutes = this.getStaticAuthRoutes();
+    routes.push(...staticAuthRoutes);
+
     // Build all routes directly from the app config
     if (appConfig.routes && Array.isArray(appConfig.routes)) {
       appConfig.routes.forEach((routeConfig: RouteConfig) => {
@@ -167,6 +181,44 @@ export class RouteManagerService {
     });
 
     return routes;
+  }
+
+  /**
+   * Obtiene las rutas estáticas de autenticación que deben estar siempre disponibles
+   */
+  private getStaticAuthRoutes(): Routes {
+    return [
+      {
+        path: 'auth',
+        children: [
+          {
+            path: 'login',
+            component: ContextualLoginComponent,
+            data: { isPublic: true }
+          },
+          {
+            path: 'register',
+            component: RegisterOwnerComponent,
+            data: { isPublic: true }
+          },
+          {
+            path: 'forgot-owner-password',
+            component: ForgotOwnerPasswordComponent,
+            data: { isPublic: true }
+          },
+          {
+            path: 'reset-owner-password',
+            component: ResetOwnerPasswordComponent,
+            data: { isPublic: true }
+          },
+          {
+            path: 'verify-email',
+            component: EmailVerificationComponent,
+            data: { isPublic: true }
+          }
+        ]
+      }
+    ];
   }
 
   /**
