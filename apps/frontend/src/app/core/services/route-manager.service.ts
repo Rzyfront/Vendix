@@ -129,29 +129,22 @@ export class RouteManagerService {
       const appConfig = this.appConfig.getCurrentConfig();
       
       if (!appConfig) {
-        console.warn('[ROUTE MANAGER] App config not available, using fallback routes');
+  // ...existing code...
         return this.getFallbackRoutes();
       }
 
-      console.log('[ROUTE MANAGER] Configuring dynamic routes for environment:', appConfig.environment);
+  // ...existing code...
 
       const dynamicRoutes = this.buildDynamicRoutes(appConfig);
       this.currentRoutesSubject.next(dynamicRoutes);
 
-      // CRITICAL FIX: Reset the router's configuration with the new dynamic routes.
-      this.router.resetConfig(dynamicRoutes);
-
-      console.log('[ROUTE MANAGER] Routes configured and router reset successfully:', {
-        environment: appConfig.environment,
-        totalRoutes: dynamicRoutes.length,
-        publicRoutes: dynamicRoutes.filter(r => r.data?.['isPublic']).length,
-        privateRoutes: dynamicRoutes.filter(r => !r.data?.['isPublic']).length
-      });
+  // CRITICAL FIX: Reset the router's configuration with the new dynamic routes.
+  this.router.resetConfig(dynamicRoutes);
 
       return dynamicRoutes;
 
     } catch (error) {
-      console.error('[ROUTE MANAGER] Error configuring routes:', error);
+  // ...existing code...
       return this.getFallbackRoutes();
     }
   }
@@ -176,7 +169,7 @@ export class RouteManagerService {
 
     // IMPORTANT: No agregar ruta wildcard aquí para evitar bucles de redirección
     // El manejo de rutas no encontradas se hará a nivel de componente
-    console.log('[ROUTE MANAGER] Dynamic routes built without wildcard to prevent infinite redirects');
+  // ...existing code...
     
     return routes;
   }
@@ -240,7 +233,7 @@ export class RouteManagerService {
     if (routeConfig.component) {
       const componentRef = this.getComponentReference(routeConfig.component);
       if (!componentRef) {
-        console.warn(`[ROUTE MANAGER] Component not found: ${routeConfig.component}`);
+  // ...existing code...
         return null;
       }
 
@@ -275,7 +268,7 @@ export class RouteManagerService {
       return route;
     }
 
-    console.warn(`[ROUTE MANAGER] Invalid route config, no component or children for path: ${routeConfig.path}`);
+  // ...existing code...
     return null;
   }
 
@@ -383,7 +376,7 @@ export class RouteManagerService {
    */
   registerComponent(name: string, component: any): void {
     this.componentRegistry.set(name, component);
-    console.log(`[ROUTE MANAGER] Component registered: ${name}`);
+  // ...existing code...
   }
 
   /**
@@ -391,7 +384,7 @@ export class RouteManagerService {
    */
   registerLayout(name: string, layout: any): void {
     this.layoutRegistry.set(name, layout);
-    console.log(`[ROUTE MANAGER] Layout registered: ${name}`);
+  // ...existing code...
   }
 
   /**
@@ -399,7 +392,7 @@ export class RouteManagerService {
    */
   registerGuard(name: string, guard: any): void {
     this.guardRegistry.set(name, guard);
-    console.log(`[ROUTE MANAGER] Guard registered: ${name}`);
+  // ...existing code...
   }
 
   /**
@@ -416,8 +409,8 @@ export class RouteManagerService {
     const routes = this.getCurrentRoutes();
     // Normalizar la ruta: remover slash inicial si existe
     const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
-    console.log('[ROUTE MANAGER] Checking route availability:', { original: path, normalized: normalizedPath });
-    console.log('[ROUTE MANAGER] Available routes:', routes);
+  // ...existing code...
+  // ...existing code...
     return this.checkRouteRecursive(routes, normalizedPath);
   }
 
@@ -428,7 +421,7 @@ export class RouteManagerService {
     for (const route of routes) {
       // Verificar la ruta actual (manejar ruta vacía como '/')
       if (route.path === targetPath || (targetPath === '' && route.path === '')) {
-        console.log('[ROUTE MANAGER] Route found:', route.path);
+  // ...existing code...
         return true;
       }
       
@@ -440,7 +433,7 @@ export class RouteManagerService {
       }
     }
     
-    console.log('[ROUTE MANAGER] Route not found:', targetPath);
+  // ...existing code...
     return false;
   }
 
@@ -523,21 +516,21 @@ export class RouteManagerService {
   async navigateTo(path: string, extras?: any): Promise<boolean> {
     try {
       if (!this.isRouteAvailable(path)) {
-        console.warn(`[ROUTE MANAGER] Route not available: ${path}`);
+  // ...existing code...
         return false;
       }
 
       const success = await this.router.navigateByUrl(path, extras);
       
       if (!success) {
-        console.warn(`[ROUTE MANAGER] Navigation failed for path: ${path}`);
+  // ...existing code...
         // Fallback to default route using navigateByUrl
         await this.router.navigateByUrl('/');
       }
 
       return success;
     } catch (error) {
-      console.error(`[ROUTE MANAGER] Error navigating to ${path}:`, error);
+  // ...existing code...
       await this.router.navigateByUrl('/');
       return false;
     }

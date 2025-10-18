@@ -20,32 +20,32 @@ export class ThemeService {
    */
   async applyAppConfiguration(appConfig: AppConfig): Promise<void> {
     try {
-      console.log('[THEME SERVICE] Applying app configuration:', appConfig);
+  // ...existing code...
       
       // Use the sanitized branding object from AppConfig
       if (appConfig.branding) {
         await this.applyBranding(appConfig.branding);
       } else {
-        console.warn('[THEME SERVICE] App configuration is missing \'branding\' object. Skipping branding application.');
+  // ...existing code...
       }
 
       // Theme and SEO still come from the nested tenantConfig
       if (appConfig.tenantConfig?.theme) {
         await this.applyTheme(appConfig.tenantConfig.theme);
       } else {
-        console.warn('[THEME SERVICE] Tenant configuration is missing \'theme\' object. Skipping theme application.');
+  // ...existing code...
       }
       
       if (appConfig.tenantConfig?.seo) {
         this.applySEOConfiguration(appConfig.tenantConfig.seo);
       } else {
-        console.warn('[THEME SERVICE] Tenant configuration is missing \'seo\' object. Skipping SEO application.');
+  // ...existing code...
       }
       
-      console.log('[THEME SERVICE] App configuration applied successfully');
+  // ...existing code...
       
     } catch (error) {
-      console.error('[THEME SERVICE] Error applying app configuration:', error);
+  // ...existing code...
       throw error;
     }
   }
@@ -54,7 +54,7 @@ export class ThemeService {
    * Aplica el tema CSS
    */
   async applyTheme(themeConfig: ThemeConfig): Promise<void> {
-    console.log('[THEME SERVICE] Applying theme:', themeConfig.name);
+  // ...existing code...
     
     // Aplicar colores CSS
     this.applyColorVariables(themeConfig);
@@ -79,7 +79,7 @@ export class ThemeService {
    * Aplica la configuración de branding
    */
   async applyBranding(brandingConfig: BrandingConfig): Promise<void> {
-    console.log('[THEME SERVICE] Applying branding configuration');
+  // ...existing code...
     
     // Add defensive checks for nested properties
     if (brandingConfig.colors) {
@@ -204,10 +204,10 @@ export class ThemeService {
       }
       
       this.loadedFonts.add(fontFamily);
-      console.log(`[THEME SERVICE] Font loaded: ${fontFamily}`);
+  // ...existing code...
       
     } catch (error) {
-      console.warn(`[THEME SERVICE] Failed to load font: ${fontFamily}`, error);
+  // ...existing code...
     }
   }
 
@@ -277,7 +277,7 @@ export class ThemeService {
     // Guardar referencia
     this.injectedStyleElements.set(id, styleElement);
     
-    console.log(`[THEME SERVICE] Custom CSS injected: ${id}`);
+  // ...existing code...
   }
 
   /**
@@ -296,10 +296,10 @@ export class ThemeService {
       }
       
       favicon.href = faviconUrl;
-      console.log(`[THEME SERVICE] Favicon updated: ${faviconUrl}`);
+  // ...existing code...
       
     } catch (error) {
-      console.warn('[THEME SERVICE] Failed to update favicon:', error);
+  // ...existing code...
     }
   }
 
@@ -334,10 +334,10 @@ export class ThemeService {
       // Robots
       this.updateMetaTag('robots', seoConfig.robots || 'index, follow');
       
-      console.log('[THEME SERVICE] SEO configuration applied');
+  // ...existing code...
       
     } catch (error) {
-      console.warn('[THEME SERVICE] Failed to apply SEO configuration:', error);
+  // ...existing code...
     }
   }
 
@@ -418,7 +418,7 @@ export class ThemeService {
     // Resetear tema actual
     this.currentThemeSubject.next(null);
     
-    console.log('[THEME SERVICE] Theme reset to default');
+  // ...existing code...
   }
 
   /**
