@@ -20,11 +20,12 @@ const USER_ENV_CACHE_KEY = 'vendix_user_environment';
 // --- RESTORED INTERFACES ---
 export interface RouteConfig {
   path: string;
-  component: string;
+  component?: string; // Component is optional for parent routes
   layout?: string;
   guards?: string[];
   data?: any;
   isPublic?: boolean;
+  children?: RouteConfig[]; // Add children property
 }
 
 export interface LayoutConfig {
@@ -150,47 +151,54 @@ export class AppConfigService {
 
   private resolveRoutes(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): RouteConfig[] {
     const routes: RouteConfig[] = [];
-
-    // Rutas públicas
     routes.push(...this.resolvePublicRoutes(domainConfig));
-
-    // Rutas privadas
     routes.push(...this.resolvePrivateRoutes(domainConfig));
-
     return routes;
   }
 
-  /**
-   * Rutas públicas por entorno
-   */
   private resolvePublicRoutes(domainConfig: DomainConfig): RouteConfig[] {
+    // Define a standard set of auth child routes for reuse
+    const standardAuthChildRoutes: RouteConfig[] = [
+      { path: 'login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true },
+      { path: 'register', component: 'RegisterOwnerComponent', layout: 'auth', isPublic: true },
+      { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
+      { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
+      { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
+    ];
+
+    const authParentRoute: RouteConfig = {
+      path: 'auth',
+      isPublic: true,
+      children: standardAuthChildRoutes
+    };
+
     switch(domainConfig.environment) {
       case AppEnvironment.VENDIX_LANDING:
         return [
-          { path: '/', component: 'VendixLandingComponent', layout: 'public', isPublic: true },
-          { path: '/auth/login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true },
-          { path: '/auth/register', component: 'VendixAuthRegisterComponent', layout: 'auth', isPublic: true },
-          { path: '/auth/forgot-password', component: 'VendixAuthForgotPasswordComponent', layout: 'auth', isPublic: true }
+          { path: '', component: 'VendixLandingComponent', layout: 'public', isPublic: true },
+          authParentRoute
         ];
 
       case AppEnvironment.ORG_LANDING:
         return [
-          { path: '/', component: 'OrgLandingComponent', layout: 'public', isPublic: true },
-          { path: '/auth/login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true },
-          { path: '/shop', component: 'OrgEcommerceComponent', layout: 'storefront', isPublic: true }
+          { path: '', component: 'OrgLandingComponent', layout: 'public', isPublic: true },
+          { path: 'shop', component: 'OrgEcommerceComponent', layout: 'storefront', isPublic: true },
+          authParentRoute
         ];
 
       case AppEnvironment.STORE_ECOMMERCE:
+        const storeAuthRoutes = standardAuthChildRoutes.map(r => 
+            r.path === 'register' ? { ...r, component: 'StoreAuthRegisterComponent' } : r
+        );
         return [
-          { path: '/', component: 'StoreEcommerceComponent', layout: 'storefront', isPublic: true },
-          { path: '/auth/login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true },
-          { path: '/auth/register', component: 'StoreAuthRegisterComponent', layout: 'auth', isPublic: true }
+          { path: '', component: 'StoreEcommerceComponent', layout: 'storefront', isPublic: true },
+          { ...authParentRoute, children: storeAuthRoutes }
         ];
 
       default:
         return [
-          { path: '/', component: 'LandingComponent', layout: 'public', isPublic: true },
-          { path: '/auth/login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true }
+          { path: '', component: 'LandingComponent', layout: 'public', isPublic: true },
+          authParentRoute
         ];
     }
   }
@@ -203,79 +211,79 @@ export class AppConfigService {
       case AppEnvironment.VENDIX_ADMIN:
         return [
           { 
-            path: '/superadmin', 
+            path: 'superadmin', 
             component: 'SuperAdminDashboardComponent', 
             layout: 'super-admin', 
-            guards: ['RoleGuard', 'DomainGuard'] 
+            guards: ['AuthGuard'] 
           },
-          { 
-            path: '/superadmin/tenants', 
+          {
+            path: 'superadmin/tenants', 
             component: 'TenantListComponent', 
             layout: 'super-admin', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           }
         ];
 
       case AppEnvironment.ORG_ADMIN:
         return [
           { 
-            path: '/admin', 
+            path: 'admin', 
             component: 'OrgAdminDashboardComponent', 
             layout: 'organization-admin', 
-            guards: ['RoleGuard', 'DomainGuard'] 
+            guards: ['AuthGuard'] 
           },
           { 
-            path: '/admin/stores', 
+            path: 'admin/stores', 
             component: 'StoreManagementComponent', 
             layout: 'organization-admin', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           },
           { 
-            path: '/admin/users', 
+            path: 'admin/users', 
             component: 'UserManagementComponent', 
             layout: 'organization-admin', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           }
         ];
 
       case AppEnvironment.STORE_ADMIN:
         return [
           { 
-            path: '/admin', 
+            path: 'admin', 
             component: 'StoreAdminDashboardComponent', 
             layout: 'store-admin', 
-            guards: ['RoleGuard', 'DomainGuard'] 
+            guards: ['AuthGuard'] 
           },
           { 
-            path: '/admin/products', 
+            path: 'admin/products', 
             component: 'ProductManagementComponent', 
             layout: 'store-admin', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           },
           { 
-            path: '/admin/orders', 
+            path: 'admin/orders', 
             component: 'OrderManagementComponent', 
             layout: 'store-admin', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           },
           { 
-            path: '/pos', 
+            path: 'pos', 
             component: 'POSComponent', 
             layout: 'pos', 
-            guards: ['RoleGuard'] 
+            guards: ['AuthGuard'] 
           }
         ];
 
       case AppEnvironment.STORE_ECOMMERCE:
         return [
           { 
-            path: '/account', 
+            path: 'account', 
             component: 'CustomerAccountComponent', 
             layout: 'store-ecommerce', 
             guards: ['AuthGuard'] 
           },
           { 
-            path: '/orders', 
+            path: 'orders', 
             component: 'CustomerOrdersComponent', 
             layout: 'store-ecommerce', 
             guards: ['AuthGuard'] 

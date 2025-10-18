@@ -44,6 +44,10 @@ export class SuperAdminLayoutComponent {
   currentPageTitle = 'Super Admin Dashboard';
   currentVlink = 'super-admin';
   platformTitle = 'Vendix Platform';
+
+  constructor() {
+    console.log('[DEBUG] SuperAdminLayoutComponent has been constructed!');
+  }
   
   breadcrumb = {
     parent: 'Super Admin',

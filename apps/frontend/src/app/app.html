@@ -1,7 +1,7 @@
 <!-- Vendix Multi-Store Application -->
 
 <!-- Loading State -->
-<div *ngIf="isLoading" class="min-h-screen flex items-center justify-center bg-background">
+<div *ngIf="isLoading$ | async" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
       <app-spinner size="lg" text="Loading Application..." [center]="true"></app-spinner>
@@ -11,7 +11,7 @@
 </div>
 
 <!-- Error State -->
-<div *ngIf="error && !isLoading" class="min-h-screen flex items-center justify-center bg-background">
+<div *ngIf="(error$ | async) as error" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
       <div class="text-6xl mb-4">⚠️</div>
@@ -22,9 +22,7 @@
 </div>
 
 <!-- Main Application Content -->
-<div *ngIf="!isLoading && !error" class="app-container">
-  <!-- Header with dynamic branding will be added here -->
-
+<div *ngIf="!(isLoading$ | async) && !(error$ | async)" class="app-container">
   <!-- Main Router Content -->
   <router-outlet></router-outlet>
 </div>

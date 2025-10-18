@@ -4,25 +4,26 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { AppConfigService, RouteConfig, LayoutConfig } from './app-config.service';
 import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
 
-// Guards imports - simplified
-import { DomainGuard } from '../guards/domain.guard';
+// Guards imports
 import { AuthGuard } from '../guards/auth.guard';
-
 
 // Component imports for dynamic loading
 import { VendixLandingComponent } from '../../public/landing/vendix-landing/vendix-landing.component';
 import { OrgLandingComponent } from '../../public/dynamic-landing/components/org-landing/org-landing.component';
 import { StoreLandingComponent } from '../../public/dynamic-landing/components/store-landing/store-landing.component';
 import { StorefrontComponent } from '../../public/ecommerce/components/storefront/storefront.component';
-// Importaciones de componentes modulares
 import { DashboardComponent as SuperAdminDashboardComponent } from '../../private/modules/super-admin/dashboard/dashboard.component';
 import { OrganizationsComponent as OrganizationsManagementComponent } from '../../private/modules/super-admin/organizations/organizations.component';
 import { DashboardComponent as OrganizationDashboardComponent } from '../../private/modules/organization/dashboard/dashboard.component';
 import { DashboardComponent as StoreDashboardComponent } from '../../private/modules/store/dashboard/dashboard.component';
 
-// Layout components - Only include existing components
+// Layout components
+import { SuperAdminLayoutComponent } from '../../private/layouts/super-admin/super-admin-layout.component';
 import { OrganizationAdminLayoutComponent } from '../../private/layouts/organization-admin/organization-admin-layout.component';
 import { StoreAdminLayoutComponent } from '../../private/layouts/store-admin/store-admin-layout.component';
+// Assuming other layouts exist at these paths
+// import { PublicLayoutComponent } from '../../public/layouts/public-layout/public-layout.component';
+// import { AuthLayoutComponent } from '../../public/layouts/auth-layout/auth-layout.component';
 
 export interface DynamicRoute {
   path: string;
@@ -55,13 +56,8 @@ export class RouteManagerService {
    * Inicializa los registros de componentes, layouts y guards
    */
   private initializeRegistries(): void {
-    // Registrar componentes
     this.registerComponents();
-    
-    // Registrar layouts
     this.registerLayouts();
-    
-    // Registrar guards
     this.registerGuards();
   }
 
@@ -85,11 +81,11 @@ export class RouteManagerService {
     // Store Admin components
     this.componentRegistry.set('StoreAdminDashboardComponent', StoreDashboardComponent);
     
-    // E-commerce components - using existing dashboard components
-    this.componentRegistry.set('StoreEcommerceComponent', StoreDashboardComponent);
-    this.componentRegistry.set('OrgEcommerceComponent', OrganizationDashboardComponent);
+    // E-commerce components
+    this.componentRegistry.set('StoreEcommerceComponent', StorefrontComponent);
+    this.componentRegistry.set('OrgEcommerceComponent', OrgLandingComponent);
     
-    // Auth components - consolidated contextual login
+    // Auth components
     this.componentRegistry.set('ContextualLoginComponent', () =>
       import('../../public/auth/components/contextual-login/contextual-login.component').then(c => c.ContextualLoginComponent));
   }
@@ -98,37 +94,21 @@ export class RouteManagerService {
    * Registra todos los layouts disponibles
    */
   private registerLayouts(): void {
-    this.layoutRegistry.set('super-admin', () =>
-      import('../../private/layouts/organization-admin/organization-admin-layout.component').then(c => c.OrganizationAdminLayoutComponent)
-    );
+    this.layoutRegistry.set('super-admin', SuperAdminLayoutComponent);
     this.layoutRegistry.set('organization-admin', OrganizationAdminLayoutComponent);
     this.layoutRegistry.set('store-admin', StoreAdminLayoutComponent);
     
-    // Register remaining layouts with dynamic imports
-    this.layoutRegistry.set('store-ecommerce', () =>
-      import('../../private/layouts/store-admin/store-admin-layout.component').then(c => c.StoreAdminLayoutComponent)
-    );
-    this.layoutRegistry.set('org-ecommerce', () =>
-      import('../../private/layouts/organization-admin/organization-admin-layout.component').then(c => c.OrganizationAdminLayoutComponent)
-    );
-    this.layoutRegistry.set('auth', () =>
-      import('../../private/layouts/organization-admin/organization-admin-layout.component').then(c => c.OrganizationAdminLayoutComponent)
-    );
-    this.layoutRegistry.set('public', () =>
-      import('../../private/layouts/organization-admin/organization-admin-layout.component').then(c => c.OrganizationAdminLayoutComponent)
-    );
-    this.layoutRegistry.set('storefront', () =>
-      import('../../private/layouts/store-admin/store-admin-layout.component').then(c => c.StoreAdminLayoutComponent)
-    );
+    // Assuming a generic public layout for these for now
+    // this.layoutRegistry.set('public', PublicLayoutComponent);
+    // this.layoutRegistry.set('auth', AuthLayoutComponent);
+    // this.layoutRegistry.set('storefront', PublicLayoutComponent);
   }
 
   /**
    * Registra todos los guards disponibles
    */
   private registerGuards(): void {
-    this.guardRegistry.set('DomainGuard', DomainGuard);
     this.guardRegistry.set('AuthGuard', AuthGuard);
-
   }
 
   /**
@@ -148,7 +128,10 @@ export class RouteManagerService {
       const dynamicRoutes = this.buildDynamicRoutes(appConfig);
       this.currentRoutesSubject.next(dynamicRoutes);
 
-      console.log('[ROUTE MANAGER] Routes configured successfully:', {
+      // CRITICAL FIX: Reset the router's configuration with the new dynamic routes.
+      this.router.resetConfig(dynamicRoutes);
+
+      console.log('[ROUTE MANAGER] Routes configured and router reset successfully:', {
         environment: appConfig.environment,
         totalRoutes: dynamicRoutes.length,
         publicRoutes: dynamicRoutes.filter(r => r.data?.['isPublic']).length,
@@ -169,23 +152,15 @@ export class RouteManagerService {
   private buildDynamicRoutes(appConfig: any): Routes {
     const routes: Routes = [];
 
-    // Agregar rutas públicas
-    appConfig.routes
-      .filter((route: RouteConfig) => route.isPublic)
-      .forEach((routeConfig: RouteConfig) => {
-        const route = this.buildRoute(routeConfig, false);
+    // Build all routes directly from the app config
+    if (appConfig.routes && Array.isArray(appConfig.routes)) {
+      appConfig.routes.forEach((routeConfig: RouteConfig) => {
+        const route = this.buildRoute(routeConfig, !routeConfig.isPublic);
         if (route) routes.push(route);
       });
+    }
 
-    // Agregar rutas privadas
-    appConfig.routes
-      .filter((route: RouteConfig) => !route.isPublic)
-      .forEach((routeConfig: RouteConfig) => {
-        const route = this.buildRoute(routeConfig, true);
-        if (route) routes.push(route);
-      });
-
-    // Agregar ruta wildcard (404)
+    // Add a wildcard route at the end to catch any non-matches
     routes.push({
       path: '**',
       redirectTo: this.getDefaultRouteForEnvironment(appConfig.environment)
@@ -198,45 +173,72 @@ export class RouteManagerService {
    * Construye una ruta individual desde la configuración
    */
   private buildRoute(routeConfig: RouteConfig, isPrivate: boolean): any {
-    const component = this.getComponentReference(routeConfig.component);
-    
-    if (!component) {
-      console.warn(`[ROUTE MANAGER] Component not found: ${routeConfig.component}`);
-      return null;
-    }
+    if (!routeConfig) return null;
 
-    const route: any = {
-      path: routeConfig.path,
-      component: component
-    };
-
-    // Configurar layout si está especificado
-    if (routeConfig.layout) {
-      const layout = this.getLayoutReference(routeConfig.layout);
-      if (layout) {
-        route.component = layout;
-        // El componente real se pasa como data para que el layout lo renderice
-        route.data = {
-          ...routeConfig.data,
-          component: component,
-          layout: routeConfig.layout,
-          isPublic: !isPrivate
-        };
-      }
-    } else {
-      route.data = {
-        ...routeConfig.data,
-        isPublic: !isPrivate
+    // Case 1: This is a parent route with children
+    if (routeConfig.children && routeConfig.children.length > 0) {
+      return {
+        path: routeConfig.path,
+        children: routeConfig.children
+          .map(child => this.buildRoute(child, isPrivate))
+          .filter(Boolean), // Filter out any null/undefined routes
+        data: { isPublic: !isPrivate }
       };
     }
 
-    // Configurar guards
-    const guards = this.resolveGuards(routeConfig.guards || [], isPrivate);
-    if (guards.length > 0) {
-      route.canActivate = guards;
+    // Case 2: This is a standard route with a component
+    if (routeConfig.component) {
+      const componentRef = this.getComponentReference(routeConfig.component);
+      if (!componentRef) {
+        console.warn(`[ROUTE MANAGER] Component not found: ${routeConfig.component}`);
+        return null;
+      }
+
+      const route: any = { path: routeConfig.path };
+
+      // If the route has a layout, the layout becomes the route's main component.
+      if (routeConfig.layout) {
+        const layoutRef = this.getLayoutReference(routeConfig.layout);
+        if (layoutRef) {
+          this.assignComponentToRoute(route, layoutRef);
+          // Pass the actual page component in the data property for the layout to render
+          route.data = {
+            ...routeConfig.data,
+            component: componentRef, 
+            layout: routeConfig.layout,
+            isPublic: !isPrivate
+          };
+        } else {
+          // Fallback if layout not found: use component directly
+          this.assignComponentToRoute(route, componentRef);
+        }
+      } else {
+        // No layout, so the page component is the main route component
+        this.assignComponentToRoute(route, componentRef);
+        route.data = {
+          ...routeConfig.data,
+          isPublic: !isPrivate
+        };
+      }
+
+      route.canActivate = []; // No guards
+      return route;
     }
 
-    return route;
+    console.warn(`[ROUTE MANAGER] Invalid route config, no component or children for path: ${routeConfig.path}`);
+    return null;
+  }
+
+  /**
+   * Helper to assign a component reference to the correct route property (component vs loadComponent)
+   */
+  private assignComponentToRoute(route: any, componentRef: any): void {
+    // A class constructor has a .prototype, a lazy-load arrow function does not.
+    if (componentRef.prototype) {
+      route.component = componentRef;
+    } else {
+      route.loadComponent = componentRef;
+    }
   }
 
   /**
@@ -270,10 +272,7 @@ export class RouteManagerService {
       guards.push(AuthGuard);
     }
 
-    // Siempre agregar DomainGuard para rutas raíz
-    if (guardNames.includes('DomainGuard') || this.shouldAddDomainGuard(guardNames)) {
-      guards.push(DomainGuard);
-    }
+
 
     return guards;
   }

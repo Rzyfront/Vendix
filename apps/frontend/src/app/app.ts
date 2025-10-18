@@ -1,46 +1,30 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { AppInitializerService } from './core/services/app-initializer.service';
+import { Observable } from 'rxjs';
+import { AppConfigService } from './core/services/app-config.service';
 import { CardComponent } from './shared/components/card/card.component';
-
-// Import shared components
-// Removed ButtonComponent and CardComponent (not used directly in App template)
 import { SpinnerComponent } from './shared/components/spinner/spinner.component';
 import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
 
 @Component({
   selector: 'app-root',
+  standalone: true, // Ensure standalone is true
   imports: [RouterOutlet, CommonModule, CardComponent, SpinnerComponent, ToastContainerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
-export class App implements OnInit {
+export class App {
   protected title = 'vendix';
-  isLoading = true;
-  error: string | null = null;
+  
+  // Expose observables directly from the service
+  public readonly isLoading$: Observable<boolean>;
+  public readonly error$: Observable<string | null>;
 
-  private appInitializer = inject(AppInitializerService);
+  private appConfigService = inject(AppConfigService);
 
-  ngOnInit(): void {
-    // Check if app is already initialized via APP_INITIALIZER
-    if (this.appInitializer.isAppInitialized()) {
-      this.isLoading = false;
-    } else if (this.appInitializer.hasInitializationError()) {
-      // Check if there was an initialization error
-      const error = this.appInitializer.getInitializationError();
-
-      // Show user-friendly error message
-      if (error?.message?.includes('Domain') && error?.message?.includes('not found')) {
-        this.error = 'Store not found';
-      } else {
-        this.error = 'Application initialization failed';
-      }
-      this.isLoading = false;
-    } else {
-      // If not initialized and no error, show generic error
-      this.error = 'Application initialization failed';
-      this.isLoading = false;
-    }
+  constructor() {
+    this.isLoading$ = this.appConfigService.loading$;
+    this.error$ = this.appConfigService.error$;
   }
 }
