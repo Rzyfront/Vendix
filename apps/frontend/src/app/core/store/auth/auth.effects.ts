@@ -6,6 +6,9 @@ import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage, normalizeApiPayload } from '../../utils/api-error-handler';
+import { RouteManagerService } from '../../services/route-manager.service';
+import { NavigationService } from '../../services/navigation.service';
+import { AppConfigService } from '../../services/app-config.service';
 import * as AuthActions from './auth.actions';
 
 @Injectable()
@@ -14,6 +17,9 @@ export class AuthEffects {
   private authService = inject(AuthService);
   private router = inject(Router);
   private toast = inject(ToastService);
+  private routeManager = inject(RouteManagerService);
+  private navigationService = inject(NavigationService);
+  private appConfig = inject(AppConfigService);
 
   login$ = createEffect(() =>
     this.actions$.pipe(
@@ -34,7 +40,8 @@ export class AuthEffects {
               },
               permissions: response.data.permissions || [],
               roles: response.data.user.roles || [],
-              message: apiMessage
+              message: apiMessage,
+              updatedEnvironment: response.updatedEnvironment
             });
           }),
           catchError(error => of(AuthActions.loginFailure({ error: normalizeApiPayload(error) })))
@@ -46,7 +53,7 @@ export class AuthEffects {
   loginSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.loginSuccess),
-      tap(async ({ user, roles, message }) => {
+      tap(async ({ user, roles, message, updatedEnvironment }) => {
         // Show server message when present
         if (message) {
           this.toast.success(message);
@@ -54,26 +61,56 @@ export class AuthEffects {
 
         console.log('Login successful, determining redirect based on roles:', roles);
 
-        // Reconfigura rutas dinámicas con la nueva configuración del usuario
-        const routeManager = (window as any).vendixRouteManager as import('../../services/route-manager.service').RouteManagerService;
-        if (routeManager && typeof routeManager.configureDynamicRoutes === 'function') {
-          await routeManager.configureDynamicRoutes();
-        }
+        try {
+          // 1. Reconfigurar rutas dinámicas con la nueva configuración del usuario
+          console.log('[AUTH EFFECTS] Reconfigurando rutas dinámicas...');
+          await this.routeManager.configureDynamicRoutes();
 
-        // Determine redirect based on user roles (ensure roles is always an array)
-        const userRoles = roles || [];
-        let redirectPath = this.determineRedirectPath(userRoles, user);
+          // 2. Obtener configuración actual del dominio y tenant
+          const currentConfig = this.appConfig.getCurrentConfig();
+          if (!currentConfig) {
+            console.error('[AUTH EFFECTS] No se pudo obtener la configuración actual');
+            this.router.navigate(['/admin']);
+            return;
+          }
 
-        console.log('Redirecting to:', redirectPath);
-        this.router.navigate([redirectPath]).then(success => {
-          if (success) {
-            console.log('Successfully navigated to:', redirectPath);
-          } else {
-            console.error('Failed to navigate to:', redirectPath);
-            // Fallback to admin dashboard
+          // 3. Actualizar domainConfig con el entorno actualizado si está disponible
+          let domainConfig = currentConfig.domainConfig;
+          if (updatedEnvironment) {
+            console.log('[AUTH EFFECTS] Usando entorno actualizado:', updatedEnvironment);
+            domainConfig = {
+              ...domainConfig,
+              environment: updatedEnvironment as any
+            };
+          }
+
+          const tenantContext = currentConfig.tenantConfig;
+          const userRoles = roles || [];
+
+          console.log('[AUTH EFFECTS] Configuración obtenida:', {
+            domainEnvironment: domainConfig.environment,
+            userRoles,
+            hasTenantContext: !!tenantContext,
+            updatedEnvironment
+          });
+
+          // 4. Redirigir usando NavigationService
+          console.log('[AUTH EFFECTS] Navegando a ruta apropiada...');
+          const success = await this.navigationService.navigateAfterLogin(
+            userRoles,
+            domainConfig,
+            tenantContext
+          );
+
+          if (!success) {
+            console.warn('[AUTH EFFECTS] Navegación fallida, usando fallback a /admin');
             this.router.navigate(['/admin']);
           }
-        });
+        } catch (error) {
+          console.error('[AUTH EFFECTS] Error durante redirección post-login:', error);
+          // Fallback seguro
+          this.router.navigate(['/admin']);
+        }
       })
     ),
     { dispatch: false }
@@ -302,26 +339,4 @@ export class AuthEffects {
     { dispatch: false }
   );
 
-  // Helper method to determine redirect path based on user roles
-  private determineRedirectPath(roles: string[], user: any): string {
-    console.log('Determining redirect path for roles:', roles, 'user:', user);
-    
-    // Priority-based role redirection
-    if (roles.includes('super_admin')) {
-      return '/superadmin';
-    } else if (roles.includes('owner') || roles.includes('admin')) {
-      return '/admin';
-    } else if (roles.includes('manager')) {
-      return '/admin/store';
-    } else if (roles.includes('supervisor') || roles.includes('employee')) {
-      // Since POS route doesn't exist yet, redirect to store ecommerce for now
-      return '/store-ecommerce';
-    } else if (roles.includes('customer')) {
-      return '/shop';
-    }
-    
-    // Default fallback
-    console.warn('No specific role match found, defaulting to admin dashboard');
-    return '/admin';
-  }
 }

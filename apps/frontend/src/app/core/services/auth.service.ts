@@ -1,12 +1,13 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, map } from 'rxjs';
+import { Observable, tap, map, mergeMap } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { TenantFacade } from '../store/tenant/tenant.facade';
 import { AppConfigService } from './app-config.service';
 import { NavigationService } from './navigation.service';
+import { RouteManagerService } from './route-manager.service';
 import { environment } from '../../../environments/environment';
 import { AppEnvironment } from '../models/domain-config.interface';
 
@@ -97,11 +98,12 @@ export class AuthService {
     private router: Router,
     private store: Store,
     private authFacade: AuthFacade,
-    private tenantFacade: TenantFacade
+    private tenantFacade: TenantFacade,
+    private routeManager: RouteManagerService
   ) {}
 
   // Login - Refactored for layered config and granular caching
-  login(loginDto: LoginDto): Observable<AuthResponse> {
+  login(loginDto: LoginDto): Observable<AuthResponse & { updatedEnvironment?: AppEnvironment }> {
     const enrichedLoginDto = { ...loginDto };
 
     if (!enrichedLoginDto.organization_slug && !enrichedLoginDto.store_slug) {
@@ -114,7 +116,7 @@ export class AuthService {
 
     return this.http.post<AuthResponse>(`${this.API_URL}/login`, enrichedLoginDto)
       .pipe(
-        map(response => {
+        mergeMap(async (response: AuthResponse) => {
           if (!response.success || !response.data) {
             throw new Error(response.message || 'Login failed');
           }
@@ -122,7 +124,8 @@ export class AuthService {
           const { user, user_settings, access_token, refresh_token } = response.data;
 
           // --- Layer 3: Update App Environment from User Settings ---
-          this.appConfigService.updateEnvironmentForUser(user_settings.config.app);
+          // Ahora esperamos a que se complete la actualización del entorno
+          await this.appConfigService.updateEnvironmentForUser(user_settings.config.app);
 
           // --- Granular Caching ---
           if (typeof localStorage !== 'undefined') {
@@ -145,14 +148,15 @@ export class AuthService {
             throw new Error(`Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`);
           }
 
-          // Return the transformed data for the NgRx effect
+          // Return the transformed data for the NgRx effect including updated environment
           return {
             ...response,
             data: {
               ...response.data,
               user,
               permissions,
-            }
+            },
+            updatedEnvironment: user_settings.config.app
           };
         })
       );
