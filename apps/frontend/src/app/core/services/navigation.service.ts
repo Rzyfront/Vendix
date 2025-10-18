@@ -44,10 +44,10 @@ export class NavigationService {
     userRoles: string[],
     domainConfig: DomainConfig,
     tenantContext: TenantConfig | null
-  ): Promise<boolean> {
+  ): string {
     const targetRoute = this.redirectAfterLogin(userRoles, domainConfig, tenantContext);
-    console.log('[NAVIGATION SERVICE] Navegando a:', targetRoute);
-    return this.router.navigate([targetRoute]);
+    console.log('[NAVIGATION SERVICE] Ruta objetivo para navegación:', targetRoute);
+    return targetRoute;
   }
 
   /**
@@ -143,7 +143,7 @@ export class NavigationService {
    */
   redirectToNotFound(): Promise<boolean> {
     console.log('[NAVIGATION SERVICE] Redirigiendo a página no encontrada');
-    return this.router.navigate(['/not-found']);
+    return this.router.navigateByUrl('/not-found');
   }
 
   /**

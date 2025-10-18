@@ -174,12 +174,10 @@ export class RouteManagerService {
       });
     }
 
-    // Add a wildcard route at the end to catch any non-matches
-    routes.push({
-      path: '**',
-      redirectTo: this.getDefaultRouteForEnvironment(appConfig.environment)
-    });
-
+    // IMPORTANT: No agregar ruta wildcard aquí para evitar bucles de redirección
+    // El manejo de rutas no encontradas se hará a nivel de componente
+    console.log('[ROUTE MANAGER] Dynamic routes built without wildcard to prevent infinite redirects');
+    
     return routes;
   }
 
@@ -340,7 +338,7 @@ export class RouteManagerService {
   /**
    * Obtiene la ruta por defecto para un entorno
    */
-  private getDefaultRouteForEnvironment(environment: AppEnvironment): string {
+  public getDefaultRouteForEnvironment(environment: AppEnvironment): string {
     switch (environment) {
       case AppEnvironment.VENDIX_LANDING:
         return '/';
@@ -502,18 +500,18 @@ export class RouteManagerService {
         return false;
       }
 
-      const success = await this.router.navigate([path], extras);
+      const success = await this.router.navigateByUrl(path, extras);
       
       if (!success) {
         console.warn(`[ROUTE MANAGER] Navigation failed for path: ${path}`);
-        // Fallback to default route
-        await this.router.navigate(['/']);
+        // Fallback to default route using navigateByUrl
+        await this.router.navigateByUrl('/');
       }
 
       return success;
     } catch (error) {
       console.error(`[ROUTE MANAGER] Error navigating to ${path}:`, error);
-      await this.router.navigate(['/']);
+      await this.router.navigateByUrl('/');
       return false;
     }
   }

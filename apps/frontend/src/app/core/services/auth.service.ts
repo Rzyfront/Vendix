@@ -125,6 +125,7 @@ export class AuthService {
 
           // --- Layer 3: Update App Environment from User Settings ---
           // Ahora esperamos a que se complete la actualización del entorno
+          // Pasamos el string directamente, AppConfigService lo normalizará
           await this.appConfigService.updateEnvironmentForUser(user_settings.config.app);
 
           // --- Granular Caching ---
@@ -297,23 +298,19 @@ export class AuthService {
 
     if (!user || !domainConfig) {
       console.warn('[AUTH SERVICE] No se pudo obtener contexto para redirección, usando fallback');
-      this.router.navigate(['/admin']);
+      this.router.navigateByUrl('/admin');
       return;
     }
 
-    this.navigationService.navigateAfterLogin(
+    const targetRoute = this.navigationService.navigateAfterLogin(
       user.roles || [],
       domainConfig,
       tenantContext
-    ).then(success => {
-      if (success) {
-        console.log('[AUTH SERVICE] Redirección post-login exitosa');
-      } else {
-        console.error('[AUTH SERVICE] Error en redirección post-login');
-        // Fallback a ruta por defecto
-        this.router.navigate(['/admin']);
-      }
-    });
+    );
+    
+    // Usar navigateByUrl para evitar recarga completa de la aplicación
+    this.router.navigateByUrl(targetRoute);
+    console.log('[AUTH SERVICE] Redirección post-login exitosa a:', targetRoute);
   }
 
   // Clear stored tokens

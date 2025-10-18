@@ -62,28 +62,27 @@ export class AuthEffects {
         console.log('Login successful, determining redirect based on roles:', roles);
 
         try {
-          // 1. Reconfigurar rutas dinámicas con la nueva configuración del usuario
-          console.log('[AUTH EFFECTS] Reconfigurando rutas dinámicas...');
-          await this.routeManager.configureDynamicRoutes();
+          // 1. Actualizar el entorno del usuario en AppConfigService (ahora es asíncrono)
+          if (updatedEnvironment) {
+            console.log('[AUTH EFFECTS] Actualizando entorno del usuario:', updatedEnvironment);
+            await this.appConfig.updateEnvironmentForUser(updatedEnvironment);
+          }
 
-          // 2. Obtener configuración actual del dominio y tenant
+          // 2. Reconfigurar rutas dinámicas con la nueva configuración del usuario
+          console.log('[AUTH EFFECTS] Reconfigurando rutas dinámicas...');
+          const dynamicRoutes = await this.routeManager.configureDynamicRoutes();
+          console.log('[AUTH EFFECTS] Rutas dinámicas configuradas:', dynamicRoutes);
+
+          // 3. Obtener configuración actual del dominio y tenant
           const currentConfig = this.appConfig.getCurrentConfig();
           if (!currentConfig) {
             console.error('[AUTH EFFECTS] No se pudo obtener la configuración actual');
-            this.router.navigate(['/admin']);
+            await this.router.navigateByUrl('/admin', { replaceUrl: true });
             return;
           }
 
-          // 3. Actualizar domainConfig con el entorno actualizado si está disponible
-          let domainConfig = currentConfig.domainConfig;
-          if (updatedEnvironment) {
-            console.log('[AUTH EFFECTS] Usando entorno actualizado:', updatedEnvironment);
-            domainConfig = {
-              ...domainConfig,
-              environment: updatedEnvironment as any
-            };
-          }
-
+          // 4. Usar domainConfig actualizado (ya viene con el nuevo entorno)
+          const domainConfig = currentConfig.domainConfig;
           const tenantContext = currentConfig.tenantConfig;
           const userRoles = roles || [];
 
@@ -94,22 +93,34 @@ export class AuthEffects {
             updatedEnvironment
           });
 
-          // 4. Redirigir usando NavigationService
+          // 5. Redirigir usando NavigationService - ahora devuelve la ruta directamente
           console.log('[AUTH EFFECTS] Navegando a ruta apropiada...');
-          const success = await this.navigationService.navigateAfterLogin(
+          const targetRoute = this.navigationService.navigateAfterLogin(
             userRoles,
             domainConfig,
             tenantContext
           );
 
-          if (!success) {
-            console.warn('[AUTH EFFECTS] Navegación fallida, usando fallback a /admin');
-            this.router.navigate(['/admin']);
+          console.log('[AUTH EFFECTS] Ruta objetivo:', targetRoute);
+          console.log('[AUTH EFFECTS] Rutas disponibles:', this.routeManager.getCurrentRoutes());
+
+          // Verificar que la ruta objetivo esté disponible antes de navegar
+          if (this.routeManager.isRouteAvailable(targetRoute)) {
+            console.log('[AUTH EFFECTS] Ruta disponible, navegando...');
+            // Usar navigateByUrl con replaceUrl para evitar recarga completa de la aplicación
+            await this.router.navigateByUrl(targetRoute, { replaceUrl: true });
+            console.log('[AUTH EFFECTS] Navegación exitosa a:', targetRoute);
+          } else {
+            console.error('[AUTH EFFECTS] Ruta objetivo no disponible:', targetRoute);
+            // Fallback a ruta por defecto del entorno
+            const fallbackRoute = this.navigationService.getDefaultRouteForEnvironment(domainConfig.environment);
+            console.log('[AUTH EFFECTS] Usando ruta de fallback:', fallbackRoute);
+            await this.router.navigateByUrl(fallbackRoute, { replaceUrl: true });
           }
         } catch (error) {
           console.error('[AUTH EFFECTS] Error durante redirección post-login:', error);
-          // Fallback seguro
-          this.router.navigate(['/admin']);
+          // Fallback seguro usando navigateByUrl
+          await this.router.navigateByUrl('/admin', { replaceUrl: true });
         }
       })
     ),
@@ -137,8 +148,8 @@ export class AuthEffects {
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
         }
-        // Navigate to login
-        this.router.navigate(['/auth/login']);
+        // Navigate to login using navigateByUrl to avoid full reload
+        this.router.navigateByUrl('/auth/login');
       })
     ),
     { dispatch: false }
@@ -276,7 +287,7 @@ export class AuthEffects {
       ofType(AuthActions.resetOwnerPasswordSuccess),
       tap(() => {
         this.toast.success('Contraseña restablecida con éxito.');
-        this.router.navigate(['/auth/login']);
+        this.router.navigateByUrl('/auth/login');
       })
     ),
     { dispatch: false }

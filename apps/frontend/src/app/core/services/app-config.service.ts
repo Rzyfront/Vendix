@@ -75,13 +75,22 @@ export class AppConfigService {
       console.log('[APP CONFIG] 2. Cached user env:', cachedUserEnv);
       let domainConfig: DomainConfig;
 
-      console.log('[APP CONFIG] 3. Awaiting detectDomain...');
-      domainConfig = await this.detectDomain();
-      console.log('[APP CONFIG] 6. detectDomain has resolved.');
-
+      // Si hay un entorno de usuario en caché, priorizarlo sobre la detección de dominio
       if (cachedUserEnv) {
-        domainConfig.environment = cachedUserEnv;
+        console.log('[APP CONFIG] 3. Using cached user environment, skipping domain detection');
+        domainConfig = await this.detectDomain();
+        // Forzar el entorno del usuario en lugar de sobrescribirlo
+        domainConfig = {
+          ...domainConfig,
+          environment: cachedUserEnv
+        };
+        console.log('[APP CONFIG] 3.1. Domain config after applying cached user env:', domainConfig);
+      } else {
+        console.log('[APP CONFIG] 3. No cached user env, detecting domain...');
+        domainConfig = await this.detectDomain();
+        console.log('[APP CONFIG] 6. detectDomain has resolved.');
       }
+
       console.log('[APP CONFIG] 7. Effective Domain/User config resolved:', domainConfig);
 
       console.log('[APP CONFIG] 8. Awaiting loadTenantConfigByDomain...');
@@ -116,23 +125,49 @@ export class AppConfigService {
     }
   }
 
-  public updateEnvironmentForUser(userAppEnvironment: AppEnvironment): void {
+  public async updateEnvironmentForUser(userAppEnvironment: string): Promise<void> {
     const currentConfig = this.getCurrentConfig();
     if (!currentConfig) {
       console.warn('[APP CONFIG] Cannot update environment for user: App is not initialized.');
       return;
     }
 
-    console.log(`[APP CONFIG] Updating environment for user. From: ${currentConfig.environment}, To: ${userAppEnvironment}`);
+    // Normalizar el entorno a minúsculas para coincidir con el enum AppEnvironment
+    const normalizedEnv = this.normalizeEnvironment(userAppEnvironment);
+    console.log(`[APP CONFIG] Updating environment for user. From: ${currentConfig.environment}, To: ${normalizedEnv} (original: ${userAppEnvironment})`);
 
-    const newConfig: AppConfig = {
-      ...currentConfig,
-      environment: userAppEnvironment,
+    // Reconstruir la configuración completa con el nuevo entorno
+    const domainConfig: DomainConfig = {
+      ...currentConfig.domainConfig,
+      environment: normalizedEnv
     };
 
-    this.cacheUserEnvironment(userAppEnvironment);
+    const tenantConfig = currentConfig.tenantConfig;
+    const newConfig = await this.buildAppConfig(domainConfig, tenantConfig);
+
+    this.cacheUserEnvironment(normalizedEnv);
     this.configSubject.next(newConfig);
     this.cacheAppConfig(newConfig);
+
+    console.log('[APP CONFIG] App configuration rebuilt with new environment');
+  }
+
+  /**
+   * Normaliza el entorno a minúsculas para coincidir con el enum AppEnvironment
+   */
+  private normalizeEnvironment(env: string): AppEnvironment {
+    const normalized = env.toLowerCase();
+    switch(normalized) {
+      case 'vendix_landing': return AppEnvironment.VENDIX_LANDING;
+      case 'vendix_admin': return AppEnvironment.VENDIX_ADMIN;
+      case 'org_landing': return AppEnvironment.ORG_LANDING;
+      case 'org_admin': return AppEnvironment.ORG_ADMIN;
+      case 'store_admin': return AppEnvironment.STORE_ADMIN;
+      case 'store_ecommerce': return AppEnvironment.STORE_ECOMMERCE;
+      default:
+        console.warn(`[APP CONFIG] Unknown environment: ${env}, using VENDIX_LANDING as fallback`);
+        return AppEnvironment.VENDIX_LANDING;
+    }
   }
 
   private async buildAppConfig(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): Promise<AppConfig> {
@@ -508,7 +543,11 @@ export class AppConfigService {
 
   private getCachedUserEnvironment(): AppEnvironment | null {
     try {
-      return localStorage.getItem(USER_ENV_CACHE_KEY) as AppEnvironment | null;
+      const cached = localStorage.getItem(USER_ENV_CACHE_KEY);
+      if (!cached) return null;
+      
+      // Normalizar el entorno en caché para asegurar compatibilidad
+      return this.normalizeEnvironment(cached);
     } catch (error) {
       console.warn('[APP CONFIG] Failed to get cached user environment:', error);
       return null;
