@@ -54,72 +54,36 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.loginSuccess),
       tap(async ({ user, roles, message, updatedEnvironment }) => {
-        // Show server message when present
         if (message) {
           this.toast.success(message);
         }
-
-        console.log('Login successful, determining redirect based on roles:', roles);
-
+        // Log principal del flujo de loginSuccess
+        console.log('[AUTH EFFECTS] loginSuccess$ effect', { user: user?.email, roles });
         try {
-          // 1. Actualizar el entorno del usuario en AppConfigService (ahora es asíncrono)
           if (updatedEnvironment) {
-            console.log('[AUTH EFFECTS] Actualizando entorno del usuario:', updatedEnvironment);
             await this.appConfig.updateEnvironmentForUser(updatedEnvironment);
           }
-
-          // 2. Reconfigurar rutas dinámicas con la nueva configuración del usuario
-          console.log('[AUTH EFFECTS] Reconfigurando rutas dinámicas...');
-          const dynamicRoutes = await this.routeManager.configureDynamicRoutes();
-          console.log('[AUTH EFFECTS] Rutas dinámicas configuradas:', dynamicRoutes);
-
-          // 3. Obtener configuración actual del dominio y tenant
+          await this.routeManager.configureDynamicRoutes();
           const currentConfig = this.appConfig.getCurrentConfig();
           if (!currentConfig) {
-            console.error('[AUTH EFFECTS] No se pudo obtener la configuración actual');
             await this.router.navigateByUrl('/admin', { replaceUrl: true });
             return;
           }
-
-          // 4. Usar domainConfig actualizado (ya viene con el nuevo entorno)
           const domainConfig = currentConfig.domainConfig;
           const tenantContext = currentConfig.tenantConfig;
           const userRoles = roles || [];
-
-          console.log('[AUTH EFFECTS] Configuración obtenida:', {
-            domainEnvironment: domainConfig.environment,
-            userRoles,
-            hasTenantContext: !!tenantContext,
-            updatedEnvironment
-          });
-
-          // 5. Redirigir usando NavigationService - ahora devuelve la ruta directamente
-          console.log('[AUTH EFFECTS] Navegando a ruta apropiada...');
           const targetRoute = this.navigationService.navigateAfterLogin(
             userRoles,
             domainConfig,
             tenantContext
           );
-
-          console.log('[AUTH EFFECTS] Ruta objetivo:', targetRoute);
-          console.log('[AUTH EFFECTS] Rutas disponibles:', this.routeManager.getCurrentRoutes());
-
-          // Verificar que la ruta objetivo esté disponible antes de navegar
           if (this.routeManager.isRouteAvailable(targetRoute)) {
-            console.log('[AUTH EFFECTS] Ruta disponible, navegando...');
-            // Usar navigateByUrl con replaceUrl para evitar recarga completa de la aplicación
             await this.router.navigateByUrl(targetRoute, { replaceUrl: true });
-            console.log('[AUTH EFFECTS] Navegación exitosa a:', targetRoute);
           } else {
-            console.error('[AUTH EFFECTS] Ruta objetivo no disponible:', targetRoute);
-            // Fallback a ruta por defecto del entorno
             const fallbackRoute = this.navigationService.getDefaultRouteForEnvironment(domainConfig.environment);
-            console.log('[AUTH EFFECTS] Usando ruta de fallback:', fallbackRoute);
             await this.router.navigateByUrl(fallbackRoute, { replaceUrl: true });
           }
         } catch (error) {
-          console.error('[AUTH EFFECTS] Error durante redirección post-login:', error);
-          // Fallback seguro usando navigateByUrl
           await this.router.navigateByUrl('/admin', { replaceUrl: true });
         }
       })
@@ -131,6 +95,7 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.logout),
       tap(() => {
+        console.warn('[AUTH EFFECTS] logout$');
         this.authService.logout();
       }),
       map(() => AuthActions.logoutSuccess())
@@ -141,14 +106,13 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.logoutSuccess),
       tap(() => {
-        // Clear local storage
+        console.warn('[AUTH EFFECTS] logoutSuccess$');
         if (typeof localStorage !== 'undefined') {
           localStorage.removeItem('vendix_user');
           localStorage.removeItem('vendix_current_store');
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
         }
-        // Navigate to login using navigateByUrl to avoid full reload
         this.router.navigateByUrl('/auth/login');
       })
     ),
@@ -211,29 +175,36 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.checkAuthStatus),
       mergeMap(() => {
-        // Check if we have persisted auth data
         try {
           const authState = localStorage.getItem('vendix_auth_state');
           if (authState) {
             const parsedState = JSON.parse(authState);
             if (parsedState.user && parsedState.tokens?.accessToken) {
-              console.log('[AUTH EFFECTS] Restoring auth state from localStorage');
-              // Also set tokens in localStorage for interceptor
-              localStorage.setItem('access_token', parsedState.tokens.accessToken);
-              localStorage.setItem('refresh_token', parsedState.tokens.refreshToken);
-              
+              console.log('[AUTH EFFECTS] checkAuthStatus$ restoring', parsedState.user.email);
+              const permissions = parsedState.permissions || [];
+              const roles = parsedState.roles || parsedState.user.roles || [];
               return of(AuthActions.restoreAuthState({
                 user: parsedState.user,
-                tokens: parsedState.tokens
+                tokens: parsedState.tokens,
+                permissions,
+                roles
               }));
             }
           }
         } catch (error) {
-          console.warn('[AUTH EFFECTS] Error checking persisted auth:', error);
+          // Silenciar otros logs
+          localStorage.removeItem('vendix_auth_state');
         }
-        
         return of(AuthActions.clearAuthState());
       })
+    )
+  );
+
+  // Auto-check auth status on app initialization
+  autoCheckAuthStatus$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType('@ngrx/effects/init'),
+      map(() => AuthActions.checkAuthStatus())
     )
   );
 
@@ -241,7 +212,7 @@ export class AuthEffects {
     this.actions$.pipe(
       ofType(AuthActions.restoreAuthState),
       tap(({ user, tokens }) => {
-        console.log('[AUTH EFFECTS] Auth state restored successfully', { user: user.email, hasTokens: !!tokens });
+        console.log('[AUTH EFFECTS] restoreAuthState$', { user: user.email, hasTokens: !!tokens });
       })
     ),
     { dispatch: false }

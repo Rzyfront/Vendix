@@ -65,60 +65,40 @@ export class AppConfigService {
   private themeService = inject(ThemeService);
 
   async initializeApp(): Promise<AppConfig> {
-    this.loadingSubject.next(true);
+      // console.log('[APP CONFIG] 1. Starting initializeApp');
     this.errorSubject.next(null);
-
+      // console.log('[APP CONFIG] 2. Cached user env:', cachedUserEnv);
     try {
       console.log('[APP CONFIG] 1. Starting initializeApp');
 
       const cachedUserEnv = this.getCachedUserEnvironment();
-      console.log('[APP CONFIG] 2. Cached user env:', cachedUserEnv);
+        // console.log('[APP CONFIG] 3. Using cached user environment, skipping domain detection');
       let domainConfig: DomainConfig;
 
       // Si hay un entorno de usuario en caché, priorizarlo sobre la detección de dominio
       if (cachedUserEnv) {
-        console.log('[APP CONFIG] 3. Using cached user environment, skipping domain detection');
+        // domainConfig = await this.detectDomain();
         domainConfig = await this.detectDomain();
-        // Forzar el entorno del usuario en lugar de sobrescribirlo
         domainConfig = {
           ...domainConfig,
           environment: cachedUserEnv
         };
-        console.log('[APP CONFIG] 3.1. Domain config after applying cached user env:', domainConfig);
       } else {
-        console.log('[APP CONFIG] 3. No cached user env, detecting domain...');
         domainConfig = await this.detectDomain();
-        console.log('[APP CONFIG] 6. detectDomain has resolved.');
       }
-
-      console.log('[APP CONFIG] 7. Effective Domain/User config resolved:', domainConfig);
-
-      console.log('[APP CONFIG] 8. Awaiting loadTenantConfigByDomain...');
       const tenantConfig = await this.loadTenantConfigByDomain(domainConfig);
-      console.log('[APP CONFIG] 9. loadTenantConfigByDomain has resolved.');
-
-      console.log('[APP CONFIG] 10. Awaiting buildAppConfig...');
       const appConfig = await this.buildAppConfig(domainConfig, tenantConfig);
-      console.log('[APP CONFIG] 11. buildAppConfig has resolved.');
-
       if (appConfig) {
         await this.themeService.applyAppConfiguration(appConfig);
       }
-
       this.cacheAppConfig(appConfig);
       this.configSubject.next(appConfig);
-      console.log('[APP CONFIG] 12. Config subject has been updated.');
-
-      // Dispatch to store AFTER the main config is ready to avoid deadlocks.
       this.store.dispatch(TenantActions.setDomainConfig({ domainConfig: appConfig.domainConfig }));
-
       this.loadingSubject.next(false);
-
-      console.log('[APP CONFIG] 13. Unified application initialization completed successfully');
       return appConfig;
 
     } catch (error) {
-      console.error('[APP CONFIG] Error during unified initialization:', error);
+      // Silenciar error
       this.errorSubject.next(error instanceof Error ? error.message : 'Unknown error');
       this.loadingSubject.next(false);
       throw error;
@@ -128,28 +108,20 @@ export class AppConfigService {
   public async updateEnvironmentForUser(userAppEnvironment: string): Promise<void> {
     const currentConfig = this.getCurrentConfig();
     if (!currentConfig) {
-      console.warn('[APP CONFIG] Cannot update environment for user: App is not initialized.');
       return;
     }
-
     // Normalizar el entorno a minúsculas para coincidir con el enum AppEnvironment
     const normalizedEnv = this.normalizeEnvironment(userAppEnvironment);
-    console.log(`[APP CONFIG] Updating environment for user. From: ${currentConfig.environment}, To: ${normalizedEnv} (original: ${userAppEnvironment})`);
-
     // Reconstruir la configuración completa con el nuevo entorno
     const domainConfig: DomainConfig = {
       ...currentConfig.domainConfig,
       environment: normalizedEnv
     };
-
     const tenantConfig = currentConfig.tenantConfig;
     const newConfig = await this.buildAppConfig(domainConfig, tenantConfig);
-
     this.cacheUserEnvironment(normalizedEnv);
     this.configSubject.next(newConfig);
     this.cacheAppConfig(newConfig);
-
-    console.log('[APP CONFIG] App configuration rebuilt with new environment');
   }
 
   /**
@@ -165,7 +137,6 @@ export class AppConfigService {
       case 'store_admin': return AppEnvironment.STORE_ADMIN;
       case 'store_ecommerce': return AppEnvironment.STORE_ECOMMERCE;
       default:
-        console.warn(`[APP CONFIG] Unknown environment: ${env}, using VENDIX_LANDING as fallback`);
         return AppEnvironment.VENDIX_LANDING;
     }
   }
@@ -181,7 +152,7 @@ export class AppConfigService {
       branding: this.transformBrandingFromApi(tenantConfig?.branding || this.getDefaultBranding())
     };
   }
-
+      // Silenciar error
   // --- RESTORED METHODS ---
 
   private resolveRoutes(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): RouteConfig[] {
@@ -190,46 +161,41 @@ export class AppConfigService {
     routes.push(...this.resolvePrivateRoutes(domainConfig));
     return routes;
   }
-
+        // console.log(`[APP CONFIG] Domain settings found in cache`);
   private resolvePublicRoutes(domainConfig: DomainConfig): RouteConfig[] {
     // Define a standard set of auth child routes for reuse
     const standardAuthChildRoutes: RouteConfig[] = [
-      { path: 'login', component: 'ContextualLoginComponent', layout: 'auth', isPublic: true },
       { path: 'register', component: 'RegisterOwnerComponent', layout: 'auth', isPublic: true },
       { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
       { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
       { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
     ];
-
     const authParentRoute: RouteConfig = {
       path: 'auth',
       isPublic: true,
       children: standardAuthChildRoutes
     };
-
     switch(domainConfig.environment) {
       case AppEnvironment.VENDIX_LANDING:
         return [
           { path: '', component: 'VendixLandingComponent', layout: 'public', isPublic: true },
           authParentRoute
         ];
-
       case AppEnvironment.ORG_LANDING:
         return [
           { path: '', component: 'OrgLandingComponent', layout: 'public', isPublic: true },
           { path: 'shop', component: 'OrgEcommerceComponent', layout: 'storefront', isPublic: true },
           authParentRoute
         ];
-
-      case AppEnvironment.STORE_ECOMMERCE:
-        const storeAuthRoutes = standardAuthChildRoutes.map(r => 
-            r.path === 'register' ? { ...r, component: 'StoreAuthRegisterComponent' } : r
+      case AppEnvironment.STORE_ECOMMERCE: {
+        const storeAuthRoutes = standardAuthChildRoutes.map(r =>
+          r.path === 'register' ? { ...r, component: 'StoreAuthRegisterComponent' } : r
         );
         return [
           { path: '', component: 'StoreEcommerceComponent', layout: 'storefront', isPublic: true },
           { ...authParentRoute, children: storeAuthRoutes }
         ];
-
+      }
       default:
         return [
           { path: '', component: 'LandingComponent', layout: 'public', isPublic: true },
@@ -258,7 +224,6 @@ export class AppConfigService {
             guards: ['AuthGuard'] 
           }
         ];
-
       case AppEnvironment.ORG_ADMIN:
         return [
           { 
@@ -280,7 +245,6 @@ export class AppConfigService {
             guards: ['AuthGuard'] 
           }
         ];
-
       case AppEnvironment.STORE_ADMIN:
         return [
           { 
@@ -297,7 +261,7 @@ export class AppConfigService {
           },
           { 
             path: 'admin/orders', 
-            component: 'OrderManagementComponent', 
+            component: 'OrderManagementComponent',
             layout: 'store-admin', 
             guards: ['AuthGuard'] 
           },
@@ -308,7 +272,6 @@ export class AppConfigService {
             guards: ['AuthGuard'] 
           }
         ];
-
       case AppEnvironment.STORE_ECOMMERCE:
         return [
           { 
@@ -324,7 +287,6 @@ export class AppConfigService {
             guards: ['AuthGuard'] 
           }
         ];
-
       default:
         return [];
     }

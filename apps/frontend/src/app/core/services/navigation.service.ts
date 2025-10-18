@@ -19,21 +19,14 @@ export class NavigationService {
     domainConfig: DomainConfig,
     tenantContext: TenantConfig | null
   ): string {
-    console.log('[NAVIGATION SERVICE] Redirección post-login para:', {
-      userRoles,
-      domainEnvironment: domainConfig.environment,
-      tenantContext: tenantContext ? 'present' : 'null'
-    });
 
     // 1. Resolver el layout apropiado
     const layout = this.layoutResolver.resolveLayout(domainConfig, userRoles, tenantContext);
     
     if (!layout) {
-      console.warn('[NAVIGATION SERVICE] No se pudo resolver layout, usando fallback');
       return this.getFallbackRoute(userRoles);
     }
 
-    console.log('[NAVIGATION SERVICE] Layout resuelto:', layout.name, 'ruta:', layout.route);
     return layout.route;
   }
 
@@ -46,7 +39,6 @@ export class NavigationService {
     tenantContext: TenantConfig | null
   ): string {
     const targetRoute = this.redirectAfterLogin(userRoles, domainConfig, tenantContext);
-    console.log('[NAVIGATION SERVICE] Ruta objetivo para navegación:', targetRoute);
     return targetRoute;
   }
 
@@ -58,12 +50,10 @@ export class NavigationService {
     currentDomainConfig: DomainConfig,
     tenantContext: TenantConfig | null
   ): string {
-    console.log('[NAVIGATION SERVICE] Redireccionando a dominio apropiado para:', userRoles);
 
     // 1. Super admin siempre va a Vendix Admin
     if (userRoles.includes('super_admin')) {
       if (currentDomainConfig.environment !== AppEnvironment.VENDIX_ADMIN) {
-        console.log('[NAVIGATION SERVICE] Super admin redirigido a Vendix Admin');
         return '/superadmin';
       }
       return '/superadmin';
@@ -72,7 +62,6 @@ export class NavigationService {
     // 2. Usuario en dominio incorrecto - redirigir al dominio apropiado
     const appropriateDomain = this.getAppropriateDomainForUser(userRoles, tenantContext);
     if (appropriateDomain && appropriateDomain !== currentDomainConfig.hostname) {
-      console.log('[NAVIGATION SERVICE] Redirigiendo a dominio:', appropriateDomain);
       // En un escenario real, aquí harías window.location.href = appropriateDomain
       // Por ahora, redirigimos a la ruta apropiada en el dominio actual
       return this.redirectAfterLogin(userRoles, currentDomainConfig, tenantContext);
@@ -125,7 +114,6 @@ export class NavigationService {
     }
 
     // Fallback absoluto - dashboard principal
-    console.warn('[NAVIGATION SERVICE] Usando fallback absoluto a /admin');
     return '/admin';
   }
 
@@ -133,7 +121,6 @@ export class NavigationService {
    * Redirección para acceso denegado
    */
   redirectToAccessDenied(returnUrl?: string): Promise<boolean> {
-    console.log('[NAVIGATION SERVICE] Redirigiendo a acceso denegado');
     const queryParams = returnUrl ? { returnUrl } : {};
     return this.router.navigate(['/access-denied'], { queryParams });
   }
@@ -142,7 +129,6 @@ export class NavigationService {
    * Redirección para página no encontrada
    */
   redirectToNotFound(): Promise<boolean> {
-    console.log('[NAVIGATION SERVICE] Redirigiendo a página no encontrada');
     return this.router.navigateByUrl('/not-found');
   }
 
@@ -150,7 +136,6 @@ export class NavigationService {
    * Redirección al login contextual
    */
   redirectToLogin(returnUrl?: string): Promise<boolean> {
-    console.log('[NAVIGATION SERVICE] Redirigiendo a login');
     const queryParams = returnUrl ? { returnUrl } : {};
     return this.router.navigate(['/auth/login'], { queryParams });
   }

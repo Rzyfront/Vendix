@@ -1,40 +1,61 @@
 import { AuthState } from './auth/auth.reducer';
 import { User } from '../services/auth.service';
 
-// --- NEW, SIMPLIFIED HYDRATION LOGIC ---
+// --- UNIFIED HYDRATION LOGIC ---
 
 /**
- * Rehydrates the authentication state from granular localStorage keys.
+ * Rehydrates the authentication state from localStorage.
  * This is the single source of truth for re-creating the session on page load.
  */
 export function hydrateAuthState(): Partial<AuthState> {
   try {
+    const unifiedAuthState = localStorage.getItem('vendix_auth_state');
+    if (unifiedAuthState) {
+      const parsedState = JSON.parse(unifiedAuthState);
+      if (parsedState.user && parsedState.tokens?.accessToken) {
+        console.log('[HYDRATE] OK unified', parsedState.user.email);
+        return {
+          user: parsedState.user,
+          tokens: parsedState.tokens,
+          roles: parsedState.user.roles || [],
+          permissions: parsedState.permissions || [],
+          loading: false,
+          error: null,
+          isAuthenticated: true
+        };
+      }
+    }
     const userJson = localStorage.getItem('vendix_user_info');
     const accessToken = localStorage.getItem('access_token');
     const refreshToken = localStorage.getItem('refresh_token');
-
     if (userJson && accessToken && refreshToken) {
       const user: User = JSON.parse(userJson);
-      console.log('[HYDRATE] Auth state rehydrated for user:', user.email);
+      console.log('[HYDRATE] OK granular', user.email);
+      const unifiedState = {
+        user,
+        tokens: { accessToken, refreshToken },
+        roles: user.roles || [],
+        permissions: []
+      };
+      localStorage.setItem('vendix_auth_state', JSON.stringify(unifiedState));
       return {
         user: user,
         tokens: { accessToken, refreshToken },
         roles: user.roles || [],
-        // Permissions can be re-fetched or decoded from token if needed upon app load
         permissions: [],
         loading: false,
         error: null,
+        isAuthenticated: true
       };
     }
   } catch (error) {
-    console.warn('[HYDRATE] Failed to rehydrate auth state from localStorage:', error);
-    // Clear potentially corrupted keys
+    console.warn('[HYDRATE] ERROR, limpiando storage');
+    localStorage.removeItem('vendix_auth_state');
     localStorage.removeItem('vendix_user_info');
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
   }
-
-  // Return default initial state if hydration fails
+  console.warn('[HYDRATE] DEFAULT, no auth state');
   return {
     user: null,
     tokens: null,
@@ -42,7 +63,47 @@ export function hydrateAuthState(): Partial<AuthState> {
     permissions: [],
     loading: false,
     error: null,
+    isAuthenticated: false
   };
+}
+
+/**
+ * Saves authentication state to localStorage for persistence
+ */
+export function saveAuthState(state: AuthState): void {
+  try {
+    if (state.user && state.tokens) {
+      const stateToSave = {
+        user: state.user,
+        tokens: state.tokens,
+        roles: state.roles,
+        permissions: state.permissions
+      };
+      localStorage.setItem('vendix_auth_state', JSON.stringify(stateToSave));
+      
+      // Also save to granular keys for backward compatibility
+      localStorage.setItem('vendix_user_info', JSON.stringify(state.user));
+      localStorage.setItem('access_token', state.tokens.accessToken);
+      localStorage.setItem('refresh_token', state.tokens.refreshToken);
+    }
+  } catch (error) {
+    console.warn('[PERSISTENCE] Failed to save auth state:', error);
+  }
+}
+
+/**
+ * Clears authentication state from localStorage
+ */
+export function clearAuthState(): void {
+  try {
+    console.warn('[CLEAR AUTH STATE]');
+    localStorage.removeItem('vendix_auth_state');
+    localStorage.removeItem('vendix_user_info');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+  } catch (error) {
+    // Silenciar otros logs
+  }
 }
 
 /**

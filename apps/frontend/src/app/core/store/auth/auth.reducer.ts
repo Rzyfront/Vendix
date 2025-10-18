@@ -1,6 +1,7 @@
 import { createReducer, on } from '@ngrx/store';
 import * as AuthActions from './auth.actions';
 import { extractApiErrorMessage, NormalizedApiPayload } from '../../utils/api-error-handler';
+import { saveAuthState, clearAuthState } from '../persistence';
 
 export interface AuthState {
   user: any | null;
@@ -31,16 +32,21 @@ export const authReducer = createReducer(
     error: null
   })),
 
-  on(AuthActions.loginSuccess, (state, { user, tokens, permissions, roles }) => ({
-    ...state,
-    user,
-    tokens,
-    permissions: permissions || [],
-    roles: roles || [],
-    loading: false,
-    error: null,
-    isAuthenticated: true
-  })),
+  on(AuthActions.loginSuccess, (state, { user, tokens, permissions, roles }) => {
+    const newState = {
+      ...state,
+      user,
+      tokens,
+      permissions: permissions || [],
+      roles: roles || [],
+      loading: false,
+      error: null,
+      isAuthenticated: true
+    };
+    // Save to localStorage for persistence
+    saveAuthState(newState);
+    return newState;
+  }),
 
   on(AuthActions.loginFailure, (state, { error }) => ({
     ...state,
@@ -64,12 +70,17 @@ export const authReducer = createReducer(
     loading: true
   })),
 
-  on(AuthActions.refreshTokenSuccess, (state, { tokens }) => ({
-    ...state,
-    tokens,
-    loading: false,
-    error: null
-  })),
+  on(AuthActions.refreshTokenSuccess, (state, { tokens }) => {
+    const newState = {
+      ...state,
+      tokens,
+      loading: false,
+      error: null
+    };
+    // Save updated tokens to localStorage
+    saveAuthState(newState);
+    return newState;
+  }),
 
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
     ...state,
@@ -115,16 +126,21 @@ export const authReducer = createReducer(
     error
   })),
 
-  on(AuthActions.restoreAuthState, (state, { user, tokens, permissions, roles }) => ({
-    ...state,
-    user,
-    tokens,
-    permissions: permissions || [],
-    roles: roles || [],
-    isAuthenticated: true,
-    loading: false,
-    error: null
-  })),
+  on(AuthActions.restoreAuthState, (state, { user, tokens, permissions, roles }) => {
+    const newState = {
+      ...state,
+      user,
+      tokens,
+      permissions: permissions || [],
+      roles: roles || [],
+      isAuthenticated: true,
+      loading: false,
+      error: null
+    };
+    // Save to localStorage to ensure consistency
+    saveAuthState(newState);
+    return newState;
+  }),
 
   // Forgot Owner Password
   on(AuthActions.forgotOwnerPassword, (state) => ({

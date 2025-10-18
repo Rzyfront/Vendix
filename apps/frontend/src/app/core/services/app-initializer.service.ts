@@ -24,15 +24,22 @@ export class AppInitializerService {
       this.initializationError = null;
       console.log('[APP INITIALIZER] Starting initialization...');
 
-      // 1. Load domain and user configuration
+      // 1. Trigger auth status check to restore session from localStorage
+      this.authFacade.checkAuthStatus();
+      console.log('[APP INITIALIZER] Auth status check triggered.');
+
+      // 2. Load domain and user configuration
       const appConfig = await this.appConfigService.initializeApp();
       console.log('[APP INITIALIZER] App configuration resolved.');
 
-      // 2. Set the dynamic routes in the router
+      // 3. Set the dynamic routes in the router
       await this.routeManager.configureDynamicRoutes();
       console.log('[APP INITIALIZER] Dynamic routes configured.');
 
-      // 3. Perform session validation for authenticated users
+      // 4. Wait a brief moment for auth state to be fully hydrated
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 5. Perform session validation for authenticated users
       const isAuthenticated = this.authFacade.isLoggedIn();
       if (isAuthenticated) {
         const user = this.authFacade.getCurrentUser();
@@ -47,7 +54,7 @@ export class AppInitializerService {
         }
       }
 
-      // 4. Handle initial navigation after routes are configured
+      // 6. Handle initial navigation after routes are configured and auth state is ready
       await this.handleInitialNavigation(appConfig);
       
       console.log('[APP INITIALIZER] Initialization completed successfully.');

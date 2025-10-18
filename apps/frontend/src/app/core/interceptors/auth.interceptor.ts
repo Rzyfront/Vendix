@@ -23,6 +23,7 @@ export class AuthInterceptor implements HttpInterceptor {
     return next.handle(req).pipe(
       catchError(error => {
         if (error instanceof HttpErrorResponse && error.status === 401 && req.url.startsWith(environment.apiUrl)) {
+          console.warn('[AUTH INTERCEPTOR] 401 detected for request:', req.url, error);
           return this.handle401Error(req, next);
         }
         return throwError(() => error);
@@ -62,11 +63,13 @@ export class AuthInterceptor implements HttpInterceptor {
             }
 
             // If refresh failed, logout user
+            console.warn('[AUTH INTERCEPTOR] Token refresh failed, logging out user');
             this.authService.logout();
             return throwError(() => new Error('Token refresh failed'));
           }),
           catchError((error) => {
             this.isRefreshing = false;
+            console.warn('[AUTH INTERCEPTOR] Error during token refresh, logging out user', error);
             this.authService.logout();
             return throwError(() => error);
           })
