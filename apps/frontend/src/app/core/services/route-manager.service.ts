@@ -410,11 +410,38 @@ export class RouteManagerService {
   }
 
   /**
-   * Verifica si una ruta está disponible
+   * Verifica si una ruta está disponible (búsqueda recursiva en rutas y hijos)
    */
   isRouteAvailable(path: string): boolean {
     const routes = this.getCurrentRoutes();
-    return routes.some(route => route.path === path);
+    // Normalizar la ruta: remover slash inicial si existe
+    const normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+    console.log('[ROUTE MANAGER] Checking route availability:', { original: path, normalized: normalizedPath });
+    console.log('[ROUTE MANAGER] Available routes:', routes);
+    return this.checkRouteRecursive(routes, normalizedPath);
+  }
+
+  /**
+   * Busca recursivamente una ruta en la configuración de rutas
+   */
+  private checkRouteRecursive(routes: Routes, targetPath: string): boolean {
+    for (const route of routes) {
+      // Verificar la ruta actual (manejar ruta vacía como '/')
+      if (route.path === targetPath || (targetPath === '' && route.path === '')) {
+        console.log('[ROUTE MANAGER] Route found:', route.path);
+        return true;
+      }
+      
+      // Verificar rutas hijas recursivamente
+      if (route.children && route.children.length > 0) {
+        if (this.checkRouteRecursive(route.children, targetPath)) {
+          return true;
+        }
+      }
+    }
+    
+    console.log('[ROUTE MANAGER] Route not found:', targetPath);
+    return false;
   }
 
   /**
