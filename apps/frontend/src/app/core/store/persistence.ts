@@ -49,11 +49,7 @@ export function hydrateAuthState(): Partial<AuthState> {
       };
     }
   } catch (error) {
-    console.warn('[HYDRATE] ERROR, limpiando storage');
-    localStorage.removeItem('vendix_auth_state');
-    localStorage.removeItem('vendix_user_info');
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+    console.warn('[HYDRATE] ERROR, no se puede parsear vendix_auth_state, retornando estado inicial ', error);
   }
   console.warn('[HYDRATE] DEFAULT, no auth state');
   return {

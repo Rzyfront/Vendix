@@ -103,7 +103,10 @@ export class AuthService {
   ) {}
 
   // Login - Refactored for layered config and granular caching
-  login(loginDto: LoginDto): Observable<AuthResponse & { updatedEnvironment?: AppEnvironment }> {
+  /**
+   * El updatedEnvironment siempre será string en UPPER_SNAKE_CASE
+   */
+  login(loginDto: LoginDto): Observable<AuthResponse & { updatedEnvironment?: string }> {
     const enrichedLoginDto = { ...loginDto };
 
     if (!enrichedLoginDto.organization_slug && !enrichedLoginDto.store_slug) {
@@ -126,7 +129,7 @@ export class AuthService {
           // --- Layer 3: Update App Environment from User Settings ---
           // Ahora esperamos a que se complete la actualización del entorno
           // Pasamos el string directamente, AppConfigService lo normalizará
-          await this.appConfigService.updateEnvironmentForUser(user_settings.config.app);
+          await this.appConfigService.updateEnvironmentForUser((user_settings.config.app || '').toUpperCase());
 
           // --- Granular Caching ---
           if (typeof localStorage !== 'undefined') {
@@ -143,7 +146,7 @@ export class AuthService {
           user.roles = roles; // Attach roles to the user object for the session
 
           // --- NEW: Validate that the user's role is allowed for the target environment ---
-          if (!this.validateUserEnvironmentAccess(roles, user_settings.config.app)) {
+          if (!this.validateUserEnvironmentAccess(roles, (user_settings.config.app || '').toUpperCase())) {
             // Clear any cached data from the failed login
             this.appConfigService.clearCache();
             throw new Error(`Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`);
@@ -157,7 +160,7 @@ export class AuthService {
               user,
               permissions,
             },
-            updatedEnvironment: user_settings.config.app
+            updatedEnvironment: (user_settings.config.app || '').toUpperCase()
           };
         })
       );
@@ -174,29 +177,25 @@ export class AuthService {
       return false; // No roles, no access
     }
 
+  // Normalizar el entorno a mayúsculas para comparar con el enum
+  const normalizedEnv = (targetEnv || '').toUpperCase();
     // Get the primary role for simplicity
     const primaryRole = userRoles[0];
 
     switch (primaryRole) {
       case 'super_admin':
-        return targetEnv === 'VENDIX_ADMIN';
-      
+        return normalizedEnv === 'VENDIX_ADMIN';
       case 'admin':
       case 'owner':
-        return targetEnv === 'ORG_ADMIN' || targetEnv === 'STORE_ADMIN';
-
+        return normalizedEnv === 'ORG_ADMIN' || normalizedEnv === 'STORE_ADMIN';
       case 'manager':
-        return targetEnv === 'STORE_ADMIN';
-
       case 'employee':
-        return targetEnv === 'STORE_ADMIN';
-
+        return normalizedEnv === 'STORE_ADMIN';
       case 'customer':
-        return targetEnv === 'STORE_ECOMMERCE';
-
+        return normalizedEnv === 'STORE_ECOMMERCE';
       default:
         // For any other custom role, default to STORE_ADMIN access
-        return targetEnv === 'STORE_ADMIN';
+        return normalizedEnv === 'STORE_ADMIN';
     }
   }
 

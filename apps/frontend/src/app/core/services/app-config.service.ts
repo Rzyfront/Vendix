@@ -71,20 +71,22 @@ export class AppConfigService {
     try {
       console.log('[APP CONFIG] 1. Starting initializeApp');
 
-      const cachedUserEnv = this.getCachedUserEnvironment();
+  const cachedUserEnv = this.getCachedUserEnvironment();
+  console.log('[APP CONFIG][DEBUG] cachedUserEnv:', cachedUserEnv);
         // console.log('[APP CONFIG] 3. Using cached user environment, skipping domain detection');
       let domainConfig: DomainConfig;
 
       // Si hay un entorno de usuario en caché, priorizarlo sobre la detección de dominio
       if (cachedUserEnv) {
-        // domainConfig = await this.detectDomain();
         domainConfig = await this.detectDomain();
         domainConfig = {
           ...domainConfig,
-          environment: cachedUserEnv
+          environment: this.normalizeEnvironment(cachedUserEnv)
         };
+        console.log('[APP CONFIG][DEBUG] environment after user override:', domainConfig.environment);
       } else {
         domainConfig = await this.detectDomain();
+        console.log('[APP CONFIG][DEBUG] environment from domain:', domainConfig.environment);
       }
       const tenantConfig = await this.loadTenantConfigByDomain(domainConfig);
       const appConfig = await this.buildAppConfig(domainConfig, tenantConfig);
@@ -110,7 +112,7 @@ export class AppConfigService {
     if (!currentConfig) {
       return;
     }
-    // Normalizar el entorno a minúsculas para coincidir con el enum AppEnvironment
+    // Normalizar el entorno a mayúsculas para coincidir con el enum AppEnvironment
     const normalizedEnv = this.normalizeEnvironment(userAppEnvironment);
     // Reconstruir la configuración completa con el nuevo entorno
     const domainConfig: DomainConfig = {
@@ -119,6 +121,7 @@ export class AppConfigService {
     };
     const tenantConfig = currentConfig.tenantConfig;
     const newConfig = await this.buildAppConfig(domainConfig, tenantConfig);
+    // Guardar el environment en mayúsculas (UPPER_SNAKE_CASE)
     this.cacheUserEnvironment(normalizedEnv);
     this.configSubject.next(newConfig);
     this.cacheAppConfig(newConfig);
@@ -128,14 +131,14 @@ export class AppConfigService {
    * Normaliza el entorno a minúsculas para coincidir con el enum AppEnvironment
    */
   private normalizeEnvironment(env: string): AppEnvironment {
-    const normalized = env.toLowerCase();
+    const normalized = env.toUpperCase();
     switch(normalized) {
-      case 'vendix_landing': return AppEnvironment.VENDIX_LANDING;
-      case 'vendix_admin': return AppEnvironment.VENDIX_ADMIN;
-      case 'org_landing': return AppEnvironment.ORG_LANDING;
-      case 'org_admin': return AppEnvironment.ORG_ADMIN;
-      case 'store_admin': return AppEnvironment.STORE_ADMIN;
-      case 'store_ecommerce': return AppEnvironment.STORE_ECOMMERCE;
+      case 'VENDIX_LANDING': return AppEnvironment.VENDIX_LANDING;
+      case 'VENDIX_ADMIN': return AppEnvironment.VENDIX_ADMIN;
+      case 'ORG_LANDING': return AppEnvironment.ORG_LANDING;
+      case 'ORG_ADMIN': return AppEnvironment.ORG_ADMIN;
+      case 'STORE_ADMIN': return AppEnvironment.STORE_ADMIN;
+      case 'STORE_ECOMMERCE': return AppEnvironment.STORE_ECOMMERCE;
       default:
         return AppEnvironment.VENDIX_LANDING;
     }
@@ -598,15 +601,7 @@ export class AppConfigService {
     let appEnvironment: AppEnvironment;
     const appType = domainInfo.config?.app;
     if (appType) {
-      switch (appType) {
-        case 'VENDIX_LANDING': appEnvironment = AppEnvironment.VENDIX_LANDING; break;
-        case 'VENDIX_ADMIN': appEnvironment = AppEnvironment.VENDIX_ADMIN; break;
-        case 'ORG_LANDING': appEnvironment = AppEnvironment.ORG_LANDING; break;
-        case 'ORG_ADMIN': appEnvironment = AppEnvironment.ORG_ADMIN; break;
-        case 'STORE_ADMIN': appEnvironment = AppEnvironment.STORE_ADMIN; break;
-        case 'STORE_ECOMMERCE': appEnvironment = AppEnvironment.STORE_ECOMMERCE; break;
-        default: throw new Error(`Unknown app type: ${appType}`);
-      }
+      appEnvironment = this.normalizeEnvironment(appType);
     } else {
       throw new Error('No app environment information provided in domain resolution config');
     }
