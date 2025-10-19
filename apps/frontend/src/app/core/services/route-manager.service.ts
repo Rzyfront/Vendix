@@ -299,36 +299,6 @@ export class RouteManagerService {
   }
 
   /**
-   * Resuelve los guards para una ruta
-   */
-  private resolveGuards(guardNames: string[], isPrivate: boolean): any[] {
-    const guards: any[] = [];
-
-    // Agregar guards específicos
-    guardNames.forEach(guardName => {
-      const guard = this.guardRegistry.get(guardName);
-      if (guard) guards.push(guard);
-    });
-
-    // Agregar guard de autenticación para rutas privadas
-    if (isPrivate && !guardNames.includes('AuthGuard')) {
-      guards.push(AuthGuard);
-    }
-
-
-
-    return guards;
-  }
-
-  /**
-   * Determina si se debe agregar DomainGuard
-   */
-  private shouldAddDomainGuard(guardNames: string[]): boolean {
-    const domainSpecificGuards = ['SuperAdminGuard', 'AdminGuard', 'POSGuard'];
-    return guardNames.some(guard => domainSpecificGuards.includes(guard));
-  }
-
-  /**
    * Obtiene la ruta por defecto para un entorno
    */
   public getDefaultRouteForEnvironment(environment: AppEnvironment): string {

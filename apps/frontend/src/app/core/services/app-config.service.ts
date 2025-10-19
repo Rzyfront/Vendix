@@ -124,9 +124,6 @@ export class AppConfigService {
     this.cacheAppConfig(newConfig);
   }
 
-  /**
-   * Normaliza el entorno a mayúsculas para coincidir con el enum AppEnvironment
-   */
   private normalizeEnvironment(env: string): AppEnvironment {
     const normalized = env.toUpperCase();
     switch(normalized) {
@@ -150,7 +147,6 @@ export class AppConfigService {
       branding: this.transformBrandingFromApi(domainConfig.customConfig?.branding || this.getDefaultBranding())
     };
   }
-  // --- RESTORED METHODS ---
 
   private resolveRoutes(domainConfig: DomainConfig): RouteConfig[] {
     const routes: RouteConfig[] = [];
@@ -171,9 +167,6 @@ export class AppConfigService {
     }
   }
 
-  /**
-   * Rutas privadas por entorno
-   */
   private resolvePrivateRoutes(domainConfig: DomainConfig): RouteConfig[] {
     switch(domainConfig.environment) {
       case AppEnvironment.VENDIX_ADMIN:
@@ -189,10 +182,6 @@ export class AppConfigService {
     }
   }
 
-
-  /**
-   * Devuelve los layouts públicos disponibles para el dominio/entorno (sin lógica de usuario)
-   */
   getPublicLayouts(domainConfig: DomainConfig): LayoutConfig[] {
     return [
       {
@@ -216,11 +205,6 @@ export class AppConfigService {
     ].filter(layout => layout.allowedEnvironments.includes(domainConfig.environment));
   }
 
-  // ...existing code...
-
-  /**
-   * Transformación correcta de branding desde API
-   */
   private transformBrandingFromApi(apiBranding: any): BrandingConfig {
     return {
       logo: {
@@ -278,8 +262,6 @@ export class AppConfigService {
   }
     };
   }
-
-  // --- UNCHANGED METHODS ---
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
     let currentHostname = hostname || window.location.hostname;
@@ -357,18 +339,10 @@ export class AppConfigService {
     return this.configSubject.value;
   }
 
-  /**
-   * Indica si la configuración principal ya fue establecida (setupConfig ejecutado).
-   */
   isConfigSetup(): boolean {
     return this.configSubject.value !== null;
   }
 
-
-  /**
-   * Limpia la caché y vuelve a ejecutar la configuración principal (setupConfig).
-   * Úsalo para reiniciar y volver a aplicar la configuración global de la app.
-   */
   async resetAndSetupConfig(): Promise<AppConfig> {
     this.clearCache();
     return await this.setupConfig();
@@ -452,7 +426,6 @@ export class AppConfigService {
       return null;
     }
   }
-
 
   private getTenantCacheKey(domainConfig: DomainConfig): string {
     const parts = [domainConfig.environment as string];
