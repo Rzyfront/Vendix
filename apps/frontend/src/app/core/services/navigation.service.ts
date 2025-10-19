@@ -30,17 +30,7 @@ export class NavigationService {
     return layout.route;
   }
 
-  /**
-   * Navega a la ruta apropiada después del login
-   */
-  navigateAfterLogin(
-    userRoles: string[],
-    domainConfig: DomainConfig,
-    tenantContext: TenantConfig | null
-  ): string {
-    const targetRoute = this.redirectAfterLogin(userRoles, domainConfig, tenantContext);
-    return targetRoute;
-  }
+  // Usa directamente redirectAfterLogin para obtener la ruta post-login
 
   /**
    * Redirección inteligente cuando el dominio no coincide con el contexto del usuario

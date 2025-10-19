@@ -6,6 +6,10 @@ import { BehaviorSubject, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { Store } from '@ngrx/store';
 import { DomainConfig, AppEnvironment, DomainType, DomainResolution } from '../models/domain-config.interface';
+import { superAdminRoutes } from '../../routes/super_admin.routes';
+import { orgAdminRoutes } from '../../routes/org_admin.routes';
+import { storeAdminRoutes } from '../../routes/store_admin.routes';
+import { ecommerceRoutes } from '../../routes/ecommerce.routes';
 import { TenantConfig, BrandingConfig } from '../models/tenant-config.interface';
 import { ThemeService } from './theme.service';
 import { environment } from '../../../environments/environment';
@@ -27,6 +31,7 @@ export interface RouteConfig {
   isPublic?: boolean;
   children?: RouteConfig[]; // Add children property
 }
+
 
 export interface LayoutConfig {
   name: string;
@@ -213,83 +218,13 @@ export class AppConfigService {
   private resolvePrivateRoutes(domainConfig: DomainConfig): RouteConfig[] {
     switch(domainConfig.environment) {
       case AppEnvironment.VENDIX_ADMIN:
-        return [
-          { 
-            path: 'superadmin', 
-            component: 'SuperAdminDashboardComponent', 
-            layout: 'super-admin', 
-            guards: ['AuthGuard'] 
-          },
-          {
-            path: 'superadmin/tenants', 
-            component: 'TenantListComponent', 
-            layout: 'super-admin', 
-            guards: ['AuthGuard'] 
-          }
-        ];
+        return superAdminRoutes;
       case AppEnvironment.ORG_ADMIN:
-        return [
-          { 
-            path: 'admin', 
-            component: 'OrgAdminDashboardComponent', 
-            layout: 'organization-admin', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'admin/stores', 
-            component: 'StoreManagementComponent', 
-            layout: 'organization-admin', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'admin/users', 
-            component: 'UserManagementComponent', 
-            layout: 'organization-admin', 
-            guards: ['AuthGuard'] 
-          }
-        ];
+        return orgAdminRoutes;
       case AppEnvironment.STORE_ADMIN:
-        return [
-          { 
-            path: 'admin', 
-            component: 'StoreAdminDashboardComponent', 
-            layout: 'store-admin', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'admin/products', 
-            component: 'ProductManagementComponent', 
-            layout: 'store-admin', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'admin/orders', 
-            component: 'OrderManagementComponent',
-            layout: 'store-admin', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'pos', 
-            component: 'POSComponent', 
-            layout: 'pos', 
-            guards: ['AuthGuard'] 
-          }
-        ];
+        return storeAdminRoutes;
       case AppEnvironment.STORE_ECOMMERCE:
-        return [
-          { 
-            path: 'account', 
-            component: 'CustomerAccountComponent', 
-            layout: 'store-ecommerce', 
-            guards: ['AuthGuard'] 
-          },
-          { 
-            path: 'orders', 
-            component: 'CustomerOrdersComponent', 
-            layout: 'store-ecommerce', 
-            guards: ['AuthGuard'] 
-          }
-        ];
+        return ecommerceRoutes;
       default:
         return [];
     }

@@ -301,7 +301,7 @@ export class AuthService {
       return;
     }
 
-    const targetRoute = this.navigationService.navigateAfterLogin(
+  const targetRoute = this.navigationService.redirectAfterLogin(
       user.roles || [],
       domainConfig,
       tenantContext

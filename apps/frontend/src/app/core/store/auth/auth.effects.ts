@@ -72,7 +72,7 @@ export class AuthEffects {
           const domainConfig = currentConfig.domainConfig;
           const tenantContext = currentConfig.tenantConfig;
           const userRoles = roles || [];
-          const targetRoute = this.navigationService.navigateAfterLogin(
+          const targetRoute = this.navigationService.redirectAfterLogin(
             userRoles,
             domainConfig,
             tenantContext
