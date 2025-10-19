@@ -47,10 +47,8 @@ export interface LayoutConfig {
 export interface AppConfig {
   environment: AppEnvironment;
   domainConfig: DomainConfig;
-  tenantConfig: TenantConfig | null;
   routes: RouteConfig[];
   layouts: LayoutConfig[];
-  features: string[];
   branding: BrandingConfig;
 }
 
@@ -73,7 +71,7 @@ export class AppConfigService {
   private store = inject(Store);
   private themeService = inject(ThemeService);
 
-  async initializeApp(): Promise<AppConfig> {
+  async setupConfig(): Promise<AppConfig> {
     this.errorSubject.next(null);
     try {
       const cachedUserEnv = this.getCachedUserEnvironment();
@@ -89,8 +87,7 @@ export class AppConfigService {
       } else {
         domainConfig = await this.detectDomain();
       }
-      const tenantConfig = await this.loadTenantConfigByDomain(domainConfig);
-      const appConfig = await this.buildAppConfig(domainConfig, tenantConfig);
+      const appConfig = await this.buildAppConfig(domainConfig, null);
       if (appConfig) {
         await this.themeService.applyAppConfiguration(appConfig);
       }
@@ -120,8 +117,7 @@ export class AppConfigService {
       ...currentConfig.domainConfig,
       environment: normalizedEnv
     };
-    const tenantConfig = currentConfig.tenantConfig;
-    const newConfig = await this.buildAppConfig(domainConfig, tenantConfig);
+  const newConfig = await this.buildAppConfig(domainConfig, null);
     // Guardar el environment en mayúsculas (UPPER_SNAKE_CASE)
     this.cacheUserEnvironment(normalizedEnv);
     this.configSubject.next(newConfig);
@@ -149,16 +145,14 @@ export class AppConfigService {
     return {
       environment: domainConfig.environment,
       domainConfig,
-      tenantConfig,
-      routes: this.resolveRoutes(domainConfig, tenantConfig),
+      routes: this.resolveRoutes(domainConfig),
       layouts: this.resolveLayouts(domainConfig),
-      features: this.resolveFeatures(domainConfig),
-      branding: this.transformBrandingFromApi(tenantConfig?.branding || this.getDefaultBranding())
+      branding: this.transformBrandingFromApi(domainConfig.customConfig?.branding || this.getDefaultBranding())
     };
   }
   // --- RESTORED METHODS ---
 
-  private resolveRoutes(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): RouteConfig[] {
+  private resolveRoutes(domainConfig: DomainConfig): RouteConfig[] {
     const routes: RouteConfig[] = [];
     routes.push(...this.resolvePublicRoutes(domainConfig));
     routes.push(...this.resolvePrivateRoutes(domainConfig));
@@ -264,33 +258,7 @@ export class AppConfigService {
     );
   }
 
-  /**
-   * Resuelve características disponibles
-   */
-  private resolveFeatures(domainConfig: DomainConfig): string[] {
-    switch(domainConfig.environment) {
-      case AppEnvironment.VENDIX_LANDING:
-        return ['registration', 'login', 'marketing', 'onboarding'];
-
-      case AppEnvironment.VENDIX_ADMIN:
-        return ['tenant-management', 'system-analytics', 'user-management', 'billing'];
-
-      case AppEnvironment.ORG_LANDING:
-        return ['company-info', 'contact', 'login', 'ecommerce'];
-
-      case AppEnvironment.ORG_ADMIN:
-        return ['store-management', 'user-management', 'analytics', 'billing', 'ecommerce'];
-
-      case AppEnvironment.STORE_ADMIN:
-        return ['inventory', 'sales', 'customer-management', 'pos', 'ecommerce'];
-
-      case AppEnvironment.STORE_ECOMMERCE:
-        return ['catalog', 'shopping-cart', 'checkout', 'account', 'reviews'];
-
-      default:
-        return [];
-    }
-  }
+  // ...existing code...
 
   /**
    * Transformación correcta de branding desde API
@@ -304,15 +272,15 @@ export class AppConfigService {
         height: 40
       },
       colors: {
-        primary: apiBranding.primary_color || '#3B82F6',
-        secondary: apiBranding.secondary_color || '#64748B',
-        accent: apiBranding.accent_color || '#10B981',
-        background: apiBranding.background_color || '#FFFFFF',
-        surface: apiBranding.background_color || '#F8FAFC',
+        primary: apiBranding.primary_color || '#7ED7A5',
+        secondary: apiBranding.secondary_color || '#2F6F4E',
+        accent: apiBranding.accent_color || '#FFFFFF',
+        background: apiBranding.background_color || '#f4f4f4ff',
+        surface: apiBranding.background_color || '#F4F4F4',
         text: {
-          primary: apiBranding.text_color || '#1E293B',
-          secondary: apiBranding.text_color || '#64748B',
-          muted: apiBranding.text_color || '#94A3B8'
+          primary: apiBranding.text_color || '#111111',
+          secondary: apiBranding.text_color || '#2F6F4E',
+          muted: apiBranding.text_color || '#7ED7A5'
         }
       },
       fonts: {
@@ -334,22 +302,22 @@ export class AppConfigService {
         height: 40
       },
       colors: {
-        primary: '#3B82F6',
-        secondary: '#64748B',
-        accent: '#10B981',
-        background: '#FFFFFF',
-        surface: '#F8FAFC',
+        primary: '#7ED7A5',
+        secondary: '#2F6F4E',
+        accent: '#FFFFFF',
+        background: '#F4F4F4',
+        surface: '#F4F4F4',
         text: {
-          primary: '#1E293B',
-          secondary: '#64748B',
-          muted: '#94A3B8'
+          primary: '#111111',
+          secondary: '#2F6F4E',
+          muted: '#7ED7A5'
         }
       },
       fonts: {
         primary: 'Inter, sans-serif',
         secondary: 'Inter, sans-serif',
         headings: 'Inter, sans-serif'
-      }
+  }
     };
   }
 
@@ -431,13 +399,21 @@ export class AppConfigService {
     return this.configSubject.value;
   }
 
-  isInitialized(): boolean {
+  /**
+   * Indica si la configuración principal ya fue establecida (setupConfig ejecutado).
+   */
+  isConfigSetup(): boolean {
     return this.configSubject.value !== null;
   }
 
-  async reinitialize(): Promise<AppConfig> {
+
+  /**
+   * Limpia la caché y vuelve a ejecutar la configuración principal (setupConfig).
+   * Úsalo para reiniciar y volver a aplicar la configuración global de la app.
+   */
+  async resetAndSetupConfig(): Promise<AppConfig> {
     this.clearCache();
-    return await this.initializeApp();
+    return await this.setupConfig();
   }
 
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {

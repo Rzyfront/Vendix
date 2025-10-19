@@ -291,7 +291,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
 
     const domainConfig = appConfig.domainConfig;
-    const tenantConfig = appConfig.tenantConfig;
+  // const tenantConfig = appConfig.tenantConfig;
 
     // Determine context type based on domain configuration
     if (domainConfig.domainType === 'vendix_core') {
@@ -325,8 +325,8 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
 
     // Apply branding
-    this.logoUrl = tenantConfig?.branding?.logo?.url || '';
-    this.primaryColor = tenantConfig?.branding?.colors?.primary || '#3b82f6';
+  // this.logoUrl = tenantConfig?.branding?.logo?.url || '';
+  // this.primaryColor = tenantConfig?.branding?.colors?.primary || '#3b82f6';
 
     // Los estilos CSS ya fueron aplicados globalmente por ThemeService durante la inicialización
     // No es necesario actualizarlos aquí nuevamente

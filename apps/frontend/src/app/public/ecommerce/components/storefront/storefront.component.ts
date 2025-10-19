@@ -216,11 +216,11 @@ export class StorefrontComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-    const tenantConfig = appConfig.tenantConfig;
+  // const tenantConfig = appConfig.tenantConfig;
     
     this.storeName = domainConfig.store_slug || 'Tienda';
-    this.branding = tenantConfig?.branding || {};
-    this.storeDescription = tenantConfig?.store?.description || '';
+  // this.branding = tenantConfig?.branding || {};
+  // this.storeDescription = tenantConfig?.store?.description || '';
     
     // Cargar datos de ejemplo
     this.categories = this.generateSampleCategories();

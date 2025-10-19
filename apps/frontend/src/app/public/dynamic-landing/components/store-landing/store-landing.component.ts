@@ -104,11 +104,11 @@ export class StoreLandingComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-    const tenantConfig = appConfig.tenantConfig;
+  // const tenantConfig = appConfig.tenantConfig;
     
     this.storeName = domainConfig.store_slug || 'Tienda';
-    this.branding = tenantConfig?.branding || {};
-    this.storeDescription = tenantConfig?.store?.description || '';
+  // this.branding = tenantConfig?.branding || {};
+  // this.storeDescription = tenantConfig?.store?.description || '';
     
     // Simular productos destacados (en producción vendría de API)
     this.featuredProducts = this.generateSampleProducts();

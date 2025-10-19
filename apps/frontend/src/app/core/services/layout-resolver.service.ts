@@ -18,13 +18,11 @@ export class LayoutResolverService {
    */
   resolveLayout(
     domainConfig: DomainConfig,
-    userRoles: string[],
-    tenantContext: TenantConfig | null
+    userRoles: string[]
   ): LayoutConfig {
     console.log('[LAYOUT RESOLVER] Resolviendo layout para:', {
       domainEnvironment: domainConfig.environment,
-      userRoles,
-      tenantContext: tenantContext ? 'present' : 'null'
+      userRoles
     });
 
     // 1. Prioridad: Super Admin (independiente del dominio)

@@ -29,7 +29,7 @@ export class AppInitializerService {
       console.log('[APP INITIALIZER] Auth status check triggered.');
 
       // 2. Load domain and user configuration
-      const appConfig = await this.appConfigService.initializeApp();
+  const appConfig = await this.appConfigService.setupConfig();
       console.log('[APP INITIALIZER] App configuration resolved.');
 
       // 3. Set the dynamic routes in the router
@@ -90,8 +90,7 @@ export class AppInitializerService {
       const userRoles = user?.roles || [];
       const targetRoute = this.navigationService.redirectAfterLogin(
         userRoles,
-        appConfig.domainConfig,
-        appConfig.tenantConfig
+        appConfig.domainConfig
       );
       
       console.log('[APP INITIALIZER] Authenticated user, navigating to:', targetRoute);
@@ -146,7 +145,7 @@ export class AppInitializerService {
     console.log('[APP INITIALIZER] Reinitializing application...');
     
     // Reinicializar usando AppConfigService centralizado
-    await this.appConfigService.reinitialize();
+    await this.appConfigService.resetAndSetupConfig();
     await this.initializeApp();
   }
 
@@ -154,6 +153,6 @@ export class AppInitializerService {
    * Verifica si la aplicación está completamente inicializada
    */
   isAppInitialized(): boolean {
-    return this.appConfigService.isInitialized();
+  return this.appConfigService.isConfigSetup();
   }
 }

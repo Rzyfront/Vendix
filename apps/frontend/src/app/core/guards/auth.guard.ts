@@ -60,10 +60,10 @@ export class AuthGuard implements CanActivate {
       }
     }
 
-    // Rutas de POS para empleados y supervisores
-    if (routePath.startsWith('/pos')) {
-      const posRoles = ['supervisor', 'employee'];
-      if (!userRoles.some(role => posRoles.includes(role))) {
+    // Rutas de tienda para empleados y supervisores
+    if (routePath.startsWith('/store')) {
+      const storeRoles = ['supervisor', 'employee'];
+      if (!userRoles.some(role => storeRoles.includes(role))) {
         return false;
       }
     }

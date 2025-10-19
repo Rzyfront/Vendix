@@ -293,7 +293,7 @@ export class AuthService {
     const user = this.getCurrentUser();
     const domainConfig = this.appConfigService.getCurrentConfig()?.domainConfig;
     // Obtener tenantContext desde AppConfigService
-    const tenantContext = this.appConfigService.getCurrentConfig()?.tenantConfig || null;
+  // const tenantContext = this.appConfigService.getCurrentConfig()?.tenantConfig || null;
 
     if (!user || !domainConfig) {
       console.warn('[AUTH SERVICE] No se pudo obtener contexto para redirección, usando fallback');
@@ -303,8 +303,7 @@ export class AuthService {
 
   const targetRoute = this.navigationService.redirectAfterLogin(
       user.roles || [],
-      domainConfig,
-      tenantContext
+      domainConfig
     );
     
     // Usar navigateByUrl para evitar recarga completa de la aplicación

@@ -73,12 +73,12 @@ export class OrgLandingComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-    const tenantConfig = appConfig.tenantConfig;
+  // const tenantConfig = appConfig.tenantConfig;
     
     this.organizationName = domainConfig.organization_slug || 'Organización';
-    this.branding = tenantConfig?.branding || {};
-    this.organizationDescription = tenantConfig?.organization?.description || '';
-    this.features = this.mapFeatures(tenantConfig?.features || {});
+  // this.branding = tenantConfig?.branding || {};
+  // this.organizationDescription = tenantConfig?.organization?.description || '';
+  // this.features = this.mapFeatures(tenantConfig?.features || {});
   }
 
   private loadDefaultData() {

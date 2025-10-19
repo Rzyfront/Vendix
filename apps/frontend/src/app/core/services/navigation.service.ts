@@ -16,17 +16,13 @@ export class NavigationService {
    */
   redirectAfterLogin(
     userRoles: string[],
-    domainConfig: DomainConfig,
-    tenantContext: TenantConfig | null
+    domainConfig: DomainConfig
   ): string {
-
     // 1. Resolver el layout apropiado
-    const layout = this.layoutResolver.resolveLayout(domainConfig, userRoles, tenantContext);
-    
+    const layout = this.layoutResolver.resolveLayout(domainConfig, userRoles);
     if (!layout) {
       return this.getFallbackRoute(userRoles);
     }
-
     return layout.route;
   }
 
@@ -54,11 +50,11 @@ export class NavigationService {
     if (appropriateDomain && appropriateDomain !== currentDomainConfig.hostname) {
       // En un escenario real, aquí harías window.location.href = appropriateDomain
       // Por ahora, redirigimos a la ruta apropiada en el dominio actual
-      return this.redirectAfterLogin(userRoles, currentDomainConfig, tenantContext);
+  return this.redirectAfterLogin(userRoles, currentDomainConfig);
     }
 
     // 3. Mantener en dominio actual con ruta apropiada
-    return this.redirectAfterLogin(userRoles, currentDomainConfig, tenantContext);
+  return this.redirectAfterLogin(userRoles, currentDomainConfig);
   }
 
   /**

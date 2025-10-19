@@ -70,12 +70,11 @@ export class AuthEffects {
             return;
           }
           const domainConfig = currentConfig.domainConfig;
-          const tenantContext = currentConfig.tenantConfig;
+          // const tenantContext = currentConfig.tenantConfig;
           const userRoles = roles || [];
           const targetRoute = this.navigationService.redirectAfterLogin(
             userRoles,
-            domainConfig,
-            tenantContext
+            domainConfig
           );
           if (this.routeManager.isRouteAvailable(targetRoute)) {
             await this.router.navigateByUrl(targetRoute, { replaceUrl: true });

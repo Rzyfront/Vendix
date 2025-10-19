@@ -1,6 +1,6 @@
 import { Injectable, Inject, DOCUMENT } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-import { TenantConfig, BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
+import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
 import { AppConfig } from './app-config.service'; // Import AppConfig
 
 @Injectable({
@@ -29,18 +29,7 @@ export class ThemeService {
   // ...existing code...
       }
 
-      // Theme and SEO still come from the nested tenantConfig
-      if (appConfig.tenantConfig?.theme) {
-        await this.applyTheme(appConfig.tenantConfig.theme);
-      } else {
-  // ...existing code...
-      }
-      
-      if (appConfig.tenantConfig?.seo) {
-        this.applySEOConfiguration(appConfig.tenantConfig.seo);
-      } else {
-  // ...existing code...
-      }
+      // Theme and SEO config removed: handled elsewhere or not used
       
   // ...existing code...
       
