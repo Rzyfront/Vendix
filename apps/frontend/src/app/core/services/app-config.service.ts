@@ -6,10 +6,14 @@ import { BehaviorSubject, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { Store } from '@ngrx/store';
 import { DomainConfig, AppEnvironment, DomainType, DomainResolution } from '../models/domain-config.interface';
-import { superAdminRoutes } from '../../routes/super_admin.routes';
-import { orgAdminRoutes } from '../../routes/org_admin.routes';
-import { storeAdminRoutes } from '../../routes/store_admin.routes';
-import { ecommerceRoutes } from '../../routes/ecommerce.routes';
+import { superAdminRoutes } from '../../routes/private/super_admin.routes';
+import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
+import { orgLandingPublicRoutes } from '../../routes/public/org_landing.public.routes';
+import { storeEcommercePublicRoutes } from '../../routes/public/store_ecommerce.public.routes';
+import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
+import { orgAdminRoutes } from '../../routes/private/org_admin.routes';
+import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
+import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { TenantConfig, BrandingConfig } from '../models/tenant-config.interface';
 import { ThemeService } from './theme.service';
 import { environment } from '../../../environments/environment';
@@ -70,15 +74,9 @@ export class AppConfigService {
   private themeService = inject(ThemeService);
 
   async initializeApp(): Promise<AppConfig> {
-      // console.log('[APP CONFIG] 1. Starting initializeApp');
     this.errorSubject.next(null);
-      // console.log('[APP CONFIG] 2. Cached user env:', cachedUserEnv);
     try {
-      console.log('[APP CONFIG] 1. Starting initializeApp');
-
-  const cachedUserEnv = this.getCachedUserEnvironment();
-  console.log('[APP CONFIG][DEBUG] cachedUserEnv:', cachedUserEnv);
-        // console.log('[APP CONFIG] 3. Using cached user environment, skipping domain detection');
+      const cachedUserEnv = this.getCachedUserEnvironment();
       let domainConfig: DomainConfig;
 
       // Si hay un entorno de usuario en caché, priorizarlo sobre la detección de dominio
@@ -88,10 +86,8 @@ export class AppConfigService {
           ...domainConfig,
           environment: this.normalizeEnvironment(cachedUserEnv)
         };
-        console.log('[APP CONFIG][DEBUG] environment after user override:', domainConfig.environment);
       } else {
         domainConfig = await this.detectDomain();
-        console.log('[APP CONFIG][DEBUG] environment from domain:', domainConfig.environment);
       }
       const tenantConfig = await this.loadTenantConfigByDomain(domainConfig);
       const appConfig = await this.buildAppConfig(domainConfig, tenantConfig);
@@ -133,7 +129,7 @@ export class AppConfigService {
   }
 
   /**
-   * Normaliza el entorno a minúsculas para coincidir con el enum AppEnvironment
+   * Normaliza el entorno a mayúsculas para coincidir con el enum AppEnvironment
    */
   private normalizeEnvironment(env: string): AppEnvironment {
     const normalized = env.toUpperCase();
@@ -160,7 +156,6 @@ export class AppConfigService {
       branding: this.transformBrandingFromApi(tenantConfig?.branding || this.getDefaultBranding())
     };
   }
-      // Silenciar error
   // --- RESTORED METHODS ---
 
   private resolveRoutes(domainConfig: DomainConfig, tenantConfig: TenantConfig | null): RouteConfig[] {
@@ -169,46 +164,16 @@ export class AppConfigService {
     routes.push(...this.resolvePrivateRoutes(domainConfig));
     return routes;
   }
-        // console.log(`[APP CONFIG] Domain settings found in cache`);
   private resolvePublicRoutes(domainConfig: DomainConfig): RouteConfig[] {
-    // Define a standard set of auth child routes for reuse
-    const standardAuthChildRoutes: RouteConfig[] = [
-      { path: 'register', component: 'RegisterOwnerComponent', layout: 'auth', isPublic: true },
-      { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
-    ];
-    const authParentRoute: RouteConfig = {
-      path: 'auth',
-      isPublic: true,
-      children: standardAuthChildRoutes
-    };
     switch(domainConfig.environment) {
       case AppEnvironment.VENDIX_LANDING:
-        return [
-          { path: '', component: 'VendixLandingComponent', layout: 'public', isPublic: true },
-          authParentRoute
-        ];
+        return vendixLandingPublicRoutes;
       case AppEnvironment.ORG_LANDING:
-        return [
-          { path: '', component: 'OrgLandingComponent', layout: 'public', isPublic: true },
-          { path: 'shop', component: 'OrgEcommerceComponent', layout: 'storefront', isPublic: true },
-          authParentRoute
-        ];
-      case AppEnvironment.STORE_ECOMMERCE: {
-        const storeAuthRoutes = standardAuthChildRoutes.map(r =>
-          r.path === 'register' ? { ...r, component: 'StoreAuthRegisterComponent' } : r
-        );
-        return [
-          { path: '', component: 'StoreEcommerceComponent', layout: 'storefront', isPublic: true },
-          { ...authParentRoute, children: storeAuthRoutes }
-        ];
-      }
+        return orgLandingPublicRoutes;
+      case AppEnvironment.STORE_ECOMMERCE:
+        return storeEcommercePublicRoutes;
       default:
-        return [
-          { path: '', component: 'LandingComponent', layout: 'public', isPublic: true },
-          authParentRoute
-        ];
+        return defaultPublicRoutes;
     }
   }
 
@@ -391,36 +356,24 @@ export class AppConfigService {
   // --- UNCHANGED METHODS ---
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
-    console.log('[APP CONFIG] 4. Starting detectDomain');
     let currentHostname = hostname || window.location.hostname;
     if (currentHostname.startsWith('www.')) {
       currentHostname = currentHostname.substring(4);
     }
     try {
       const domainInfo = await this.resolveDomainFromAPI(currentHostname);
-      console.log('[APP CONFIG] 5. resolveDomainFromAPI has resolved.');
       if (!domainInfo) {
         throw new Error(`Domain ${currentHostname} not found or not configured`);
       }
       const domainConfig = this.buildDomainConfig(currentHostname, domainInfo);
-      // Removed dispatch from here to prevent deadlock
       return domainConfig;
     } catch (error) {
-      console.error('[APP CONFIG] Error detecting domain:', error);
       throw error;
     }
   }
 
   async loadTenantConfigByDomain(domainConfig: DomainConfig): Promise<TenantConfig | null> {
-    // ... (rest of the method is unchanged)
     try {
-      if (domainConfig.isVendixDomain && (domainConfig.environment === AppEnvironment.VENDIX_LANDING || domainConfig.environment === AppEnvironment.VENDIX_ADMIN)) {
-        const vendixConfig = this.getVendixDefaultConfig();
-        if (domainConfig.customConfig?.branding) {
-          vendixConfig.branding = this.mergeVendixBranding(vendixConfig.branding, domainConfig.customConfig.branding);
-        }
-        return vendixConfig;
-      }
       const cacheKey = this.getTenantCacheKey(domainConfig);
       const cachedConfig = this.getCachedTenantConfig(cacheKey);
       if (cachedConfig) return cachedConfig;
@@ -428,7 +381,6 @@ export class AppConfigService {
       if (config) this.cacheTenantConfig(cacheKey, config);
       return config;
     } catch (error) {
-      console.error('[APP CONFIG] Error loading tenant config:', error);
       throw error;
     }
   }
@@ -437,7 +389,7 @@ export class AppConfigService {
     try {
       localStorage.setItem(USER_ENV_CACHE_KEY, env);
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache user environment:', error);
+      // Silenciar error de caché
     }
   }
 
@@ -449,7 +401,6 @@ export class AppConfigService {
       // Normalizar el entorno en caché para asegurar compatibilidad
       return this.normalizeEnvironment(cached);
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to get cached user environment:', error);
       return null;
     }
   }
@@ -458,7 +409,7 @@ export class AppConfigService {
     try {
       localStorage.setItem(APP_CONFIG_CACHE_KEY, JSON.stringify(config));
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache app config:', error);
+      // Silenciar error de caché
     }
   }
 
@@ -472,7 +423,7 @@ export class AppConfigService {
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to clear cache:', error);
+      // Silenciar error de limpieza de caché
     }
   }
 
@@ -493,37 +444,29 @@ export class AppConfigService {
     try {
       const cachedDomain = this.getCachedDomainSettings();
       if (cachedDomain) {
-        console.log(`[APP CONFIG] Domain settings found in cache`);
         return cachedDomain;
       }
-
-      console.log(`[APP CONFIG] Domain settings not in cache, calling API for ${hostname}...`);
 
       const response = await this.http
         .get<DomainResolution>(`${environment.apiUrl}/api/domains/resolve/${hostname}`)
         .pipe(
           catchError(error => {
-            console.warn(`[APP CONFIG] API resolution failed for ${hostname}:`, error);
             return of(null);
           })
         )
         .toPromise();
 
       if (response) {
-        console.log(`[APP CONFIG] Caching domain settings for future requests`);
         this.cacheDomainSettings(response);
       }
 
       return response || null;
     } catch (error) {
-      console.warn(`[APP CONFIG] Failed to resolve domain ${hostname}:`, error);
       return null;
     }
   }
 
   private buildDomainConfig(hostname: string, domainInfo: any): DomainConfig {
-    console.log(`[APP CONFIG] Building config for domain:`, domainInfo);
-
     let domainType: DomainType;
     switch (domainInfo.domain_type) {
       case 'vendix_core': domainType = DomainType.VENDIX_CORE; break;
@@ -566,20 +509,16 @@ export class AppConfigService {
       const response = await this.http
         .get<{ success: boolean; data: TenantConfig }>(`${environment.apiUrl}${endpoint}`)
         .pipe(catchError(error => {
-          console.error('[APP CONFIG] API fetch failed:', error);
           return of(null);
         }))
         .toPromise();
       
       return response?.data || null;
     } catch (error) {
-      console.error('[APP CONFIG] Error fetching from API:', error);
       return null;
     }
   }
 
-  private getVendixDefaultConfig(): TenantConfig { return {} as any; /* Placeholder */ }
-  private mergeVendixBranding(defaultBranding: any, domainBranding: any): any { return {} as any; /* Placeholder */ }
 
   private getTenantCacheKey(domainConfig: DomainConfig): string {
     const parts = [domainConfig.environment as string];
@@ -593,7 +532,6 @@ export class AppConfigService {
       const cached = localStorage.getItem(cacheKey);
       return cached ? JSON.parse(cached) : null;
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to get cached tenant config:', error);
       return null;
     }
   }
@@ -602,7 +540,7 @@ export class AppConfigService {
     try {
       localStorage.setItem(cacheKey, JSON.stringify(config));
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache tenant config:', error);
+      // Silenciar error de caché
     }
   }
 
@@ -611,7 +549,7 @@ export class AppConfigService {
       const cacheData = { data: domainInfo, timestamp: Date.now(), ttl: this.CACHE_TTL };
       localStorage.setItem(DOMAIN_SETTINGS_CACHE_KEY, JSON.stringify(cacheData));
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to cache domain settings:', error);
+      // Silenciar error de caché
     }
   }
 
@@ -627,7 +565,6 @@ export class AppConfigService {
       }
       return cacheData.data;
     } catch (error) {
-      console.warn('[APP CONFIG] Failed to get cached domain settings:', error);
       return null;
     }
   }

@@ -1,4 +1,4 @@
-import type { RouteConfig } from '../core/services/app-config.service';
+import type { RouteConfig } from '../../core/services/app-config.service';
 
 export const orgAdminRoutes: RouteConfig[] = [
   {
