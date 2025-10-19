@@ -146,7 +146,7 @@ export class AppConfigService {
       environment: domainConfig.environment,
       domainConfig,
       routes: this.resolveRoutes(domainConfig),
-      layouts: this.resolveLayouts(domainConfig),
+      layouts: this.getPublicLayouts(domainConfig),
       branding: this.transformBrandingFromApi(domainConfig.customConfig?.branding || this.getDefaultBranding())
     };
   }
@@ -189,11 +189,12 @@ export class AppConfigService {
     }
   }
 
+
   /**
-   * Resuelve layouts disponibles
+   * Devuelve los layouts públicos disponibles para el dominio/entorno (sin lógica de usuario)
    */
-  private resolveLayouts(domainConfig: DomainConfig): LayoutConfig[] {
-    const baseLayouts: LayoutConfig[] = [
+  getPublicLayouts(domainConfig: DomainConfig): LayoutConfig[] {
+    return [
       {
         name: 'auth',
         component: 'AuthLayoutComponent',
@@ -212,50 +213,7 @@ export class AppConfigService {
         allowedEnvironments: [AppEnvironment.ORG_LANDING, AppEnvironment.STORE_ECOMMERCE],
         allowedRoles: ['customer']
       }
-    ];
-
-    const privateLayouts: LayoutConfig[] = [
-      {
-        name: 'super-admin',
-        component: 'SuperAdminLayoutComponent',
-        allowedEnvironments: [AppEnvironment.VENDIX_ADMIN],
-        allowedRoles: ['super_admin']
-      },
-      {
-        name: 'organization-admin',
-        component: 'OrganizationAdminLayoutComponent',
-        allowedEnvironments: [AppEnvironment.ORG_ADMIN],
-        allowedRoles: ['owner', 'admin', 'manager']
-      },
-      {
-        name: 'store-admin',
-        component: 'StoreAdminLayoutComponent',
-        allowedEnvironments: [AppEnvironment.STORE_ADMIN],
-        allowedRoles: ['owner', 'admin', 'manager', 'supervisor']
-      },
-      {
-        name: 'org-ecommerce',
-        component: 'OrgEcommerceLayoutComponent',
-        allowedEnvironments: [AppEnvironment.ORG_ADMIN, AppEnvironment.STORE_ADMIN],
-        allowedRoles: ['owner', 'admin', 'manager', 'customer']
-      },
-      {
-        name: 'store-ecommerce',
-        component: 'StoreEcommerceLayoutComponent',
-        allowedEnvironments: [AppEnvironment.STORE_ECOMMERCE],
-        allowedRoles: ['customer', 'employee']
-      },
-      {
-        name: 'pos',
-        component: 'POSLayoutComponent',
-        allowedEnvironments: [AppEnvironment.STORE_ADMIN],
-        allowedRoles: ['supervisor', 'employee']
-      }
-    ];
-
-    return [...baseLayouts, ...privateLayouts].filter(layout => 
-      layout.allowedEnvironments.includes(domainConfig.environment)
-    );
+    ].filter(layout => layout.allowedEnvironments.includes(domainConfig.environment));
   }
 
   // ...existing code...
