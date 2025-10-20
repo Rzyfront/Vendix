@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { AppConfigService } from '../../../../core/services/app-config.service';
+import { ConfigFacade } from '../../../../core/store/config';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 
 @Component({
@@ -93,10 +93,10 @@ export class StoreLandingComponent implements OnInit {
     return this.featuredProducts.length > 0;
   }
 
-  private appConfig = inject(AppConfigService);
+  private configFacade = inject(ConfigFacade);
 
-  async ngOnInit() {
-    const appConfig = this.appConfig.getCurrentConfig();
+  ngOnInit() {
+    const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
       console.warn('[STORE-LANDING] App config not available, using default values');
       this.loadDefaultData();
@@ -104,13 +104,10 @@ export class StoreLandingComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-  // const tenantConfig = appConfig.tenantConfig;
-    
     this.storeName = domainConfig.store_slug || 'Tienda';
-  // this.branding = tenantConfig?.branding || {};
-  // this.storeDescription = tenantConfig?.store?.description || '';
+    this.branding = appConfig.branding || {};
+    this.storeDescription = appConfig.domainConfig.customConfig?.description || '';
     
-    // Simular productos destacados (en producción vendría de API)
     this.featuredProducts = this.generateSampleProducts();
   }
 
@@ -120,43 +117,13 @@ export class StoreLandingComponent implements OnInit {
 
   private generateSampleProducts(): any[] {
     return [
-      {
-        id: 1,
-        name: 'Producto Destacado 1',
-        price: 29.99,
-        image: '/assets/images/product-placeholder.jpg',
-        description: 'Descripción del producto destacado 1'
-      },
-      {
-        id: 2,
-        name: 'Producto Destacado 2',
-        price: 39.99,
-        image: '/assets/images/product-placeholder.jpg',
-        description: 'Descripción del producto destacado 2'
-      },
-      {
-        id: 3,
-        name: 'Producto Destacado 3',
-        price: 49.99,
-        image: '/assets/images/product-placeholder.jpg',
-        description: 'Descripción del producto destacado 3'
-      }
+      { id: 1, name: 'Producto Destacado 1', price: 29.99, image: '/assets/images/product-placeholder.jpg' },
+      { id: 2, name: 'Producto Destacado 2', price: 39.99, image: '/assets/images/product-placeholder.jpg' },
+      { id: 3, name: 'Producto Destacado 3', price: 49.99, image: '/assets/images/product-placeholder.jpg' }
     ];
   }
 
-  navigateToLogin() {
-    // Usar login contextual unificado
-    window.location.href = '/auth/login';
-  }
-
-  navigateToShop() {
-    // Navegar al e-commerce público de la tienda
-    window.location.href = '/shop';
-  }
-
-  addToCart(product: any) {
-    // Lógica para agregar al carrito
-    console.log('Agregar al carrito:', product);
-    // En producción, usaría un servicio de carrito
-  }
+  navigateToLogin() { window.location.href = '/auth/login'; }
+  navigateToShop() { window.location.href = '/shop'; }
+  addToCart(product: any) { console.log('Agregar al carrito:', product); }
 }

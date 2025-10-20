@@ -1,28 +1,22 @@
-import type { RouteConfig } from '../../core/services/app-config.service';
+import { Routes } from '@angular/router';
+import { AuthGuard } from '../../core/guards/auth.guard';
 
-export const storeAdminRoutes: RouteConfig[] = [
+export const storeAdminRoutes: Routes = [
   {
     path: 'admin',
-    component: 'StoreAdminDashboardComponent',
-    layout: 'store-admin',
-    guards: ['AuthGuard']
-  },
-  {
-    path: 'admin/products',
-    component: 'ProductManagementComponent',
-    layout: 'store-admin',
-    guards: ['AuthGuard']
-  },
-  {
-    path: 'admin/orders',
-    component: 'OrderManagementComponent',
-    layout: 'store-admin',
-    guards: ['AuthGuard']
-  },
-  {
-    path: 'pos',
-    component: 'POSComponent',
-    layout: 'pos',
-    guards: ['AuthGuard']
+    loadComponent: () => import('../../private/layouts/store-admin/store-admin-layout.component').then(c => c.StoreAdminLayoutComponent),
+    canActivate: [AuthGuard],
+    children: [
+      {
+        path: '',
+        pathMatch: 'full',
+        redirectTo: 'dashboard'
+      },
+      {
+        path: 'dashboard',
+        loadComponent: () => import('../../private/modules/store/dashboard/dashboard.component').then(c => c.DashboardComponent)
+      }
+      // Aquí se añadirían más rutas de admin de tienda como /admin/products, etc.
+    ]
   }
 ];

@@ -1,7 +1,7 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { AppConfigService } from '../../../../core/services/app-config.service';
+import { ConfigFacade } from '../../../../core/store/config';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputComponent } from '../../../../shared/components/input/input.component';
@@ -204,11 +204,10 @@ export class StorefrontComponent implements OnInit {
     return this.cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   }
 
-  private appConfig = inject(AppConfigService);
+  private configFacade = inject(ConfigFacade);
 
   async ngOnInit() {
-    // Esperar a que la configuración de la aplicación esté lista
-    const appConfig = this.appConfig.getCurrentConfig();
+    const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
       console.warn('[STOREFRONT] App config not available, using default values');
       this.loadDefaultData();

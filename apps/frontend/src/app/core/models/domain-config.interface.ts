@@ -6,12 +6,12 @@ export enum DomainType {
 }
 
 export enum AppEnvironment {
-  VENDIX_LANDING = 'vendix_landing',
-  VENDIX_ADMIN = 'vendix_admin',
-  ORG_LANDING = 'org_landing',
-  ORG_ADMIN = 'org_admin',
-  STORE_ADMIN = 'store_admin',
-  STORE_ECOMMERCE = 'store_ecommerce'
+  VENDIX_LANDING = 'VENDIX_LANDING',
+  VENDIX_ADMIN = 'VENDIX_ADMIN',
+  ORG_LANDING = 'ORG_LANDING',
+  ORG_ADMIN = 'ORG_ADMIN',
+  STORE_ADMIN = 'STORE_ADMIN',
+  STORE_ECOMMERCE = 'STORE_ECOMMERCE'
 }
 
 export interface DomainConfig {

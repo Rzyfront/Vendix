@@ -1,16 +1,12 @@
-import type { RouteConfig } from '../../core/services/app-config.service';
+import { Routes } from '@angular/router';
 
-export const orgLandingPublicRoutes: RouteConfig[] = [
-  { path: '', component: 'OrgLandingComponent', layout: 'public', isPublic: true },
-  { path: 'shop', component: 'OrgEcommerceComponent', layout: 'storefront', isPublic: true },
+export const orgLandingPublicRoutes: Routes = [
   {
-    path: 'auth',
-    isPublic: true,
-    children: [
-      { path: 'register', component: 'RegisterOwnerComponent', layout: 'auth', isPublic: true },
-      { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
-    ]
+    path: '',
+    loadComponent: () => import('../../public/dynamic-landing/components/org-landing/org-landing.component').then(c => c.OrgLandingComponent)
+  },
+  {
+    path: 'shop',
+    loadComponent: () => import('../../public/ecommerce/components/storefront/storefront.component').then(c => c.StorefrontComponent)
   }
 ];

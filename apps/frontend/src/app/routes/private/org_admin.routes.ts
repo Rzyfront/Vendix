@@ -1,22 +1,22 @@
-import type { RouteConfig } from '../../core/services/app-config.service';
+import { Routes } from '@angular/router';
+import { AuthGuard } from '../../core/guards/auth.guard';
 
-export const orgAdminRoutes: RouteConfig[] = [
+export const orgAdminRoutes: Routes = [
   {
     path: 'admin',
-    component: 'OrgAdminDashboardComponent',
-    layout: 'organization-admin',
-    guards: ['AuthGuard']
-  },
-  {
-    path: 'admin/stores',
-    component: 'StoreManagementComponent',
-    layout: 'organization-admin',
-    guards: ['AuthGuard']
-  },
-  {
-    path: 'admin/users',
-    component: 'UserManagementComponent',
-    layout: 'organization-admin',
-    guards: ['AuthGuard']
+    loadComponent: () => import('../../private/layouts/organization-admin/organization-admin-layout.component').then(c => c.OrganizationAdminLayoutComponent),
+    canActivate: [AuthGuard],
+    children: [
+      {
+        path: '',
+        pathMatch: 'full',
+        redirectTo: 'dashboard'
+      },
+      {
+        path: 'dashboard',
+        loadComponent: () => import('../../private/modules/organization/dashboard/dashboard.component').then(c => c.DashboardComponent)
+      }
+      // Aquí se añadirían más rutas de admin de organización como /admin/stores, /admin/users, etc.
+    ]
   }
 ];

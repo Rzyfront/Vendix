@@ -1,4 +1,5 @@
 import { createSelector } from '@ngrx/store';
+import { AppEnvironment } from '../models/domain-config.interface';
 import * as TenantSelectors from './tenant/tenant.selectors';
 import * as AuthSelectors from './auth/auth.selectors';
 
@@ -90,7 +91,7 @@ export const selectNavigationContext = createSelector(
     environment,
     isVendixDomain,
     showAdminMenu: permissions.canAccessAdmin,
-    showStoreMenu: permissions.canManageStore && environment !== 'vendix_admin',
+    showStoreMenu: permissions.canManageStore && environment !== AppEnvironment.VENDIX_ADMIN,
     showReportsMenu: permissions.canViewReports,
     showUserManagement: permissions.canManageUsers
   })

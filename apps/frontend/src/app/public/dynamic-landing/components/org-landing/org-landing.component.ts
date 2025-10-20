@@ -1,6 +1,6 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { AppConfigService } from '../../../../core/services/app-config.service';
+import { ConfigFacade } from '../../../../core/store/config';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 
@@ -62,10 +62,10 @@ export class OrgLandingComponent implements OnInit {
   branding: any = {};
   features: any[] = [];
 
-  private appConfig = inject(AppConfigService);
+  private configFacade = inject(ConfigFacade);
 
-  async ngOnInit() {
-    const appConfig = this.appConfig.getCurrentConfig();
+  ngOnInit() {
+    const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
       console.warn('[ORG-LANDING] App config not available, using default values');
       this.loadDefaultData();
@@ -73,12 +73,10 @@ export class OrgLandingComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-  // const tenantConfig = appConfig.tenantConfig;
-    
     this.organizationName = domainConfig.organization_slug || 'Organización';
-  // this.branding = tenantConfig?.branding || {};
-  // this.organizationDescription = tenantConfig?.organization?.description || '';
-  // this.features = this.mapFeatures(tenantConfig?.features || {});
+    this.branding = appConfig.branding || {};
+    this.organizationDescription = appConfig.domainConfig.customConfig?.description || '';
+    this.features = this.mapFeatures(appConfig.domainConfig.customConfig?.features || {});
   }
 
   private loadDefaultData() {
@@ -104,12 +102,10 @@ export class OrgLandingComponent implements OnInit {
   }
 
   navigateToLogin() {
-    // Usar login contextual unificado
     window.location.href = '/auth/login';
   }
 
   navigateToShop() {
-    // Navegar al e-commerce público de la organización
     window.location.href = '/shop';
   }
 }

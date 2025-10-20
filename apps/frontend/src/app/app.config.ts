@@ -1,19 +1,29 @@
 import { ApplicationConfig, provideZoneChangeDetection, APP_INITIALIZER, inject, isDevMode } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withFetch, withInterceptorsFromDi, HTTP_INTERCEPTORS } from '@angular/common/http';
-import { provideStore } from '@ngrx/store';
+import { provideStore, Store } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { provideState } from '@ngrx/store';
+import { firstValueFrom } from 'rxjs';
 import { AuthInterceptor } from './core/interceptors/auth.interceptor';
-import { AppInitializerService } from './core/services/app-initializer.service';
-import { tenantReducer } from './core/store/tenant';
-import { TenantEffects } from './core/store/tenant';
-import { authReducer } from './core/store/auth';
-import { AuthEffects } from './core/store/auth';
-import { hydrateTenantState, hydrateAuthState } from './core/store/persistence';
+import { RouteManagerService } from './core/services/route-manager.service';
+import { tenantReducer, TenantEffects } from './core/store/tenant';
+import { authReducer, AuthEffects } from './core/store/auth';
+import { configReducer } from './core/store/config/config.reducer';
+import { ConfigEffects } from './core/store/config/config.effects';
+import { hydrateAuthState } from './core/store/persistence';
+import * as ConfigActions from './core/store/config/config.actions';
 
 import { routes } from './app.routes';
+
+// Factory para el APP_INITIALIZER
+export function initializeApp(store: Store, routeManager: RouteManagerService): () => Promise<boolean> {
+  return () => {
+    store.dispatch(ConfigActions.initializeApp());
+    return firstValueFrom(routeManager.routesConfigured$);
+  };
+}
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -26,15 +36,16 @@ export const appConfig: ApplicationConfig = {
       runtimeChecks: {
         strictStateImmutability: true,
         strictActionImmutability: true,
-        strictStateSerializability: false, // Set to false because functions in actions (e.g., for APP_INITIALIZER) are not serializable
+        strictStateSerializability: false,
         strictActionSerializability: false,
         strictActionWithinNgZone: true,
         strictActionTypeUniqueness: true
       }
     }),
-    provideState('tenant', tenantReducer, { initialState: hydrateTenantState() }),
+    provideState('tenant', tenantReducer),
     provideState('auth', authReducer, { initialState: hydrateAuthState() }),
-    provideEffects([TenantEffects, AuthEffects]),
+    provideState('config', configReducer),
+    provideEffects([TenantEffects, AuthEffects, ConfigEffects]),
     provideStoreDevtools({
       maxAge: 25,
       logOnly: !isDevMode(),
@@ -50,10 +61,8 @@ export const appConfig: ApplicationConfig = {
     },
     {
       provide: APP_INITIALIZER,
-      useFactory: () => {
-        const appInitializer = inject(AppInitializerService);
-        return () => appInitializer.initializeApp();
-      },
+      useFactory: initializeApp,
+      deps: [Store, RouteManagerService],
       multi: true
     }
   ]

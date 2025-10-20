@@ -1,15 +1,8 @@
-import type { RouteConfig } from '../../core/services/app-config.service';
+import { Routes } from '@angular/router';
 
-export const storeEcommercePublicRoutes: RouteConfig[] = [
-  { path: '', component: 'StoreEcommerceComponent', layout: 'storefront', isPublic: true },
+export const storeEcommercePublicRoutes: Routes = [
   {
-    path: 'auth',
-    isPublic: true,
-    children: [
-      { path: 'register', component: 'StoreAuthRegisterComponent', layout: 'auth', isPublic: true },
-      { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
-    ]
+    path: '',
+    loadComponent: () => import('../../public/ecommerce/components/storefront/storefront.component').then(c => c.StorefrontComponent)
   }
 ];

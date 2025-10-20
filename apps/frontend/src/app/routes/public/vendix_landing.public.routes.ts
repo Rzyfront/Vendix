@@ -1,15 +1,8 @@
-import type { RouteConfig } from '../../core/services/app-config.service';
+import { Routes } from '@angular/router';
 
-export const vendixLandingPublicRoutes: RouteConfig[] = [
-  { path: '', component: 'VendixLandingComponent', layout: 'public', isPublic: true },
+export const vendixLandingPublicRoutes: Routes = [
   {
-    path: 'auth',
-    isPublic: true,
-    children: [
-      { path: 'register', component: 'RegisterOwnerComponent', layout: 'auth', isPublic: true },
-      { path: 'forgot-password', component: 'ForgotOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'reset-password', component: 'ResetOwnerPasswordComponent', layout: 'auth', isPublic: true },
-      { path: 'verify-email', component: 'EmailVerificationComponent', layout: 'auth', isPublic: true }
-    ]
+    path: '',
+    loadComponent: () => import('../../public/landing/vendix-landing/vendix-landing.component').then(c => c.VendixLandingComponent)
   }
 ];

@@ -1,53 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
-import { of, from } from 'rxjs';
-import { map, mergeMap, catchError, tap } from 'rxjs/operators';
-import { AppConfigService } from '../../services/app-config.service';
-import { TenantConfig } from '../../models/tenant-config.interface';
+import { tap } from 'rxjs/operators';
 import * as TenantActions from './tenant.actions';
 
 @Injectable()
 export class TenantEffects {
   private actions$ = inject(Actions);
-  private appConfig = inject(AppConfigService);
 
-  initTenant$ = createEffect(() =>
-    this.actions$.pipe(
-      ofType(TenantActions.initTenant),
-      mergeMap(({ domainConfig }) =>
-        from(this.appConfig.loadTenantConfigByDomain(domainConfig)).pipe(
-          map((tenantConfig: TenantConfig | null) => {
-            if (!tenantConfig) {
-              throw new Error('Failed to load tenant config');
-            }
-            return TenantActions.initTenantSuccess({ tenantConfig, domainConfig });
-          }),
-          catchError((error) =>
-            of(TenantActions.initTenantFailure({ error }))
-          )
-        )
-      )
-    )
-  );
-
-  loadTenantConfig$ = createEffect(() =>
-    this.actions$.pipe(
-      ofType(TenantActions.loadTenantConfig),
-      mergeMap(({ domainConfig }) =>
-        from(this.appConfig.loadTenantConfigByDomain(domainConfig)).pipe(
-          map((tenantConfig: TenantConfig | null) => {
-            if (!tenantConfig) {
-              throw new Error('Failed to load tenant config');
-            }
-            return TenantActions.loadTenantConfigSuccess({ tenantConfig });
-          }),
-          catchError((error) =>
-            of(TenantActions.loadTenantConfigFailure({ error }))
-          )
-        )
-      )
-    )
-  );
+  // Los effects initTenant$ y loadTenantConfig$ han sido eliminados.
+  // Su lógica ahora es manejada por ConfigEffects para centralizar la inicialización.
 
   initTenantSuccess$ = createEffect(() =>
     this.actions$.pipe(
