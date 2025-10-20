@@ -1,3 +1,4 @@
+import { JonathanModule } from "./modules/jonathan/jonathan.module";
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -26,6 +27,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RequestContextService } from './common/context/request-context.service';
 import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
+
 
 @Module({
   imports: [
