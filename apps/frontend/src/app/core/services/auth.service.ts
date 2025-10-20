@@ -50,10 +50,6 @@ export class AuthService {
           }
 
           const { user, user_settings, access_token, refresh_token } = response.data;
-          const currentConfig = this.configFacade.getCurrentConfig();
-          if (currentConfig) {
-            await this.appConfigService.updateEnvironmentForUser(currentConfig, (user_settings.config.app || '').toUpperCase());
-          }
 
           if (typeof localStorage !== 'undefined') {
             localStorage.setItem('access_token', access_token);
