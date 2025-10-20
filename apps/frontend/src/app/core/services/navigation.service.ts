@@ -29,7 +29,7 @@ export class NavigationService {
       case AppEnvironment.VENDIX_LANDING:
         return '/';
       case AppEnvironment.VENDIX_ADMIN:
-        return '/superadmin';
+        return '/super-admin';
       case AppEnvironment.ORG_LANDING:
         return '/';
       case AppEnvironment.ORG_ADMIN:

@@ -15,7 +15,6 @@ import { TenantConfig, BrandingConfig } from '../models/tenant-config.interface'
 import { environment } from '../../../environments/environment';
 import { Routes } from '@angular/router';
 
-// --- INTERFACES DE CONFIGURACIÓN ---
 export interface LayoutConfig { name: string; component: string; allowedEnvironments: AppEnvironment[]; allowedRoles: string[]; }
 export interface AppConfig { environment: AppEnvironment; domainConfig: DomainConfig; routes: Routes; layouts: LayoutConfig[]; branding: BrandingConfig; }
 
@@ -24,7 +23,18 @@ export class AppConfigService {
   private http = inject(HttpClient);
 
   async setupConfig(): Promise<AppConfig> {
-    const domainConfig = await this.detectDomain();
+    // 1. Detectar la configuración base del dominio.
+    let domainConfig = await this.detectDomain();
+
+    // 2. Revisar si hay un entorno de usuario guardado (de un login previo).
+    const cachedUserEnv = this.getCachedUserEnvironment();
+
+    // 3. Si existe, este tiene prioridad sobre el entorno por defecto del dominio.
+    if (cachedUserEnv) {
+      domainConfig.environment = cachedUserEnv;
+    }
+
+    // 4. Construir la configuración final con el entorno definitivo.
     const appConfig = this.buildAppConfig(domainConfig);
     this.cacheAppConfig(appConfig);
     return appConfig;
@@ -44,7 +54,7 @@ export class AppConfigService {
       environment: domainConfig.environment,
       domainConfig,
       routes: this.resolveRoutes(domainConfig),
-      layouts: [], // La lógica de Layouts ahora está en las rutas
+      layouts: [],
       branding: this.transformBrandingFromApi(domainConfig.customConfig?.branding || {})
     };
   }
@@ -104,6 +114,15 @@ export class AppConfigService {
       customConfig: domainInfo.config,
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
     };
+  }
+
+  private getCachedUserEnvironment(): AppEnvironment | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      return localStorage.getItem('vendix_user_environment') as AppEnvironment | null;
+    } catch (e) {
+      return null;
+    }
   }
 
   private cacheUserEnvironment(env: AppEnvironment): void { try { if(typeof localStorage !== 'undefined') localStorage.setItem('vendix_user_environment', env); } catch (e) {} }

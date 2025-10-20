@@ -3,7 +3,7 @@ import { AuthGuard } from '../../core/guards/auth.guard';
 
 export const superAdminRoutes: Routes = [
   {
-    path: 'superadmin',
+    path: 'super-admin',
     loadComponent: () => import('../../private/layouts/super-admin/super-admin-layout.component').then(c => c.SuperAdminLayoutComponent),
     canActivate: [AuthGuard], // O un guardia específico para Super Admin
     children: [
