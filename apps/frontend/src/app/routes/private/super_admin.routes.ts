@@ -17,8 +17,12 @@ export const superAdminRoutes: Routes = [
         loadComponent: () => import('../../private/modules/super-admin/dashboard/dashboard.component').then(c => c.DashboardComponent)
       },
       {
-        path: 'tenants',
+        path: 'organizations',
         loadComponent: () => import('../../private/modules/super-admin/organizations/organizations.component').then(c => c.OrganizationsComponent)
+      },
+      {
+        path: 'users',
+        loadChildren: () => import('../../private/modules/super-admin/users/users.routes').then(r => r.USERS_ROUTES)
       }
     ]
   }
