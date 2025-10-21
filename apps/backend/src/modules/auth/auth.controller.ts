@@ -12,16 +12,16 @@ import {
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
-import { RegisterOwnerDto } from './dto/register-owner.dto';
-import { RegisterCustomerDto } from './dto/register-customer.dto';
-import { RegisterStaffDto } from './dto/register-staff.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import {
+  LoginDto,
+  RegisterOwnerDto,
+  RegisterCustomerDto,
+  RegisterStaffDto,
+  RefreshTokenDto,
   ChangePasswordDto,
   ForgotPasswordDto,
   ResetPasswordDto,
-} from './dto/password.dto';
+} from './dto';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { ResponseService } from '../../common/responses/response.service';
@@ -31,7 +31,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post('register-owner')
   @Public()
@@ -472,7 +472,7 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message ||
-          'Error al configurar la organización durante el onboarding',
+        'Error al configurar la organización durante el onboarding',
         error.response?.message || error.message,
         error.status || 400,
       );

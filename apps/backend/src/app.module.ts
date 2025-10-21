@@ -27,6 +27,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RequestContextService } from './common/context/request-context.service';
 import { RequestContextInterceptor } from './common/interceptors/request-context.interceptor';
+import { GreetingModule } from './modules/greeting/greeting.module'; // modulo greeting
 
 
 @Module({
@@ -35,6 +36,7 @@ import { RequestContextInterceptor } from './common/interceptors/request-context
       isGlobal: true,
       envFilePath: '.env',
     }),
+    GreetingModule,
     AuthModule,
     PrismaModule,
     OrganizationsModule,
@@ -70,4 +72,4 @@ import { RequestContextInterceptor } from './common/interceptors/request-context
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
