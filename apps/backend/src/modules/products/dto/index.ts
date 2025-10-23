@@ -14,6 +14,7 @@ import {
   IsArray,
   IsJSON,
   IsNumber,
+  Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -52,6 +53,7 @@ export class CreateProductDto {
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
+  @Min(0, { message: 'El precio base no puede ser negativo' })
   base_price: number;
 
   @IsOptional()
@@ -62,6 +64,7 @@ export class CreateProductDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number = 0;
 
   @IsOptional()
@@ -112,6 +115,7 @@ export class UpdateProductDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
+  @Min(0, { message: 'El precio base no puede ser negativo' })
   base_price?: number;
 
   @IsOptional()
@@ -122,6 +126,7 @@ export class UpdateProductDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number;
 
   @IsOptional()
@@ -196,11 +201,13 @@ export class CreateProductVariantDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
+  @Min(0, { message: 'El precio no puede ser negativo' })
   price_override?: number;
 
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number = 0;
 
   @IsOptional()
@@ -217,11 +224,13 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
+  @Min(0, { message: 'El precio no puede ser negativo' })
   price_override?: number;
 
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number;
 
   @IsOptional()
