@@ -56,6 +56,8 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <path *ngSwitchCase="'store'" d="M3 3h18v2H3zm0 4h18v10H3zm0 4h18M3 3v18"/>
         <path *ngSwitchCase="'package'" d="m7.5 4.27 9 5.15M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
         <path *ngSwitchCase="'tag'" d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01"/>
+        <path *ngSwitchCase="'circle'" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+        <path *ngSwitchCase="'link-2'" d="M15 12h3M6 12H3m11-7l3 3-3 3M6 5L3 8l3 3"/>
         
         <!-- Default icon for unknown names -->
         <path *ngSwitchDefault d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>

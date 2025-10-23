@@ -18,7 +18,28 @@ export const superAdminRoutes: Routes = [
       },
       {
         path: 'organizations',
-        loadComponent: () => import('../../private/modules/super-admin/organizations/organizations.component').then(c => c.OrganizationsComponent)
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('../../private/modules/super-admin/organizations/organizations.component').then(c => c.OrganizationsComponent)
+          },
+          {
+            path: 'create',
+            loadComponent: () => import('../../private/modules/super-admin/organizations/components/create-organization.component').then(c => c.CreateOrganizationComponent)
+          },
+          {
+            path: ':id',
+            loadComponent: () => import('../../private/modules/super-admin/organizations/components/organization-details.component').then(c => c.OrganizationDetailsComponent)
+          },
+          {
+            path: ':id/edit',
+            loadComponent: () => import('../../private/modules/super-admin/organizations/components/edit-organization.component').then(c => c.EditOrganizationComponent)
+          },
+          {
+            path: 'settings',
+            loadComponent: () => import('../../private/modules/super-admin/organizations/components/organization-settings.component').then(c => c.OrganizationSettingsComponent)
+          }
+        ]
       },
       {
         path: 'users',

@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { SidebarComponent, MenuItem } from '../../../shared/components/sidebar/sidebar.component';
@@ -39,7 +39,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
   `,
   styleUrls: ['./super-admin-layout.component.scss']
 })
-export class SuperAdminLayoutComponent {
+export class SuperAdminLayoutComponent implements OnInit {
   sidebarCollapsed = false;
   currentPageTitle = 'Super Admin Dashboard';
   currentVlink = 'super-admin';
@@ -47,6 +47,13 @@ export class SuperAdminLayoutComponent {
 
   constructor() {
     console.log('[DEBUG] SuperAdminLayoutComponent has been constructed!');
+    console.log('[DEBUG] Menu items:', this.menuItems);
+  }
+
+  ngOnInit(): void {
+    console.log('[DEBUG] SuperAdminLayoutComponent initialized');
+    // Ensure menu items are properly set
+    console.log('[DEBUG] Menu items on init:', this.menuItems);
   }
   
   breadcrumb = {
