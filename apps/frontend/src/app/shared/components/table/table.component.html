@@ -73,7 +73,14 @@
             
             <!-- Default content -->
             <ng-template #defaultContent>
-              <span class="text-text-primary" *ngIf="column.key !== 'state'">{{ item[column.key] }}</span>
+              <span class="text-text-primary" *ngIf="column.key !== 'state'">
+                <ng-container *ngIf="item[column.key] !== null && item[column.key] !== undefined && item[column.key] !== ''; else noDataTemplate">
+                  {{ item[column.key] }}
+                </ng-container>
+                <ng-template #noDataTemplate>
+                  <span class="text-muted">Data not found</span>
+                </ng-template>
+              </span>
             </ng-template>
           </td>
 

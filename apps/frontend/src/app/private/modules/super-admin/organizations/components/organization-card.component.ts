@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 
 import { OrganizationListItem } from '../interfaces/organization.interface';
+import { IconComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-organization-card',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   template: `
     <div 
       class="bg-white border border-border rounded-lg p-6 hover:shadow-md transition-shadow duration-200 cursor-pointer"
@@ -17,7 +18,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
         <div class="flex items-center gap-4 flex-1">
           <!-- Organization Icon -->
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10">
-            <i class="fas fa-building text-primary text-xl"></i>
+            <app-icon name="building" [size]="20" class="text-primary"></app-icon>
           </div>
           
           <!-- Organization Details -->
@@ -26,11 +27,11 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
             <p class="text-sm text-text-secondary mb-2">{{ organization.email }}</p>
             <div class="flex items-center gap-4 text-xs text-text-muted">
               <span>
-                <i class="fas fa-calendar mr-1"></i>
+                <app-icon name="calendar" [size]="14" class="mr-1"></app-icon>
                 {{ organization.createdAt | date:'shortDate' }}
               </span>
               <span>
-                <i class="fas fa-store mr-1"></i>
+                <app-icon name="store" [size]="14" class="mr-1"></app-icon>
                 {{ organization.settings.maxStores || 0 }} stores max
               </span>
             </div>
@@ -50,7 +51,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
             <button
               class="p-2 rounded-lg hover:bg-gray-100 text-text-primary"
               (click)="toggleMenu($event)">
-              <i class="fas fa-ellipsis-v"></i>
+              <app-icon name="settings" [size]="16"></app-icon>
             </button>
             
             <!-- Dropdown Menu -->
@@ -60,19 +61,19 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg flex items-center gap-2"
                 (click)="viewDetails($event)">
-                <i class="fas fa-eye text-text-secondary"></i>
+                <app-icon name="search" [size]="14" class="text-text-secondary"></app-icon>
                 View Details
               </button>
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
                 (click)="editOrganization($event)">
-                <i class="fas fa-edit text-text-secondary"></i>
+                <app-icon name="edit" [size]="14" class="text-text-secondary"></app-icon>
                 Edit
               </button>
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-b-lg flex items-center gap-2 text-destructive"
                 (click)="deleteOrganization($event)">
-                <i class="fas fa-trash text-destructive"></i>
+                <app-icon name="delete" [size]="14" class="text-destructive"></app-icon>
                 Delete
               </button>
             </div>

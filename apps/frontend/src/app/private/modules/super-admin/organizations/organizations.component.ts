@@ -78,12 +78,12 @@ import './organizations.component.css';
                   <app-icon name="refresh" [size]="16"></app-icon>
                 </button>
                 <button
-                  class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm"
+                  class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
                   (click)="openCreateOrganizationModal()"
-                  title="Add Organization"
+                  title="New Organization"
                 >
-                  <i class="fas fa-plus mr-1"></i>
-                  <span class="hidden sm:inline">Add</span>
+                  <app-icon name="plus" [size]="16"></app-icon>
+                  <span class="hidden sm:inline">New Organization</span>
                 </button>
               </div>
             </div>

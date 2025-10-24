@@ -7,7 +7,7 @@
 .table-container {
   position: relative;
   overflow: hidden;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   border: var(--border-width) solid var(--color-border);
   background-color: var(--color-surface);
   box-shadow: none;
@@ -353,7 +353,7 @@ table {
 // Responsive design
 @media (max-width: 768px) {
   .table-container {
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     
     table {
       font-size: var(--fs-xs);
@@ -382,7 +382,7 @@ table {
 
 @media (max-width: 480px) {
   .table-container {
-    border-radius: 0;
+    border-radius: var(--radius-sm);
     
     table {
       thead th,

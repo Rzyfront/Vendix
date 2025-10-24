@@ -1,10 +1,11 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-organization-pagination',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   template: `
     <div *ngIf="pagination.totalPages > 1" class="flex justify-center items-center gap-2 mt-6">
       <!-- Previous Button -->
@@ -12,7 +13,7 @@ import { CommonModule } from '@angular/common';
         class="px-3 py-1 rounded-lg border border-border disabled:opacity-50 disabled:cursor-not-allowed text-text-primary hover:bg-gray-50"
         [disabled]="pagination.page <= 1"
         (click)="changePage(pagination.page - 1)">
-        <i class="fas fa-chevron-left"></i>
+        <app-icon name="chevron-left" [size]="16"></app-icon>
       </button>
 
       <!-- Page Numbers -->
@@ -42,7 +43,7 @@ import { CommonModule } from '@angular/common';
         class="px-3 py-1 rounded-lg border border-border disabled:opacity-50 disabled:cursor-not-allowed text-text-primary hover:bg-gray-50"
         [disabled]="pagination.page >= pagination.totalPages"
         (click)="changePage(pagination.page + 1)">
-        <i class="fas fa-chevron-right"></i>
+        <app-icon name="chevron-right" [size]="16"></app-icon>
       </button>
 
       <!-- Page Info -->

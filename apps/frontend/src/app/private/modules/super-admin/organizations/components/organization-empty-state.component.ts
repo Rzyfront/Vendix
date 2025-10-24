@@ -1,15 +1,16 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-organization-empty-state',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   template: `
     <div class="p-8 text-center">
       <!-- Empty State Icon -->
       <div class="w-16 h-16 mx-auto mb-4 rounded-lg flex items-center justify-center bg-muted/20">
-        <i class="fas fa-building text-2xl text-text-muted"></i>
+        <app-icon name="building" [size]="24" class="text-text-muted"></app-icon>
       </div>
       
       <!-- Empty State Content -->
@@ -20,8 +21,8 @@ import { CommonModule } from '@angular/common';
       <button
         *ngIf="showActionButton"
         (click)="onActionClick()"
-        class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors">
-        <i class="fas fa-plus mr-2"></i>
+        class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2">
+        <app-icon name="plus" [size]="16"></app-icon>
         {{ actionText }}
       </button>
     </div>

@@ -36,3 +36,4 @@
 - Se usan componentes reutilizables para la construccion de vistar y componentes.
 - Se usa un gestor de estados global centralizado.
 - Se usa un guard para direccionar a layout de aplicacion especificas por rol.
+- Se usa Lucide para los iconos, con un componente Icon para modularidad.
