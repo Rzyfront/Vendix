@@ -7,6 +7,33 @@
   color: var(--text);
 }
 
+/* Organizations List Container with scroll */
+.organizations-list-container {
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar styling for organizations list */
+.organizations-list-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.organizations-list-container::-webkit-scrollbar-track {
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+.organizations-list-container::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.organizations-list-container::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
 /* Organization Card Styles */
 .organization-card {
   transition: all var(--transition-fast) ease;

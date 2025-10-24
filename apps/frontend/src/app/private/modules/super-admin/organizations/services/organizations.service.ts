@@ -19,17 +19,15 @@ export interface CreateOrganizationDto {
 
 export interface UpdateOrganizationDto {
   name?: string;
+  slug?: string;
+  legal_name?: string;
+  tax_id?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  logo_url?: string;
   description?: string;
-  contact?: {
-    email?: string;
-    phone?: string;
-  };
-  settings?: {
-    allowPublicStore?: boolean;
-    allowMultipleStores?: boolean;
-    maxStores?: number;
-    maxUsers?: number;
-  };
+  state?: string;
 }
 
 export interface OrganizationQueryDto {

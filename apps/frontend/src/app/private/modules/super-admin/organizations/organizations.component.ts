@@ -12,11 +12,11 @@ import { Organization } from '../../../../core/models/organization.model';
 // Import new components
 import {
   OrganizationStatsComponent,
-  OrganizationFiltersComponent,
   OrganizationCardComponent,
   OrganizationPaginationComponent,
   OrganizationEmptyStateComponent,
-  OrganizationCreateModalComponent
+  OrganizationCreateModalComponent,
+  OrganizationEditModalComponent
 } from './components/index';
 
 // Import shared components
@@ -34,11 +34,11 @@ import './organizations.component.css';
     FormsModule,
     ReactiveFormsModule,
     OrganizationStatsComponent,
-    OrganizationFiltersComponent,
     OrganizationCardComponent,
     OrganizationPaginationComponent,
     OrganizationEmptyStateComponent,
     OrganizationCreateModalComponent,
+    OrganizationEditModalComponent,
     InputsearchComponent,
     IconComponent
   ],
@@ -113,12 +113,12 @@ import './organizations.component.css';
         </app-organization-empty-state>
 
         <!-- Organizations Grid -->
-        <div *ngIf="!isLoading && organizations.length > 0" class="p-6">
+        <div *ngIf="!isLoading && organizations.length > 0" class="organizations-list-container p-6">
           <div class="space-y-4">
             <app-organization-card
               *ngFor="let org of organizations"
               [organization]="org"
-              (cardClick)="viewOrganization(org)"
+              (cardClick)="editOrganization(org)"
               (view)="viewOrganization(org)"
               (edit)="editOrganization(org)"
               (delete)="deleteOrganization(org)">
@@ -141,6 +141,16 @@ import './organizations.component.css';
         (submit)="createOrganization($event)"
         (cancel)="onCreateModalCancel()"
       ></app-organization-create-modal>
+
+      <!-- Edit Organization Modal -->
+      <app-organization-edit-modal
+        [isOpen]="isEditModalOpen"
+        [isSubmitting]="isUpdatingOrganization"
+        [organization]="selectedOrganization"
+        (openChange)="onEditModalChange($event)"
+        (submit)="updateOrganization($event)"
+        (cancel)="onEditModalCancel()"
+      ></app-organization-edit-modal>
     </div>
   `
 })
@@ -168,6 +178,11 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   isCreateModalOpen = false;
   isCreatingOrganization = false;
   createOrganizationForm!: FormGroup;
+
+  // Edit Modal state
+  isEditModalOpen = false;
+  isUpdatingOrganization = false;
+  selectedOrganization?: OrganizationListItem;
 
   private subscriptions: Subscription[] = [];
 
@@ -341,11 +356,6 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadOrganizations();
   }
 
-  onStatusFilterChange(status: string): void {
-    this.selectedStatus = status;
-    this.pagination.page = 1;
-    this.loadOrganizations();
-  }
 
   changePage(page: number): void {
     this.pagination.page = page;
@@ -378,17 +388,62 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   editOrganization(org: OrganizationListItem): void {
-    // Navigate to organization edit page
-    // TODO: Implement navigation when edit page is created
-    console.log('Edit organization:', org);
+    this.selectedOrganization = org;
+    this.isEditModalOpen = true;
   }
 
-  onFiltersCleared(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
-    this.pagination.page = 1;
-    this.loadOrganizations();
+  onEditModalChange(isOpen: boolean): void {
+    this.isEditModalOpen = isOpen;
+    if (!isOpen) {
+      this.selectedOrganization = undefined;
+    }
   }
+
+  onEditModalCancel(): void {
+    this.isEditModalOpen = false;
+    this.selectedOrganization = undefined;
+  }
+
+  updateOrganization(organizationData: any): void {
+    if (!this.selectedOrganization) return;
+
+    this.isUpdatingOrganization = true;
+
+    // Transform data to match the UpdateOrganizationDto interface from backend
+    const updateData = {
+      name: organizationData.name,
+      slug: this.selectedOrganization.slug, // Keep existing slug
+      legal_name: organizationData.legalName,
+      tax_id: organizationData.taxId,
+      email: organizationData.email,
+      phone: organizationData.phone,
+      website: organizationData.website,
+      description: organizationData.description,
+      state: organizationData.state
+    };
+
+    const sub = this.organizationsService.updateOrganization(this.selectedOrganization.id, updateData).subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.isEditModalOpen = false;
+          this.selectedOrganization = undefined;
+          this.loadOrganizations(); // Reload the list
+          this.loadStats(); // Reload stats
+          // TODO: Show success notification
+          console.log('Organization updated successfully:', response.data);
+        }
+        this.isUpdatingOrganization = false;
+      },
+      error: (error) => {
+        console.error('Error updating organization:', error);
+        this.isUpdatingOrganization = false;
+        // TODO: Show error notification
+      }
+    });
+
+    this.subscriptions.push(sub);
+  }
+
 
   getEmptyStateTitle(): string {
     if (this.searchTerm || this.selectedStatus) {
