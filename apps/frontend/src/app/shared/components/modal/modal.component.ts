@@ -15,16 +15,16 @@ export type ModalSize = 'sm' | 'md' | 'lg';
       class="fixed inset-0 z-50 flex items-center justify-center p-4"
       (click)="onBackdropClick($event)"
     >
-      <!-- Backdrop overlay con blur sin color -->
+      <!-- Backdrop overlay con blur y oscuridad -->
       <div
-        class="absolute inset-0 backdrop-blur-sm transition-opacity"
+        class="absolute inset-0 backdrop-blur-sm bg-black/50 transition-opacity duration-500 ease-out"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
       ></div>
 
       <!-- Modal container -->
       <div
-        class="relative transform transition-all duration-300 ease-out"
+        class="relative transform transition-all duration-500 ease-out"
         [class]="modalClasses"
         [class.scale-100]="isOpen"
         [class.scale-95]="!isOpen"
