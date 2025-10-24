@@ -1,0 +1,417 @@
+// Estilos para el componente de tabla usando tokens CSS de la aplicación
+
+// Clases de colores para estados
+.bg-orange-100 { background-color: #fed7aa; }
+.text-orange-800 { color: #9a3412; }
+
+.table-container {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0;
+  border: var(--border-width) solid var(--color-border);
+  background-color: var(--color-surface);
+  box-shadow: none;
+
+  // Contenedor con scroll horizontal para tablas muy anchas
+  &.table-scrollable {
+    overflow-x: auto;
+    
+    // Personalización del scroll horizontal usando tokens
+    &::-webkit-scrollbar {
+      height: 8px;
+    }
+    
+    &::-webkit-scrollbar-track {
+      background: var(--color-muted);
+      border-radius: var(--radius-sm);
+    }
+    
+    &::-webkit-scrollbar-thumb {
+      background: var(--color-border);
+      border-radius: var(--radius-sm);
+      transition: background-color var(--transition-fast) ease;
+      
+      &:hover {
+        background: var(--color-text-secondary);
+      }
+    }
+    
+    // Scrollbar para Firefox
+    & {
+      scrollbar-width: thin;
+      scrollbar-color: var(--color-border) var(--color-muted);
+    }
+  }
+}
+
+// Estilos base para la tabla
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--color-text-primary);
+
+  // Encabezado de la tabla
+  thead {
+    th {
+      font-weight: var(--fw-semibold);
+      color: var(--color-text-primary);
+      background-color: var(--color-muted);
+      border-bottom: var(--border-width) solid var(--color-border);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      transition: background-color var(--transition-fast) ease;
+      padding: 16px 12px;
+
+      // Efecto hover en columnas ordenables
+      &.cursor-pointer {
+        &:hover {
+          background-color: var(--color-muted-foreground);
+        }
+      }
+
+      // Icono de ordenamiento
+      svg {
+        transition: transform var(--transition-fast) ease;
+        
+        &.rotate-180 {
+          transform: rotate(180deg);
+        }
+      }
+    }
+  }
+
+  // Cuerpo de la tabla
+  tbody {
+    tr {
+      border-bottom: var(--border-width) solid var(--color-border);
+      transition: background-color var(--transition-fast) ease;
+
+      // Efecto hover en filas
+      &:hover {
+        background-color: var(--color-muted);
+      }
+
+      // Filas con efecto striped (cebra)
+      &:nth-child(even) {
+        background-color: var(--color-muted);
+        
+        &:hover {
+          background-color: var(--color-muted-foreground);
+        }
+      }
+
+      // Celdas de datos
+      td {
+        padding: var(--control-padding);
+        vertical-align: middle;
+        border-bottom: var(--border-width) solid var(--color-border);
+
+        // Alineación de texto
+        &.text-center {
+          text-align: center;
+        }
+        
+        &.text-right {
+          text-align: right;
+        }
+
+        // Contenido de las celdas
+        span {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: 200px;
+        }
+      }
+
+      // Última fila sin borde inferior
+      &:last-child {
+        border-bottom: none;
+        
+        td {
+          border-bottom: none;
+        }
+      }
+    }
+  }
+}
+
+// Estados de tamaño
+.table-size-sm {
+  table {
+    font-size: var(--fs-xs);
+    
+    thead th,
+    tbody td {
+      padding: 6px 8px;
+    }
+  }
+}
+
+.table-size-md {
+  table {
+    font-size: var(--fs-sm);
+    
+    thead th,
+    tbody td {
+      padding: var(--control-padding);
+    }
+  }
+}
+
+.table-size-lg {
+  table {
+    font-size: var(--fs-base);
+    
+    thead th,
+    tbody td {
+      padding: 16px 20px;
+    }
+  }
+}
+
+// Estados de la tabla
+.table-bordered {
+  border: var(--border-width) solid var(--color-border);
+  
+  table {
+    thead th,
+    tbody td {
+      border: var(--border-width) solid var(--color-border);
+    }
+  }
+}
+
+.table-striped {
+  table {
+    tbody tr:nth-child(even) {
+      background-color: var(--color-muted);
+    }
+  }
+}
+
+.table-hoverable {
+  table {
+    tbody tr {
+      cursor: pointer;
+      
+      &:hover {
+        background-color: var(--color-muted);
+      }
+    }
+  }
+}
+
+.table-compact {
+  table {
+    thead th,
+    tbody td {
+      padding: 8px 12px;
+    }
+  }
+}
+
+// Botones de acciones
+.table-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  align-items: center;
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 0;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-medium);
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast) ease;
+    min-width: auto;
+    background: transparent;
+    color: var(--color-text-secondary);
+    opacity: 0.7;
+
+    // Variante primaria
+    &.action-primary {
+      color: var(--color-primary);
+      
+      &:hover:not(:disabled) {
+        opacity: 1;
+        background-color: rgba(126, 215, 165, 0.1);
+      }
+    }
+
+    // Variante secundaria
+    &.action-secondary {
+      color: var(--color-text-primary);
+      
+      &:hover:not(:disabled) {
+        opacity: 1;
+        background-color: var(--color-muted);
+      }
+    }
+
+    // Variante peligrosa
+    &.action-danger {
+      color: var(--color-destructive);
+      
+      &:hover:not(:disabled) {
+        opacity: 1;
+        background-color: rgba(239, 68, 68, 0.1);
+      }
+    }
+
+    // Variante fantasma
+    &.action-ghost {
+      color: var(--color-text-secondary);
+      
+      &:hover:not(:disabled) {
+        opacity: 1;
+        background-color: var(--color-muted);
+        color: var(--color-text-primary);
+      }
+    }
+
+    // Estado deshabilitado
+    &:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    // Iconos
+    svg {
+      width: 12px;
+      height: 12px;
+    }
+  }
+}
+
+// Estado de carga
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+
+  .loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--color-text-secondary);
+    
+    svg {
+      animation: spin 1s linear infinite;
+    }
+  }
+}
+
+// Estado vacío
+.empty-state {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  
+  .empty-icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 12px;
+    opacity: 0.5;
+  }
+  
+  .empty-message {
+    font-size: var(--fs-sm);
+    margin: 0;
+  }
+}
+
+// Animación de spin para el loading
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .table-container {
+    border-radius: 0;
+    
+    table {
+      font-size: var(--fs-xs);
+      
+      thead th,
+      tbody td {
+        padding: 8px 12px;
+      }
+    }
+  }
+  
+  .table-actions {
+    flex-direction: column;
+    gap: 2px;
+    
+    button {
+      padding: 6px;
+      min-width: 32px;
+      
+      span {
+        display: none;
+      }
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .table-container {
+    border-radius: 0;
+    
+    table {
+      thead th,
+      tbody td {
+        padding: 6px 8px;
+      }
+    }
+  }
+}
+
+// Tema oscuro
+[data-theme="dark"] {
+  .loading-overlay {
+    background-color: rgba(11, 18, 32, 0.8);
+  }
+  
+  table {
+    tbody tr {
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+      }
+      
+      &:nth-child(even) {
+        background-color: rgba(255, 255, 255, 0.02);
+        
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.05);
+        }
+      }
+    }
+  }
+}

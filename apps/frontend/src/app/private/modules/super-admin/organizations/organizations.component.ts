@@ -12,7 +12,6 @@ import { Organization } from '../../../../core/models/organization.model';
 // Import new components
 import {
   OrganizationStatsComponent,
-  OrganizationCardComponent,
   OrganizationPaginationComponent,
   OrganizationEmptyStateComponent,
   OrganizationCreateModalComponent,
@@ -20,7 +19,8 @@ import {
 } from './components/index';
 
 // Import shared components
-import { ModalComponent, InputsearchComponent, IconComponent } from '../../../../shared/components/index';
+import { ModalComponent, InputsearchComponent, IconComponent, TableComponent } from '../../../../shared/components/index';
+import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './organizations.component.css';
@@ -34,13 +34,13 @@ import './organizations.component.css';
     FormsModule,
     ReactiveFormsModule,
     OrganizationStatsComponent,
-    OrganizationCardComponent,
     OrganizationPaginationComponent,
     OrganizationEmptyStateComponent,
     OrganizationCreateModalComponent,
     OrganizationEditModalComponent,
     InputsearchComponent,
-    IconComponent
+    IconComponent,
+    TableComponent
   ],
   providers: [OrganizationsService],
   template: `
@@ -112,24 +112,28 @@ import './organizations.component.css';
           (actionClick)="openCreateOrganizationModal()">
         </app-organization-empty-state>
 
-        <!-- Organizations Grid -->
-        <div *ngIf="!isLoading && organizations.length > 0" class="organizations-list-container p-6">
-          <div class="space-y-4">
-            <app-organization-card
-              *ngFor="let org of organizations"
-              [organization]="org"
-              (cardClick)="editOrganization(org)"
-              (view)="viewOrganization(org)"
-              (edit)="editOrganization(org)"
-              (delete)="deleteOrganization(org)">
-            </app-organization-card>
-          </div>
+        <!-- Organizations Table -->
+        <div *ngIf="!isLoading && organizations.length > 0" class="p-6">
+          <app-table
+            [data]="organizations"
+            [columns]="tableColumns"
+            [actions]="tableActions"
+            [loading]="isLoading"
+            [sortable]="true"
+            [hoverable]="true"
+            [striped]="true"
+            size="md"
+            (sort)="onTableSort($event)"
+            (rowClick)="viewOrganization($event)">
+          </app-table>
 
           <!-- Pagination -->
-          <app-organization-pagination
-            [pagination]="pagination"
-            (pageChange)="changePage($event)">
-          </app-organization-pagination>
+          <div class="mt-6 flex justify-center">
+            <app-organization-pagination
+              [pagination]="pagination"
+              (pageChange)="changePage($event)">
+            </app-organization-pagination>
+          </div>
         </div>
       </div>
 
@@ -159,6 +163,31 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   isLoading = false;
   searchTerm = '';
   selectedStatus = '';
+
+  // Table configuration
+  tableColumns: TableColumn[] = [
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
+    { key: 'slug', label: 'Vlink', sortable: true, width: '150px' },
+    { key: 'email', label: 'Email', sortable: true, width: '250px' },
+    { key: 'phone', label: 'Teléfono', sortable: true, width: '150px' },
+    { key: 'tax_id', label: 'NIT/CC', sortable: true, width: '120px' },
+    { key: 'state', label: 'Estado', sortable: true, width: '100px', align: 'center' }
+  ];
+
+  tableActions: TableAction[] = [
+    {
+      label: 'Editar',
+      icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+      action: (org) => this.editOrganization(org),
+      variant: 'primary'
+    },
+    {
+      label: 'Eliminar',
+      icon: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16',
+      action: (org) => this.deleteOrganization(org),
+      variant: 'danger'
+    }
+  ];
 
   stats = {
     total: 0,
@@ -308,7 +337,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
             name: org.name,
             slug: org.slug,
             email: org.email,
+            phone: org.phone || '',
+            tax_id: org.tax_id || '',
             status: org.state || 'active',
+            state: org.state || 'active',
             plan: 'premium' as any, // Default plan since backend doesn't have this field
             createdAt: org.created_at || new Date().toISOString(),
             settings: {
@@ -356,10 +388,34 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadOrganizations();
   }
 
+  onTableSort(sortEvent: { column: string; direction: 'asc' | 'desc' | null }): void {
+    // TODO: Implement server-side sorting
+    console.log('Sort event:', sortEvent);
+    // For now, just reload the organizations
+    this.loadOrganizations();
+  }
 
   changePage(page: number): void {
     this.pagination.page = page;
     this.loadOrganizations();
+  }
+
+  // Helper methods for table display
+  formatStatus(status: string): string {
+    const statusMap: { [key: string]: string } = {
+      'active': 'Activo',
+      'inactive': 'Inactivo',
+      'suspended': 'Suspendido'
+    };
+    return statusMap[status] || status;
+  }
+
+  formatDate(dateString: string): string {
+    return new Date(dateString).toLocaleDateString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
   }
 
   deleteOrganization(org: OrganizationListItem): void {
