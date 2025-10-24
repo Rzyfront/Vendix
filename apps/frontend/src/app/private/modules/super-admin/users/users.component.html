@@ -1,9 +1,9 @@
-<div class="space-y-6 bg-bg min-h-full p-6">
-  <!-- Stats Cards -->
-  <app-user-stats [stats]="userStats"></app-user-stats>
+<div class="space-y-6">
+    <!-- Stats Cards -->
+    <app-user-stats [stats]="userStats"></app-user-stats>
 
-  <!-- Users Table -->
-  <div class="bg-surface rounded-card shadow-card border border-border">
+    <!-- Users Table Container -->
+    <div class="rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
       <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div class="flex-1 min-w-0">
@@ -22,25 +22,27 @@
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
           
-          <!-- State Filter -->
-          <select
-            formControlName="state"
-            class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm"
-            [disabled]="isLoading"
-          >
-            <option *ngFor="let state of userStates" [value]="state.value">
-              {{ state.label }}
-            </option>
-          </select>
-          
-          <!-- Organization Filter -->
-          <input
-            type="number"
-            formControlName="organization_id"
-            class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm w-32"
-            placeholder="ID Org"
-            [disabled]="isLoading"
-          />
+          <form [formGroup]="filterForm">
+            <!-- State Filter -->
+            <select
+              formControlName="state"
+              class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm"
+              [disabled]="isLoading"
+            >
+              <option *ngFor="let state of userStates" [value]="state.value">
+                {{ state.label }}
+              </option>
+            </select>
+            
+            <!-- Organization Filter -->
+            <input
+              type="number"
+              formControlName="organization_id"
+              class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm w-32"
+              placeholder="ID Org"
+              [disabled]="isLoading"
+            />
+          </form>
           
           <div class="flex gap-2">
             <button
@@ -70,20 +72,19 @@
         </div>
       </div>
     </div>
-    <div *ngIf="isLoading && users.length === 0" class="p-8 text-center">
-      <app-icon name="refresh" class="w-8 h-8 animate-spin text-primary mx-auto mb-4"></app-icon>
-      <p class="text-text-muted">Cargando usuarios...</p>
-    </div>
+      <!-- Loading State -->
+      <div *ngIf="isLoading" class="p-8 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p class="mt-2 text-text-secondary">Loading users...</p>
+      </div>
 
-    <div *ngIf="!isLoading && users.length === 0" class="p-8">
+      <!-- Empty State -->
       <app-user-empty-state
-        [title]="'No se encontraron usuarios'"
-        [description]="'No hay usuarios que coincidan con los criterios de búsqueda'"
-        [showActionButton]="true"
-        [actionText]="'Crear Primer Usuario'"
-        (onActionClick)="createUser()"
-      ></app-user-empty-state>
-    </div>
+        *ngIf="!isLoading && users.length === 0"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        (actionClick)="createUser()">
+      </app-user-empty-state>
 
     <div *ngIf="users.length > 0" class="p-6">
       <app-table
@@ -172,7 +173,7 @@
         </ng-template>
       </app-table>
     </div>
-  </div>
+    </div>
 
   <!-- Create User Modal -->
   <app-user-create-modal

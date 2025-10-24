@@ -38,8 +38,9 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <path *ngSwitchCase="'close'" d="M18 6 6 18M6 6l12 12"/>
         <path *ngSwitchCase="'check'" d="M20 6 9 17l-5-5"/>
         <path *ngSwitchCase="'search'" d="m21 21-4.3-4.3M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0z"/>
-        <path *ngSwitchCase="'edit'" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path *ngSwitchCase="'edit'" d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
         <path *ngSwitchCase="'delete'" d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        <path *ngSwitchCase="'trash-2'" d="M3 6h18m-2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m-6 5v6m4-6v6"/>
         <path *ngSwitchCase="'info'" d="M12 16v-4m0-4h.01M22 12c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10z"/>
         <path *ngSwitchCase="'warning'" d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4m0 4h.01"/>
         <path *ngSwitchCase="'user'" d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
@@ -54,6 +55,13 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <path *ngSwitchCase="'headset'" d="M22 16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v6z"/>
         <path *ngSwitchCase="'circle'" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z"/>
         <path *ngSwitchCase="'refresh'" d="M1 4v6h6M23 20v-6h-6M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+        <path *ngSwitchCase="'archive'" d="M21 8v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8m5-4h8a2 2 0 0 1 2 2v4H6V4a2 2 0 0 1 2-2z"/>
+        <path *ngSwitchCase="'shield'" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        <path *ngSwitchCase="'check-circle'" d="M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3"/>
+        <path *ngSwitchCase="'clock'" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/>
+        <path *ngSwitchCase="'user-x'" d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m8-10a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7 1-4 4m0-4 4 4"/>
+        <path *ngSwitchCase="'alert-triangle'" d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4m0 4h.01"/>
+        <path *ngSwitchCase="'mail-check'" d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7m5-10 4 4m0 0 4-4m-4 4V3"/>
         
         <!-- Commerce icons -->
         <path *ngSwitchCase="'cart'" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0-2.5 1.5M7 13v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6"/>

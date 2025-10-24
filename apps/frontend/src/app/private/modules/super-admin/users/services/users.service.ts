@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, BehaviorSubject, finalize, catchError, throwError } from 'rxjs';
+import { Observable, BehaviorSubject, finalize, catchError, throwError, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   User,
@@ -44,7 +44,19 @@ export class UsersService {
     if (query.state) params = params.set('state', query.state);
     if (query.organization_id) params = params.set('organization_id', query.organization_id.toString());
 
-    return this.http.get<PaginatedUsersResponse>(`${this.apiUrl}/users`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/users`, { params }).pipe(
+      map(response => {
+        // Mapear la respuesta de la API a la estructura esperada por el frontend
+        return {
+          data: response.data,
+          pagination: {
+            page: response.meta.page,
+            limit: response.meta.limit,
+            total: response.meta.total,
+            total_pages: response.meta.totalPages
+          }
+        } as PaginatedUsersResponse;
+      }),
       finalize(() => this.isLoading$.next(false)),
       catchError(error => {
         console.error('Error loading users:', error);
@@ -145,18 +157,39 @@ export class UsersService {
    */
   getUsersDashboard(dashboardQuery: UsersDashboardDto = {}): Observable<UserStats> {
     let params = new HttpParams();
-    if (dashboardQuery.store_id) params = params.set('store_id', dashboardQuery.store_id);
-    if (dashboardQuery.search) params = params.set('search', dashboardQuery.search);
-    if (dashboardQuery.role) params = params.set('role', dashboardQuery.role);
-    if (dashboardQuery.page) params = params.set('page', dashboardQuery.page.toString());
-    if (dashboardQuery.limit) params = params.set('limit', dashboardQuery.limit.toString());
+    
+    // Solo agregar parámetros si tienen valores válidos
+    if (dashboardQuery.store_id && dashboardQuery.store_id.trim() !== '') {
+      params = params.set('store_id', dashboardQuery.store_id.trim());
+    }
+    if (dashboardQuery.search && dashboardQuery.search.trim() !== '') {
+      params = params.set('search', dashboardQuery.search.trim());
+    }
+    if (dashboardQuery.role && dashboardQuery.role.trim() !== '') {
+      params = params.set('role', dashboardQuery.role.trim());
+    }
+    if (dashboardQuery.page && dashboardQuery.page > 0) {
+      params = params.set('page', dashboardQuery.page.toString());
+    }
+    if (dashboardQuery.limit && dashboardQuery.limit > 0) {
+      params = params.set('limit', dashboardQuery.limit.toString());
+    }
     if (dashboardQuery.include_inactive !== undefined) {
       params = params.set('include_inactive', dashboardQuery.include_inactive.toString());
     }
 
-    return this.http.get<UserStats>(`${this.apiUrl}/users/dashboard`, { params }).pipe(
+    console.log('Making dashboard request with params:', params.toString());
+
+    return this.http.get<{ data: UserStats }>(`${this.apiUrl}/users/dashboard`, { params }).pipe(
+      map(response => response.data),
       catchError(error => {
         console.error('Error getting users dashboard:', error);
+        console.error('Error details:', {
+          status: error.status,
+          statusText: error.statusText,
+          url: error.url,
+          params: params.toString()
+        });
         return throwError(() => error);
       })
     );

@@ -24,6 +24,8 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
            [class.ml-16]="sidebarCollapsed">
         <!-- Header -->
         <app-header
+          [breadcrumb]="breadcrumb"
+          [user]="user"
           (toggleSidebar)="toggleSidebar()">
         </app-header>
         
@@ -41,6 +43,17 @@ export class OrganizationAdminLayoutComponent {
   currentVlink = 'organization-admin';
   organizationName = 'Acme Corporation';
   organizationSlug = 'acme-corp';
+  
+  breadcrumb = {
+    parent: { label: 'Organización', url: '/organization' },
+    current: { label: 'Dashboard' }
+  };
+
+  user = {
+    name: 'Admin User',
+    role: 'Organization Admin',
+    initials: 'AU'
+  };
 
   menuItems: MenuItem[] = [
     {

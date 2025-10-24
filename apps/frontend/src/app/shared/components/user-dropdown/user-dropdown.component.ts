@@ -70,6 +70,11 @@ export class UserDropdownComponent implements OnInit {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
+  
+  private router = inject(Router);
+  private authService = inject(AuthService);
+  private globalFacade = inject(GlobalFacade);
+  
   userContext$: Observable<{
     user?: any;
     organization?: any;
@@ -80,12 +85,8 @@ export class UserDropdownComponent implements OnInit {
     hasStore: boolean;
   }>;
 
-  private router = inject(Router);
-  private authService = inject(AuthService);
-  private globalFacade = inject(GlobalFacade);
-
   constructor() {
-    // Inicializar el observable del contexto del usuario
+    // Inicializar el observable en el constructor
     this.userContext$ = this.globalFacade.userContext$;
   }
 

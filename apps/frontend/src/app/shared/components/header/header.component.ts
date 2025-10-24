@@ -35,39 +35,40 @@ import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
 
           <!-- Dynamic Breadcrumb -->
           <div class="breadcrumb-section">
-            <div class="breadcrumb-trail" *ngIf="breadcrumb$ | async as breadcrumb">
-              <ng-container *ngIf="breadcrumb.parent">
+            <div class="breadcrumb-trail" *ngIf="breadcrumb$ | async as breadcrumbData">
+              <ng-container *ngIf="breadcrumbData.parent">
                 <a
-                  *ngIf="breadcrumb.parent.url"
-                  [routerLink]="breadcrumb.parent.url"
-                  class="breadcrumb-link">
+                  *ngIf="breadcrumbData.parent.url"
+                  [routerLink]="breadcrumbData.parent.url"
+                  class="breadcrumb-link"
+                  style="cursor: pointer;">
                   <app-icon
-                    *ngIf="breadcrumb.parent.icon"
-                    [name]="breadcrumb.parent.icon"
+                    *ngIf="breadcrumbData.parent.icon"
+                    [name]="breadcrumbData.parent.icon"
                     [size]="14"
                     class="parent-icon">
                   </app-icon>
-                  {{ breadcrumb.parent.label }}
+                  {{ breadcrumbData.parent.label }}
                 </a>
-                <span *ngIf="!breadcrumb.parent.url" class="breadcrumb-label">
+                <span *ngIf="!breadcrumbData.parent.url" class="breadcrumb-label">
                   <app-icon
-                    *ngIf="breadcrumb.parent.icon"
-                    [name]="breadcrumb.parent.icon"
+                    *ngIf="breadcrumbData.parent.icon"
+                    [name]="breadcrumbData.parent.icon"
                     [size]="14"
                     class="parent-icon">
                   </app-icon>
-                  {{ breadcrumb.parent.label }}
+                  {{ breadcrumbData.parent.label }}
                 </span>
                 <span class="breadcrumb-separator">/</span>
               </ng-container>
               <span class="breadcrumb-current">
                 <app-icon
-                  *ngIf="breadcrumb.current.icon"
-                  [name]="breadcrumb.current.icon"
+                  *ngIf="breadcrumbData.current.icon"
+                  [name]="breadcrumbData.current.icon"
                   [size]="14"
                   class="current-icon">
                 </app-icon>
-                {{ breadcrumb.current.label }}
+                {{ breadcrumbData.current.label }}
               </span>
             </div>
             <h1 class="page-title">{{ (breadcrumb$ | async)?.title || title }}</h1>
@@ -120,5 +121,9 @@ export class HeaderComponent implements OnInit, OnDestroy {
 
   onDropdownClose() {
     // Puedes agregar lógica cuando se cierra el dropdown si es necesario
+  }
+
+  navigateToUrl(url: string) {
+    this.router.navigateByUrl(url);
   }
 }

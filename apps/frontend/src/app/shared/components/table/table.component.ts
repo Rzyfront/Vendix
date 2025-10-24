@@ -1,5 +1,6 @@
 import { Component, Input, Output, EventEmitter, TemplateRef, ContentChild, AfterContentInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../icon/icon.component';
 
 export interface TableColumn {
   key: string;
@@ -27,7 +28,7 @@ export type SortDirection = 'asc' | 'desc' | null;
 @Component({
   selector: 'app-table',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss'
 })

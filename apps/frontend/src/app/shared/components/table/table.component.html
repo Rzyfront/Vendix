@@ -105,15 +105,11 @@
                     [attr.title]="action.label"
                   >
                     <!-- Icon if provided -->
-                    <svg
+                    <app-icon
                       *ngIf="action.icon"
-                      class="w-3 h-3"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" [attr.d]="action.icon"></path>
-                    </svg>
+                      [name]="action.icon"
+                      [size]="12"
+                    ></app-icon>
                     
                     <!-- Label (only show if no icon or on larger sizes) -->
                     <span *ngIf="!action.icon || size === 'lg'">{{ action.label }}</span>

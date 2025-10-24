@@ -13,20 +13,26 @@ export interface User {
   onboarding_completed: boolean;
   organization_id: number;
   app?: 'ORG_ADMIN' | 'STORE_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
-  organization?: {
+  organizations?: {
     id: number;
     name: string;
   };
-  roles?: UserRole[];
+  user_roles?: UserRole[];
   created_at: string;
   updated_at: string;
 }
 
 export interface UserRole {
   id: number;
-  role: {
+  user_id: number;
+  role_id: number;
+  roles: {
     id: number;
     name: string;
+    description: string;
+    is_system_role: boolean;
+    created_at: string;
+    updated_at: string;
   };
 }
 
@@ -81,15 +87,14 @@ export interface UsersDashboardDto {
 }
 
 export interface UserStats {
-  total: number;
-  active: number;
-  inactive: number;
-  pending_verification: number;
-  suspended: number;
-  archived: number;
-  with_2fa: number;
-  verified: number;
-  organizations: number;
+  total_usuarios: number;
+  activos: number;
+  pendientes: number;
+  con_2fa: number;
+  inactivos: number;
+  suspendidos: number;
+  email_verificado: number;
+  archivados: number;
 }
 
 export interface PaginatedUsersResponse {

@@ -46,6 +46,23 @@ export class UsersController {
     );
   }
 
+  @Get('dashboard')
+  @Permissions('users:read')
+  async getDashboard(@Query() query: UsersDashboardDto) {
+    try {
+      const result = await this.usersService.getDashboard(query);
+      return this.responseService.success(
+        result.data,
+        'Dashboard de usuarios obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard de usuarios',
+        error.message,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('users:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -81,23 +98,5 @@ export class UsersController {
   @HttpCode(HttpStatus.OK)
   reactivate(@Param('id', ParseIntPipe) id: number) {
     return this.usersService.reactivate(id);
-  }
-
-  @Get('dashboard')
-  @Permissions('users:read')
-  async getDashboard(@Query() query: UsersDashboardDto) {
-    try {
-      const result = await this.usersService.getDashboard(query);
-      return this.responseService.success(
-        result.data,
-        'Dashboard de usuarios obtenido exitosamente',
-        result.meta,
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener el dashboard de usuarios',
-        error.message,
-      );
-    }
   }
 }

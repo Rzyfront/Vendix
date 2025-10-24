@@ -13,7 +13,7 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Total Usuarios</p>
-            <p class="text-2xl font-bold mt-1 text-text-primary">{{ stats?.total || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-text-primary">{{ stats?.total_usuarios || 0 }}</p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10">
             <app-icon name="users" [size]="24" class="text-primary"></app-icon>
@@ -26,9 +26,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Activos</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">{{ stats?.active || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-green-600">{{ stats?.activos || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.active || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.activos || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100">
@@ -42,9 +42,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Pendientes</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">{{ stats?.pending_verification || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-yellow-600">{{ stats?.pendientes || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.pending_verification || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.pendientes || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100">
@@ -58,9 +58,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Con 2FA</p>
-            <p class="text-2xl font-bold mt-1 text-purple-600">{{ stats?.with_2fa || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-purple-600">{{ stats?.con_2fa || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.with_2fa || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.con_2fa || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100">
@@ -74,9 +74,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Inactivos</p>
-            <p class="text-2xl font-bold mt-1 text-gray-600">{{ stats?.inactive || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-gray-600">{{ stats?.inactivos || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.inactive || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.inactivos || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-gray-100">
@@ -90,9 +90,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Suspendidos</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">{{ stats?.suspended || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-red-600">{{ stats?.suspendidos || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.suspended || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.suspendidos || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100">
@@ -106,9 +106,9 @@ import { UserStats } from '../interfaces/user.interface';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Email Verificado</p>
-            <p class="text-2xl font-bold mt-1 text-emerald-600">{{ stats?.verified || 0 }}</p>
+            <p class="text-2xl font-bold mt-1 text-emerald-600">{{ stats?.email_verificado || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculatePercentage(stats?.verified || 0, stats?.total || 0) }}% del total
+              {{ calculatePercentage(stats?.email_verificado || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-emerald-100">
@@ -117,21 +117,22 @@ import { UserStats } from '../interfaces/user.interface';
         </div>
       </div>
 
-      <!-- Organizations -->
+      <!-- Archived -->
       <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm font-medium text-text-secondary">Organizaciones</p>
-            <p class="text-2xl font-bold mt-1 text-indigo-600">{{ stats?.organizations || 0 }}</p>
+            <p class="text-sm font-medium text-text-secondary">Archivados</p>
+            <p class="text-2xl font-bold mt-1 text-red-600">{{ stats?.archivados || 0 }}</p>
             <p class="text-xs text-text-secondary mt-1">
-              {{ calculateAverageUsersPerOrg(stats?.total || 0, stats?.organizations || 0) }} usuarios por org
+              {{ calculatePercentage(stats?.archivados || 0, stats?.total_usuarios || 0) }}% del total
             </p>
           </div>
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-indigo-100">
-            <app-icon name="building" [size]="24" class="text-indigo-600"></app-icon>
+          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100">
+            <app-icon name="archive" [size]="24" class="text-red-600"></app-icon>
           </div>
         </div>
       </div>
+
     </div>
   `,
   styles: [`
@@ -152,9 +153,4 @@ export class UserStatsComponent implements OnInit {
     return Math.round((part / total) * 100);
   }
 
-  calculateAverageUsersPerOrg(totalUsers: number, totalOrgs: number): string {
-    if (totalOrgs === 0) return '0';
-    const average = totalUsers / totalOrgs;
-    return average.toFixed(1);
-  }
 }

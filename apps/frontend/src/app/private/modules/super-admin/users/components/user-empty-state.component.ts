@@ -26,10 +26,10 @@ import { IconComponent } from '../../../../../shared/components/index';
       <!-- Action Button (optional) -->
       <button
         *ngIf="showActionButton"
-        (click)="onActionClick.emit()"
-        class="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors duration-200 flex items-center gap-2"
+        (click)="actionClick.emit()"
+        class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2"
       >
-        <app-icon name="plus" class="w-4 h-4"></app-icon>
+        <app-icon name="plus" [size]="16"></app-icon>
         {{ actionText }}
       </button>
     </div>
@@ -41,12 +41,12 @@ import { IconComponent } from '../../../../../shared/components/index';
   `]
 })
 export class UserEmptyStateComponent {
-  @Input() title: string = 'No se encontraron usuarios';
-  @Input() description: string = 'No hay usuarios que coincidan con los criterios de búsqueda. Intenta ajustar los filtros.';
+  @Input() title: string = 'No users found';
+  @Input() description: string = 'Get started by creating your first user.';
   @Input() showActionButton: boolean = true;
-  @Input() actionText: string = 'Crear Primer Usuario';
+  @Input() actionText: string = 'Create User';
 
-  @Output() onActionClick = new EventEmitter<void>();
+  @Output() actionClick = new EventEmitter<void>();
 
   constructor() {}
 }

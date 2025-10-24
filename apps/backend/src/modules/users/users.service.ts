@@ -142,8 +142,11 @@ export class UsersService {
           id: true,
           first_name: true,
           last_name: true,
+          username: true,
           email: true,
           state: true,
+          last_login: true,
+          created_at: true,
           organizations: { select: { id: true, name: true } },
           user_roles: {
             include: {
@@ -235,128 +238,91 @@ export class UsersService {
   }
 
   async getDashboard(query: UsersDashboardDto) {
-    const { page = 1, limit = 10, search, role, store_id, include_inactive } = query;
-    const skip = (page - 1) * limit;
+    const { organization_id } = query;
 
-    const where: Prisma.usersWhereInput = {
-      // Solo excluir usuarios suspended/archived si no se especifica incluirlos
-      ...(include_inactive ? {} : { state: { notIn: ['suspended', 'archived'] } }),
-      ...(search && {
-        OR: [
-          { first_name: { contains: search, mode: 'insensitive' } },
-          { last_name: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-          { username: { contains: search, mode: 'insensitive' } },
-        ],
+    // Estadísticas generales de usuarios
+    const [
+      totalUsuarios,
+      usuariosActivos,
+      usuariosPendientes,
+      usuariosCon2FA,
+      usuariosInactivos,
+      usuariosSuspendidos,
+      usuariosEmailVerificado,
+      usuariosArchivados
+    ] = await Promise.all([
+      // Total Usuarios
+      this.prisma.users.count({
+        where: organization_id ? { organization_id } : {}
       }),
-      // Filtro por roles
-      ...(role && {
-        user_roles: {
-          some: {
-            roles: { name: { equals: role } }
-          }
+      
+      // Activos
+      this.prisma.users.count({
+        where: {
+          state: 'active',
+          ...(organization_id && { organization_id })
         }
       }),
-      // Filtro por tienda (multi-tenant: solo usuarios de stores de la organización del usuario actual)
-      ...(store_id && {
-        store_users: {
-          some: { store_id: parseInt(store_id) }
+      
+      // Pendientes
+      this.prisma.users.count({
+        where: {
+          state: 'pending_verification',
+          ...(organization_id && { organization_id })
         }
       }),
-    };
-
-    const [users, total, roleStats, stateStats] = await Promise.all([
-      // Usuarios paginados con filtros
-      this.prisma.users.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { created_at: 'desc' },
-        select: {
-          id: true,
-          first_name: true,
-          last_name: true,
-          email: true,
-          username: true,
-          state: true,
-          last_login: true,
+      
+      // Con 2FA
+      this.prisma.users.count({
+        where: {
+          two_factor_enabled: true,
+          ...(organization_id && { organization_id })
+        }
+      }),
+      
+      // Inactivos
+      this.prisma.users.count({
+        where: {
+          state: 'inactive',
+          ...(organization_id && { organization_id })
+        }
+      }),
+      
+      // Suspendidos
+      this.prisma.users.count({
+        where: {
+          state: 'suspended',
+          ...(organization_id && { organization_id })
+        }
+      }),
+      
+      // Email Verificado
+      this.prisma.users.count({
+        where: {
           email_verified: true,
-          created_at: true,
-          organizations: { select: { id: true, name: true } },
-          store_users: {
-            include: {
-              store: { select: { id: true, name: true, is_active: true } }
-            }
-          },
-          user_roles: {
-            include: {
-              roles: { select: { id: true, name: true, description: true } }
-            }
-          },
-        },
-      }),
-
-      // Total de usuarios aplicando filtros
-      this.prisma.users.count({ where }),
-
-      // Estadísticas por rol
-      this.prisma.user_roles.groupBy({
-        by: ['role_id'],
-        _count: { role_id: true },
-        include: {
-          roles: { select: { name: true } }
+          ...(organization_id && { organization_id })
         }
       }),
-
-      // Estadísticas por estado
-      this.prisma.users.groupBy({
-        by: ['state'],
-        _count: { state: true },
-        where: include_inactive ? {} : { state: { notIn: ['suspended', 'archived'] } }
+      
+      // Archivados
+      this.prisma.users.count({
+        where: {
+          state: 'archived',
+          ...(organization_id && { organization_id })
+        }
       })
     ]);
 
-    // Transform estadísticas
-    const roleStatistics = roleStats.map(stat => ({
-      role: stat.roles?.name || 'Sin rol',
-      count: stat._count.role_id
-    }));
-
-    const stateStatistics = stateStats.map(stat => ({
-      state: stat.state,
-      count: stat._count.state
-    }));
-
     return {
-      data: users.map(user => ({
-        id: user.id,
-        name: `${user.first_name} ${user.last_name}`.trim(),
-        email: user.email,
-        username: user.username,
-        state: user.state,
-        email_verified: user.email_verified,
-        last_login: user.last_login,
-        created_at: user.created_at,
-        organization: user.organizations,
-        stores: user.store_users.map(su => su.store),
-        roles: user.user_roles.map(ur => ur.roles).filter(Boolean),
-      })),
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        filters: {
-          search,
-          role,
-          store_id,
-          include_inactive
-        }
-      },
-      statistics: {
-        roles: roleStatistics,
-        states: stateStatistics,
-        total_users: total
+      data: {
+        total_usuarios: totalUsuarios,
+        activos: usuariosActivos,
+        pendientes: usuariosPendientes,
+        con_2fa: usuariosCon2FA,
+        inactivos: usuariosInactivos,
+        suspendidos: usuariosSuspendidos,
+        email_verificado: usuariosEmailVerificado,
+        archivados: usuariosArchivados
       }
     };
   }

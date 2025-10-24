@@ -1,4 +1,3 @@
-
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
@@ -75,7 +74,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       transform: (value: UserState) => this.getStateDisplay(value).text
     },
     {
-      key: 'organization.name',
+      key: 'organizations.name',
       label: 'Organización',
       sortable: false,
       defaultValue: 'N/A'
@@ -183,6 +182,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUsers(): void {
+    this.isLoading = true;
     const filters = this.filterForm.value;
     const query: UserQueryDto = {
       page: this.pagination.page,
@@ -194,18 +194,41 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     this.usersService.getUsers(query).subscribe({
       next: (response: PaginatedUsersResponse) => {
-        this.users = response.data;
-        this.pagination = {
-          page: response.pagination.page,
-          limit: response.pagination.limit,
-          total: response.pagination.total,
-          totalPages: response.pagination.total_pages
-        };
+        this.users = response.data || [];
+        
+        // Validar que response.pagination exista y tenga las propiedades esperadas
+        if (response.pagination) {
+          this.pagination = {
+            page: response.pagination.page || 1,
+            limit: response.pagination.limit || 10,
+            total: response.pagination.total || 0,
+            totalPages: response.pagination.total_pages || 0
+          };
+        } else {
+          // Si no hay paginación, mantener valores por defecto
+          console.warn('La respuesta no contiene información de paginación:', response);
+          this.pagination = {
+            page: 1,
+            limit: 10,
+            total: this.users.length,
+            totalPages: 1
+          };
+        }
       },
       error: (error) => {
         console.error('Error loading users:', error);
+        this.users = []; // Limpiar usuarios en caso de error
+        // Resetear paginación a valores seguros
+        this.pagination = {
+          page: 1,
+          limit: 10,
+          total: 0,
+          totalPages: 0
+        };
         // Handle error - show toast or notification
       }
+    }).add(() => {
+      this.isLoading = false; // Asegurar que el estado de carga se resetee
     });
   }
 
@@ -216,6 +239,17 @@ export class UsersComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error loading user stats:', error);
+        // Establecer valores por defecto para evitar errores de renderizado
+        this.userStats = {
+          total_usuarios: 0,
+          activos: 0,
+          pendientes: 0,
+          con_2fa: 0,
+          inactivos: 0,
+          suspendidos: 0,
+          email_verificado: 0,
+          archivados: 0
+        };
       }
     });
   }
@@ -353,5 +387,21 @@ export class UsersComponent implements OnInit, OnDestroy {
     } else {
       return this.formatDate(dateString);
     }
+  }
+
+  getEmptyStateTitle(): string {
+    const filters = this.filterForm.value;
+    if (filters.search || filters.state || filters.organization_id) {
+      return 'No users match your filters';
+    }
+    return 'No users found';
+  }
+
+  getEmptyStateDescription(): string {
+    const filters = this.filterForm.value;
+    if (filters.search || filters.state || filters.organization_id) {
+      return 'Try adjusting your search terms or filters';
+    }
+    return 'Get started by creating your first user.';
   }
 }

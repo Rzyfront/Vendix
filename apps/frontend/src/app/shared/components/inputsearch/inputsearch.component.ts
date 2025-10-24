@@ -95,7 +95,7 @@ export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAcce
   @Input() required = false;
   @Input() showClear = true;
   @Input() size: InputSearchSize = 'md';
-  @Input() debounceTime = 3000; // 3 segundos por defecto
+  @Input() debounceTime = 300; // 300 ms por defecto
   @Input() helpText = '';
   @Input() errorMessage = '';
   @Input() customClasses = '';
