@@ -1,0 +1,242 @@
+<div class="space-y-6 bg-bg min-h-full p-6">
+  <!-- Stats Cards -->
+  <app-user-stats [stats]="userStats"></app-user-stats>
+
+  <!-- Users Table -->
+  <div class="bg-surface rounded-card shadow-card border border-border">
+    <div class="px-6 py-4 border-b border-border">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            Todos los Usuarios ({{ pagination.total }})
+          </h2>
+        </div>
+        
+        <div class="filter-compact">
+          <!-- Input de búsqueda compacto -->
+          <app-inputsearch
+            class="w-full sm:w-64"
+            size="sm"
+            placeholder="Buscar usuarios..."
+            [debounceTime]="1000"
+            (searchChange)="onSearchChange($event)"
+          ></app-inputsearch>
+          
+          <!-- State Filter -->
+          <select
+            formControlName="state"
+            class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm"
+            [disabled]="isLoading"
+          >
+            <option *ngFor="let state of userStates" [value]="state.value">
+              {{ state.label }}
+            </option>
+          </select>
+          
+          <!-- Organization Filter -->
+          <input
+            type="number"
+            formControlName="organization_id"
+            class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm w-32"
+            placeholder="ID Org"
+            [disabled]="isLoading"
+          />
+          
+          <div class="flex gap-2">
+            <button
+              class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
+              (click)="refreshUsers()"
+              [disabled]="isLoading"
+              title="Refresh"
+            >
+              <app-icon name="refresh" [size]="16"></app-icon>
+            </button>
+            <button
+              class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
+              (click)="createUser()"
+              title="Nuevo Usuario"
+            >
+              <app-icon name="plus" [size]="16"></app-icon>
+              <span class="hidden sm:inline">Nuevo Usuario</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Paginación info -->
+        <div class="flex items-center gap-2 mt-2 sm:mt-0">
+          <span class="text-sm text-text-secondary">
+            Página {{ pagination.page }} de {{ pagination.totalPages }}
+          </span>
+        </div>
+      </div>
+    </div>
+    <div *ngIf="isLoading && users.length === 0" class="p-8 text-center">
+      <app-icon name="refresh" class="w-8 h-8 animate-spin text-primary mx-auto mb-4"></app-icon>
+      <p class="text-text-muted">Cargando usuarios...</p>
+    </div>
+
+    <div *ngIf="!isLoading && users.length === 0" class="p-8">
+      <app-user-empty-state
+        [title]="'No se encontraron usuarios'"
+        [description]="'No hay usuarios que coincidan con los criterios de búsqueda'"
+        [showActionButton]="true"
+        [actionText]="'Crear Primer Usuario'"
+        (onActionClick)="createUser()"
+      ></app-user-empty-state>
+    </div>
+
+    <div *ngIf="users.length > 0" class="p-6">
+      <app-table
+        [data]="users"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [loading]="isLoading"
+        (sort)="onSortChange($event.column, $event.direction)"
+      >
+        <!-- Custom cell for status -->
+        <ng-template #statusCell let-item>
+          <span
+            class="px-2 py-1 text-xs font-medium rounded-full"
+            [class]="getStateDisplay(item.state).class"
+          >
+            {{ getStateDisplay(item.state).text }}
+          </span>
+        </ng-template>
+
+        <!-- Custom cell for 2FA -->
+        <ng-template #twoFactorCell let-item>
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="shield"
+              class="w-4 h-4"
+              [ngClass]="item.two_factor_enabled ? 'text-green-500' : 'text-gray-400'"
+            ></app-icon>
+            <span class="text-sm text-text">
+              {{ item.two_factor_enabled ? 'Sí' : 'No' }}
+            </span>
+          </div>
+        </ng-template>
+
+        <!-- Custom cell for email verification -->
+        <ng-template #emailVerifiedCell let-item>
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="check"
+              class="w-4 h-4"
+              [ngClass]="item.email_verified ? 'text-green-500' : 'text-yellow-500'"
+            ></app-icon>
+            <span class="text-sm text-text">
+              {{ item.email_verified ? 'Verificado' : 'Pendiente' }}
+            </span>
+          </div>
+        </ng-template>
+
+        <!-- Custom actions -->
+        <ng-template #actionsCell let-item>
+          <div class="flex items-center gap-2">
+            <!-- Edit Button -->
+            <button
+              (click)="editUser(item)"
+              class="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+              title="Editar usuario"
+            >
+              <app-icon name="edit" class="w-4 h-4"></app-icon>
+            </button>
+
+            <!-- Toggle Status Button -->
+            <button
+              (click)="toggleUserStatus(item)"
+              class="p-1 rounded transition-colors"
+              [ngClass]="
+                item.state === 'active'
+                  ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
+                  : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
+              "
+              [title]="item.state === 'active' ? 'Archivar usuario' : 'Reactivar usuario'"
+            >
+              <app-icon
+                name="archive"
+                class="w-4 h-4"
+              ></app-icon>
+            </button>
+
+            <!-- Delete Button -->
+            <button
+              (click)="confirmDelete(item)"
+              class="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+              title="Eliminar usuario"
+            >
+              <app-icon name="delete" class="w-4 h-4"></app-icon>
+            </button>
+          </div>
+        </ng-template>
+      </app-table>
+    </div>
+  </div>
+
+  <!-- Create User Modal -->
+  <app-user-create-modal
+    *ngIf="showCreateModal"
+    [isOpen]="showCreateModal"
+    (onClose)="showCreateModal = false"
+    (onUserCreated)="onUserCreated()"
+  ></app-user-create-modal>
+
+  <!-- Edit User Modal -->
+  <app-user-edit-modal
+    *ngIf="showEditModal && currentUser"
+    [user]="currentUser"
+    [isOpen]="showEditModal"
+    (onClose)="showEditModal = false"
+    (onUserUpdated)="onUserUpdated()"
+  ></app-user-edit-modal>
+
+  <!-- Delete Confirmation Modal -->
+  <app-modal
+    *ngIf="showDeleteModal && userToDelete"
+    [isOpen]="showDeleteModal"
+    [title]="'Confirmar Eliminación'"
+    (onClose)="showDeleteModal = false"
+  >
+    <div class="p-6">
+      <div class="flex items-center gap-4 mb-4">
+        <div class="w-12 h-12 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
+          <app-icon name="warning" class="w-6 h-6 text-red-600 dark:text-red-400"></app-icon>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold text-text">¿Eliminar Usuario?</h3>
+          <p class="text-text-muted">
+            Estás por eliminar al usuario <strong>{{ userToDelete.first_name }} {{ userToDelete.last_name }}</strong>.
+            Esta acción no se puede deshacer.
+          </p>
+        </div>
+      </div>
+
+      <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-6">
+        <p class="text-sm text-text-muted mb-2">Información del usuario:</p>
+        <ul class="space-y-1 text-sm">
+          <li><strong>Nombre:</strong> {{ userToDelete.first_name }} {{ userToDelete.last_name }}</li>
+          <li><strong>Email:</strong> {{ userToDelete.email }}</li>
+          <li><strong>Usuario:</strong> {{ '@' + userToDelete.username }}</li>
+          <li><strong>Estado:</strong> {{ getStateDisplay(userToDelete.state).text }}</li>
+        </ul>
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button
+          (click)="showDeleteModal = false"
+          class="px-4 py-2 text-text bg-surface border border-border rounded-md hover:bg-surface-hover transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          (click)="deleteUser()"
+          class="px-4 py-2 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors flex items-center gap-2"
+        >
+          <app-icon name="trash-2" class="w-4 h-4"></app-icon>
+          Eliminar Usuario
+        </button>
+      </div>
+    </div>
+  </app-modal>
+</div>

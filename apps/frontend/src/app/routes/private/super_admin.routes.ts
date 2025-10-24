@@ -22,7 +22,7 @@ export const superAdminRoutes: Routes = [
       },
       {
         path: 'users',
-        loadChildren: () => import('../../private/modules/super-admin/users/users.routes').then(r => r.USERS_ROUTES)
+        loadComponent: () => import('../../private/modules/super-admin/users/users.component').then(c => c.UsersComponent)
       }
     ]
   }

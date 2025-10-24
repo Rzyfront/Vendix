@@ -1,0 +1,173 @@
+:host {
+  display: block;
+  height: 100%;
+  background-color: var(--bg);
+  color: var(--text);
+}
+
+/* Card container styles */
+.rounded-card {
+  border-radius: var(--radius-card);
+}
+
+.shadow-card {
+  box-shadow: var(--shadow-card);
+}
+
+/* Button styles */
+.rounded-button {
+  border-radius: var(--radius-input);
+}
+
+/* Header compact styles */
+.header-compact {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Filter and search styles */
+.filter-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .filter-compact {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+  
+  .filter-compact > * {
+    width: 100%;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading states */
+.loading-skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Table responsive styles */
+@media (max-width: 768px) {
+  .table-responsive {
+    overflow-x: auto;
+  }
+
+  .hide-mobile {
+    display: none;
+  }
+}
+
+/* Custom scrollbars */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Focus states */
+.focus-ring:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Hover effects for table rows */
+.table-row-hover:hover {
+  background-color: var(--surface-hover);
+  transition: background-color 0.2s ease;
+}
+
+/* Status badge styles */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+.status-badge.active {
+  background-color: var(--success-bg);
+  color: var(--success-text);
+}
+
+.status-badge.inactive {
+  background-color: var(--muted-bg);
+  color: var(--muted-text);
+}
+
+.status-badge.pending {
+  background-color: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.status-badge.suspended {
+  background-color: var(--error-bg);
+  color: var(--error-text);
+}
+
+.status-badge.archived {
+  background-color: var(--destructive-bg);
+  color: var(--destructive-text);
+}
+
+/* Custom animations for modals */
+.modal-backdrop {
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-content {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

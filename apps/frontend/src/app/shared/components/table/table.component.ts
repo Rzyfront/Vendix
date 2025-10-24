@@ -8,6 +8,8 @@ export interface TableColumn {
   width?: string;
   align?: 'left' | 'center' | 'right';
   template?: TemplateRef<any>;
+  transform?: (value: any) => string;
+  defaultValue?: string;
 }
 
 export interface TableAction {
@@ -256,5 +258,24 @@ export class TableComponent implements AfterContentInit {
       ...variantClasses[action.variant || 'ghost'],
       ...disabledClasses
     ].join(' ');
+  }
+
+  /**
+   * Get nested value from object using dot notation
+   */
+  getNestedValue(obj: any, path: string): any {
+    if (!path || !obj) return obj;
+
+    const keys = path.split('.');
+    let current = obj;
+
+    for (const key of keys) {
+      if (current === null || current === undefined) {
+        return undefined;
+      }
+      current = current[key];
+    }
+
+    return current;
   }
 }

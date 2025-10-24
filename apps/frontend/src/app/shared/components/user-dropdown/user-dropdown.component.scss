@@ -1,0 +1,212 @@
+.user-dropdown-container {
+  position: relative;
+  display: inline-block;
+
+  .user-trigger {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: var(--surface);
+    border: 1px solid var(--border);
+
+    &:hover {
+      background: var(--surface-hover);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .user-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      text-align: left;
+
+      .user-name {
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-primary);
+        line-height: 1.2;
+      }
+
+      .user-role {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.2;
+      }
+    }
+
+    .user-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+      color: white;
+      background: var(--primary);
+      flex-shrink: 0;
+    }
+
+    .chevron-icon {
+      color: var(--text-secondary);
+      transition: transform 0.2s ease;
+
+      &.rotate {
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 280px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-8px);
+    transition: all 0.2s ease;
+    z-index: 1000;
+    overflow: hidden;
+
+    &.show {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .dropdown-header {
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--background);
+
+      .header-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 16px;
+        color: white;
+        background: var(--primary);
+        flex-shrink: 0;
+      }
+
+      .header-info {
+        flex: 1;
+        min-width: 0;
+
+        .header-name {
+          font-size: 14px;
+          font-weight: 600;
+          color: var(--text-primary);
+          margin: 0 0 4px 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .header-email {
+          font-size: 12px;
+          color: var(--text-secondary);
+          margin: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+      }
+    }
+
+    .dropdown-divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    .dropdown-content {
+      padding: 8px;
+
+      .dropdown-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 12px;
+        border: none;
+        background: transparent;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: left;
+
+        &:hover {
+          background: var(--surface-hover);
+        }
+
+        &.danger {
+          .item-label {
+            color: var(--error);
+          }
+          .item-icon {
+            color: var(--error);
+          }
+
+          &:hover {
+            background: rgba(239, 68, 68, 0.1);
+          }
+        }
+
+        .item-icon {
+          color: var(--text-secondary);
+          flex-shrink: 0;
+        }
+
+        .item-label {
+          font-size: 14px;
+          color: var(--text-primary);
+          font-weight: 500;
+          flex: 1;
+        }
+      }
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .user-dropdown-container {
+    .user-trigger {
+      padding: 6px 8px;
+      gap: 8px;
+
+      .user-info {
+        display: none;
+      }
+
+      .user-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 12px;
+      }
+    }
+
+    .dropdown-menu {
+      min-width: 240px;
+      right: -12px;
+    }
+  }
+}

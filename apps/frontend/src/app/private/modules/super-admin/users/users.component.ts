@@ -1,88 +1,357 @@
 
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { UsersService } from '../../../../core/services/users.service';
+import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import {
+  User,
+  UserQueryDto,
+  UserStats,
+  UserState,
+  PaginatedUsersResponse
+} from './interfaces/user.interface';
+import { UsersService } from './services/users.service';
+import {
+  UserStatsComponent,
+  UserCreateModalComponent,
+  UserEditModalComponent,
+  UserEmptyStateComponent
+} from './components/index';
+
+// Import components from shared
+import {
+  TableComponent,
+  TableColumn,
+  TableAction,
+  InputsearchComponent,
+  IconComponent,
+  ModalComponent
+} from '../../../../shared/components/index';
+import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
 
 @Component({
   selector: 'app-users',
   standalone: true,
-  imports: [CommonModule],
-  template: `
-    <div class="container mx-auto px-4 sm:px-8">
-      <div class="py-8">
-        <div>
-          <h2 class="text-2xl font-semibold leading-tight">Users</h2>
-        </div>
-        <div class="-mx-4 sm:-mx-8 px-4 sm:px-8 py-4 overflow-x-auto">
-          <div class="inline-block min-w-full shadow rounded-lg overflow-hidden">
-            <table class="min-w-full leading-normal">
-              <thead>
-                <tr>
-                  <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    User
-                  </th>
-                  <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    Email
-                  </th>
-                  <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    State
-                  </th>
-                  <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
-                    Organization
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let user of users">
-                  <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                    <div class="flex items-center">
-                      <div class="ml-3">
-                        <p class="text-gray-900 whitespace-no-wrap">
-                          {{ user.first_name }} {{ user.last_name }}
-                        </p>
-                      </div>
-                    </div>
-                  </td>
-                  <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                    <p class="text-gray-900 whitespace-no-wrap">{{ user.email }}</p>
-                  </td>
-                  <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                    <span
-                      class="relative inline-block px-3 py-1 font-semibold text-green-900 leading-tight"
-                    >
-                      <span
-                        aria-hidden
-                        class="absolute inset-0 bg-green-200 opacity-50 rounded-full"
-                      ></span>
-                      <span class="relative">{{ user.state }}</span>
-                    </span>
-                  </td>
-                  <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
-                    <p class="text-gray-900 whitespace-no-wrap">
-                      {{ user.organizations.name }}
-                    </p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-  `,
-  styles: []
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    UserStatsComponent,
+    UserCreateModalComponent,
+    UserEditModalComponent,
+    UserEmptyStateComponent,
+    TableComponent,
+    InputsearchComponent,
+    IconComponent,
+    ModalComponent
+  ],
+  templateUrl: './users.component.html',
+  styleUrls: ['./users.component.css']
 })
-export class UsersComponent implements OnInit {
-  private usersService = inject(UsersService);
-  users: any[] = [];
+export class UsersComponent implements OnInit, OnDestroy {
+  users: User[] = [];
+  userStats: UserStats | null = null;
+  isLoading = false;
+  currentUser: User | null = null;
+  showCreateModal = false;
+  showEditModal = false;
+  userToDelete: User | null = null;
+  showDeleteModal = false;
+  searchSubject = new Subject<string>();
+  private destroy$ = new Subject<void>();
+
+  // Form for filters
+  filterForm: FormGroup;
+
+  // Table configuration
+  tableColumns: TableColumn[] = [
+    { key: 'first_name', label: 'Nombre', sortable: true },
+    { key: 'last_name', label: 'Apellido', sortable: true },
+    { key: 'username', label: 'Usuario', sortable: true },
+    { key: 'email', label: 'Email', sortable: true },
+    {
+      key: 'state',
+      label: 'Estado',
+      sortable: true,
+      transform: (value: UserState) => this.getStateDisplay(value).text
+    },
+    {
+      key: 'organization.name',
+      label: 'Organización',
+      sortable: false,
+      defaultValue: 'N/A'
+    },
+    {
+      key: 'last_login',
+      label: 'Último Acceso',
+      sortable: true,
+      transform: (value: string) => value ? this.formatDate(value) : 'Nunca'
+    },
+    {
+      key: 'created_at',
+      label: 'Fecha Creación',
+      sortable: true,
+      transform: (value: string) => this.formatDate(value)
+    }
+  ];
+
+  tableActions: TableAction[] = [
+    {
+      label: 'Editar',
+      icon: 'edit',
+      action: (user: User) => this.editUser(user),
+      variant: 'primary'
+    },
+    {
+      label: 'Eliminar',
+      icon: 'trash-2',
+      action: (user: User) => this.confirmDelete(user),
+      variant: 'danger'
+    }
+  ];
+
+  // Pagination
+  pagination = {
+    page: 1,
+    limit: 10,
+    total: 0,
+    totalPages: 0
+  };
+
+  // Filter states
+  userStates = [
+    { value: '', label: 'Todos los estados' },
+    { value: UserState.ACTIVE, label: 'Activo' },
+    { value: UserState.INACTIVE, label: 'Inactivo' },
+    { value: UserState.PENDING_VERIFICATION, label: 'Pendiente de Verificación' },
+    { value: UserState.SUSPENDED, label: 'Suspendido' },
+    { value: UserState.ARCHIVED, label: 'Archivado' }
+  ];
+
+  constructor(
+    private usersService: UsersService,
+    private fb: FormBuilder
+  ) {
+    this.filterForm = this.fb.group({
+      search: [''],
+      state: [''],
+      organization_id: ['']
+    });
+
+    // Setup search debounce
+    this.searchSubject
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntil(this.destroy$)
+      )
+      .subscribe((searchTerm: string) => {
+        this.filterForm.patchValue({ search: searchTerm }, { emitEvent: false });
+        this.pagination.page = 1;
+        this.loadUsers();
+      });
+  }
 
   ngOnInit(): void {
     this.loadUsers();
+    this.loadUserStats();
+
+    // Subscribe to form changes
+    this.filterForm.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.pagination.page = 1;
+        this.loadUsers();
+      });
+
+    // Subscribe to service loading states
+    this.usersService.isCreatingUser
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isCreating => {
+        // Optional: Handle global loading state
+      });
+
+    this.usersService.isUpdatingUser
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isUpdating => {
+        // Optional: Handle global loading state
+      });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   loadUsers(): void {
-    this.usersService.getUsers({}).subscribe(response => {
-      this.users = response.data;
+    const filters = this.filterForm.value;
+    const query: UserQueryDto = {
+      page: this.pagination.page,
+      limit: this.pagination.limit,
+      search: filters.search || undefined,
+      state: filters.state || undefined,
+      organization_id: filters.organization_id || undefined
+    };
+
+    this.usersService.getUsers(query).subscribe({
+      next: (response: PaginatedUsersResponse) => {
+        this.users = response.data;
+        this.pagination = {
+          page: response.pagination.page,
+          limit: response.pagination.limit,
+          total: response.pagination.total,
+          totalPages: response.pagination.total_pages
+        };
+      },
+      error: (error) => {
+        console.error('Error loading users:', error);
+        // Handle error - show toast or notification
+      }
     });
+  }
+
+  loadUserStats(): void {
+    this.usersService.getUsersDashboard().subscribe({
+      next: (stats: UserStats) => {
+        this.userStats = stats;
+      },
+      error: (error) => {
+        console.error('Error loading user stats:', error);
+      }
+    });
+  }
+
+  onSearchChange(searchTerm: string): void {
+    this.searchSubject.next(searchTerm);
+  }
+
+  onPageChange(page: number): void {
+    this.pagination.page = page;
+    this.loadUsers();
+  }
+
+  onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
+    // TODO: Implement sorting logic
+    console.log('Sort changed:', column, direction);
+    this.loadUsers();
+  }
+
+  refreshUsers(): void {
+    this.loadUsers();
+  }
+
+  createUser(): void {
+    this.showCreateModal = true;
+  }
+
+  onUserCreated(): void {
+    this.showCreateModal = false;
+    this.loadUsers();
+    this.loadUserStats();
+  }
+
+  editUser(user: User): void {
+    this.currentUser = user;
+    this.showEditModal = true;
+  }
+
+  onUserUpdated(): void {
+    this.showEditModal = false;
+    this.currentUser = null;
+    this.loadUsers();
+    this.loadUserStats();
+  }
+
+  confirmDelete(user: User): void {
+    this.userToDelete = user;
+    this.showDeleteModal = true;
+  }
+
+  deleteUser(): void {
+    if (!this.userToDelete) return;
+
+    this.usersService.deleteUser(this.userToDelete.id).subscribe({
+      next: () => {
+        this.showDeleteModal = false;
+        this.userToDelete = null;
+        this.loadUsers();
+        this.loadUserStats();
+      },
+      error: (error) => {
+        console.error('Error deleting user:', error);
+        // Handle error - show toast or notification
+      }
+    });
+  }
+
+  toggleUserStatus(user: User): void {
+    const action = user.state === UserState.ACTIVE ? 'archive' : 'reactivate';
+
+    if (action === 'archive') {
+      this.usersService.archiveUser(user.id).subscribe({
+        next: () => {
+          this.loadUsers();
+          this.loadUserStats();
+        },
+        error: (error) => {
+          console.error('Error archiving user:', error);
+        }
+      });
+    } else {
+      this.usersService.reactivateUser(user.id).subscribe({
+        next: () => {
+          this.loadUsers();
+          this.loadUserStats();
+        },
+        error: (error) => {
+          console.error('Error reactivating user:', error);
+        }
+      });
+    }
+  }
+
+  getStateDisplay(state: UserState): { text: string; class: string } {
+    switch (state) {
+      case UserState.ACTIVE:
+        return { text: 'Activo', class: 'bg-green-100 text-green-800' };
+      case UserState.INACTIVE:
+        return { text: 'Inactivo', class: 'bg-gray-100 text-gray-800' };
+      case UserState.PENDING_VERIFICATION:
+        return { text: 'Pendiente', class: 'bg-yellow-100 text-yellow-800' };
+      case UserState.SUSPENDED:
+        return { text: 'Suspendido', class: 'bg-orange-100 text-orange-800' };
+      case UserState.ARCHIVED:
+        return { text: 'Archivado', class: 'bg-red-100 text-red-800' };
+      default:
+        return { text: 'Desconocido', class: 'bg-gray-100 text-gray-800' };
+    }
+  }
+
+  formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  getRelativeTime(dateString: string): string {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+
+    if (diffInHours < 1) {
+      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+      return `Hace ${diffInMinutes} minuto${diffInMinutes !== 1 ? 's' : ''}`;
+    } else if (diffInHours < 24) {
+      return `Hace ${diffInHours} hora${diffInHours !== 1 ? 's' : ''}`;
+    } else if (diffInHours < 48) {
+      return 'Ayer';
+    } else {
+      return this.formatDate(dateString);
+    }
   }
 }

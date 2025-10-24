@@ -74,11 +74,11 @@
             <!-- Default content -->
             <ng-template #defaultContent>
               <span class="text-text-primary" *ngIf="column.key !== 'state'">
-                <ng-container *ngIf="item[column.key] !== null && item[column.key] !== undefined && item[column.key] !== ''; else noDataTemplate">
-                  {{ item[column.key] }}
+                <ng-container *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''; else noDataTemplate">
+                  {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item, column.key) }}
                 </ng-container>
                 <ng-template #noDataTemplate>
-                  <span class="text-muted">Data not found</span>
+                  <span class="text-muted">{{ column.defaultValue || 'Data not found' }}</span>
                 </ng-template>
               </span>
             </ng-template>

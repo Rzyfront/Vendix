@@ -1,3 +1,4 @@
+import { environment } from '../../../../environments/environment';
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
@@ -45,7 +46,7 @@ export interface Order {
   providedIn: 'root'
 })
 export class EcommerceService {
-  private apiUrl = '/api/ecommerce';
+  private apiUrl = `${environment.apiUrl}/ecommerce`;
 
   constructor(private http: HttpClient) {}
 

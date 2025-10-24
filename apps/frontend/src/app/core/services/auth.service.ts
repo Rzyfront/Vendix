@@ -22,7 +22,7 @@ export interface RegisterOwnerDto { organization_name: string; email: string; pa
   providedIn: 'root'
 })
 export class AuthService {
-  private readonly API_URL = `${environment.apiUrl}/api/auth`;
+  private readonly API_URL = `${environment.apiUrl}/auth`;
 
   private appConfigService = inject(AppConfigService);
   private navigationService = inject(NavigationService);

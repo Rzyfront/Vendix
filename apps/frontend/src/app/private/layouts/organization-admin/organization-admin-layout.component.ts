@@ -23,10 +23,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
            [class.ml-16]="sidebarCollapsed">
         <!-- Header -->
-        <app-header 
-          [title]="currentPageTitle"
-          [breadcrumb]="breadcrumb"
-          [user]="user"
+        <app-header
           (toggleSidebar)="toggleSidebar()">
         </app-header>
         
@@ -41,21 +38,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 })
 export class OrganizationAdminLayoutComponent {
   sidebarCollapsed = false;
-  currentPageTitle = 'Organization Dashboard';
   currentVlink = 'organization-admin';
   organizationName = 'Acme Corporation';
   organizationSlug = 'acme-corp';
-  
-  breadcrumb = {
-    parent: 'Organization',
-    current: 'Dashboard'
-  };
-
-  user = {
-    name: 'John Doe',
-    role: 'Organization Admin',
-    initials: 'JD'
-  };
 
   menuItems: MenuItem[] = [
     {

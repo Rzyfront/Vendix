@@ -9,7 +9,7 @@ import { environment } from '../../../environments/environment';
 })
 export class PermissionsService {
   private http = inject(HttpClient);
-  private apiUrl = `${environment.apiUrl}/api/permissions`;
+  private apiUrl = `${environment.apiUrl}/permissions`;
 
   getPermissions(params: any): Observable<any> {
     return this.http.get(this.apiUrl, { params });

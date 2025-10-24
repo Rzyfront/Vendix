@@ -9,7 +9,7 @@ import { environment } from '../../../environments/environment';
 })
 export class RolesService {
   private http = inject(HttpClient);
-  private apiUrl = `${environment.apiUrl}/api/roles`;
+  private apiUrl = `${environment.apiUrl}/roles`;
 
   getRoles(params: any): Observable<any> {
     return this.http.get(this.apiUrl, { params });

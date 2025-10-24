@@ -23,11 +23,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
            [class.ml-16]="sidebarCollapsed">
         <!-- Header -->
-        <app-header 
-          [title]="currentPageTitle"
-          [breadcrumb]="breadcrumb"
-          [user]="user"
-          (toggleSidebar)="toggleSidebar()">
+        <app-header (toggleSidebar)="toggleSidebar()">
         </app-header>
         
         <!-- Page Content -->

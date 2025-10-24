@@ -99,4 +99,4 @@ import { CommonModule } from '@angular/common';
     </div>
   `
 })
-export class DashboardComponent {}
+export class DashboardComponent { }

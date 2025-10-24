@@ -100,7 +100,7 @@ export class AppConfigService {
   }
 
   private async resolveDomainFromAPI(hostname: string): Promise<DomainResolution | null> {
-    const response = await this.http.get<DomainResolution>(`${environment.apiUrl}/api/domains/resolve/${hostname}`).pipe(catchError(() => of(null))).toPromise();
+    const response = await this.http.get<DomainResolution>(`${environment.apiUrl}/domains/resolve/${hostname}`).pipe(catchError(() => of(null))).toPromise();
     return response ?? null;
   }
 

@@ -23,8 +23,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
            [class.ml-16]="sidebarCollapsed">
         <!-- Header -->
-        <app-header 
-          [title]="currentPageTitle"
+        <app-header
           [breadcrumb]="breadcrumb"
           [user]="user"
           (toggleSidebar)="toggleSidebar()">
@@ -81,11 +80,7 @@ export class SuperAdminLayoutComponent implements OnInit {
     {
       label: 'Users',
       icon: 'users',
-      children: [
-        { label: 'All Users', icon: 'circle', route: '/super-admin/users' },
-        { label: 'User Roles', icon: 'circle', route: '/super-admin/users/roles' },
-        { label: 'Permissions', icon: 'circle', route: '/super-admin/users/permissions' }
-      ]
+      route: '/super-admin/users'
     },
     {
       label: 'System',

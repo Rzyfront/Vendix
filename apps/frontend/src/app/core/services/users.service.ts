@@ -9,7 +9,7 @@ import { environment } from '../../../environments/environment';
 })
 export class UsersService {
   private http = inject(HttpClient);
-  private apiUrl = `${environment.apiUrl}/api/users`;
+  private apiUrl = `${environment.apiUrl}/users`;
 
   getUsers(params: any): Observable<any> {
     return this.http.get(this.apiUrl, { params });
