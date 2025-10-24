@@ -89,42 +89,42 @@ export class OrganizationsService {
     if (query?.search) params = params.set('search', query.search);
     if (query?.state) params = params.set('state', query.state);
 
-    return this.http.get<PaginatedResponse<Organization[]>>(`${this.apiUrl}/organizations`, { params });
+    return this.http.get<PaginatedResponse<Organization[]>>(`${this.apiUrl}/api/organizations`, { params });
   }
 
   /**
    * Get organization by ID
    */
   getOrganizationById(id: number): Observable<ApiResponse<Organization>> {
-    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/organizations/${id}`);
+    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/api/organizations/${id}`);
   }
 
   /**
    * Get organization by slug
    */
   getOrganizationBySlug(slug: string): Observable<ApiResponse<Organization>> {
-    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/organizations/slug/${slug}`);
+    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/api/organizations/slug/${slug}`);
   }
 
   /**
    * Create a new organization
    */
   createOrganization(data: CreateOrganizationDto): Observable<ApiResponse<Organization>> {
-    return this.http.post<ApiResponse<Organization>>(`${this.apiUrl}/organizations`, data);
+    return this.http.post<ApiResponse<Organization>>(`${this.apiUrl}/api/organizations`, data);
   }
 
   /**
    * Update an existing organization
    */
   updateOrganization(id: number, data: UpdateOrganizationDto): Observable<ApiResponse<Organization>> {
-    return this.http.patch<ApiResponse<Organization>>(`${this.apiUrl}/organizations/${id}`, data);
+    return this.http.patch<ApiResponse<Organization>>(`${this.apiUrl}/api/organizations/${id}`, data);
   }
 
   /**
    * Delete an organization
    */
   deleteOrganization(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/organizations/${id}`);
+    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/api/organizations/${id}`);
   }
 
   /**
@@ -136,7 +136,7 @@ export class OrganizationsService {
     if (dashboardData?.start_date) params = params.set('start_date', dashboardData.start_date);
     if (dashboardData?.end_date) params = params.set('end_date', dashboardData.end_date);
 
-    return this.http.get<ApiResponse<OrganizationDashboardResponse>>(`${this.apiUrl}/organizations/${id}/dashboard`, { params });
+    return this.http.get<ApiResponse<OrganizationDashboardResponse>>(`${this.apiUrl}/api/organizations/${id}/dashboard`, { params });
   }
 
   /**
@@ -148,6 +148,6 @@ export class OrganizationsService {
     inactiveOrganizations: number;
     recentlyCreated: number;
   }>> {
-    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/organizations/stats`);
+    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/api/organizations/stats`);
   }
 }

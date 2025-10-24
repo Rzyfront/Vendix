@@ -1,31 +1,29 @@
 import { Component, Input, Output, EventEmitter, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+export type ModalSize = 'sm' | 'md' | 'lg';
 
 @Component({
   selector: 'app-modal',
   standalone: true,
   imports: [CommonModule],
+  styleUrl: './modal.component.scss',
   template: `
     <!-- Modal backdrop -->
-    <div 
+    <div
       *ngIf="isOpen"
-      class="fixed inset-0 z-50 overflow-y-auto"
-      [class.flex]="true"
-      [class.items-center]="centered"
-      [class.justify-center]="centered"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4"
       (click)="onBackdropClick($event)"
     >
-      <!-- Backdrop overlay -->
-      <div 
-        class="fixed inset-0 bg-surface bg-opacity-80 transition-opacity"
+      <!-- Backdrop overlay con blur sin color -->
+      <div
+        class="absolute inset-0 backdrop-blur-sm transition-opacity"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
       ></div>
 
       <!-- Modal container -->
-      <div 
+      <div
         class="relative transform transition-all duration-300 ease-out"
         [class]="modalClasses"
         [class.scale-100]="isOpen"
@@ -35,11 +33,11 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
         (click)="$event.stopPropagation()"
       >
         <!-- Modal content -->
-        <div class="bg-background rounded-lg shadow-xl overflow-hidden">
+        <div class="bg-surface rounded-card shadow-lg overflow-hidden flex flex-col max-h-[90vh] border border-border">
           <!-- Header -->
-          <div 
-            *ngIf="hasHeader" 
-            class="px-6 py-4 border-b border-border flex items-center justify-between"
+          <div
+            *ngIf="hasHeader"
+            class="px-6 py-4 border-b border-border flex items-center justify-between flex-shrink-0 bg-surface"
           >
             <div>
               <h3 *ngIf="title" class="text-lg font-semibold text-text-primary">
@@ -52,10 +50,10 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
             </div>
             
             <!-- Close button -->
-            <button 
+            <button
               *ngIf="showCloseButton"
               type="button"
-              class="text-text-secondary hover:text-text-primary transition-colors p-1 rounded-md hover:bg-surface"
+              class="text-text-secondary hover:text-text-primary transition-colors p-1 rounded-button hover:bg-muted/20"
               (click)="close()"
             >
               <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -64,15 +62,15 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
             </button>
           </div>
 
-          <!-- Body -->
-          <div class="px-6 py-4">
+          <!-- Body con overflow scroll -->
+          <div class="px-6 py-4 overflow-y-auto overflow-x-auto flex-1 bg-surface" style="scroll-behavior: smooth;">
             <ng-content></ng-content>
           </div>
 
-          <!-- Footer -->
-          <div 
-            *ngIf="hasFooter" 
-            class="px-6 py-4 border-t border-border bg-surface"
+          <!-- Footer con soporte para botones -->
+          <div
+            *ngIf="hasFooter"
+            class="px-6 py-4 border-t border-border bg-muted/20 flex-shrink-0"
           >
             <ng-content select="[slot=footer]"></ng-content>
           </div>
@@ -126,26 +124,19 @@ export class ModalComponent implements OnInit, OnDestroy {
   get modalClasses(): string {
     const baseClasses = [
       'w-full',
-      'max-h-screen',
-      'overflow-y-auto'
+      'flex',
+      'flex-col'
     ];
 
     const sizeClasses = {
-      sm: ['max-w-md', 'mx-4'],
-      md: ['max-w-lg', 'mx-4'],
-      lg: ['max-w-2xl', 'mx-4'],
-      xl: ['max-w-4xl', 'mx-4'],
-      full: ['max-w-full', 'h-full', 'm-0']
+      sm: ['max-w-sm'],
+      md: ['max-w-2xl'],
+      lg: ['max-w-7xl', 'w-full', 'h-full', 'max-h-[90vh]']
     };
-
-    const positionClasses = this.centered 
-      ? ['mx-auto', 'my-8'] 
-      : ['mx-auto', 'mt-8'];
 
     const classes = [
       ...baseClasses,
-      ...sizeClasses[this.size],
-      ...positionClasses
+      ...sizeClasses[this.size]
     ];
 
     if (this.customClasses) {
@@ -160,7 +151,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   }
 
   get hasFooter(): boolean {
-    return false; // Will be determined by content projection
+    return true; // Siempre mostramos el footer para permitir botones
   }
 
   open(): void {

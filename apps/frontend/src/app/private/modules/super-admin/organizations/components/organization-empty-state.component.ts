@@ -1,15 +1,14 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
 
 @Component({
   selector: 'app-organization-empty-state',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule],
   template: `
     <div class="p-8 text-center">
       <!-- Empty State Icon -->
-      <div class="w-16 h-16 mx-auto mb-4 rounded-lg flex items-center justify-center bg-gray-100">
+      <div class="w-16 h-16 mx-auto mb-4 rounded-lg flex items-center justify-center bg-muted/20">
         <i class="fas fa-building text-2xl text-text-muted"></i>
       </div>
       
@@ -20,8 +19,8 @@ import { RouterModule } from '@angular/router';
       <!-- Action Button -->
       <button
         *ngIf="showActionButton"
-        [routerLink]="actionLink"
-        class="px-4 py-2 rounded-lg text-white font-medium bg-primary hover:bg-primary/90">
+        (click)="onActionClick()"
+        class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors">
         <i class="fas fa-plus mr-2"></i>
         {{ actionText }}
       </button>
@@ -38,7 +37,6 @@ export class OrganizationEmptyStateComponent {
   @Input() description = 'Get started by creating your first organization.';
   @Input() showActionButton = true;
   @Input() actionText = 'Create Organization';
-  @Input() actionLink = '/super-admin/organizations/create';
   @Output() actionClick = new EventEmitter<void>();
 
   onActionClick(): void {

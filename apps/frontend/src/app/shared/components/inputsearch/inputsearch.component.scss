@@ -1,0 +1,365 @@
+// Componente InputSearch usando tokens CSS de la aplicación
+
+// Contenedor principal - siempre ocupa todo el ancho disponible
+.inputsearch-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  font-family: var(--font-sans);
+
+  // Estados
+  &.inputsearch-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.inputsearch-error {
+    .inputsearch-wrapper {
+      border-color: var(--color-destructive);
+    }
+  }
+
+  &.inputsearch-focused {
+    .inputsearch-wrapper {
+      box-shadow: 0 0 0 2px var(--color-ring);
+    }
+  }
+
+  // Variaciones de tamaño para el contenedor
+  &.inputsearch-container-sm {
+    max-width: 100%;
+  }
+
+  &.inputsearch-container-md {
+    max-width: 100%;
+  }
+
+  &.inputsearch-container-lg {
+    max-width: 100%;
+  }
+}
+
+// Wrapper del input y iconos
+.inputsearch-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-input);
+  transition: all var(--transition-fast) ease;
+
+  &:hover:not(.inputsearch-wrapper-disabled) {
+    border-color: var(--color-text-secondary);
+  }
+
+  // Estados
+  &.inputsearch-wrapper-focused {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+
+  &.inputsearch-wrapper-error {
+    border-color: var(--color-destructive);
+    
+    &:focus {
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+    }
+  }
+
+  &.inputsearch-wrapper-disabled {
+    background-color: var(--color-muted);
+    cursor: not-allowed;
+  }
+
+  // Variaciones de tamaño
+  &.inputsearch-wrapper-sm {
+    height: 2.25rem; // 36px
+    padding: 0 0.5rem;
+  }
+
+  &.inputsearch-wrapper-md {
+    height: 2.75rem; // 44px
+    padding: 0 0.75rem;
+  }
+
+  &.inputsearch-wrapper-lg {
+    height: 3.25rem; // 52px
+    padding: 0 1rem;
+  }
+}
+
+// Input principal
+.inputsearch-input {
+  flex: 1;
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+
+  &::placeholder {
+    color: var(--color-text-secondary);
+  }
+
+  // Estados
+  &.inputsearch-input-disabled {
+    cursor: not-allowed;
+    color: var(--color-text-secondary);
+  }
+
+  &.inputsearch-input-error {
+    color: var(--color-destructive);
+  }
+
+  // Variaciones de tamaño
+  &.inputsearch-input-sm {
+    font-size: var(--fs-sm);
+    padding: 0 0.5rem;
+  }
+
+  &.inputsearch-input-md {
+    font-size: var(--fs-base);
+    padding: 0 0.75rem;
+  }
+
+  &.inputsearch-input-lg {
+    font-size: var(--fs-lg);
+    padding: 0 1rem;
+  }
+
+  // Ajustar padding cuando hay iconos
+  &:has(+ .inputsearch-clear) {
+    padding-right: 2rem;
+  }
+}
+
+// Icono de lupa
+.inputsearch-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  transition: color var(--transition-fast) ease;
+
+  .search-icon {
+    width: 1rem;
+    height: 1rem;
+  }
+
+  // Variaciones de tamaño
+  &.inputsearch-icon-sm {
+    margin-right: 0.5rem;
+    
+    .search-icon {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+  }
+
+  &.inputsearch-icon-md {
+    margin-right: 0.75rem;
+    
+    .search-icon {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+
+  &.inputsearch-icon-lg {
+    margin-right: 1rem;
+    
+    .search-icon {
+      width: 1.25rem;
+      height: 1.25rem;
+    }
+  }
+}
+
+// Botón de limpiar
+.inputsearch-clear {
+  position: absolute;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-button);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast) ease;
+
+  &:hover:not(:disabled) {
+    background-color: var(--color-muted);
+    color: var(--color-text-primary);
+  }
+
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .clear-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  // Variaciones de tamaño
+  &.inputsearch-clear-sm {
+    right: 0.375rem;
+    padding: 0.25rem;
+    
+    .clear-icon {
+      width: 0.75rem;
+      height: 0.75rem;
+    }
+  }
+
+  &.inputsearch-clear-md {
+    right: 0.5rem;
+    padding: 0.375rem;
+    
+    .clear-icon {
+      width: 0.875rem;
+      height: 0.875rem;
+    }
+  }
+
+  &.inputsearch-clear-lg {
+    right: 0.75rem;
+    padding: 0.5rem;
+    
+    .clear-icon {
+      width: 1rem;
+      height: 1rem;
+    }
+  }
+}
+
+// Texto de ayuda/error
+.inputsearch-help {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+
+  .help-text {
+    color: var(--color-text-secondary);
+  }
+
+  .error-message {
+    color: var(--color-destructive);
+    font-weight: var(--fw-medium);
+  }
+
+  &.inputsearch-help-error {
+    .error-message {
+      display: block;
+    }
+  }
+}
+
+// Estados de foco para accesibilidad
+.inputsearch-wrapper:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-ring);
+}
+
+.inputsearch-wrapper.inputsearch-wrapper-error:focus-within {
+  border-color: var(--color-destructive);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+// Responsive design
+@media (max-width: 640px) {
+  .inputsearch-wrapper {
+    &.inputsearch-wrapper-lg {
+      height: 2.75rem; // Reducir tamaño en móvil
+      padding: 0 0.75rem;
+    }
+  }
+
+  .inputsearch-input {
+    &.inputsearch-input-lg {
+      font-size: var(--fs-base);
+      padding: 0 0.75rem;
+    }
+  }
+
+  .inputsearch-icon {
+    &.inputsearch-icon-lg {
+      margin-right: 0.75rem;
+      
+      .search-icon {
+        width: 1rem;
+        height: 1rem;
+      }
+    }
+  }
+}
+
+// Animaciones suaves
+@keyframes inputsearch-focus-in {
+  from {
+    box-shadow: 0 0 0 0 var(--color-ring);
+  }
+  to {
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+}
+
+@keyframes inputsearch-clear-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.inputsearch-clear {
+  animation: inputsearch-clear-appear 0.15s ease-out;
+}
+
+// Clases para temas personalizados
+[data-theme="dark"] {
+  .inputsearch-wrapper {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+    
+    &:hover:not(.inputsearch-wrapper-disabled) {
+      border-color: var(--color-text-secondary);
+    }
+  }
+
+  .inputsearch-input {
+    color: var(--color-text-primary);
+    
+    &::placeholder {
+      color: var(--color-text-secondary);
+    }
+  }
+
+  .inputsearch-icon {
+    color: var(--color-text-secondary);
+  }
+
+  .inputsearch-clear {
+    color: var(--color-text-secondary);
+    
+    &:hover:not(:disabled) {
+      background-color: var(--color-muted);
+      color: var(--color-text-primary);
+    }
+  }
+}

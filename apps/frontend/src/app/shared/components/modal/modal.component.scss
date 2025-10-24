@@ -1,0 +1,232 @@
+// Estilos adicionales para el componente modal usando tokens CSS de la aplicación
+
+// Animaciones de entrada y salida
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-content-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+// Contenedor principal del modal
+.modal-backdrop {
+  animation: modal-backdrop-in 0.2s ease-out;
+}
+
+.modal-content {
+  animation: modal-content-in 0.3s ease-out;
+}
+
+// Estilos para el efecto blur usando tokens
+.modal-backdrop-blur {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px); // Soporte para Safari
+}
+
+// Variaciones de tamaño específicas usando tokens
+.modal-size-sm {
+  .modal-content {
+    max-width: 24rem; // 384px
+  }
+}
+
+.modal-size-md {
+  .modal-content {
+    max-width: 42rem; // 672px
+  }
+}
+
+.modal-size-lg {
+  .modal-content {
+    max-width: 80rem; // 1280px - muy grande y amplio
+    width: 90vw;
+    height: 85vh;
+  }
+}
+
+// Asegurar que el modal nunca salga del viewport
+.modal-viewport-constraint {
+  max-width: 95vw;
+  max-height: 95vh;
+  overflow: hidden;
+}
+
+// Estilos para el header del modal usando tokens
+.modal-header {
+  border-bottom: var(--border-width) solid var(--color-border);
+  background-color: var(--color-surface);
+  
+  .modal-title {
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
+    margin: 0;
+  }
+  
+  .modal-subtitle {
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+    margin: 0.25rem 0 0 0;
+  }
+}
+
+// Estilos para el body del modal con scroll usando tokens
+.modal-body {
+  overflow-y: auto;
+  overflow-x: auto;
+  flex: 1;
+  background-color: var(--color-surface);
+  
+  // Efecto de scroll suave para ambos ejes
+  scroll-behavior: smooth;
+  
+  // Personalización del scroll usando tokens
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: var(--color-muted);
+    border-radius: var(--radius-sm);
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: var(--radius-sm);
+    transition: background-color var(--transition-fast) ease;
+    
+    &:hover {
+      background: var(--color-text-secondary);
+    }
+  }
+  
+  // Scrollbar para Firefox
+  & {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) var(--color-muted);
+  }
+  
+  // Efecto de scroll suave para navegación con rueda
+  &::-webkit-scrollbar {
+    scroll-behavior: smooth;
+  }
+}
+
+// Estilos para el footer del modal usando tokens
+.modal-footer {
+  border-top: var(--border-width) solid var(--color-border);
+  background-color: var(--color-muted);
+  display: flex;
+  gap: var(--spacing-md);
+  justify-content: flex-end;
+  align-items: center;
+  padding: var(--spacing-md) var(--spacing-lg);
+  
+  // Soporte para botones en el footer usando tokens
+  .btn {
+    min-width: 80px;
+    border-radius: var(--radius-button);
+    font-weight: var(--fw-medium);
+    transition: all var(--transition-fast) ease;
+    
+    &.btn-primary {
+      background-color: var(--color-primary);
+      color: var(--color-surface);
+      border: 1px solid var(--color-primary);
+      
+      &:hover {
+        background-color: var(--primary-600);
+        border-color: var(--primary-600);
+      }
+    }
+    
+    &.btn-secondary {
+      background-color: var(--color-surface);
+      color: var(--color-text-primary);
+      border: var(--border-width) solid var(--color-border);
+      
+      &:hover {
+        background-color: var(--color-muted);
+        border-color: var(--color-text-secondary);
+      }
+    }
+  }
+}
+
+// Botón de cerrar usando tokens
+.modal-close-btn {
+  transition: all var(--transition-fast) ease;
+  border-radius: var(--radius-button);
+  
+  &:hover {
+    transform: scale(1.1);
+  }
+  
+  &:active {
+    transform: scale(0.95);
+  }
+}
+
+// Responsive design
+@media (max-width: 640px) {
+  .modal-size-lg,
+  .modal-size-md,
+  .modal-size-sm {
+    .modal-content {
+      max-width: 95vw;
+      width: 95vw;
+      margin: 1rem;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .modal-content {
+    margin: 0.5rem;
+    max-width: 98vw;
+    width: 98vw;
+  }
+  
+  .modal-header,
+  .modal-footer {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+  
+  .modal-body {
+    padding: var(--spacing-sm) var(--spacing-md);
+  }
+}
+
+// Estados de foco para accesibilidad usando tokens
+.modal-content:focus {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+
+// Efectos de transición suaves usando tokens
+.modal-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+// Clases adicionales para consistencia con el diseño system
+.modal-overlay {
+  background-color: rgba(0, 0, 0, 0.1); // Muy sutil para el efecto blur
+}
+
+.modal-container {
+  font-family: var(--font-sans);
+  box-shadow: var(--shadow-lg);
+}

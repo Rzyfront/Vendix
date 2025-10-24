@@ -76,11 +76,7 @@ export class SuperAdminLayoutComponent implements OnInit {
     {
       label: 'Organizations',
       icon: 'building',
-      children: [
-        { label: 'All Organizations', icon: 'circle', route: '/super-admin/organizations' },
-        { label: 'Create Organization', icon: 'circle', route: '/super-admin/organizations/create' },
-        { label: 'Organization Settings', icon: 'circle', route: '/super-admin/organizations/settings' }
-      ]
+      route: '/super-admin/organizations'
     },
     {
       label: 'Users',

@@ -50,6 +50,7 @@ import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
         <path *ngSwitchCase="'credit-card'" d="M3 6h18M3 10h18M3 14h18M5 18h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2z"/>
         <path *ngSwitchCase="'headset'" d="M22 16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4v6z"/>
         <path *ngSwitchCase="'circle'" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20z"/>
+        <path *ngSwitchCase="'refresh'" d="M1 4v6h6M23 20v-6h-6M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
         
         <!-- Commerce icons -->
         <path *ngSwitchCase="'cart'" d="M3 3h2l.4 2M7 13h10l4-8H5.4m0 0L7 13m0 0-2.5 1.5M7 13v6a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-6"/>

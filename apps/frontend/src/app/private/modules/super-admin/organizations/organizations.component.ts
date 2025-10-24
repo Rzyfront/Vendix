@@ -1,10 +1,11 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
-import { OrganizationsService } from './services/organizations.service';
+import { OrganizationsService, CreateOrganizationDto } from './services/organizations.service';
 import { OrganizationListItem } from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
 
@@ -14,8 +15,12 @@ import {
   OrganizationFiltersComponent,
   OrganizationCardComponent,
   OrganizationPaginationComponent,
-  OrganizationEmptyStateComponent
-} from './index';
+  OrganizationEmptyStateComponent,
+  OrganizationCreateModalComponent
+} from './components/index';
+
+// Import shared components
+import { ModalComponent, InputsearchComponent, IconComponent } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './organizations.component.css';
@@ -27,66 +32,71 @@ import './organizations.component.css';
     CommonModule,
     RouterModule,
     FormsModule,
+    ReactiveFormsModule,
     OrganizationStatsComponent,
     OrganizationFiltersComponent,
     OrganizationCardComponent,
     OrganizationPaginationComponent,
-    OrganizationEmptyStateComponent
+    OrganizationEmptyStateComponent,
+    OrganizationCreateModalComponent,
+    InputsearchComponent,
+    IconComponent
   ],
   providers: [OrganizationsService],
   template: `
     <div class="space-y-6">
-      <!-- Header -->
-      <div class="flex justify-between items-center">
-        <div>
-          <h1 class="text-2xl font-bold text-text-primary">Organizations Management</h1>
-          <p class="text-sm mt-1 text-text-secondary">
-            Manage all organizations in the platform
-          </p>
-        </div>
-        <div class="flex gap-3">
-          <button
-            class="px-4 py-2 rounded-lg font-medium border border-border text-text-primary hover:bg-gray-50 disabled:opacity-50"
-            (click)="refreshOrganizations()"
-            [disabled]="isLoading">
-            <i class="fas fa-sync-alt mr-2"></i>
-            Refresh
-          </button>
-          <button
-            class="px-4 py-2 rounded-lg text-white font-medium bg-primary hover:bg-primary/90"
-            routerLink="/super-admin/organizations/create">
-            <i class="fas fa-plus mr-2"></i>
-            Add Organization
-          </button>
-        </div>
-      </div>
-
       <!-- Stats Cards -->
       <app-organization-stats [stats]="stats"></app-organization-stats>
 
-      <!-- Filters and Search -->
-      <app-organization-filters
-        [searchTerm]="searchTerm"
-        [selectedStatus]="selectedStatus"
-        (searchChange)="onSearchChange($event)"
-        (statusFilterChange)="onStatusFilterChange($event)"
-        (filtersCleared)="onFiltersCleared()">
-      </app-organization-filters>
-
       <!-- Organizations List -->
-      <div class="bg-white rounded-lg shadow-sm border border-border">
+      <div class="bg-surface rounded-card shadow-card border border-border">
         <div class="px-6 py-4 border-b border-border">
-          <div class="flex justify-between items-center">
-            <h2 class="text-lg font-semibold text-text-primary">
-              All Organizations ({{ pagination.total }})
-            </h2>
-            <div class="flex items-center gap-2">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-semibold text-text-primary">
+                All Organizations ({{ pagination.total }})
+              </h2>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+              <!-- Input de búsqueda compacto -->
+              <app-inputsearch
+                class="w-full sm:w-64"
+                size="sm"
+                placeholder="Search organizations..."
+                [debounceTime]="1000"
+                (searchChange)="onSearchChange($event)"
+              ></app-inputsearch>
+              
+              <div class="flex gap-2">
+                <button
+                  class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
+                  (click)="refreshOrganizations()"
+                  [disabled]="isLoading"
+                  title="Refresh"
+                >
+                  <app-icon name="refresh" [size]="16"></app-icon>
+                </button>
+                <button
+                  class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm"
+                  (click)="openCreateOrganizationModal()"
+                  title="Add Organization"
+                >
+                  <i class="fas fa-plus mr-1"></i>
+                  <span class="hidden sm:inline">Add</span>
+                </button>
+              </div>
+            </div>
+            
+            <!-- Paginación info -->
+            <div class="flex items-center gap-2 mt-2 sm:mt-0">
               <span class="text-sm text-text-secondary">
                 Page {{ pagination.page }} of {{ pagination.totalPages }}
               </span>
             </div>
           </div>
         </div>
+
 
         <!-- Loading State -->
         <div *ngIf="isLoading" class="p-8 text-center">
@@ -98,7 +108,8 @@ import './organizations.component.css';
         <app-organization-empty-state
           *ngIf="!isLoading && organizations.length === 0"
           [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()">
+          [description]="getEmptyStateDescription()"
+          (actionClick)="openCreateOrganizationModal()">
         </app-organization-empty-state>
 
         <!-- Organizations Grid -->
@@ -121,6 +132,15 @@ import './organizations.component.css';
           </app-organization-pagination>
         </div>
       </div>
+
+      <!-- Create Organization Modal -->
+      <app-organization-create-modal
+        [isOpen]="isCreateModalOpen"
+        [isSubmitting]="isCreatingOrganization"
+        (openChange)="onCreateModalChange($event)"
+        (submit)="createOrganization($event)"
+        (cancel)="onCreateModalCancel()"
+      ></app-organization-create-modal>
     </div>
   `
 })
@@ -144,9 +164,19 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     totalPages: 0
   };
 
+  // Modal state
+  isCreateModalOpen = false;
+  isCreatingOrganization = false;
+  createOrganizationForm!: FormGroup;
+
   private subscriptions: Subscription[] = [];
 
-  constructor(private organizationsService: OrganizationsService) {}
+  constructor(
+    private organizationsService: OrganizationsService,
+    private fb: FormBuilder
+  ) {
+    this.initializeCreateForm();
+  }
 
   ngOnInit(): void {
     this.loadOrganizations();
@@ -155,6 +185,94 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscriptions.forEach(sub => sub.unsubscribe());
+  }
+
+  private initializeCreateForm(): void {
+    this.createOrganizationForm = this.fb.group({
+      name: ['', [Validators.required, Validators.minLength(2)]],
+      email: ['', [Validators.required, Validators.email]],
+      phone: [''],
+      website: [''],
+      description: [''],
+      legalName: [''],
+      taxId: [''],
+      state: ['active']
+    });
+  }
+
+  openCreateOrganizationModal(): void {
+    this.isCreateModalOpen = true;
+    this.createOrganizationForm.reset({
+      name: '',
+      email: '',
+      phone: '',
+      website: '',
+      description: '',
+      legalName: '',
+      taxId: '',
+      state: 'active'
+    });
+  }
+
+  onCreateModalChange(isOpen: boolean): void {
+    this.isCreateModalOpen = isOpen;
+    if (!isOpen) {
+      this.createOrganizationForm.reset();
+    }
+  }
+
+  onCreateModalCancel(): void {
+    this.isCreateModalOpen = false;
+    this.createOrganizationForm.reset();
+  }
+
+  createOrganization(organizationData?: CreateOrganizationDto | Event): void {
+    // If it's an Event, it means method was called from the new modal
+    // If no data is provided, it means method was called from the old form
+    // This maintains backward compatibility while transitioning to the new modal
+    if (!organizationData || organizationData instanceof Event) {
+      if (this.createOrganizationForm.invalid) {
+        // Mark all fields as touched to trigger validation messages
+        Object.keys(this.createOrganizationForm.controls).forEach(key => {
+          this.createOrganizationForm.get(key)?.markAsTouched();
+        });
+        return;
+      }
+
+      const formData = this.createOrganizationForm.value;
+      organizationData = {
+        name: formData.name,
+        email: formData.email,
+        phone: formData.phone || undefined,
+        website: formData.website || undefined,
+        description: formData.description || undefined,
+        legal_name: formData.legalName || undefined,
+        tax_id: formData.taxId || undefined,
+        state: formData.state
+      };
+    }
+
+    this.isCreatingOrganization = true;
+
+    const sub = this.organizationsService.createOrganization(organizationData as CreateOrganizationDto).subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.isCreateModalOpen = false;
+          this.loadOrganizations(); // Reload the list
+          this.loadStats(); // Reload stats
+          // TODO: Show success notification
+          console.log('Organization created successfully:', response.data);
+        }
+        this.isCreatingOrganization = false;
+      },
+      error: (error) => {
+        console.error('Error creating organization:', error);
+        this.isCreatingOrganization = false;
+        // TODO: Show error notification
+      }
+    });
+
+    this.subscriptions.push(sub);
   }
 
   loadOrganizations(): void {

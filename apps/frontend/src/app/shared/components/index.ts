@@ -9,9 +9,11 @@ export { DropdownComponent } from './dropdown/dropdown.component';
 export { ToastContainerComponent } from './toast/toast-container.component';
 export { DialogService } from './dialog/dialog.service';
 export { IconComponent } from './icon/icon.component';
+export { InputsearchComponent } from './inputsearch/inputsearch.component';
 
 // Types
 export type { ButtonVariant, ButtonSize } from './button/button.component';
 export type { InputType, InputSize } from './input/input.component';
 export type { SpinnerSize } from './spinner/spinner.component';
 export type { ModalSize } from './modal/modal.component';
+export type { InputSearchSize } from './inputsearch/inputsearch.component';
