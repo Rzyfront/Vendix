@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
+import { UserRole } from '../enums/user-role.enum';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -27,6 +28,11 @@ export class PermissionsGuard implements CanActivate {
 
     if (!user) {
       throw new ForbiddenException('Usuario no autenticado');
+    }
+
+    // Bypass para super admin - tiene acceso a todo sin verificar permisos
+    if (user.roles && user.roles.includes(UserRole.SUPER_ADMIN)) {
+      return true;
     }
 
     if (!user.permissions || user.permissions.length === 0) {
