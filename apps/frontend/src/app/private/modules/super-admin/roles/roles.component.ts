@@ -83,10 +83,15 @@ export class RolesComponent implements OnInit, OnDestroy {
       defaultValue: '0'
     },
     {
-      key: '_count.role_permissions',
+      key: 'permissions',
       label: 'Permisos',
       sortable: true,
-      defaultValue: '0'
+      transform: (permissions: string[]) => {
+        if (!permissions || permissions.length === 0) {
+          return 'Sin permisos';
+        }
+        return permissions.length === 1 ? permissions[0] : `${permissions.length} permisos`;
+      }
     },
     {
       key: 'created_at',

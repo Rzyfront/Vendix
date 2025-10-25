@@ -63,13 +63,19 @@ export class RolesService {
 
     return this.http.get<any>(`${this.apiUrl}/roles`, { params }).pipe(
       map(response => {
+        // Mapear los datos para asegurar que tengan la estructura correcta
+        const mappedData = (response.data || []).map((role: any) => ({
+          ...role,
+          permissions: role.permissions || []
+        }));
+        
         return {
-          data: response.data,
+          data: mappedData,
           pagination: {
-            page: response.meta?.page || 1,
-            limit: response.meta?.limit || 10,
-            total: response.meta?.total || 0,
-            total_pages: response.meta?.totalPages || 0
+            page: 1, // La respuesta no incluye paginación, usamos valores por defecto
+            limit: 10,
+            total: mappedData.length,
+            total_pages: 1
           }
         } as PaginatedRolesResponse;
       }),

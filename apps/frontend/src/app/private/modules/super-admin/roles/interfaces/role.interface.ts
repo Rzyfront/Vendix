@@ -5,10 +5,9 @@ export interface Role {
   is_system_role: boolean;
   created_at: string;
   updated_at: string;
-  permissions?: Permission[];
+  permissions?: string[];
   _count?: {
     user_roles: number;
-    role_permissions: number;
   };
 }
 
