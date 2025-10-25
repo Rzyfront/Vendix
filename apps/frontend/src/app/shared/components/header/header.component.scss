@@ -56,7 +56,7 @@
           font-weight: 500;
 
           &:hover {
-            color: var(--primary);
+            color: var(--color-primary);
           }
 
           .parent-icon {
@@ -77,11 +77,11 @@
           align-items: center;
           gap: 6px;
           font-size: 13px;
-          color: var(--color-text);
+          color: var(--color-text-primary);
           font-weight: 600;
 
           .current-icon {
-            color: var(--primary);
+            color: var(--color-primary);
           }
         }
       }
@@ -89,7 +89,7 @@
       .page-title {
         font-size: 28px;
         font-weight: 700;
-        color: var(--color-text);
+        color: var(--color-text-primary);
         margin: 0;
         line-height: 1.2;
         letter-spacing: -0.025em;

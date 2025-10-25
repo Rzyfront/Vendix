@@ -1,8 +1,8 @@
 .store-landing-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  color: #1e293b;
-  font-family: 'Inter', system-ui, sans-serif;
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-primary) 100%);
+  color: var(--color-text-primary);
+  font-family: var(--font-primary);
 }
 
 .store-header {
@@ -12,8 +12,8 @@
   padding: 1rem 2rem;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  border-bottom: var(--border-width) solid rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-md);
 }
 
 .store-logo {
@@ -23,9 +23,9 @@
 
   h1 {
     margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #1e293b;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-bold);
+    color: var(--color-text-primary);
   }
 }
 
@@ -42,27 +42,27 @@
 
   .nav-button {
     padding: 0.5rem 1rem;
-    border: 1px solid #cbd5e1;
-    background: white;
-    color: #475569;
-    border-radius: 0.375rem;
+    border: var(--border-width) solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    font-weight: 500;
-    transition: all 0.2s ease;
+    font-weight: var(--fw-medium);
+    transition: all var(--transition-fast) ease;
 
     &:hover {
-      background: #f8fafc;
-      border-color: #94a3b8;
+      background: var(--color-background);
+      border-color: var(--color-text-secondary);
     }
 
     &.primary {
-      background: #3b82f6;
-      color: white;
-      border-color: #3b82f6;
+      background: var(--color-accent);
+      color: var(--color-text-on-primary);
+      border-color: var(--color-accent);
 
       &:hover {
-        background: #2563eb;
-        border-color: #2563eb;
+        background: var(--color-primary);
+        border-color: var(--color-primary);
       }
     }
   }
@@ -80,15 +80,15 @@
   color: white;
 
   h2 {
-    font-size: 3rem;
-    font-weight: 700;
+    font-size: var(--fs-3xl);
+    font-weight: var(--fw-bold);
     margin-bottom: 1rem;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
 }
 
 .store-description {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   margin-bottom: 2rem;
   opacity: 0.9;
   max-width: 600px;
@@ -113,10 +113,10 @@
 
   h3 {
     text-align: center;
-    font-size: 2rem;
+    font-size: var(--fs-2xl);
     margin-bottom: 2rem;
-    font-weight: 600;
-    color: #1e293b;
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
   }
 }
 
@@ -128,21 +128,21 @@
 }
 
 .product-card {
-  background: white;
-  border-radius: 0.75rem;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast) ease, box-shadow var(--transition-fast) ease;
 
   &:hover {
     transform: translateY(-4px);
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    box-shadow: var(--shadow-lg);
   }
 }
 
 .product-image {
   height: 200px;
-  background: #f1f5f9;
+  background: var(--color-background);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -160,15 +160,15 @@
 
   h4 {
     margin: 0 0 0.5rem 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: #1e293b;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
   }
 
   .product-price {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #059669;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-bold);
+    color: var(--color-primary);
     margin: 0.5rem 0 1rem 0;
   }
 }
@@ -177,7 +177,7 @@
   margin-top: 4rem;
   padding: 2rem;
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   backdrop-filter: blur(10px);
 }
 
@@ -191,14 +191,14 @@
   text-align: center;
 
   h4 {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: #1e293b;
+    font-size: var(--fs-lg);
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
     margin-bottom: 0.5rem;
   }
 
   p {
-    color: #64748b;
+    color: var(--color-text-secondary);
     margin: 0;
     line-height: 1.5;
   }

@@ -1,0 +1,9 @@
+<app-modal [isOpen]="isOpen" [title]="title" (closed)="onCancel()">
+  <div class="p-6">
+    <p>{{ message }}</p>
+  </div>
+  <div class="px-6 py-4 bg-gray-50 dark:bg-gray-800 flex justify-end gap-3">
+    <app-button variant="outline" (clicked)="onCancel()">{{ cancelText }}</app-button>
+    <app-button [variant]="confirmVariant" (clicked)="onConfirm()">{{ confirmText }}</app-button>
+  </div>
+</app-modal>

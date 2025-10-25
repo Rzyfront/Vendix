@@ -1,4 +1,4 @@
-/* Organizations Module Styles */
+/* Roles Module Styles */
 /* Using Vendix CSS tokens for consistent theming */
 
 :host {
@@ -6,39 +6,39 @@
   color: var(--color-text-primary);
 }
 
-/* Organizations List Container with scroll */
-.organizations-list-container {
+/* Roles List Container with scroll */
+.roles-list-container {
   max-height: calc(100vh - 200px);
   overflow-y: auto;
   overflow-x: hidden;
   scroll-behavior: smooth;
 }
 
-/* Custom scrollbar styling for organizations list */
-.organizations-list-container::-webkit-scrollbar {
+/* Custom scrollbar styling for roles list */
+.roles-list-container::-webkit-scrollbar {
   width: 8px;
 }
 
-.organizations-list-container::-webkit-scrollbar-track {
+.roles-list-container::-webkit-scrollbar-track {
   background: var(--color-background);
   border-radius: 4px;
 }
 
-.organizations-list-container::-webkit-scrollbar-thumb {
+.roles-list-container::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 4px;
 }
 
-.organizations-list-container::-webkit-scrollbar-thumb:hover {
+.roles-list-container::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
 }
 
-/* Organization Card Styles */
-.organization-card {
+/* Role Card Styles */
+.role-card {
   transition: all var(--transition-fast) ease;
 }
 
-.organization-card:hover {
+.role-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
@@ -61,14 +61,14 @@
   color: #ca8a04;
 }
 
-.status-badge.status-suspended {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: #dc2626;
-}
-
-.status-badge.status-pending {
+.status-badge.status-system {
   background-color: rgba(59, 130, 246, 0.1);
   color: #2563eb;
+}
+
+.status-badge.status-custom {
+  background-color: rgba(126, 215, 165, 0.1);
+  color: var(--color-primary);
 }
 
 /* Stats Card Styles */

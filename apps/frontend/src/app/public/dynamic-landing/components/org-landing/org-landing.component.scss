@@ -1,8 +1,8 @@
 .org-landing-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  font-family: 'Inter', system-ui, sans-serif;
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+  color: var(--color-text-on-primary);
+  font-family: var(--font-primary);
 }
 
 .org-header {
@@ -12,7 +12,7 @@
   padding: 1rem 2rem;
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  border-bottom: var(--border-width) solid rgba(255, 255, 255, 0.2);
 }
 
 .org-logo {
@@ -22,8 +22,8 @@
 
   h1 {
     margin: 0;
-    font-size: 1.5rem;
-    font-weight: 600;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-semibold);
   }
 }
 
@@ -39,12 +39,12 @@
 
   .nav-button {
     padding: 0.5rem 1rem;
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    border: var(--border-width) solid rgba(255, 255, 255, 0.3);
     background: rgba(255, 255, 255, 0.1);
-    color: white;
-    border-radius: 0.375rem;
+    color: var(--color-text-on-primary);
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--transition-fast) ease;
 
     &:hover {
       background: rgba(255, 255, 255, 0.2);
@@ -53,11 +53,11 @@
 
     &.primary {
       background: rgba(255, 255, 255, 0.9);
-      color: #333;
+      color: var(--color-text-primary);
       border-color: transparent;
 
       &:hover {
-        background: white;
+        background: var(--color-surface);
       }
     }
   }
@@ -74,10 +74,10 @@
   padding: 4rem 0;
 
   h2 {
-    font-size: 3rem;
-    font-weight: 700;
+    font-size: var(--fs-3xl);
+    font-weight: var(--fw-bold);
     margin-bottom: 1rem;
-    background: linear-gradient(45deg, #fff, #e2e8f0);
+    background: linear-gradient(45deg, var(--color-text-on-primary), var(--color-background));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -85,7 +85,7 @@
 }
 
 .org-description {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   margin-bottom: 2rem;
   opacity: 0.9;
   max-width: 600px;
@@ -107,9 +107,9 @@
 
   h3 {
     text-align: center;
-    font-size: 2rem;
+    font-size: var(--fs-2xl);
     margin-bottom: 2rem;
-    font-weight: 600;
+    font-weight: var(--fw-semibold);
   }
 }
 

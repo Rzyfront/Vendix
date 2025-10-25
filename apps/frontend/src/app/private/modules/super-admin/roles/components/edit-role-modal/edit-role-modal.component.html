@@ -1,0 +1,76 @@
+<app-modal [title]="title" (close)="onCancel()">
+  <form [formGroup]="roleForm" (ngSubmit)="saveRole()">
+    <div class="p-6 space-y-4">
+      <div>
+        <label for="name" class="block text-sm font-medium text-text-secondary mb-1">
+          Nombre del Rol <span class="text-red-500">*</span>
+        </label>
+        <input 
+          id="name" 
+          type="text" 
+          formControlName="name" 
+          class="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+          placeholder="Ej: manager, supervisor, etc."
+          [class.opacity-50]="roleForm.get('name')?.disabled">
+        <div *ngIf="roleForm.get('name')?.invalid && roleForm.get('name')?.touched" class="mt-1 text-sm text-red-600">
+          <div *ngIf="roleForm.get('name')?.errors?.['required']">El nombre es requerido</div>
+          <div *ngIf="roleForm.get('name')?.errors?.['minlength']">Mínimo 2 caracteres</div>
+          <div *ngIf="roleForm.get('name')?.errors?.['maxlength']">Máximo 50 caracteres</div>
+        </div>
+      </div>
+
+      <div>
+        <label for="description" class="block text-sm font-medium text-text-secondary mb-1">
+          Descripción
+        </label>
+        <textarea 
+          id="description" 
+          formControlName="description" 
+          rows="3" 
+          class="mt-1 block w-full px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+          placeholder="Describe las responsabilidades y permisos de este rol..."></textarea>
+        <div *ngIf="roleForm.get('description')?.invalid && roleForm.get('description')?.touched" class="mt-1 text-sm text-red-600">
+          <div *ngIf="roleForm.get('description')?.errors?.['maxlength']">Máximo 255 caracteres</div>
+        </div>
+      </div>
+
+      <div *ngIf="!isEditMode" class="flex items-center">
+        <input 
+          id="is_system_role" 
+          type="checkbox" 
+          formControlName="is_system_role" 
+          class="h-4 w-4 text-primary focus:ring-primary border-border rounded">
+        <label for="is_system_role" class="ml-2 block text-sm text-text-primary">
+          Rol del sistema (no se puede eliminar)
+        </label>
+      </div>
+
+      <div *ngIf="isEditMode && role?.is_system_role" class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
+        <div class="flex">
+          <app-icon name="alert-triangle" class="w-5 h-5 text-amber-600 dark:text-amber-400 mr-2"></app-icon>
+          <div class="text-sm text-amber-800 dark:text-amber-200">
+            <p class="font-medium">Rol del Sistema</p>
+            <p>Este es un rol del sistema y algunos campos están deshabilitados para mantener la integridad del sistema.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="px-6 py-4 bg-gray-50 dark:bg-gray-800 flex justify-end gap-3">
+      <button 
+        type="button" 
+        (click)="onCancel()" 
+        class="px-4 py-2 text-text bg-surface border border-border rounded-md hover:bg-surface-hover transition-colors"
+        [disabled]="isLoading">
+        Cancelar
+      </button>
+      <button 
+        type="submit" 
+        [disabled]="!roleForm.valid || isLoading" 
+        class="px-4 py-2 text-white bg-primary hover:bg-primary/90 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center">
+        <span *ngIf="isLoading" class="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></span>
+        {{ submitButtonText }}
+      </button>
+    </div>
+  </form>
+</app-modal>

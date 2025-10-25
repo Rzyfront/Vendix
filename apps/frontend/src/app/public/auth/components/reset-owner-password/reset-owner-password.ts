@@ -59,17 +59,17 @@ export function passwordStrengthValidator(control: AbstractControl): ValidationE
     ButtonComponent
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-green-50">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126, 215, 165, 0.1)]">
       <div class="max-w-sm w-full space-y-8">
         <!-- Header section with logo and title -->
         <div class="text-center my-3">
-          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
+          <div class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4">
             <span class="text-white font-bold text-xl">V</span>
           </div>
-          <h2 class="mt-6 text-2xl font-extrabold text-text-primary">
+          <h2 class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]">
             Restablecer Contraseña
           </h2>
-          <p class="mt-2 text-sm text-text-secondary">
+          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
             Ingresa tu nueva contraseña.
           </p>
         </div>
@@ -79,15 +79,15 @@ export function passwordStrengthValidator(control: AbstractControl): ValidationE
           <form [formGroup]="resetPasswordForm" (ngSubmit)="onSubmit()" class="space-y-8">
             <div>
               <!-- Error message display -->
-              <div *ngIf="error" class="rounded-md bg-red-50 p-4 border border-red-200">
+              <div *ngIf="error" class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]">
                 <div class="flex">
                   <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <svg class="h-5 w-5 text-[var(--color-destructive)]" viewBox="0 0 20 20" fill="currentColor">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                     </svg>
                   </div>
                   <div class="ml-3">
-                    <h3 class="text-sm font-medium text-red-800">
+                    <h3 class="text-sm font-medium text-[var(--color-destructive)]">
                       {{ error }}
                     </h3>
                   </div>
@@ -114,7 +114,7 @@ export function passwordStrengthValidator(control: AbstractControl): ValidationE
 
               <!-- Passwords mismatch error -->
               <div *ngIf="resetPasswordForm.hasError('passwordsMismatch') && resetPasswordForm.get('confirmPassword')?.touched" 
-                   class="mt-2 text-sm text-red-600">
+                   class="mt-2 text-sm text-[var(--color-destructive)]">
                 Las contraseñas no coinciden.
               </div>
             </div>
@@ -140,7 +140,7 @@ export function passwordStrengthValidator(control: AbstractControl): ValidationE
               <div class="text-sm">
                 <a
                   routerLink="/auth/login"
-                  class="font-medium text-primary hover:text-primary-dark">
+                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]">
                   Volver a Iniciar Sesión
                 </a>
               </div>

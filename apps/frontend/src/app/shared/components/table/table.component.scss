@@ -48,7 +48,7 @@
 table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--font-sans);
+  font-family: var(--font-primary);
   font-size: var(--fs-sm);
   color: var(--color-text-primary);
 
@@ -57,7 +57,7 @@ table {
     th {
       font-weight: var(--fw-semibold);
       color: var(--color-text-primary);
-      background-color: var(--color-muted);
+      background-color: var(--color-background);
       border-bottom: var(--border-width) solid var(--color-border);
       position: sticky;
       top: 0;
@@ -68,7 +68,8 @@ table {
       // Efecto hover en columnas ordenables
       &.cursor-pointer {
         &:hover {
-          background-color: var(--color-muted-foreground);
+          background-color: var(--color-text-secondary);
+          opacity: 0.1;
         }
       }
 
@@ -91,15 +92,16 @@ table {
 
       // Efecto hover en filas
       &:hover {
-        background-color: var(--color-muted);
+        background-color: var(--color-background);
       }
 
       // Filas con efecto striped (cebra)
       &:nth-child(even) {
-        background-color: var(--color-muted);
+        background-color: var(--color-background);
         
         &:hover {
-          background-color: var(--color-muted-foreground);
+          background-color: var(--color-text-secondary);
+          opacity: 0.05;
         }
       }
 
@@ -189,7 +191,7 @@ table {
 .table-striped {
   table {
     tbody tr:nth-child(even) {
-      background-color: var(--color-muted);
+      background-color: var(--color-background);
     }
   }
 }
@@ -200,7 +202,7 @@ table {
       cursor: pointer;
       
       &:hover {
-        background-color: var(--color-muted);
+        background-color: var(--color-background);
       }
     }
   }
@@ -254,7 +256,7 @@ table {
       
       &:hover:not(:disabled) {
         opacity: 1;
-        background-color: var(--color-muted);
+        background-color: var(--color-background);
       }
     }
 
@@ -274,7 +276,7 @@ table {
       
       &:hover:not(:disabled) {
         opacity: 1;
-        background-color: var(--color-muted);
+        background-color: var(--color-background);
         color: var(--color-text-primary);
       }
     }

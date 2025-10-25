@@ -12,11 +12,11 @@
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.2s ease;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
 
     &:hover {
-      background: var(--surface-hover);
+      background: var(--color-background);
       transform: translateY(-1px);
       box-shadow: var(--shadow-sm);
     }
@@ -30,13 +30,13 @@
       .user-name {
         font-size: 14px;
         font-weight: 500;
-        color: var(--text-primary);
+        color: var(--color-text-primary);
         line-height: 1.2;
       }
 
       .user-role {
         font-size: 12px;
-        color: var(--text-secondary);
+        color: var(--color-text-secondary);
         line-height: 1.2;
       }
     }
@@ -51,12 +51,12 @@
       font-weight: 600;
       font-size: 14px;
       color: white;
-      background: var(--primary);
+      background: var(--color-primary);
       flex-shrink: 0;
     }
 
     .chevron-icon {
-      color: var(--text-secondary);
+      color: var(--color-text-secondary);
       transition: transform 0.2s ease;
 
       &.rotate {
@@ -70,8 +70,8 @@
     top: calc(100% + 8px);
     right: 0;
     min-width: 280px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
     border-radius: 12px;
     box-shadow: var(--shadow-lg);
     opacity: 0;
@@ -92,7 +92,7 @@
       display: flex;
       align-items: center;
       gap: 12px;
-      background: var(--background);
+      background: var(--color-background);
 
       .header-avatar {
         width: 48px;
@@ -104,7 +104,7 @@
         font-weight: 600;
         font-size: 16px;
         color: white;
-        background: var(--primary);
+        background: var(--color-primary);
         flex-shrink: 0;
       }
 
@@ -115,7 +115,7 @@
         .header-name {
           font-size: 14px;
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           margin: 0 0 4px 0;
           white-space: nowrap;
           overflow: hidden;
@@ -124,7 +124,7 @@
 
         .header-email {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin: 0;
           white-space: nowrap;
           overflow: hidden;
@@ -135,7 +135,7 @@
 
     .dropdown-divider {
       height: 1px;
-      background: var(--border);
+      background: var(--color-border);
     }
 
     .dropdown-content {
@@ -155,15 +155,15 @@
         text-align: left;
 
         &:hover {
-          background: var(--surface-hover);
+          background: var(--color-background);
         }
 
         &.danger {
           .item-label {
-            color: var(--error);
+            color: var(--color-destructive);
           }
           .item-icon {
-            color: var(--error);
+            color: var(--color-destructive);
           }
 
           &:hover {
@@ -172,13 +172,13 @@
         }
 
         .item-icon {
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           flex-shrink: 0;
         }
 
         .item-label {
           font-size: 14px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           font-weight: 500;
           flex: 1;
         }

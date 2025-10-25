@@ -1,0 +1,14 @@
+<app-modal title="Confirmar Eliminación" (close)="close.emit()">
+  <div class="p-6">
+    <p>¿Estás seguro de que quieres eliminar el rol <strong>{{ role.name }}</strong>?</p>
+    <p class="text-sm text-text-secondary">Esta acción no se puede deshacer.</p>
+  </div>
+  <div class="px-6 py-4 bg-gray-50 dark:bg-gray-800 flex justify-end gap-3">
+    <button type="button" (click)="close.emit()" class="px-4 py-2 text-text bg-surface border border-border rounded-md hover:bg-surface-hover transition-colors">
+      Cancelar
+    </button>
+    <button type="button" (click)="deleteRole()" class="px-4 py-2 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors">
+      Eliminar
+    </button>
+  </div>
+</app-modal>

@@ -1,27 +1,29 @@
 :host {
   display: block;
-  background-color: var(--bg);
-  color: var(--text);
+  color: var(--color-text-primary);
 }
 
 /* Card container styles */
 .rounded-card {
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
 }
 
 .shadow-card {
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-md);
 }
 
 /* Button styles */
 .rounded-button {
-  border-radius: var(--radius-input);
+  border-radius: var(--radius-md);
 }
 
 /* Header compact styles */
 .header-compact {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
 }
 
 /* Filter and search styles */
@@ -58,7 +60,7 @@
 
 /* Loading states */
 .loading-skeleton {
-  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-hover) 50%, var(--surface) 75%);
+  background: linear-gradient(90deg, var(--color-surface) 25%, var(--color-background) 50%, var(--color-surface) 75%);
   background-size: 200% 100%;
   animation: loading 1.5s infinite;
 }
@@ -89,28 +91,28 @@
 }
 
 .overflow-y-auto::-webkit-scrollbar-track {
-  background: var(--surface);
+  background: var(--color-surface);
   border-radius: 3px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--color-border);
   border-radius: 3px;
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: var(--text-muted);
+  background: var(--color-text-muted);
 }
 
 /* Focus states */
 .focus-ring:focus {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
 /* Hover effects for table rows */
 .table-row-hover:hover {
-  background-color: var(--surface-hover);
+  background-color: var(--color-background);
   transition: background-color 0.2s ease;
 }
 
@@ -127,28 +129,28 @@
 }
 
 .status-badge.active {
-  background-color: var(--success-bg);
-  color: var(--success-text);
+  background-color: rgba(126, 215, 165, 0.1);
+  color: var(--color-primary);
 }
 
 .status-badge.inactive {
-  background-color: var(--muted-bg);
-  color: var(--muted-text);
+  background-color: var(--color-background);
+  color: var(--color-text-secondary);
 }
 
 .status-badge.pending {
-  background-color: var(--warning-bg);
-  color: var(--warning-text);
+  background-color: rgba(6, 182, 212, 0.1);
+  color: var(--color-accent);
 }
 
 .status-badge.suspended {
-  background-color: var(--error-bg);
-  color: var(--error-text);
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--color-destructive);
 }
 
 .status-badge.archived {
-  background-color: var(--destructive-bg);
-  color: var(--destructive-text);
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--color-destructive);
 }
 
 /* Custom animations for modals */

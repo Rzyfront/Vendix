@@ -20,72 +20,74 @@ export class ThemeService {
    */
   async applyAppConfiguration(appConfig: AppConfig): Promise<void> {
     try {
-  // ...existing code...
-      
-      // Use the sanitized branding object from AppConfig
       if (appConfig.branding) {
         await this.applyBranding(appConfig.branding);
-      } else {
-  // ...existing code...
       }
-
-      // Theme and SEO config removed: handled elsewhere or not used
-      
-  // ...existing code...
-      
     } catch (error) {
-  // ...existing code...
+      console.error('Error applying app configuration:', error);
       throw error;
     }
   }
 
   /**
-   * Aplica el tema CSS
+   * Aplica el tema CSS.
+   * @deprecated El branding ahora maneja todos los aspectos visuales. El tema puede ser eliminado.
    */
   async applyTheme(themeConfig: ThemeConfig): Promise<void> {
-  // ...existing code...
-    
-    // Aplicar colores CSS
-    this.applyColorVariables(themeConfig);
-    
-    // Aplicar espaciado
-    this.applySpacingVariables(themeConfig);
-    
-    // Aplicar sombras
-    this.applyShadowVariables(themeConfig);
-    
-    // Cargar fuentes
-    await this.loadFont(themeConfig.fontFamily);
-    
-    // Aplicar fuente base
-    this.applyFontVariables(themeConfig);
-    
-    // Guardar tema actual
+    const themeStyles: { [key: string]: string | undefined } = {
+      '--color-primary': themeConfig.primaryColor,
+      '--color-secondary': themeConfig.secondaryColor,
+      '--color-accent': themeConfig.accentColor,
+      '--color-background': themeConfig.backgroundColor,
+      '--color-text-primary': themeConfig.textColor,
+      '--border-radius': themeConfig.borderRadius,
+      '--font-base': themeConfig.fontFamily,
+    };
+
+    this.setCssVariables(themeStyles);
+    if (themeConfig.spacing) {
+      this.setCssVariables(this.flattenObject(themeConfig.spacing, 'spacing'));
+    }
+    if (themeConfig.shadows) {
+      this.setCssVariables(this.flattenObject(themeConfig.shadows, 'shadow'));
+    }
+
+    if (themeConfig.fontFamily) {
+      await this.loadFont(themeConfig.fontFamily);
+    }
     this.currentThemeSubject.next(themeConfig);
   }
 
   /**
-   * Aplica la configuración de branding
+   * Aplica la configuración de branding, sobreescribiendo los valores por defecto del CSS.
    */
   async applyBranding(brandingConfig: BrandingConfig): Promise<void> {
-  // ...existing code...
-    
-    // Add defensive checks for nested properties
     if (brandingConfig.colors) {
-      this.applyBrandingColors(brandingConfig.colors);
+      const colorStyles: { [key: string]: string | undefined } = {
+        '--color-primary': brandingConfig.colors.primary,
+        '--color-secondary': brandingConfig.colors.secondary,
+        '--color-accent': brandingConfig.colors.accent,
+        '--color-background': brandingConfig.colors.background,
+        '--color-surface': brandingConfig.colors.surface,
+        '--color-text-primary': brandingConfig.colors.text?.primary,
+        '--color-text-secondary': brandingConfig.colors.text?.secondary,
+        '--color-text-muted': brandingConfig.colors.text?.muted,
+      };
+      this.setCssVariables(colorStyles);
     }
 
     if (brandingConfig.fonts) {
-      if (brandingConfig.fonts.primary) {
-        await this.loadFont(brandingConfig.fonts.primary);
+      const fontStyles: { [key: string]: string | undefined } = {
+        '--font-primary': brandingConfig.fonts.primary,
+        '--font-secondary': brandingConfig.fonts.secondary,
+        '--font-headings': brandingConfig.fonts.headings,
+      };
+      this.setCssVariables(fontStyles);
+
+      // Cargar las fuentes necesarias
+      for (const font of Object.values(fontStyles)) {
+        if (font) await this.loadFont(font);
       }
-      if (brandingConfig.fonts.secondary) {
-        await this.loadFont(brandingConfig.fonts.secondary);
-      }
-      if (brandingConfig.fonts.headings) {
-        await this.loadFont(brandingConfig.fonts.headings);
-      }
-      this.applyBrandingFonts(brandingConfig.fonts);
     }
 
     if (brandingConfig.customCSS) {
@@ -98,105 +100,46 @@ export class ThemeService {
   }
 
   /**
-   * Aplica variables de colores CSS
+   * Establece un conjunto de variables CSS en el elemento raíz.
+   * @param variables - Un objeto donde las claves son nombres de variables CSS y los valores son sus valores.
    */
-  private applyColorVariables(themeConfig: ThemeConfig): void {
+  private setCssVariables(variables: { [key: string]: string | undefined }): void {
     const root = this.document.documentElement;
-    
-    root.style.setProperty('--color-primary', themeConfig.primaryColor);
-    root.style.setProperty('--color-secondary', themeConfig.secondaryColor);
-    root.style.setProperty('--color-accent', themeConfig.accentColor);
-    root.style.setProperty('--color-background', themeConfig.backgroundColor);
-    root.style.setProperty('--color-text-primary', themeConfig.textColor);
-    root.style.setProperty('--border-radius', themeConfig.borderRadius);
-  }
-
-  /**
-   * Aplica colores de branding personalizados
-   */
-  private applyBrandingColors(colors: BrandingConfig['colors']): void {
-    const root = this.document.documentElement;
-    
-    root.style.setProperty('--color-primary', colors.primary);
-    root.style.setProperty('--color-secondary', colors.secondary);
-    root.style.setProperty('--color-accent', colors.accent);
-    root.style.setProperty('--color-background', colors.background);
-    root.style.setProperty('--color-surface', colors.surface);
-    root.style.setProperty('--color-text-primary', colors.text.primary);
-    root.style.setProperty('--color-text-secondary', colors.text.secondary);
-    root.style.setProperty('--color-text-muted', colors.text.muted);
-  }
-
-  /**
-   * Aplica variables de espaciado
-   */
-  private applySpacingVariables(themeConfig: ThemeConfig): void {
-    const root = this.document.documentElement;
-    
-    Object.entries(themeConfig.spacing).forEach(([key, value]) => {
-      root.style.setProperty(`--spacing-${key}`, value);
+    Object.entries(variables).forEach(([key, value]) => {
+      if (value) {
+        root.style.setProperty(key, value);
+      }
     });
   }
 
   /**
-   * Aplica variables de sombras
+   * Aplana un objeto anidado para usarlo como variables CSS.
+   * ej: { sm: '1px' } con el prefijo 'shadow' se convierte en { '--shadow-sm': '1px' }
    */
-  private applyShadowVariables(themeConfig: ThemeConfig): void {
-    const root = this.document.documentElement;
-    
-    Object.entries(themeConfig.shadows).forEach(([key, value]) => {
-      root.style.setProperty(`--shadow-${key}`, value);
+  private flattenObject(obj: object, prefix: string): { [key: string]: string } {
+    const result: { [key: string]: string } = {};
+    Object.entries(obj).forEach(([key, value]) => {
+      result[`--${prefix}-${key}`] = value;
     });
-  }
-
-  /**
-   * Aplica variables de fuente del tema
-   */
-  private applyFontVariables(themeConfig: ThemeConfig): void {
-    const root = this.document.documentElement;
-    root.style.setProperty('--font-base', themeConfig.fontFamily);
-  }
-
-  /**
-   * Aplica fuentes de branding personalizadas
-   */
-  private applyBrandingFonts(fonts: BrandingConfig['fonts']): void {
-    const root = this.document.documentElement;
-    
-    if (fonts.primary) {
-      root.style.setProperty('--font-primary', fonts.primary);
-    }
-    
-    if (fonts.secondary) {
-      root.style.setProperty('--font-secondary', fonts.secondary);
-    }
-    
-    if (fonts.headings) {
-      root.style.setProperty('--font-headings', fonts.headings);
-    }
+    return result;
   }
 
   /**
    * Carga una fuente externa
    */
   async loadFont(fontFamily: string): Promise<void> {
-    if (this.loadedFonts.has(fontFamily)) {
-      return; // Ya está cargada
+    if (!fontFamily || this.loadedFonts.has(fontFamily)) {
+      return;
     }
 
     try {
-      // Extraer el nombre de la fuente para Google Fonts
       const fontName = this.extractFontName(fontFamily);
-      
       if (this.isGoogleFont(fontName)) {
         await this.loadGoogleFont(fontName);
       }
-      
       this.loadedFonts.add(fontFamily);
-  // ...existing code...
-      
     } catch (error) {
-  // ...existing code...
+      console.error(`Failed to load font: ${fontFamily}`, error);
     }
   }
 
@@ -224,14 +167,11 @@ export class ThemeService {
   private async loadGoogleFont(fontName: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const linkId = `google-font-${fontName.toLowerCase().replace(' ', '-')}`;
-      
-      // Verificar si ya existe
       if (this.document.getElementById(linkId)) {
         resolve();
         return;
       }
       
-      // Crear elemento link
       const link = this.document.createElement('link');
       link.id = linkId;
       link.rel = 'stylesheet';
@@ -240,7 +180,6 @@ export class ThemeService {
       link.onload = () => resolve();
       link.onerror = () => reject(new Error(`Failed to load Google Font: ${fontName}`));
       
-      // Añadir al head
       this.document.head.appendChild(link);
     });
   }
@@ -249,24 +188,17 @@ export class ThemeService {
    * Inyecta CSS personalizado
    */
   injectCustomCSS(css: string, id: string = 'custom-css'): void {
-    // Remover CSS anterior si existe
     if (this.injectedStyleElements.has(id)) {
       const oldElement = this.injectedStyleElements.get(id)!;
       oldElement.remove();
     }
     
-    // Crear nuevo elemento style
     const styleElement = this.document.createElement('style');
     styleElement.id = id;
     styleElement.textContent = css;
     
-    // Añadir al head
     this.document.head.appendChild(styleElement);
-    
-    // Guardar referencia
     this.injectedStyleElements.set(id, styleElement);
-    
-  // ...existing code...
   }
 
   /**
@@ -274,199 +206,87 @@ export class ThemeService {
    */
   updateFavicon(faviconUrl: string): void {
     try {
-      // Buscar favicon existente
       let favicon = this.document.querySelector('link[rel="icon"]') as HTMLLinkElement;
-      
       if (!favicon) {
-        // Crear nuevo favicon
         favicon = this.document.createElement('link');
         favicon.rel = 'icon';
         this.document.head.appendChild(favicon);
       }
-      
       favicon.href = faviconUrl;
-  // ...existing code...
-      
     } catch (error) {
-  // ...existing code...
+      console.error('Failed to update favicon:', error);
     }
   }
 
   /**
-   * Aplica configuración SEO
-   */
-  private applySEOConfiguration(seoConfig: any): void {
-    try {
-      // Actualizar título
-      if (seoConfig.title) {
-        this.document.title = seoConfig.title;
-      }
-      
-      // Actualizar meta tags
-      this.updateMetaTag('description', seoConfig.description);
-      this.updateMetaTag('keywords', seoConfig.keywords?.join(', '));
-      
-      // Open Graph
-      this.updateMetaTag('og:title', seoConfig.ogTitle || seoConfig.title);
-      this.updateMetaTag('og:description', seoConfig.ogDescription || seoConfig.description);
-      this.updateMetaTag('og:image', seoConfig.ogImage);
-      
-      // Twitter
-      this.updateMetaTag('twitter:card', seoConfig.twitterCard || 'summary_large_image');
-      this.updateMetaTag('twitter:site', seoConfig.twitterSite);
-      
-      // Canonical URL
-      if (seoConfig.canonicalUrl) {
-        this.updateCanonicalUrl(seoConfig.canonicalUrl);
-      }
-      
-      // Robots
-      this.updateMetaTag('robots', seoConfig.robots || 'index, follow');
-      
-  // ...existing code...
-      
-    } catch (error) {
-  // ...existing code...
-    }
-  }
-
-  /**
-   * Actualiza un meta tag
-   */
-  private updateMetaTag(name: string, content: string): void {
-    if (!content) return;
-    
-    const selector = name.startsWith('og:') || name.startsWith('twitter:') 
-      ? `meta[property="${name}"]` 
-      : `meta[name="${name}"]`;
-      
-    let meta = this.document.querySelector(selector) as HTMLMetaElement;
-    
-    if (!meta) {
-      meta = this.document.createElement('meta');
-      if (name.startsWith('og:') || name.startsWith('twitter:')) {
-        meta.setAttribute('property', name);
-      } else {
-        meta.setAttribute('name', name);
-      }
-      this.document.head.appendChild(meta);
-    }
-    
-    meta.setAttribute('content', content);
-  }
-
-  /**
-   * Actualiza la URL canónica
-   */
-  private updateCanonicalUrl(url: string): void {
-    let canonical = this.document.querySelector('link[rel="canonical"]') as HTMLLinkElement;
-    
-    if (!canonical) {
-      canonical = this.document.createElement('link');
-      canonical.rel = 'canonical';
-      this.document.head.appendChild(canonical);
-    }
-    
-    canonical.href = url;
-  }
-
-  /**
-   * Obtiene el tema actual
-   */
-  getCurrentTheme(): ThemeConfig | null {
-    return this.currentThemeSubject.value;
-  }
-
-  /**
-   * Resetea el tema a los valores por defecto
+   * Resetea el tema a los valores por defecto del CSS.
    */
   resetTheme(): void {
     const root = this.document.documentElement;
     
-    // Remover variables CSS personalizadas
-    const customProperties = [
-      '--color-primary', '--color-secondary', '--color-accent',
-      '--color-background', '--color-surface', '--color-text-primary',
-      '--color-text-secondary', '--color-text-muted', '--font-primary',
-      '--font-secondary', '--font-headings'
-    ];
-    
-    customProperties.forEach(prop => {
-      root.style.removeProperty(prop);
-    });
+    // Remover todos los estilos en línea para que se apliquen los de la hoja de estilos.
+    root.removeAttribute('style');
     
     // Remover CSS inyectado
-    this.injectedStyleElements.forEach((element, id) => {
+    this.injectedStyleElements.forEach((element) => {
       element.remove();
     });
     this.injectedStyleElements.clear();
     
-    // Limpiar fuentes cargadas
+    // Limpiar fuentes cargadas (no removemos los <link> de fuentes por simplicidad)
     this.loadedFonts.clear();
     
-    // Resetear tema actual
     this.currentThemeSubject.next(null);
-    
-  // ...existing code...
   }
 
   /**
-   * Transforma el branding desde el formato de API al formato interno
-   * Soluciona el problema de mapeo incorrecto identificado en el plan de reestructuración
+   * Transforma el branding desde el formato de API al formato interno.
+   * Los valores no definidos en la API resultarán en `undefined` para que se usen los fallbacks de CSS.
    */
   transformBrandingFromApi(apiBranding: any): BrandingConfig {
     return {
       colors: {
-        primary: apiBranding.primary_color || '#3b82f6',
-        secondary: apiBranding.secondary_color || '#6b7280',
-        accent: apiBranding.accent_color || '#8b5cf6',
-        background: apiBranding.background_color || '#ffffff',
-        surface: apiBranding.background_color || '#f8fafc',
+        primary: apiBranding.primary_color,
+        secondary: apiBranding.secondary_color,
+        accent: apiBranding.accent_color,
+        background: apiBranding.background_color,
+        surface: apiBranding.surface_color,
         text: {
-          primary: apiBranding.text_color || '#1f2937',
-          secondary: apiBranding.text_color || '#6b7280',
-          muted: apiBranding.text_color || '#9ca3af'
+          primary: apiBranding.text_color,
+          secondary: apiBranding.text_secondary_color,
+          muted: apiBranding.text_muted_color,
         }
       },
       fonts: {
-        primary: 'Inter, sans-serif',
-        secondary: 'Inter, sans-serif',
-        headings: 'Inter, sans-serif'
+        primary: apiBranding.font_primary,
+        secondary: apiBranding.font_secondary,
+        headings: apiBranding.font_headings,
       },
       logo: {
-        url: apiBranding.logo_url || '',
-        alt: apiBranding.name || 'Logo'
+        url: apiBranding.logo_url,
+        alt: apiBranding.name,
       },
-      favicon: apiBranding.favicon_url || '',
-      customCSS: apiBranding.custom_css || ''
+      favicon: apiBranding.favicon_url,
+      customCSS: apiBranding.custom_css,
     };
   }
 
   /**
-   * Transforma el tema desde el formato de API al formato interno
+   * Transforma el tema desde el formato de API al formato interno.
+   * @deprecated Usar `transformBrandingFromApi` en su lugar.
    */
   transformThemeFromApi(apiTheme: any): ThemeConfig {
     return {
-      name: apiTheme.name || 'default',
-      primaryColor: apiTheme.primary_color || apiTheme.primaryColor || '#3b82f6',
-      secondaryColor: apiTheme.secondary_color || apiTheme.secondaryColor || '#6b7280',
-      accentColor: apiTheme.accent_color || apiTheme.accentColor || '#8b5cf6',
-      backgroundColor: apiTheme.background_color || apiTheme.backgroundColor || '#ffffff',
-      textColor: apiTheme.text_color || apiTheme.textColor || '#1f2937',
-      borderRadius: apiTheme.border_radius || apiTheme.borderRadius || '0.375rem',
-      fontFamily: apiTheme.font_family || apiTheme.fontFamily || 'Inter, sans-serif',
-      spacing: apiTheme.spacing || {
-        xs: '0.25rem',
-        sm: '0.5rem',
-        md: '1rem',
-        lg: '1.5rem',
-        xl: '2rem'
-      },
-      shadows: apiTheme.shadows || {
-        sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-        md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
-        lg: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)'
-      }
+      name: apiTheme.name,
+      primaryColor: apiTheme.primary_color || apiTheme.primaryColor,
+      secondaryColor: apiTheme.secondary_color || apiTheme.secondaryColor,
+      accentColor: apiTheme.accent_color || apiTheme.accentColor,
+      backgroundColor: apiTheme.background_color || apiTheme.backgroundColor,
+      textColor: apiTheme.text_color || apiTheme.textColor,
+      borderRadius: apiTheme.border_radius || apiTheme.borderRadius,
+      fontFamily: apiTheme.font_family || apiTheme.fontFamily,
+      spacing: apiTheme.spacing,
+      shadows: apiTheme.shadows,
     };
   }
 }

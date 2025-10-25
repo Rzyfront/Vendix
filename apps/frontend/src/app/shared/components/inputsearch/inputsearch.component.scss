@@ -5,8 +5,8 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: var(--spacing-sm);
-  font-family: var(--font-sans);
+  gap: 0.5rem;
+  font-family: var(--font-primary);
 
   // Estados
   &.inputsearch-disabled {
@@ -48,7 +48,7 @@
   width: 100%;
   background-color: var(--color-surface);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-input);
+  border-radius: var(--radius-md);
   transition: all var(--transition-fast) ease;
 
   &:hover:not(.inputsearch-wrapper-disabled) {
@@ -70,7 +70,7 @@
   }
 
   &.inputsearch-wrapper-disabled {
-    background-color: var(--color-muted);
+    background-color: var(--color-background);
     cursor: not-allowed;
   }
 
@@ -190,13 +190,13 @@
   justify-content: center;
   background: transparent;
   border: none;
-  border-radius: var(--radius-button);
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast) ease;
 
   &:hover:not(:disabled) {
-    background-color: var(--color-muted);
+    background-color: var(--color-background);
     color: var(--color-text-primary);
   }
 
@@ -358,7 +358,7 @@
     color: var(--color-text-secondary);
     
     &:hover:not(:disabled) {
-      background-color: var(--color-muted);
+      background-color: var(--color-background);
       color: var(--color-text-primary);
     }
   }

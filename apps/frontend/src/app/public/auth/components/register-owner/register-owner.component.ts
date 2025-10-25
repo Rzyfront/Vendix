@@ -20,17 +20,17 @@ interface RegistrationError {
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule, RouterLink, InputComponent, ButtonComponent, CardComponent],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-green-50">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126, 215, 165, 0.1)]">
       <div class="max-w-2xl w-full space-y-8">
         <!-- Branding -->
         <div class="text-center my-3">
-          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
+          <div class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4">
             <span class="text-white font-bold text-xl">V</span>
           </div>
-          <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
+          <h2 class="mt-6 text-3xl font-extrabold text-[var(--color-text-primary)]">
             Crear tu organización
           </h2>
-          <p class="mt-2 text-sm text-gray-600">
+          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
             Comienza tu viaje empresarial con Vendix
           </p>
         </div>
@@ -95,15 +95,15 @@ interface RegistrationError {
 
             <!-- Error Display -->
             @if (hasError) {
-              <div class="rounded-md bg-red-50 p-4 border border-red-200 mt-4">
+              <div class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)] mt-4">
                 <div class="flex">
                   <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <svg class="h-5 w-5 text-[var(--color-destructive)]" viewBox="0 0 20 20" fill="currentColor">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                     </svg>
                   </div>
                   <div class="ml-3">
-                    <h3 class="text-sm font-medium text-red-800">
+                    <h3 class="text-sm font-medium text-[var(--color-destructive)]">
                       {{ errorMessage }}
                     </h3>
                   </div>
@@ -130,10 +130,10 @@ interface RegistrationError {
               </app-button>
             </div>
 
-            <div class="text-center text-sm text-gray-600 pt-4">
+            <div class="text-center text-sm text-[var(--color-text-secondary)] pt-4">
               <p>
                 ¿Ya tienes una cuenta?
-                <a [routerLink]="['/auth', 'login']" class="font-medium text-primary hover:text-primary-dark">
+                <a [routerLink]="['/auth', 'login']" class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]">
                   Inicia sesión
                 </a>
               </p>

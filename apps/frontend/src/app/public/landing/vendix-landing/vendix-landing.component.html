@@ -1,6 +1,6 @@
-<div class="vendrix-landing min-h-screen bg-[var(--bg)] text-[var(--text)]">
+<div class="vendrix-landing min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
   <!-- Header -->
-  <header class="bg-[var(--surface)] border-b border-[var(--border)] shadow-sm">
+  <header class="bg-[var(--color-surface)] border-b border-[var(--color-border)] shadow-sm">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Logo Section -->
@@ -8,24 +8,24 @@
           <img [src]="tenantConfig?.branding?.logo?.url || 'assets/images/logo.png'"
                alt="Vendix"
                class="h-8 w-8 object-contain">
-          <h1 class="text-xl font-semibold text-[var(--text)]">
+          <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
             {{ tenantConfig?.branding?.name || 'Vendix' }}
           </h1>
         </div>
 
         <!-- Navigation -->
         <nav class="hidden md:flex items-center space-x-8">
-          <a href="#features" class="text-[var(--text)] hover:text-[var(--primary)] transition-colors duration-200">
+          <a href="#features" class="text-[var(--color-text-primary)] hover:text-[var(--color-primary)] transition-colors duration-200">
             Características
           </a>
-          <a href="#pricing" class="text-[var(--text)] hover:text-[var(--primary)] transition-colors duration-200">
+          <a href="#pricing" class="text-[var(--color-text-primary)] hover:text-[var(--color-primary)] transition-colors duration-200">
             Precios
           </a>
-          <a routerLink="/auth/login" class="text-[var(--text)] hover:text-[var(--primary)] transition-colors duration-200">
+          <a routerLink="/auth/login" class="text-[var(--color-text-primary)] hover:text-[var(--color-primary)] transition-colors duration-200">
             Iniciar Sesión
           </a>
           <a routerLink="/auth/register"
-             class="bg-[var(--primary)] text-white px-4 py-2 rounded-button hover:opacity-90 transition-all duration-200 shadow-sm">
+             class="bg-[var(--color-primary)] text-white px-4 py-2 rounded-button hover:opacity-90 transition-all duration-200 shadow-sm">
             Registrarse
           </a>
         </nav>
@@ -35,25 +35,25 @@
 
   <main class="flex-1">
     <!-- Hero Section -->
-    <section class="bg-gradient-to-br from-[var(--bg)] to-[var(--primary)]/10 py-20">
+    <section class="bg-gradient-to-br from-[var(--color-background)] to-[var(--color-primary)]/10 py-20">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="grid lg:grid-cols-2 gap-12 items-center">
           <!-- Hero Content -->
           <div class="space-y-6">
-            <h1 class="text-4xl md:text-5xl lg:text-6xl font-bold text-[var(--text)] leading-tight">
+            <h1 class="text-4xl md:text-5xl lg:text-6xl font-bold text-[var(--color-text-primary)] leading-tight">
               Plataforma Multi-tenant para E-commerce y Gestión Empresarial
             </h1>
-            <p class="text-lg md:text-xl text-[var(--text)]/80 leading-relaxed">
+            <p class="text-lg md:text-xl text-[var(--color-text-primary)]/80 leading-relaxed">
               Solución completa para organizaciones, tiendas y administradores.
               Gestiona múltiples dominios, usuarios y permisos en una sola plataforma.
             </p>
             <div class="flex flex-col sm:flex-row gap-4 pt-4">
               <a routerLink="/auth/register"
-                 class="bg-[var(--primary)] text-white px-8 py-4 rounded-button hover:opacity-90 transition-all duration-200 text-center font-medium shadow-md">
+                 class="bg-[var(--color-primary)] text-white px-8 py-4 rounded-button hover:opacity-90 transition-all duration-200 text-center font-medium shadow-md">
                 Comenzar Ahora
               </a>
               <a href="#features"
-                 class="border border-[var(--border)] text-[var(--text)] px-8 py-4 rounded-button hover:bg-[var(--surface)] transition-all duration-200 text-center font-medium">
+                 class="border border-[var(--color-border)] text-[var(--color-text-primary)] px-8 py-4 rounded-button hover:bg-[var(--color-surface)] transition-all duration-200 text-center font-medium">
                 Conocer Más
               </a>
             </div>
@@ -61,17 +61,17 @@
 
           <!-- Hero Visual -->
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)]">
-              <h4 class="font-semibold text-[var(--text)] mb-2">Panel Administrativo</h4>
-              <p class="text-[var(--text)]/70 text-sm">Gestión completa de usuarios y permisos</p>
+            <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)]">
+              <h4 class="font-semibold text-[var(--color-text-primary)] mb-2">Panel Administrativo</h4>
+              <p class="text-[var(--color-text-primary)]/70 text-sm">Gestión completa de usuarios y permisos</p>
             </div>
-            <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)]">
-              <h4 class="font-semibold text-[var(--text)] mb-2">Tienda Online</h4>
-              <p class="text-[var(--text)]/70 text-sm">E-commerce personalizado por dominio</p>
+            <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)]">
+              <h4 class="font-semibold text-[var(--color-text-primary)] mb-2">Tienda Online</h4>
+              <p class="text-[var(--color-text-primary)]/70 text-sm">E-commerce personalizado por dominio</p>
             </div>
-            <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)]">
-              <h4 class="font-semibold text-[var(--text)] mb-2">Punto de Venta</h4>
-              <p class="text-[var(--text)]/70 text-sm">Sistema POS integrado</p>
+            <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)]">
+              <h4 class="font-semibold text-[var(--color-text-primary)] mb-2">Punto de Venta</h4>
+              <p class="text-[var(--color-text-primary)]/70 text-sm">Sistema POS integrado</p>
             </div>
           </div>
         </div>
@@ -79,76 +79,76 @@
     </section>
 
     <!-- Features Section -->
-    <section id="features" class="py-20 bg-[var(--bg)]">
+    <section id="features" class="py-20 bg-[var(--color-background)]">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 class="text-3xl md:text-4xl font-bold text-center text-[var(--text)] mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold text-center text-[var(--color-text-primary)] mb-12">
           Características Principales
         </h2>
         <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
           <!-- Feature Cards -->
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">🏢</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">Arquitectura Multi-tenant</h3>
-            <p class="text-[var(--text)]/70">Soporte para múltiples organizaciones y dominios con configuración independiente</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Arquitectura Multi-tenant</h3>
+            <p class="text-[var(--color-text-primary)]/70">Soporte para múltiples organizaciones y dominios con configuración independiente</p>
           </div>
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">🔐</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">Autenticación Contextual</h3>
-            <p class="text-[var(--text)]/70">Login adaptado al contexto (Vendix, Organización, Tienda) con permisos granulares</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Autenticación Contextual</h3>
+            <p class="text-[var(--color-text-primary)]/70">Login adaptado al contexto (Vendix, Organización, Tienda) con permisos granulares</p>
           </div>
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">🎨</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">Branding Dinámico</h3>
-            <p class="text-[var(--text)]/70">Personalización de marca, temas y estilos por dominio y organización</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Branding Dinámico</h3>
+            <p class="text-[var(--color-text-primary)]/70">Personalización de marca, temas y estilos por dominio y organización</p>
           </div>
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">🛒</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">E-commerce Completo</h3>
-            <p class="text-[var(--text)]/70">Tiendas online personalizadas con catálogo, carrito y pasarelas de pago</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">E-commerce Completo</h3>
+            <p class="text-[var(--color-text-primary)]/70">Tiendas online personalizadas con catálogo, carrito y pasarelas de pago</p>
           </div>
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">💻</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">Panel Administrativo</h3>
-            <p class="text-[var(--text)]/70">Gestión centralizada de usuarios, permisos, productos y configuraciones</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Panel Administrativo</h3>
+            <p class="text-[var(--color-text-primary)]/70">Gestión centralizada de usuarios, permisos, productos y configuraciones</p>
           </div>
-          <div class="bg-[var(--surface)] p-6 rounded-card shadow-card border border-[var(--border)] hover:shadow-md transition-all duration-200">
+          <div class="bg-[var(--color-surface)] p-6 rounded-card shadow-card border border-[var(--color-border)] hover:shadow-md transition-all duration-200">
             <div class="text-2xl mb-4">📱</div>
-            <h3 class="text-xl font-semibold text-[var(--text)] mb-3">Sistema POS</h3>
-            <p class="text-[var(--text)]/70">Punto de venta integrado para gestión de ventas físicas</p>
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Sistema POS</h3>
+            <p class="text-[var(--color-text-primary)]/70">Punto de venta integrado para gestión de ventas físicas</p>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Environment Types -->
-    <section class="py-20 bg-[var(--surface)]">
+    <section class="py-20 bg-[var(--color-surface)]">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 class="text-3xl md:text-4xl font-bold text-center text-[var(--text)] mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold text-center text-[var(--color-text-primary)] mb-12">
           Entornos Disponibles
         </h2>
         <div class="grid md:grid-cols-3 gap-8">
-          <div class="bg-[var(--bg)] p-8 rounded-card shadow-card border border-[var(--border)] text-center">
-            <h3 class="text-2xl font-semibold text-[var(--text)] mb-4">Vendix Platform</h3>
-            <p class="text-[var(--text)]/70 mb-6">Plataforma principal para gestión multi-organizacional</p>
-            <ul class="text-[var(--text)]/80 space-y-2 text-left">
+          <div class="bg-[var(--color-background)] p-8 rounded-card shadow-card border border-[var(--color-border)] text-center">
+            <h3 class="text-2xl font-semibold text-[var(--color-text-primary)] mb-4">Vendix Platform</h3>
+            <p class="text-[var(--color-text-primary)]/70 mb-6">Plataforma principal para gestión multi-organizacional</p>
+            <ul class="text-[var(--color-text-primary)]/80 space-y-2 text-left">
               <li>• Super Administración</li>
               <li>• Gestión de Organizaciones</li>
               <li>• Configuración Global</li>
             </ul>
           </div>
-          <div class="bg-[var(--bg)] p-8 rounded-card shadow-card border border-[var(--border)] text-center">
-            <h3 class="text-2xl font-semibold text-[var(--text)] mb-4">Organización</h3>
-            <p class="text-[var(--text)]/70 mb-6">Panel administrativo para empresas con múltiples tiendas</p>
-            <ul class="text-[var(--text)]/80 space-y-2 text-left">
+          <div class="bg-[var(--color-background)] p-8 rounded-card shadow-card border border-[var(--color-border)] text-center">
+            <h3 class="text-2xl font-semibold text-[var(--color-text-primary)] mb-4">Organización</h3>
+            <p class="text-[var(--color-text-primary)]/70 mb-6">Panel administrativo para empresas con múltiples tiendas</p>
+            <ul class="text-[var(--color-text-primary)]/80 space-y-2 text-left">
               <li>• Administración de Tiendas</li>
               <li>• Gestión de Usuarios</li>
               <li>• Reportes Consolidados</li>
             </ul>
           </div>
-          <div class="bg-[var(--bg)] p-8 rounded-card shadow-card border border-[var(--border)] text-center">
-            <h3 class="text-2xl font-semibold text-[var(--text)] mb-4">Tienda</h3>
-            <p class="text-[var(--text)]/70 mb-6">E-commerce y gestión para tiendas individuales</p>
-            <ul class="text-[var(--text)]/80 space-y-2 text-left">
+          <div class="bg-[var(--color-background)] p-8 rounded-card shadow-card border border-[var(--color-border)] text-center">
+            <h3 class="text-2xl font-semibold text-[var(--color-text-primary)] mb-4">Tienda</h3>
+            <p class="text-[var(--color-text-primary)]/70 mb-6">E-commerce y gestión para tiendas individuales</p>
+            <ul class="text-[var(--color-text-primary)]/80 space-y-2 text-left">
               <li>• Catálogo de Productos</li>
               <li>• Ventas Online</li>
               <li>• Sistema POS</li>
@@ -160,32 +160,32 @@
   </main>
 
   <!-- Footer -->
-  <footer class="bg-[var(--surface)] border-t border-[var(--border)] py-12">
+  <footer class="bg-[var(--color-surface)] border-t border-[var(--color-border)] py-12">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
       <div class="grid md:grid-cols-3 gap-8 mb-8">
         <div class="space-y-4">
-          <h4 class="text-lg font-semibold text-[var(--text)]">Vendix Platform</h4>
-          <p class="text-[var(--text)]/70">Soluciones multi-tenant para e-commerce y gestión empresarial</p>
+          <h4 class="text-lg font-semibold text-[var(--color-text-primary)]">Vendix Platform</h4>
+          <p class="text-[var(--color-text-primary)]/70">Soluciones multi-tenant para e-commerce y gestión empresarial</p>
         </div>
         <div class="space-y-4">
-          <h4 class="text-lg font-semibold text-[var(--text)]">Enlaces</h4>
+          <h4 class="text-lg font-semibold text-[var(--color-text-primary)]">Enlaces</h4>
           <div class="space-y-2">
-            <a routerLink="/auth/login" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Iniciar Sesión</a>
-            <a routerLink="/auth/register" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Registrarse</a>
-            <a href="#features" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Características</a>
+            <a routerLink="/auth/login" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Iniciar Sesión</a>
+            <a routerLink="/auth/register" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Registrarse</a>
+            <a href="#features" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Características</a>
           </div>
         </div>
         <div class="space-y-4">
-          <h4 class="text-lg font-semibold text-[var(--text)]">Soporte</h4>
+          <h4 class="text-lg font-semibold text-[var(--color-text-primary)]">Soporte</h4>
           <div class="space-y-2">
-            <a href="#" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Documentación</a>
-            <a href="#" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Contacto</a>
-            <a href="#" class="block text-[var(--text)]/70 hover:text-[var(--primary)] transition-colors">Políticas</a>
+            <a href="#" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Documentación</a>
+            <a href="#" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Contacto</a>
+            <a href="#" class="block text-[var(--color-text-primary)]/70 hover:text-[var(--color-primary)] transition-colors">Políticas</a>
           </div>
         </div>
       </div>
       <div class="border-t border-[var(--border)] pt-8 text-center">
-        <p class="text-[var(--text)]/70">&copy; 2024 Vendix Platform. Todos los derechos reservados.</p>
+        <p class="text-[var(--color-text-primary)]/70">&copy; 2024 Vendix Platform. Todos los derechos reservados.</p>
       </div>
     </div>
   </footer>

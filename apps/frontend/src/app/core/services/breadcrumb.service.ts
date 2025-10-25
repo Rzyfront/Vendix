@@ -117,6 +117,7 @@ export class BreadcrumbService {
     { path: '/super-admin/users/:id/edit', title: 'Editar', parent: 'Usuarios' },
     { path: '/super-admin/users/roles', title: 'Roles', parent: 'Usuarios' },
     { path: '/super-admin/users/permissions', title: 'Permisos', parent: 'Usuarios' },
+    { path: '/super-admin/roles', title: 'Roles', parent: 'Super Admin', icon: 'shield' },
     { path: '/super-admin/stores', title: 'Tiendas', parent: 'Super Admin', icon: 'cart' },
     { path: '/super-admin/stores/create', title: 'Crear Tienda', parent: 'Tiendas' },
     { path: '/super-admin/stores/:id', title: 'Detalles', parent: 'Tiendas' },

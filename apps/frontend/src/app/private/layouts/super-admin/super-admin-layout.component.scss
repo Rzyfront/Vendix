@@ -1,12 +1,5 @@
 /* Applied Vendix Corp branding colors */
-:root {
-  --primary: #7ED7A5;
-  --secondary: #2F6F4E;
-  --background: #F4F4F4;
-  --accent: #FFFFFF;
-  --border: #B0B0B0;
-  --text: #222222;
-}
+/* Using tokens from styles.scss */
 
 /* Global styles for the layout */
 :host {
@@ -41,7 +34,7 @@
 
 /* Main content area styles */
 main {
-  background-color: var(--background);
+  background-color: var(--color-background);
 }
 
 /* Ensure proper spacing */

@@ -23,17 +23,17 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
     SpinnerComponent
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-50 to-green-50">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126, 215, 165, 0.1)]">
       <div class="max-w-sm w-full space-y-8">
         <!-- Header section with logo and title -->
         <div class="text-center my-3">
-          <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
+          <div class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4">
             <span class="text-white font-bold text-xl">V</span>
           </div>
-          <h2 class="mt-6 text-2xl font-extrabold text-text-primary">
+          <h2 class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]">
             Verificación de Email
           </h2>
-          <p class="mt-2 text-sm text-text-secondary">
+          <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
             {{ verificationMessage }}
           </p>
         </div>
@@ -53,19 +53,19 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
               
               @if (!isLoading && verificationStatus === 'success') {
                 <div class="text-center">
-                  <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100">
-                    <svg class="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-[rgba(126, 215, 165, 0.1)]">
+                    <svg class="h-6 w-6 text-[var(--color-primary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <h3 class="mt-4 text-lg font-medium text-text-primary">¡Email verificado!</h3>
-                  <p class="mt-2 text-sm text-text-secondary">
+                  <h3 class="mt-4 text-lg font-medium text-[var(--color-text-primary)]">¡Email verificado!</h3>
+                  <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
                     Tu cuenta ha sido verificada correctamente.
                   </p>
                   <div class="mt-6">
                     <a 
                       routerLink="/auth/login" 
-                      class="font-medium text-primary hover:text-primary-dark">
+                      class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]">
                       Iniciar sesión
                     </a>
                   </div>
@@ -73,13 +73,13 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
               }
 
               <div *ngIf="!isLoading && verificationStatus === 'error'" class="text-center">
-                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-                  <svg class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-[rgba(239, 68, 68, 0.1)]">
+                  <svg class="h-6 w-6 text-[var(--color-destructive)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </div>
-                <h3 class="mt-4 text-lg font-medium text-text-primary">Verificación fallida</h3>
-                <p class="mt-2 text-sm text-text-secondary">
+                <h3 class="mt-4 text-lg font-medium text-[var(--color-text-primary)]">Verificación fallida</h3>
+                <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
                   No se pudo verificar tu email. El token puede haber expirado o ser inválido.
                 </p>
 

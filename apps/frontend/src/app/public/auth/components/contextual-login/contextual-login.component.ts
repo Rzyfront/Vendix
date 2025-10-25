@@ -36,7 +36,7 @@ export interface LoginError {
     CardComponent
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="backgroundClass">
+    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="'bg-[var(--color-background)]'">
       <div class="max-w-sm w-full space-y-8">
         <!-- Contextual Branding -->
         <div class="text-center my-3">
@@ -45,21 +45,21 @@ export interface LoginError {
               <img [src]="logoUrl" [alt]="displayName" class="h-14 w-14 rounded-md">
             </div>
           } @else {
-            <div class="mx-auto h-16 w-16 bg-primary rounded-full flex items-center justify-center mb-4">
+            <div class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4">
               <span class="text-white font-bold text-xl">{{ contextInitial }}</span>
             </div>
           }
 
-          <h2 class="mt-6 text-2xl font-extrabold text-text-primary">
+          <h2 class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]">
             {{ loginTitle }}
           </h2>
           @if (displayName) {
-            <p class="mt-2 text-sm text-text-secondary">
+            <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
               {{ contextDescription }}
             </p>
           }
           @if (!displayName) {
-            <p class="mt-1 text-sm text-text-tertiary">
+            <p class="mt-1 text-sm text-[var(--color-text-muted)]">
               {{ defaultDescription }}
             </p>
           }
@@ -105,15 +105,15 @@ export interface LoginError {
 
             <!-- Error Display -->
             @if (hasError) {
-              <div class="rounded-md bg-red-50 p-4 border border-red-200">
+              <div class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]">
                 <div class="flex">
                   <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                    <svg class="h-5 w-5 text-[var(--color-destructive)]" viewBox="0 0 20 20" fill="currentColor">
                       <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
                     </svg>
                   </div>
                   <div class="ml-3">
-                    <h3 class="text-sm font-medium text-red-800">
+                    <h3 class="text-sm font-medium text-[var(--color-destructive)]">
                       {{ errorMessage }}
                     </h3>
                   </div>
@@ -143,7 +143,7 @@ export interface LoginError {
               <div class="text-sm">
                 <a
                   (click)="navigateToForgotPassword()"
-                  class="font-medium text-primary hover:text-primary-dark cursor-pointer">
+                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer">
                   ¿Olvidaste tu contraseña?
                 </a>
               </div>
@@ -153,11 +153,11 @@ export interface LoginError {
         </app-card>
 
         <!-- Additional Links -->
-        <div class="text-center text-sm text-text-secondary">
+        <div class="text-center text-sm text-[var(--color-text-secondary)]">
           @if (contextType === 'vendix') {
             <p>
               ¿Necesitas una cuenta corporativa?
-              <a routerLink="/auth/register" class="font-medium text-primary hover:text-primary-dark">
+              <a routerLink="/auth/register" class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]">
                 Solicitar acceso
               </a>
             </p>
@@ -166,7 +166,7 @@ export interface LoginError {
 
         <!-- Context Info -->
         @if (displayName) {
-          <div class="text-center text-xs text-text-tertiary mt-4">
+          <div class="text-center text-xs text-[var(--color-text-muted)] mt-4">
             <p>{{ contextFooter }}</p>
             <p>Powered by Vendix</p>
           </div>
@@ -308,7 +308,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   get errorMessage(): string { return this.loginError?.message || ''; }
   get errorDetails(): string { return this.loginError?.details || ''; }
   get apiError(): string | null { return this.apiErrorMessage || this.loginError?.message || null; }
-  get backgroundClass(): string { return 'bg-gray-50'; } // Simplified
+  get backgroundClass(): string { return 'bg-[var(--color-background)]'; } // Using token
   get contextInitial(): string { return this.displayName.charAt(0).toUpperCase() || 'V'; }
   get loginTitle(): string { return 'Iniciar Sesión'; }
   get contextDescription(): string { return `en ${this.displayName}`; }

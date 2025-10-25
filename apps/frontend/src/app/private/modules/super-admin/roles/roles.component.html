@@ -1,0 +1,171 @@
+<div class="space-y-6">
+    <!-- Estadísticas de Roles -->
+    <app-role-stats [roles]="roles"></app-role-stats>
+
+    <div class="rounded-card shadow-card border border-border">
+        <div class="px-6 py-4 border-b border-border">
+            <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                <div class="flex-1 min-w-0">
+                    <h2 class="text-lg font-semibold text-text-primary">
+                        Gestión de Roles ({{ filteredRoles.length }}/{{ roles.length }})
+                    </h2>
+                    <p class="text-sm text-text-secondary mt-1">
+                        Administra los roles y permisos del sistema
+                    </p>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <!-- Búsqueda -->
+                    <div class="relative">
+                        <input
+                            type="text"
+                            [(ngModel)]="searchTerm"
+                            (ngModelChange)="onSearchChange()"
+                            placeholder="Buscar roles..."
+                            class="pl-10 pr-4 py-2 border border-border rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                        <app-icon name="search" class="absolute left-3 top-2.5 w-4 h-4 text-text-secondary"></app-icon>
+                    </div>
+                    
+                    <!-- Tamaño de página -->
+                    <select
+                        [(ngModel)]="pageSize"
+                        (ngModelChange)="onPageSizeChange($event)"
+                        class="px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                        <option [value]="5">5 por página</option>
+                        <option [value]="10">10 por página</option>
+                        <option [value]="25">25 por página</option>
+                        <option [value]="50">50 por página</option>
+                    </select>
+                    
+                    <button
+                        (click)="createRole()"
+                        class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+                        <app-icon name="plus" class="w-4 h-4 mr-2"></app-icon>
+                        Nuevo Rol
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div *ngIf="isLoading" class="p-8 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <p class="mt-2 text-text-secondary">Cargando roles...</p>
+        </div>
+
+        <div *ngIf="!isLoading && filteredRoles.length === 0 && roles.length > 0" class="p-8 text-center">
+            <app-icon name="search-x" class="w-12 h-12 mx-auto text-text-secondary mb-4"></app-icon>
+            <h3 class="text-lg font-medium text-text-primary mb-2">No se encontraron roles</h3>
+            <p class="text-text-secondary mb-4">No hay roles que coincidan con "{{ searchTerm }}"</p>
+            <button
+                (click)="searchTerm = ''; onSearchChange()"
+                class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+                <app-icon name="refresh-cw" class="w-4 h-4 mr-2"></app-icon>
+                Limpiar Búsqueda
+            </button>
+        </div>
+
+        <div *ngIf="!isLoading && roles.length === 0" class="p-8 text-center">
+            <app-icon name="shield" class="w-12 h-12 mx-auto text-text-secondary mb-4"></app-icon>
+            <h3 class="text-lg font-medium text-text-primary mb-2">No hay roles registrados</h3>
+            <p class="text-text-secondary mb-4">Comienza creando tu primer rol</p>
+            <button
+                (click)="createRole()"
+                class="inline-flex items-center px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors">
+                <app-icon name="plus" class="w-4 h-4 mr-2"></app-icon>
+                Crear Rol
+            </button>
+        </div>
+
+        <div *ngIf="!isLoading && filteredRoles.length > 0" class="p-6">
+            <app-table
+                [data]="paginatedRoles"
+                [columns]="tableColumns"
+                [actions]="tableActions"
+                [loading]="isLoading"
+                (sort)="onSortChange($event.column)">
+                <ng-template #cell_is_system_role let-value>
+                    <span 
+                        *ngIf="value" 
+                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                        <app-icon name="shield-check" class="w-3 h-3 mr-1"></app-icon>
+                        Sistema
+                    </span>
+                    <span 
+                        *ngIf="!value" 
+                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                        <app-icon name="users" class="w-3 h-3 mr-1"></app-icon>
+                        Personalizado
+                    </span>
+                </ng-template>
+                <ng-template #cell__count_user_roles let-value>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                        {{ value || 0 }} usuarios
+                    </span>
+                </ng-template>
+            </app-table>
+
+            <!-- Paginación -->
+            <div *ngIf="totalPages > 1" class="px-6 py-4 border-t border-border">
+                <div class="flex items-center justify-between">
+                    <div class="text-sm text-text-secondary">
+                        Mostrando {{ ((currentPage - 1) * pageSize) + 1 }} - {{ Math.min(currentPage * pageSize, totalItems) }} de {{ totalItems }} roles
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <!-- Botón anterior -->
+                        <button
+                            (click)="onPageChange(currentPage - 1)"
+                            [disabled]="currentPage === 1"
+                            class="px-3 py-1 text-sm border border-border rounded-md hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed">
+                            <app-icon name="chevron-left" class="w-4 h-4"></app-icon>
+                        </button>
+                        
+                        <!-- Números de página -->
+                        <div class="flex space-x-1">
+                            <button
+                                *ngFor="let page of getPageNumbers()"
+                                (click)="onPageChange(page)"
+                                [class]="currentPage === page ? 'px-3 py-1 text-sm bg-primary text-white rounded-md' : 'px-3 py-1 text-sm border border-border rounded-md hover:bg-surface'">
+                                {{ page }}
+                            </button>
+                        </div>
+                        
+                        <!-- Botón siguiente -->
+                        <button
+                            (click)="onPageChange(currentPage + 1)"
+                            [disabled]="currentPage === totalPages"
+                            class="px-3 py-1 text-sm border border-border rounded-md hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed">
+                            <app-icon name="chevron-right" class="w-4 h-4"></app-icon>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para crear/editar rol -->
+<app-edit-role-modal
+    *ngIf="showEditModal"
+    [role]="currentRole"
+    (close)="onCloseModals()"
+    (roleUpdated)="onRoleUpdated()"></app-edit-role-modal>
+
+<!-- Modal para crear rol (reutilizamos el mismo componente) -->
+<app-edit-role-modal
+    *ngIf="showCreateModal"
+    [role]="null"
+    (close)="onCloseModals()"
+    (roleUpdated)="onRoleCreated()"></app-edit-role-modal>
+
+<!-- Modal para eliminar rol -->
+<app-delete-role-modal
+    *ngIf="showDeleteModal"
+    [role]="roleToDelete"
+    (close)="onCloseModals()"
+    (roleDeleted)="onRoleDeleted()"></app-delete-role-modal>
+
+<!-- Modal para gestionar permisos -->
+<app-role-permissions-modal
+    *ngIf="showPermissionsModal"
+    [role]="currentRole"
+    (close)="onCloseModals()"
+    (permissionsUpdated)="onPermissionsUpdated()"></app-role-permissions-modal>

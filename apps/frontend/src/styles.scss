@@ -4,16 +4,21 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 🎨 Design tokens basados en Shadcn UI Kit */
+/* 🎨 Design Tokens: Single Source of Truth */
 :root {
   /* Typography */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-primary: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-secondary: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-headings: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-base: var(--font-primary); /* Default base font */
+
+  /* Font Weights */
   --fw-regular: 400;
   --fw-medium: 500;
   --fw-semibold: 600;
   --fw-bold: 700;
 
-  /* Font sizes */
+  /* Font Sizes */
   --fs-xs: 12px;
   --fs-sm: 14px;
   --fs-base: 16px;
@@ -22,53 +27,34 @@
   --fs-2xl: 24px;
   --fs-3xl: 30px;
 
-  /* Colors (light) - Base tokens */
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --muted: #94a3b8;
-  --text: #0f172a;
-  --border: #e6edf3;
-  --primary: #7ED7A5; /* Vendix green - will be overridden by branding */
-  --primary-500: #7ED7A5;
-  --primary-600: #2F6F4E;
-  --accent: #06b6d4;
-
-  /* Legacy color mappings for backward compatibility */
-  --color-background: var(--bg);
-  --color-foreground: var(--text);
-  --color-primary: var(--primary);
-  --color-secondary: var(--primary-600); /* Will be overridden by branding */
-  --color-accent: var(--surface);
-  --color-accent-foreground: var(--text);
-  --color-muted: var(--bg);
-  --color-muted-foreground: var(--muted);
-  --color-ring: rgba(79,70,229,0.5);
-  --color-border: var(--border);
-  --color-input: var(--border);
+  /* Default Theme Colors (Light) */
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-primary: #7ED7A5;   /* Vendix green */
+  --color-secondary: #2F6F4E;
+  --color-accent: #06b6d4;
   --color-destructive: #ef4444;
-  --color-destructive-foreground: #ffffff;
-  --color-text-primary: var(--text);
-  --color-text-secondary: var(--muted);
+  --color-border: #e6edf3;
+  --color-ring: rgba(126, 215, 165, 0.5);
+
+  /* Text Colors */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #94a3b8;
+  --color-text-on-primary: #ffffff; /* Example for text on primary buttons */
 
   /* Radii */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --border-radius: 0.375rem; /* Default radius, ~6px */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
   --radius-pill: 9999px;
 
-  /* Legacy radius mappings */
-  --radius-button: var(--radius-md);
-  --radius-card: var(--radius-lg);
-  --radius-input: var(--radius-sm);
-
   /* Shadows */
-  --shadow-xs: 0 1px 2px rgba(2,6,23,0.04);
-  --shadow-sm: 0 4px 8px rgba(15,23,42,0.06);
-  --shadow-md: 0 10px 30px rgba(15,23,42,0.08);
-  --shadow-lg: 0 20px 50px rgba(2,6,23,0.10);
-
-  /* Legacy shadow mapping */
-  --shadow-card: var(--shadow-sm);
+  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.04);
+  --shadow-md: 0 4px 8px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --shadow-xl: 0 20px 50px rgba(2, 6, 23, 0.10);
 
   /* Misc */
   --border-width: 1px;
@@ -76,29 +62,28 @@
   --transition-fast: 160ms;
 }
 
-/* Dark theme */
+/* Dark Theme */
 [data-theme="dark"] {
-  --bg: #0b1220;
-  --surface: #0f1724;
-  --muted: #9aa6b2;
-  --text: #e6eef6;
-  --border: rgba(255,255,255,0.06);
+  /* Dark Theme Colors */
+  --color-background: #0b1220;
+  --color-surface: #0f1724;
+  --color-primary: #7ED7A5;
+  --color-secondary: #2F6F4E;
+  --color-accent: #06b6d4;
+  --color-destructive: #ef4444;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-ring: rgba(126, 215, 165, 0.4);
 
-  /* Update legacy mappings for dark theme */
-  --color-background: var(--bg);
-  --color-foreground: var(--text);
-  --color-accent: var(--surface);
-  --color-accent-foreground: var(--text);
-  --color-muted: var(--bg);
-  --color-muted-foreground: var(--muted);
-  --color-border: var(--border);
-  --color-input: var(--border);
-  --color-text-primary: var(--text);
-  --color-text-secondary: var(--muted);
+  /* Text Colors */
+  --color-text-primary: #e6eef6;
+  --color-text-secondary: #9aa6b2;
+  --color-text-muted: #9aa6b2;
 
-  --shadow-xs: 0 1px 2px rgba(2,6,23,0.6);
-  --shadow-sm: 0 6px 16px rgba(2,6,23,0.6);
-  --shadow-card: var(--shadow-sm);
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.6);
+  --shadow-md: 0 6px 16px rgba(2, 6, 23, 0.6);
+  --shadow-lg: 0 12px 32px rgba(2, 6, 23, 0.6);
+  --shadow-xl: 0 22px 55px rgba(2, 6, 23, 0.6);
 }
 
 /* Global Styles */
@@ -127,8 +112,8 @@ body {
 .app-dialog-panel {
   background: var(--color-background);
   color: var(--color-text-primary);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   border: 1px solid var(--color-border);
   max-width: 42rem; /* ~lg */
   width: calc(100vw - 2rem);
@@ -175,13 +160,13 @@ body {
 }
 
 .rounded-card {
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-lg);
 }
 
 .rounded-button {
-  border-radius: var(--radius-button);
+  border-radius: var(--radius-md);
 }
 
 .shadow-card {
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-md);
 }
