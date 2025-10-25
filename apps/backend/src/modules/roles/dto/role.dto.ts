@@ -138,3 +138,72 @@ export class RoleDashboardStatsDto {
   })
   total_permissions: number;
 }
+
+export class RoleWithPermissionDescriptionsDto {
+  @ApiProperty({
+    description: 'ID del rol',
+    example: 1,
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Nombre del rol',
+    example: 'manager',
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Descripción del rol',
+    example: 'Gestor de tienda con permisos administrativos',
+  })
+  description?: string;
+
+  @ApiProperty({
+    description: 'Indica si es un rol del sistema',
+    example: false,
+  })
+  is_system_role: boolean;
+
+  @ApiProperty({
+    description: 'Fecha de creación',
+    example: '2023-01-01T00:00:00.000Z',
+  })
+  created_at?: Date;
+
+  @ApiProperty({
+    description: 'Fecha de actualización',
+    example: '2023-01-01T00:00:00.000Z',
+  })
+  updated_at?: Date;
+
+  @ApiProperty({
+    description: 'Array con las descripciones de los permisos',
+    example: ['Crear usuarios', 'Editar productos', 'Ver reportes'],
+    type: [String],
+  })
+  permissions: string[];
+
+  @ApiProperty({
+    description: 'Usuarios asignados al rol',
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        id: { type: 'number' },
+        email: { type: 'string' },
+        first_name: { type: 'string' },
+        last_name: { type: 'string' },
+        state: { type: 'string' },
+      },
+    },
+  })
+  user_roles?: any[];
+
+  @ApiProperty({
+    description: 'Conteo de usuarios asignados',
+    example: 5,
+  })
+  _count?: {
+    user_roles: number;
+  };
+}

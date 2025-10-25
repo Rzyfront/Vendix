@@ -103,8 +103,6 @@ export interface RoleStats {
   system_roles: number;
   custom_roles: number;
   total_permissions: number;
-  active_permissions: number;
-  inactive_permissions: number;
 }
 
 export interface PaginatedRolesResponse {

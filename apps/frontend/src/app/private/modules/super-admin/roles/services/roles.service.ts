@@ -338,14 +338,12 @@ export class RolesService {
    * Obtener estadísticas de roles y permisos
    */
   getRolesStats(): Observable<RoleStats> {
-    return this.http.get<any>(`${this.apiUrl}/roles/stats`).pipe(
+    return this.http.get<any>(`${this.apiUrl}/roles/dashboard`).pipe(
       map(response => response.data || {
         total_roles: 0,
         system_roles: 0,
         custom_roles: 0,
-        total_permissions: 0,
-        active_permissions: 0,
-        inactive_permissions: 0
+        total_permissions: 0
       }),
       catchError(error => {
         console.error('Error getting roles stats:', error);

@@ -7,7 +7,7 @@ import { RoleStats } from '../interfaces/role.interface';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
       <!-- Total Roles -->
       <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center">
@@ -67,36 +67,6 @@ import { RoleStats } from '../interfaces/role.interface';
           </div>
         </div>
       </div>
-
-      <!-- Active Permissions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-green-100 text-green-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-600">Active Permissions</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.active_permissions }}</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Inactive Permissions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center">
-          <div class="p-3 rounded-full bg-red-100 text-red-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-          </div>
-          <div class="ml-4">
-            <p class="text-sm font-medium text-gray-600">Inactive Permissions</p>
-            <p class="text-2xl font-semibold text-gray-900">{{ stats.inactive_permissions }}</p>
-          </div>
-        </div>
-      </div>
     </div>
   `
 })
@@ -105,8 +75,6 @@ export class RoleStatsComponent {
     total_roles: 0,
     system_roles: 0,
     custom_roles: 0,
-    total_permissions: 0,
-    active_permissions: 0,
-    inactive_permissions: 0
+    total_permissions: 0
   };
 }

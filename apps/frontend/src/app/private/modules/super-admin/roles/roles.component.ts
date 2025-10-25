@@ -50,9 +50,7 @@ export class RolesComponent implements OnInit, OnDestroy {
     total_roles: 0,
     system_roles: 0,
     custom_roles: 0,
-    total_permissions: 0,
-    active_permissions: 0,
-    inactive_permissions: 0
+    total_permissions: 0
   };
   isLoading = false;
   currentRole: Role | null = null;
@@ -211,9 +209,7 @@ export class RolesComponent implements OnInit, OnDestroy {
           total_roles: 0,
           system_roles: 0,
           custom_roles: 0,
-          total_permissions: 0,
-          active_permissions: 0,
-          inactive_permissions: 0
+          total_permissions: 0
         };
       }
     });

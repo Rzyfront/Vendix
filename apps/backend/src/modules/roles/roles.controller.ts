@@ -29,8 +29,9 @@ import {
   RemovePermissionsDto,
   AssignRoleToUserDto,
   RemoveRoleFromUserDto,
+  RoleDashboardStatsDto,
+  RoleWithPermissionDescriptionsDto,
 } from './dto/role.dto';
-import { RoleDashboardStatsDto } from './dto/role.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
@@ -79,6 +80,29 @@ export class RolesController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener los roles',
+        error.message,
+      );
+    }
+  }
+
+  // ===== DASHBOARD STATS =====
+
+  @Get('dashboard')
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Obtener estadísticas del dashboard de roles' })
+  @ApiResponse({ status: 200, description: 'Estadísticas obtenidas exitosamente' })
+  @ApiResponse({ status: 403, description: 'No tienes permisos para ver estas estadísticas' })
+  async getDashboardStats(@Request() req) {
+    try {
+      const result = await this.rolesService.getDashboardStats(req.user.id);
+      return this.responseService.success(
+        result,
+        'Estadísticas del dashboard obtenidas exitosamente',
+        req.url,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las estadísticas del dashboard',
         error.message,
       );
     }
@@ -319,26 +343,4 @@ export class RolesController {
     }
   }
 
-  // ===== DASHBOARD STATS =====
-
-  @Get('dashboard')
-  @Roles(UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Obtener estadísticas del dashboard de roles' })
-  @ApiResponse({ status: 200, description: 'Estadísticas obtenidas exitosamente' })
-  @ApiResponse({ status: 403, description: 'No tienes permisos para ver estas estadísticas' })
-  async getDashboardStats(@Request() req) {
-    try {
-      const result = await this.rolesService.getDashboardStats(req.user.id);
-      return this.responseService.success(
-        result,
-        'Estadísticas del dashboard obtenidas exitosamente',
-        req.url,
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas del dashboard',
-        error.message,
-      );
-    }
-  }
 }
