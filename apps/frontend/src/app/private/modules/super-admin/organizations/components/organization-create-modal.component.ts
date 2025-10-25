@@ -3,7 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
-import { ModalComponent } from '../../../../../shared/components/index';
+import {
+  ModalComponent,
+  InputComponent,
+  ButtonComponent
+} from '../../../../../shared/components/index';
 import { CreateOrganizationDto } from '../services/organizations.service';
 
 @Component({
@@ -13,7 +17,9 @@ import { CreateOrganizationDto } from '../services/organizations.service';
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    ModalComponent
+    ModalComponent,
+    InputComponent,
+    ButtonComponent
   ],
   template: `
     <app-modal
@@ -29,73 +35,38 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Basic Information</h3>
           
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <label for="name" class="block text-sm font-medium text-text-primary">
-                Organization Name <span class="text-red-500">*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                formControlName="name"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="Enter organization name"
-                [class.border-red-500]="organizationForm.get('name')?.invalid && organizationForm.get('name')?.touched"
-              >
-              <div
-                *ngIf="organizationForm.get('name')?.invalid && organizationForm.get('name')?.touched"
-                class="text-red-500 text-sm mt-1"
-              >
-                Organization name is required
-              </div>
-            </div>
+            <app-input
+              formControlName="name"
+              label="Organization Name"
+              placeholder="Enter organization name"
+              [required]="true"
+              [control]="organizationForm.get('name')"
+            ></app-input>
 
-            <div class="space-y-2">
-              <label for="email" class="block text-sm font-medium text-text-primary">
-                Email <span class="text-red-500">*</span>
-              </label>
-              <input
-                id="email"
-                type="email"
-                formControlName="email"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="organization@example.com"
-                [class.border-red-500]="organizationForm.get('email')?.invalid && organizationForm.get('email')?.touched"
-              >
-              <div
-                *ngIf="organizationForm.get('email')?.invalid && organizationForm.get('email')?.touched"
-                class="text-red-500 text-sm mt-1"
-              >
-                Valid email is required
-              </div>
-            </div>
+            <app-input
+              formControlName="email"
+              label="Email"
+              type="email"
+              placeholder="organization@example.com"
+              [required]="true"
+              [control]="organizationForm.get('email')"
+            ></app-input>
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <label for="phone" class="block text-sm font-medium text-text-primary">
-                Phone
-              </label>
-              <input
-                id="phone"
-                type="tel"
-                formControlName="phone"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="+1 (555) 123-4567"
-              >
-            </div>
+            <app-input
+              formControlName="phone"
+              label="Phone"
+              type="tel"
+              placeholder="+1 (555) 123-4567"
+            ></app-input>
 
-            <div class="space-y-2">
-              <label for="website" class="block text-sm font-medium text-text-primary">
-                Website
-              </label>
-              <input
-                id="website"
-                type="url"
-                formControlName="website"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="https://example.com"
-              >
-            </div>
+            <app-input
+              formControlName="website"
+              label="Website"
+              type="url"
+              placeholder="https://example.com"
+            ></app-input>
           </div>
 
           <div class="space-y-2">
@@ -117,31 +88,17 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Legal Information</h3>
           
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-              <label for="legalName" class="block text-sm font-medium text-text-primary">
-                Legal Name
-              </label>
-              <input
-                id="legalName"
-                type="text"
-                formControlName="legalName"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="Legal entity name"
-              >
-            </div>
+            <app-input
+              formControlName="legalName"
+              label="Legal Name"
+              placeholder="Legal entity name"
+            ></app-input>
 
-            <div class="space-y-2">
-              <label for="taxId" class="block text-sm font-medium text-text-primary">
-                Tax ID
-              </label>
-              <input
-                id="taxId"
-                type="text"
-                formControlName="taxId"
-                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                placeholder="Tax identification number"
-              >
-            </div>
+            <app-input
+              formControlName="taxId"
+              label="Tax ID"
+              placeholder="Tax identification number"
+            ></app-input>
           </div>
         </div>
 
@@ -171,28 +128,20 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <button
-            type="button"
-            class="px-4 py-2 border border-border text-text-primary rounded-button hover:bg-muted/20 transition-colors"
-            (click)="onCancel()"
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
           >
             Cancel
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 bg-primary text-surface rounded-button hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            (click)="onSubmit()"
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
             [disabled]="organizationForm.invalid || isSubmitting"
+            [loading]="isSubmitting"
           >
-            <span *ngIf="!isSubmitting">Create Organization</span>
-            <span *ngIf="isSubmitting" class="flex items-center">
-              <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-surface" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              Creating...
-            </span>
-          </button>
+            Create Organization
+          </app-button>
         </div>
       </div>
     </app-modal>

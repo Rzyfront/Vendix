@@ -1,0 +1,38 @@
+# 📊 ORGANIZATIONS DASHBOARD
+# Estadísticas generales de organizaciones
+
+@baseUrl = http://localhost:3000/api
+@authToken = Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# =================================================================
+# 📊 ORGANIZATIONS DASHBOARD STATS
+# =================================================================
+
+### Get Organizations Dashboard Stats
+GET {{baseUrl}}/organizations/dashboard
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# Returns: {
+#   "success": true,
+#   "message": "Estadísticas del dashboard de organizaciones obtenidas exitosamente",
+#   "data": {
+#     "total_organizations": 150,
+#     "active": 120,
+#     "inactive": 25,
+#     "suspended": 5
+#   },
+#   "timestamp": "2024-01-01T00:00:00.000Z",
+#   "path": "/api/organizations/dashboard"
+# }
+
+### Get Dashboard Stats - Unauthorized (403)
+GET {{baseUrl}}/organizations/dashboard
+Content-Type: application/json
+Authorization: Bearer invalid_token
+
+### Get Dashboard Stats - No Token (401)
+GET {{baseUrl}}/organizations/dashboard
+Content-Type: application/json

@@ -19,7 +19,15 @@ import {
 } from './components/index';
 
 // Import shared components
-import { ModalComponent, InputsearchComponent, IconComponent, TableComponent } from '../../../../shared/components/index';
+import {
+  ModalComponent,
+  InputsearchComponent,
+  IconComponent,
+  TableComponent,
+  ButtonComponent,
+  DialogService,
+  ToastService
+} from '../../../../shared/components/index';
 import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -40,7 +48,8 @@ import './organizations.component.css';
     OrganizationEditModalComponent,
     InputsearchComponent,
     IconComponent,
-    TableComponent
+    TableComponent,
+    ButtonComponent
   ],
   providers: [OrganizationsService],
   template: `
@@ -69,22 +78,24 @@ import './organizations.component.css';
               ></app-inputsearch>
               
               <div class="flex gap-2">
-                <button
-                  class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
-                  (click)="refreshOrganizations()"
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="refreshOrganizations()"
                   [disabled]="isLoading"
                   title="Refresh"
                 >
-                  <app-icon name="refresh" [size]="16"></app-icon>
-                </button>
-                <button
-                  class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
-                  (click)="openCreateOrganizationModal()"
+                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+                </app-button>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="openCreateOrganizationModal()"
                   title="New Organization"
                 >
-                  <app-icon name="plus" [size]="16"></app-icon>
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                   <span class="hidden sm:inline">New Organization</span>
-                </button>
+                </app-button>
               </div>
             </div>
             
@@ -217,7 +228,9 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   constructor(
     private organizationsService: OrganizationsService,
-    private fb: FormBuilder
+    private fb: FormBuilder,
+    private dialogService: DialogService,
+    private toastService: ToastService
   ) {
     this.initializeCreateForm();
   }
@@ -304,15 +317,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
           this.isCreateModalOpen = false;
           this.loadOrganizations(); // Reload the list
           this.loadStats(); // Reload stats
-          // TODO: Show success notification
+          this.toastService.success('Organización creada exitosamente');
           console.log('Organization created successfully:', response.data);
         }
         this.isCreatingOrganization = false;
       },
       error: (error) => {
         console.error('Error creating organization:', error);
+        this.toastService.error('Error al crear la organización');
         this.isCreatingOrganization = false;
-        // TODO: Show error notification
       }
     });
 
@@ -366,9 +379,23 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    // For now, calculate stats from loaded data
-    // In the future, this could be a separate API call
-    this.updateStats();
+    const sub = this.organizationsService.getOrganizationStats().subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.stats.total = response.data.total_organizations;
+          this.stats.active = response.data.active;
+          this.stats.inactive = response.data.inactive;
+          this.stats.suspended = response.data.suspended;
+        }
+      },
+      error: (error) => {
+        console.error('Error loading organization stats:', error);
+        // Fallback to calculating stats from loaded data
+        this.updateStats();
+      }
+    });
+
+    this.subscriptions.push(sub);
   }
 
   updateStats(): void {
@@ -419,22 +446,30 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   deleteOrganization(org: OrganizationListItem): void {
-    if (confirm('Are you sure you want to delete this organization? This action cannot be undone.')) {
-      const sub = this.organizationsService.deleteOrganization(org.id).subscribe({
-        next: (response) => {
-          if (response.success) {
-            this.loadOrganizations(); // Reload the list
-            // TODO: Show success notification
+    this.dialogService.confirm({
+      title: 'Eliminar Organización',
+      message: `¿Estás seguro de que deseas eliminar la organización "${org.name}"? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger'
+    }).then((confirmed) => {
+      if (confirmed) {
+        const sub = this.organizationsService.deleteOrganization(org.id).subscribe({
+          next: (response) => {
+            if (response.success) {
+              this.loadOrganizations(); // Reload the list
+              this.toastService.success('Organización eliminada exitosamente');
+            }
+          },
+          error: (error) => {
+            console.error('Error deleting organization:', error);
+            this.toastService.error('Error al eliminar la organización');
           }
-        },
-        error: (error) => {
-          console.error('Error deleting organization:', error);
-          // TODO: Show error notification
-        }
-      });
+        });
 
-      this.subscriptions.push(sub);
-    }
+        this.subscriptions.push(sub);
+      }
+    });
   }
 
   viewOrganization(org: OrganizationListItem): void {
@@ -485,15 +520,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
           this.selectedOrganization = undefined;
           this.loadOrganizations(); // Reload the list
           this.loadStats(); // Reload stats
-          // TODO: Show success notification
+          this.toastService.success('Organización actualizada exitosamente');
           console.log('Organization updated successfully:', response.data);
         }
         this.isUpdatingOrganization = false;
       },
       error: (error) => {
         console.error('Error updating organization:', error);
+        this.toastService.error('Error al actualizar la organización');
         this.isUpdatingOrganization = false;
-        // TODO: Show error notification
       }
     });
 

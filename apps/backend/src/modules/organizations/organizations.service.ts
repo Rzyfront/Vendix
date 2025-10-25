@@ -10,6 +10,7 @@ import {
   UpdateOrganizationDto,
   OrganizationQueryDto,
   OrganizationDashboardDto,
+  OrganizationsDashboardStatsDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
@@ -262,6 +263,33 @@ export class OrganizationsService {
           : null,
         store: log.stores?.name,
       })),
+    };
+  }
+
+  async getDashboardStats(): Promise<OrganizationsDashboardStatsDto> {
+    // Obtener el total de organizaciones
+    const totalOrganizations = await this.prisma.organizations.count();
+
+    // Obtener organizaciones activas
+    const active = await this.prisma.organizations.count({
+      where: { state: 'active' },
+    });
+
+    // Obtener organizaciones inactivas
+    const inactive = await this.prisma.organizations.count({
+      where: { state: 'inactive' },
+    });
+
+    // Obtener organizaciones suspendidas
+    const suspended = await this.prisma.organizations.count({
+      where: { state: 'suspended' },
+    });
+
+    return {
+      total_organizations: totalOrganizations,
+      active,
+      inactive,
+      suspended,
     };
   }
 }

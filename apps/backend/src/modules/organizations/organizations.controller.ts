@@ -18,6 +18,7 @@ import {
   OrganizationQueryDto,
   OrganizationDashboardDto,
   UsersDashboardDto,
+  OrganizationsDashboardStatsDto,
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -157,6 +158,23 @@ export class OrganizationsController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener el dashboard organizacional',
+        error.message,
+      );
+    }
+  }
+
+  @Get('dashboard')
+  @Permissions('organizations:read')
+  async getDashboardStats() {
+    try {
+      const result = await this.organizationsService.getDashboardStats();
+      return this.responseService.success(
+        result,
+        'Estadísticas del dashboard de organizaciones obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las estadísticas del dashboard de organizaciones',
         error.message,
       );
     }

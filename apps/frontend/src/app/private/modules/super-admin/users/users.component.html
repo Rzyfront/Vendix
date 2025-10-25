@@ -45,22 +45,24 @@
           </form>
           
           <div class="flex gap-2">
-            <button
-              class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
-              (click)="refreshUsers()"
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshUsers()"
               [disabled]="isLoading"
               title="Refresh"
             >
-              <app-icon name="refresh" [size]="16"></app-icon>
-            </button>
-            <button
-              class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
-              (click)="createUser()"
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="createUser()"
               title="Nuevo Usuario"
             >
-              <app-icon name="plus" [size]="16"></app-icon>
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline">Nuevo Usuario</span>
-            </button>
+            </app-button>
           </div>
         </div>
         
@@ -192,52 +194,4 @@
     (onUserUpdated)="onUserUpdated()"
   ></app-user-edit-modal>
 
-  <!-- Delete Confirmation Modal -->
-  <app-modal
-    *ngIf="showDeleteModal && userToDelete"
-    [isOpen]="showDeleteModal"
-    [title]="'Confirmar Eliminación'"
-    (onClose)="showDeleteModal = false"
-  >
-    <div class="p-6">
-      <div class="flex items-center gap-4 mb-4">
-        <div class="w-12 h-12 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center">
-          <app-icon name="warning" class="w-6 h-6 text-red-600 dark:text-red-400"></app-icon>
-        </div>
-        <div>
-          <h3 class="text-lg font-semibold text-text">¿Eliminar Usuario?</h3>
-          <p class="text-text-muted">
-            Estás por eliminar al usuario <strong>{{ userToDelete.first_name }} {{ userToDelete.last_name }}</strong>.
-            Esta acción no se puede deshacer.
-          </p>
-        </div>
-      </div>
-
-      <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-6">
-        <p class="text-sm text-text-muted mb-2">Información del usuario:</p>
-        <ul class="space-y-1 text-sm">
-          <li><strong>Nombre:</strong> {{ userToDelete.first_name }} {{ userToDelete.last_name }}</li>
-          <li><strong>Email:</strong> {{ userToDelete.email }}</li>
-          <li><strong>Usuario:</strong> {{ '@' + userToDelete.username }}</li>
-          <li><strong>Estado:</strong> {{ getStateDisplay(userToDelete.state).text }}</li>
-        </ul>
-      </div>
-
-      <div class="flex justify-end gap-3">
-        <button
-          (click)="showDeleteModal = false"
-          class="px-4 py-2 text-text bg-surface border border-border rounded-md hover:bg-surface-hover transition-colors"
-        >
-          Cancelar
-        </button>
-        <button
-          (click)="deleteUser()"
-          class="px-4 py-2 text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors flex items-center gap-2"
-        >
-          <app-icon name="trash-2" class="w-4 h-4"></app-icon>
-          Eliminar Usuario
-        </button>
-      </div>
-    </div>
-  </app-modal>
 </div>

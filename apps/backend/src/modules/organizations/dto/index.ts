@@ -198,3 +198,10 @@ export class UsersDashboardDto {
   @IsBoolean()
   include_inactive?: boolean = false;
 }
+
+export class OrganizationsDashboardStatsDto {
+  total_organizations: number;
+  active: number;
+  inactive: number;
+  suspended: number;
+}

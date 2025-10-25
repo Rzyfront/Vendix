@@ -141,11 +141,11 @@ export class OrganizationsService {
    * Get organization statistics (simplified version for dashboard)
    */
   getOrganizationStats(): Observable<ApiResponse<{
-    totalOrganizations: number;
-    activeOrganizations: number;
-    inactiveOrganizations: number;
-    recentlyCreated: number;
+    total_organizations: number;
+    active: number;
+    inactive: number;
+    suspended: number;
   }>> {
-    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/organizations/stats`);
+    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/organizations/dashboard`);
   }
 }

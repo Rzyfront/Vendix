@@ -7,6 +7,7 @@ export { ModalComponent } from './modal/modal.component';
 export { ToggleComponent } from './toggle/toggle.component';
 export { DropdownComponent } from './dropdown/dropdown.component';
 export { ToastContainerComponent } from './toast/toast-container.component';
+export { ToastService } from './toast/toast.service';
 export { DialogService } from './dialog/dialog.service';
 export { IconComponent } from './icon/icon.component';
 export { InputsearchComponent } from './inputsearch/inputsearch.component';

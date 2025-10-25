@@ -34,22 +34,24 @@
           ></app-inputsearch>
           
           <div class="flex gap-2">
-            <button
-              class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
-              (click)="refreshRoles()"
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshRoles()"
               [disabled]="isLoading"
               title="Refresh"
             >
-              <app-icon name="refresh" [size]="16"></app-icon>
-            </button>
-            <button
-              class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
-              (click)="createRole()"
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="createRole()"
               title="New Role"
             >
-              <app-icon name="plus" [size]="16"></app-icon>
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline">New Role</span>
-            </button>
+            </app-button>
           </div>
         </div>
       </div>

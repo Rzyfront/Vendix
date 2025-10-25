@@ -23,7 +23,10 @@ import {
   TableAction,
   InputsearchComponent,
   IconComponent,
-  ModalComponent
+  ModalComponent,
+  ButtonComponent,
+  DialogService,
+  ToastService
 } from '../../../../shared/components/index';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
 
@@ -41,7 +44,8 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     TableComponent,
     InputsearchComponent,
     IconComponent,
-    ModalComponent
+    ModalComponent,
+    ButtonComponent
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css']
@@ -128,7 +132,9 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   constructor(
     private usersService: UsersService,
-    private fb: FormBuilder
+    private fb: FormBuilder,
+    private dialogService: DialogService,
+    private toastService: ToastService
   ) {
     this.filterForm = this.fb.group({
       search: [''],
@@ -296,8 +302,17 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   confirmDelete(user: User): void {
-    this.userToDelete = user;
-    this.showDeleteModal = true;
+    this.dialogService.confirm({
+      title: 'Eliminar Usuario',
+      message: `¿Estás seguro de que deseas eliminar al usuario "${user.first_name} ${user.last_name}"? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger'
+    }).then((confirmed) => {
+      if (confirmed) {
+        this.deleteUser();
+      }
+    });
   }
 
   deleteUser(): void {
@@ -305,42 +320,57 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     this.usersService.deleteUser(this.userToDelete.id).subscribe({
       next: () => {
-        this.showDeleteModal = false;
         this.userToDelete = null;
         this.loadUsers();
         this.loadUserStats();
+        this.toastService.success('Usuario eliminado exitosamente');
       },
       error: (error) => {
         console.error('Error deleting user:', error);
-        // Handle error - show toast or notification
+        this.toastService.error('Error al eliminar el usuario');
       }
     });
   }
 
   toggleUserStatus(user: User): void {
     const action = user.state === UserState.ACTIVE ? 'archive' : 'reactivate';
+    const actionText = action === 'archive' ? 'archivar' : 'reactivar';
 
-    if (action === 'archive') {
-      this.usersService.archiveUser(user.id).subscribe({
-        next: () => {
-          this.loadUsers();
-          this.loadUserStats();
-        },
-        error: (error) => {
-          console.error('Error archiving user:', error);
+    this.dialogService.confirm({
+      title: `${action === 'archive' ? 'Archivar' : 'Reactivar'} Usuario`,
+      message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
+      confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger'
+    }).then((confirmed) => {
+      if (confirmed) {
+        if (action === 'archive') {
+          this.usersService.archiveUser(user.id).subscribe({
+            next: () => {
+              this.loadUsers();
+              this.loadUserStats();
+              this.toastService.success('Usuario archivado exitosamente');
+            },
+            error: (error) => {
+              console.error('Error archiving user:', error);
+              this.toastService.error('Error al archivar el usuario');
+            }
+          });
+        } else {
+          this.usersService.reactivateUser(user.id).subscribe({
+            next: () => {
+              this.loadUsers();
+              this.loadUserStats();
+              this.toastService.success('Usuario reactivado exitosamente');
+            },
+            error: (error) => {
+              console.error('Error reactivating user:', error);
+              this.toastService.error('Error al reactivar el usuario');
+            }
+          });
         }
-      });
-    } else {
-      this.usersService.reactivateUser(user.id).subscribe({
-        next: () => {
-          this.loadUsers();
-          this.loadUserStats();
-        },
-        error: (error) => {
-          console.error('Error reactivating user:', error);
-        }
-      });
-    }
+      }
+    });
   }
 
   getStateDisplay(state: UserState): { text: string; class: string } {

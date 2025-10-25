@@ -22,8 +22,12 @@ import {
   TableColumn,
   TableAction,
   InputsearchComponent,
-  IconComponent
+  IconComponent,
+  ButtonComponent,
+  DialogService,
+  ToastService
 } from '../../../../shared/components/index';
+import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
 
 @Component({
@@ -39,7 +43,9 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     RoleEmptyStateComponent,
     TableComponent,
     InputsearchComponent,
-    IconComponent
+    IconComponent,
+    ButtonComponent,
+    ConfirmationModalComponent
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css']
@@ -127,7 +133,9 @@ export class RolesComponent implements OnInit, OnDestroy {
 
   constructor(
     private rolesService: RolesService,
-    private fb: FormBuilder
+    private fb: FormBuilder,
+    private dialogService: DialogService,
+    private toastService: ToastService
   ) {
     this.filterForm = this.fb.group({
       search: [''],
@@ -260,9 +268,11 @@ export class RolesComponent implements OnInit, OnDestroy {
         this.showCreateModal = false;
         this.loadRoles();
         this.loadRoleStats();
+        this.toastService.success('Rol creado exitosamente');
       },
       error: (error) => {
         console.error('Error creating role:', error);
+        this.toastService.error('Error al crear el rol');
       }
     });
   }
@@ -281,20 +291,32 @@ export class RolesComponent implements OnInit, OnDestroy {
         this.currentRole = null;
         this.loadRoles();
         this.loadRoleStats();
+        this.toastService.success('Rol actualizado exitosamente');
       },
       error: (error) => {
         console.error('Error updating role:', error);
+        this.toastService.error('Error al actualizar el rol');
       }
     });
   }
 
   confirmDelete(role: Role): void {
     if (role.is_system_role) {
-      alert('No se pueden eliminar roles del sistema.');
+      this.toastService.warning('No se pueden eliminar roles del sistema.');
       return;
     }
-    this.roleToDelete = role;
-    this.showDeleteModal = true;
+    
+    this.dialogService.confirm({
+      title: 'Eliminar Rol',
+      message: `¿Estás seguro de que deseas eliminar el rol "${role.name}"? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger'
+    }).then((confirmed) => {
+      if (confirmed) {
+        this.deleteRole();
+      }
+    });
   }
 
   deleteRole(): void {
@@ -302,14 +324,14 @@ export class RolesComponent implements OnInit, OnDestroy {
 
     this.rolesService.deleteRole(this.roleToDelete.id).subscribe({
       next: () => {
-        this.showDeleteModal = false;
         this.roleToDelete = null;
         this.loadRoles();
         this.loadRoleStats();
+        this.toastService.success('Rol eliminado exitosamente');
       },
       error: (error) => {
         console.error('Error deleting role:', error);
-        // Handle error - show toast or notification
+        this.toastService.error('Error al eliminar el rol');
       }
     });
   }
