@@ -33,14 +33,16 @@ import {
   RoleWithPermissionDescriptionsDto,
 } from './dto/role.dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
 
 @ApiTags('Roles')
 @ApiBearerAuth()
 @Controller('roles')
-@UseGuards(RolesGuard)
+@UseGuards(PermissionsGuard)
 export class RolesController {
   constructor(
     private readonly rolesService: RolesService,
@@ -103,6 +105,93 @@ export class RolesController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener las estadísticas del dashboard',
+        error.message,
+      );
+    }
+  }
+
+  // ===== GESTIÓN DE PERMISOS =====
+
+  @Get(':id/permissions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
+  @Permissions('roles.permissions.read')
+  @ApiOperation({ summary: 'Obtener IDs de permisos de un rol' })
+  @ApiResponse({ status: 200, description: 'IDs de permisos obtenidos exitosamente' })
+  @ApiResponse({ status: 404, description: 'Rol no encontrado' })
+  async getRolePermissions(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+  ) {
+    try {
+      const result = await this.rolesService.getRolePermissions(id, req.user.id);
+      return this.responseService.success(
+        result,
+        'IDs de permisos obtenidos exitosamente',
+        req.url,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener los IDs de permisos del rol',
+        error.message,
+      );
+    }
+  }
+
+  @Post(':id/permissions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Asignar permisos a un rol' })
+  @ApiResponse({ status: 200, description: 'Permisos asignados exitosamente' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiResponse({ status: 404, description: 'Rol no encontrado' })
+  async assignPermissions(
+    @Param('id', ParseIntPipe) roleId: number,
+    @Body() assignPermissionsDto: AssignPermissionsDto,
+    @Request() req,
+  ) {
+    try {
+      const result = await this.rolesService.assignPermissions(
+        roleId,
+        assignPermissionsDto,
+        req.user.id,
+      );
+      return this.responseService.success(
+        result,
+        'Permisos asignados exitosamente',
+        req.url,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al asignar permisos',
+        error.message,
+      );
+    }
+  }
+
+  @Delete(':id/permissions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Remover permisos de un rol' })
+  @ApiResponse({ status: 200, description: 'Permisos removidos exitosamente' })
+  @ApiResponse({ status: 400, description: 'Datos inválidos' })
+  @ApiResponse({ status: 404, description: 'Rol no encontrado' })
+  async removePermissions(
+    @Param('id', ParseIntPipe) roleId: number,
+    @Body() removePermissionsDto: RemovePermissionsDto,
+    @Request() req,
+  ) {
+    try {
+      const result = await this.rolesService.removePermissions(
+        roleId,
+        removePermissionsDto,
+        req.user.id,
+      );
+      return this.responseService.success(
+        result,
+        'Permisos removidos exitosamente',
+        req.url,
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al remover permisos',
         error.message,
       );
     }
@@ -173,68 +262,6 @@ export class RolesController {
     } catch (error) {
       return this.responseService.error(
         'Error al eliminar el rol',
-        error.message,
-      );
-    }
-  }
-
-  // ===== GESTIÓN DE PERMISOS =====
-
-  @Post(':id/permissions')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Asignar permisos a un rol' })
-  @ApiResponse({ status: 200, description: 'Permisos asignados exitosamente' })
-  @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  @ApiResponse({ status: 404, description: 'Rol no encontrado' })
-  async assignPermissions(
-    @Param('id', ParseIntPipe) roleId: number,
-    @Body() assignPermissionsDto: AssignPermissionsDto,
-    @Request() req,
-  ) {
-    try {
-      const result = await this.rolesService.assignPermissions(
-        roleId,
-        assignPermissionsDto,
-        req.user.id,
-      );
-      return this.responseService.success(
-        result,
-        'Permisos asignados exitosamente',
-        req.url,
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al asignar permisos',
-        error.message,
-      );
-    }
-  }
-
-  @Delete(':id/permissions')
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-  @ApiOperation({ summary: 'Remover permisos de un rol' })
-  @ApiResponse({ status: 200, description: 'Permisos removidos exitosamente' })
-  @ApiResponse({ status: 400, description: 'Datos inválidos' })
-  @ApiResponse({ status: 404, description: 'Rol no encontrado' })
-  async removePermissions(
-    @Param('id', ParseIntPipe) roleId: number,
-    @Body() removePermissionsDto: RemovePermissionsDto,
-    @Request() req,
-  ) {
-    try {
-      const result = await this.rolesService.removePermissions(
-        roleId,
-        removePermissionsDto,
-        req.user.id,
-      );
-      return this.responseService.success(
-        result,
-        'Permisos removidos exitosamente',
-        req.url,
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al remover permisos',
         error.message,
       );
     }

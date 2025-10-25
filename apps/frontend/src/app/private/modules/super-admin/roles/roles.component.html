@@ -107,6 +107,16 @@
     (cancel)="showEditModal = false"
   ></app-role-edit-modal>
 
+  <!-- Permissions Modal -->
+  <app-role-permissions-modal
+    [isOpen]="showPermissionsModal"
+    [isSubmitting]="isUpdatingPermissions"
+    [role]="currentRole"
+    (openChange)="showPermissionsModal = $event"
+    (submit)="onPermissionsUpdated($event)"
+    (cancel)="showPermissionsModal = false"
+  ></app-role-permissions-modal>
+
   <!-- Delete Confirmation Modal -->
   <div *ngIf="showDeleteModal" class="fixed inset-0 z-50 overflow-y-auto">
     <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">

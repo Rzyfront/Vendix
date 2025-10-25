@@ -410,6 +410,53 @@ export class RolesService {
     return this.transformRoleWithPermissionDescriptions(updatedRole);
   }
 
+  async getRolePermissions(roleId: number, userId?: number) {
+    // Verificar que el rol existe
+    const role = await this.prismaService.roles.findUnique({
+      where: { id: roleId },
+      select: { id: true, name: true },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Rol no encontrado');
+    }
+
+    // Si se proporciona userId, verificar permisos de acceso
+    if (userId) {
+      const userRoles = await this.prismaService.user_roles.findMany({
+        where: { user_id: userId },
+        include: {
+          roles: true,
+        },
+      });
+
+      const isSuperAdmin = userRoles.some(
+        (ur) => ur.roles?.name === 'super_admin',
+      );
+
+      // Si el rol es super_admin y el usuario no es super_admin, devolver 404
+      if (role.name === 'super_admin' && !isSuperAdmin) {
+        throw new NotFoundException('Rol no encontrado');
+      }
+    }
+
+    // Obtener los IDs de los permisos del rol
+    const rolePermissions = await this.prismaService.role_permissions.findMany({
+      where: { role_id: roleId },
+      select: { permission_id: true },
+      orderBy: { permission_id: 'asc' },
+    });
+
+    // Extraer solo los IDs de los permisos
+    const permissionIds = rolePermissions.map(rp => rp.permission_id);
+
+    return {
+      role_id: roleId,
+      permission_ids: permissionIds,
+      total_permissions: permissionIds.length,
+    };
+  }
+
   // ===== GESTIÓN DE USUARIOS =====
 
   async assignRoleToUser(

@@ -169,6 +169,19 @@ export class RolesService {
   }
 
   /**
+   * Obtener permisos de un rol específico
+   */
+  getRolePermissions(roleId: number): Observable<number[]> {
+    return this.http.get<any>(`${this.apiUrl}/roles/${roleId}/permissions`).pipe(
+      map(response => response.data?.permission_ids || []),
+      catchError(error => {
+        console.error('Error getting role permissions:', error);
+        return throwError(() => error);
+      })
+    );
+  }
+
+  /**
    * Asignar rol a usuario
    */
   assignRoleToUser(roleData: AssignRoleToUserDto): Observable<void> {

@@ -21,6 +21,7 @@
 # Endpoints implementados en roles.controller.ts:
 # - GET /roles - Obtener todos los roles (requiere: SUPER_ADMIN, ADMIN, MANAGER)
 # - GET /roles/:id - Obtener rol por ID (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - GET /roles/:id/permissions - Obtener IDs de permisos de un rol (requiere: SUPER_ADMIN, ADMIN, MANAGER)
 # - POST /roles - Crear rol (requiere: SUPER_ADMIN, ADMIN)
 # - PATCH /roles/:id - Actualizar rol (requiere: SUPER_ADMIN, ADMIN)
 # - DELETE /roles/:id - Eliminar rol (requiere: SUPER_ADMIN, ADMIN)
@@ -132,6 +133,15 @@ Authorization: {{authToken}}
 {
   "permissionIds": [2, 4]
 }
+
+###
+
+### Get Role Permissions (IDs only)
+# Obtiene solo los IDs de los permisos asignados a un rol específico.
+# Devuelve un array con los IDs de los permisos ordenados ascendentemente.
+GET {{baseUrl}}/roles/1/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
 
 ###
 

@@ -124,6 +124,7 @@ async function main() {
     { name: 'roles.read.one', description: 'Leer rol específico', path: '/api/roles/:id', method: 'GET' },
     { name: 'roles.update', description: 'Actualizar rol', path: '/api/roles/:id', method: 'PATCH' },
     { name: 'roles.delete', description: 'Eliminar rol', path: '/api/roles/:id', method: 'DELETE' },
+    { name: 'roles.permissions.read', description: 'Leer permisos de rol', path: '/api/roles/:id/permissions', method: 'GET' },
     { name: 'roles.permissions.assign', description: 'Asignar permisos a rol', path: '/api/roles/:id/permissions', method: 'POST' },
     { name: 'roles.permissions.remove', description: 'Remover permisos de rol', path: '/api/roles/:id/permissions', method: 'DELETE' },
     { name: 'roles.assign.user', description: 'Asignar rol a usuario', path: '/api/roles/assign-to-user', method: 'POST' },

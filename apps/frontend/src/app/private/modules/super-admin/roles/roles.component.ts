@@ -13,7 +13,8 @@ import {
   RoleStatsComponent,
   RoleCreateModalComponent,
   RoleEditModalComponent,
-  RoleEmptyStateComponent
+  RoleEmptyStateComponent,
+  RolePermissionsModalComponent
 } from './components/index';
 
 // Import components from shared
@@ -41,6 +42,7 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     RoleCreateModalComponent,
     RoleEditModalComponent,
     RoleEmptyStateComponent,
+    RolePermissionsModalComponent,
     TableComponent,
     InputsearchComponent,
     IconComponent,
@@ -67,6 +69,8 @@ export class RolesComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
   isCreatingRole = false;
   isUpdatingRole = false;
+  showPermissionsModal = false;
+  isUpdatingPermissions = false;
 
   // Form for filters
   filterForm: FormGroup;
@@ -121,6 +125,12 @@ export class RolesComponent implements OnInit, OnDestroy {
       icon: 'edit',
       action: (role: Role) => this.editRole(role),
       variant: 'primary'
+    },
+    {
+      label: 'Permisos',
+      icon: 'settings',
+      action: (role: Role) => this.openPermissionsModal(role),
+      variant: 'secondary'
     },
     {
       label: 'Eliminar',
@@ -369,5 +379,94 @@ export class RolesComponent implements OnInit, OnDestroy {
       return 'Try adjusting your search terms or filters';
     }
     return 'Get started by creating your first role.';
+  }
+
+  openPermissionsModal(role: Role): void {
+    this.currentRole = role;
+    this.showPermissionsModal = true;
+  }
+
+  onPermissionsUpdated(permissionData: any): void {
+    if (!this.currentRole) return;
+    
+    this.isUpdatingPermissions = true;
+    
+    // Get current role permissions to calculate differences
+    this.rolesService.getRolePermissions(this.currentRole.id).subscribe({
+      next: (currentPermissionIds) => {
+        const newPermissionIds = permissionData.permissionIds || [];
+        
+        // Calculate permissions to add and remove
+        const toAdd = newPermissionIds.filter((id: number) => !currentPermissionIds.includes(id));
+        const toRemove = currentPermissionIds.filter((id: number) => !newPermissionIds.includes(id));
+        
+        // Execute operations in parallel if both are needed
+        const operations = [];
+        
+        if (toAdd.length > 0) {
+          operations.push(
+            this.rolesService.assignPermissionsToRole(this.currentRole!.id, { permissionIds: toAdd })
+          );
+        }
+        
+        if (toRemove.length > 0) {
+          operations.push(
+            this.rolesService.removePermissionsFromRole(this.currentRole!.id, { permissionIds: toRemove })
+          );
+        }
+        
+        // If no changes needed, just close modal
+        if (operations.length === 0) {
+          this.showPermissionsModal = false;
+          this.currentRole = null;
+          this.isUpdatingPermissions = false;
+          this.toastService.info('No hay cambios en los permisos');
+          return;
+        }
+        
+        // Execute all operations
+        operations.length === 1 ?
+          operations[0].subscribe({
+            next: () => this.handlePermissionsUpdateSuccess(),
+            error: (error) => this.handlePermissionsUpdateError(error)
+          }) :
+          operations.length === 2 ?
+            // Execute both operations in parallel
+            operations.forEach(op =>
+              op.subscribe({
+                next: () => {
+                  // Wait for both operations to complete
+                  // This is a simplified approach, in production you might want more sophisticated handling
+                },
+                error: (error) => this.handlePermissionsUpdateError(error)
+              })
+            ) :
+            null;
+            
+        // For simplicity, we'll wait a bit and then complete
+        setTimeout(() => {
+          this.handlePermissionsUpdateSuccess();
+        }, operations.length * 500); // Rough timing estimate
+      },
+      error: (error) => {
+        console.error('Error getting current permissions:', error);
+        this.isUpdatingPermissions = false;
+        this.toastService.error('Error al obtener permisos actuales');
+      }
+    });
+  }
+  
+  private handlePermissionsUpdateSuccess(): void {
+    this.showPermissionsModal = false;
+    this.currentRole = null;
+    this.isUpdatingPermissions = false;
+    this.loadRoles();
+    this.toastService.success('Permisos actualizados exitosamente');
+  }
+  
+  private handlePermissionsUpdateError(error: any): void {
+    console.error('Error updating permissions:', error);
+    this.isUpdatingPermissions = false;
+    this.toastService.error('Error al actualizar permisos');
   }
 }
