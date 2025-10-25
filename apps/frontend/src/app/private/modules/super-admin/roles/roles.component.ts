@@ -27,7 +27,7 @@ import {
   DialogService,
   ToastService
 } from '../../../../shared/components/index';
-import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
+
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
 
 @Component({
@@ -44,8 +44,7 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     TableComponent,
     InputsearchComponent,
     IconComponent,
-    ButtonComponent,
-    ConfirmationModalComponent
+    ButtonComponent
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css']
@@ -80,6 +79,15 @@ export class RolesComponent implements OnInit, OnDestroy {
       key: 'is_system_role',
       label: 'Tipo',
       sortable: true,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          'true': '#3b82f6',  // Blue for system roles
+          'false': '#10b981'  // Green for custom roles
+        }
+      },
       transform: (value: boolean) => value ? 'Sistema' : 'Personalizado'
     },
     {

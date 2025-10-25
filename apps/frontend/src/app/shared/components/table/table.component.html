@@ -49,27 +49,28 @@
             *ngFor="let column of columns"
             [class]="getCellClasses(column)"
           >
-            <!-- Status template for state column -->
-            <ng-container *ngIf="column.key === 'state'">
-              <span class="status-badge"
-                    [class.status-active]="item.state === 'active'"
-                    [class.status-inactive]="item.state === 'inactive'"
-                    [class.status-suspended]="item.state === 'suspended'"
-                    [class.status-draft]="item.state === 'draft'">
-                {{ item.state === 'active' ? 'Active' : item.state === 'inactive' ? 'Inactive' : item.state === 'suspended' ? 'Suspended' : 'Draft' }}
+            <!-- Badge template -->
+            <ng-container *ngIf="column.badge">
+              <span
+                class="status-badge"
+                [ngClass]="getBadgeClasses(column, getNestedValue(item, column.key))"
+                [style.background-color]="getBadgeBackgroundColor(column, getNestedValue(item, column.key))"
+                [style.color]="getBadgeTextColor(column, getNestedValue(item, column.key))"
+                [style.border-color]="getBadgeBorderColor(column, getNestedValue(item, column.key))">
+                {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item, column.key) }}
               </span>
             </ng-container>
             
-            <!-- Custom template if provided -->
+            <!-- Custom template if provided (only when not a badge) -->
             <ng-container
-              *ngIf="column.template && column.key !== 'state'; else defaultContent"
+              *ngIf="!column.badge && column.template"
               [ngTemplateOutlet]="column.template"
               [ngTemplateOutletContext]="{ $implicit: item, column: column }"
             ></ng-container>
             
-            <!-- Default content -->
-            <ng-template #defaultContent>
-              <span class="cell-content" *ngIf="column.key !== 'state'">
+            <!-- Default content (only when not a badge and no custom template) -->
+            <ng-container *ngIf="!column.badge && !column.template">
+              <span class="cell-content">
                 <ng-container *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''; else noDataTemplate">
                   {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item, column.key) }}
                 </ng-container>
@@ -77,7 +78,7 @@
                   <span class="cell-content-empty">{{ column.defaultValue || 'Data not found' }}</span>
                 </ng-template>
               </span>
-            </ng-template>
+            </ng-container>
           </td>
 
           <!-- Actions cell -->

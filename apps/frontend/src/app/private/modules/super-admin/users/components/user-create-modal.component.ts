@@ -2,7 +2,6 @@ import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } fro
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
-  IconComponent,
   InputComponent,
   ButtonComponent,
   ModalComponent
@@ -14,7 +13,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-create-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, InputComponent, ButtonComponent, ModalComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, ButtonComponent, ModalComponent],
   template: `
     <app-modal
       [isOpen]="isOpen"

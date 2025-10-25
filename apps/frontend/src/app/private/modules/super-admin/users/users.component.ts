@@ -23,7 +23,6 @@ import {
   TableAction,
   InputsearchComponent,
   IconComponent,
-  ModalComponent,
   ButtonComponent,
   DialogService,
   ToastService
@@ -44,7 +43,6 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     TableComponent,
     InputsearchComponent,
     IconComponent,
-    ModalComponent,
     ButtonComponent
   ],
   templateUrl: './users.component.html',
@@ -75,6 +73,11 @@ export class UsersComponent implements OnInit, OnDestroy {
       key: 'state',
       label: 'Estado',
       sortable: true,
+      badge: true,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm'
+      },
       transform: (value: UserState) => this.getStateDisplay(value).text
     },
     {

@@ -15,7 +15,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
       [class]="buttonClasses"
       (click)="handleClick($event)"
     >
-      <div class="flex items-center justify-center gap-2">
+      <div class="flex items-center justify-center">
         <!-- Loading spinner -->
         <svg 
           *ngIf="loading" 

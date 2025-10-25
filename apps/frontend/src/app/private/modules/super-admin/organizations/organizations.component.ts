@@ -53,7 +53,7 @@ import './organizations.component.css';
   ],
   providers: [OrganizationsService],
   template: `
-    <div class="p-6 space-y-6">
+    <div class="space-y-6">
       <!-- Stats Cards -->
       <app-organization-stats [stats]="stats"></app-organization-stats>
 
@@ -77,7 +77,7 @@ import './organizations.component.css';
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
               
-              <div class="flex gap-2">
+              <div class="flex gap-2 items-center">
                 <app-button
                   variant="outline"
                   size="sm"
@@ -182,7 +182,19 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     { key: 'email', label: 'Email', sortable: true, width: '250px' },
     { key: 'phone', label: 'Teléfono', sortable: true, width: '150px' },
     { key: 'tax_id', label: 'NIT/CC', sortable: true, width: '120px' },
-    { key: 'state', label: 'Estado', sortable: true, width: '100px', align: 'center' }
+    {
+      key: 'state',
+      label: 'Estado',
+      sortable: true,
+      width: '100px',
+      align: 'center',
+      badge: true,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm'
+      },
+      transform: (value: string) => this.formatStatus(value)
+    }
   ];
 
   tableActions: TableAction[] = [

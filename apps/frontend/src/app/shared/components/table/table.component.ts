@@ -11,6 +11,13 @@ export interface TableColumn {
   template?: TemplateRef<any>;
   transform?: (value: any) => string;
   defaultValue?: string;
+  badge?: boolean;
+  badgeConfig?: {
+    type?: 'status' | 'custom';
+    colorKey?: string; // For status type, maps to predefined colors
+    colorMap?: Record<string, string>; // For custom mapping of values to colors
+    size?: 'sm' | 'md' | 'lg';
+  };
 }
 
 export interface TableAction {
@@ -278,5 +285,198 @@ export class TableComponent implements AfterContentInit {
     }
 
     return current;
+  }
+
+  /**
+   * Get CSS classes for badge based on configuration
+   */
+  getBadgeClasses(column: TableColumn, value: any): string {
+    if (!column.badgeConfig) {
+      // Default badge class if no config
+      return 'status-badge-default';
+    }
+
+    const baseClass = 'status-badge';
+    const sizeClass = `status-badge-${column.badgeConfig.size || 'md'}`;
+    
+    if (column.badgeConfig.type === 'status') {
+      // For status type, use predefined color classes
+      // Apply transform if exists to get display value, but use original for class
+      const displayValue = column.transform ? column.transform(value) : value;
+      const originalValue = value; // Use original value for CSS class
+      
+      // Handle UserState enum values and common status strings
+      let statusValue = String(originalValue)?.toLowerCase() || 'default';
+      
+      // Map common status variations to standard CSS classes
+      const statusMap: Record<string, string> = {
+        'active': 'active',
+        'inactive': 'inactive',
+        'pending_verification': 'pending',
+        'pending': 'pending',
+        'suspended': 'suspended',
+        'archived': 'draft',
+        'draft': 'draft',
+        'completed': 'completed',
+        'error': 'error',
+        'warning': 'warning'
+      };
+      
+      const colorClass = `status-${statusMap[statusValue] || 'default'}`;
+      return `${baseClass} ${colorClass} ${sizeClass}`;
+    } else if (column.badgeConfig.type === 'custom' && column.badgeConfig.colorMap) {
+      // For custom type, we'll use inline styles instead of CSS classes
+      return `${baseClass} ${sizeClass} status-badge-custom`;
+    }
+    
+    return `${baseClass} ${sizeClass}`;
+  }
+
+  /**
+   * Get background color for custom badges
+   */
+  getBadgeBackgroundColor(column: TableColumn, value: any): string | null {
+    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+      const color = this.getBadgeColorFromMap(column, value);
+      if (color) {
+        // Convert the color to a soft/transparent version for background
+        return this.makeColorSoft(color);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get text color for custom badges
+   */
+  getBadgeTextColor(column: TableColumn, value: any): string | null {
+    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+      return this.getBadgeColorFromMap(column, value);
+    }
+    return null;
+  }
+
+  /**
+   * Get border color for custom badges
+   */
+  getBadgeBorderColor(column: TableColumn, value: any): string | null {
+    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+      const color = this.getBadgeColorFromMap(column, value);
+      if (color) {
+        // Make border slightly more transparent than text
+        return this.makeColorMoreTransparent(color);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get color from the color map based on value
+   * This method applies the column transform function if it exists before looking up the color
+   */
+  private getBadgeColorFromMap(column: TableColumn, value: any): string | null {
+    if (column.badgeConfig?.colorMap) {
+      // Apply transform function to get display value if exists
+      const displayValue = column.transform ? column.transform(value) : value;
+      
+      // First try exact match with original value
+      const exactValue = String(value);
+      if (column.badgeConfig.colorMap[exactValue]) {
+        return column.badgeConfig.colorMap[exactValue];
+      }
+      
+      // Then try case-insensitive match with original value
+      const valueStr = String(value).toLowerCase();
+      if (column.badgeConfig.colorMap[valueStr]) {
+        return column.badgeConfig.colorMap[valueStr];
+      }
+      
+      // If we have a transform function, also try matching the transformed value
+      if (column.transform && displayValue !== value) {
+        const displayValueStr = String(displayValue).toLowerCase();
+        if (column.badgeConfig.colorMap[displayValueStr]) {
+          return column.badgeConfig.colorMap[displayValueStr];
+        }
+      }
+      
+      // Try to handle numeric values by converting to categories if applicable
+      if (typeof value === 'number') {
+        if (value >= 4) { // high rating
+          return column.badgeConfig.colorMap['high'] || 
+                 column.badgeConfig.colorMap['excellent'] || 
+                 column.badgeConfig.colorMap['good'] || null;
+        } else if (value >= 3) { // medium rating
+          return column.badgeConfig.colorMap['medium'] || 
+                 column.badgeConfig.colorMap['average'] || null;
+        } else { // low rating
+          return column.badgeConfig.colorMap['low'] || 
+                 column.badgeConfig.colorMap['poor'] || null;
+        }
+      }
+      
+      // Handle string values that might contain numbers
+      if (typeof value === 'string' && !isNaN(Number(value))) {
+        const numValue = Number(value);
+        if (numValue >= 4) {
+          return column.badgeConfig.colorMap['high'] || 
+                 column.badgeConfig.colorMap['excellent'] || 
+                 column.badgeConfig.colorMap['good'] || null;
+        } else if (numValue >= 3) {
+          return column.badgeConfig.colorMap['medium'] || 
+                 column.badgeConfig.colorMap['average'] || null;
+        } else {
+          return column.badgeConfig.colorMap['low'] || 
+                 column.badgeConfig.colorMap['poor'] || null;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Make a color softer by reducing its opacity
+   */
+  private makeColorSoft(color: string): string {
+    // Convert hex to rgba with lower opacity
+    if (color.startsWith('#')) {
+      return this.hexToRgba(color, 0.15);
+    } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
+      return color.replace(/[\d.]+\)$/, '0.15)');
+    }
+    return color;
+  }
+
+  /**
+   * Make a color slightly more transparent
+   */
+  private makeColorMoreTransparent(color: string): string {
+    if (color.startsWith('#')) {
+      return this.hexToRgba(color, 0.3);
+    } else if (color.startsWith('rgb') || color.startsWith('rgba')) {
+      return color.replace(/[\d.]+\)$/, '0.3)');
+    }
+    return color;
+  }
+
+  /**
+   * Convert hex color to rgba
+   */
+  private hexToRgba(hex: string, alpha: number): string {
+    // Remove # if present
+    hex = hex.replace('#', '');
+    
+    // Parse r, g, b values
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 6) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    } else if (hex.length === 3) {
+      r = parseInt(hex.substring(0, 1) + hex.substring(0, 1), 16);
+      g = parseInt(hex.substring(1, 2) + hex.substring(1, 2), 16);
+      b = parseInt(hex.substring(2, 3) + hex.substring(2, 3), 16);
+    }
+    
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 }

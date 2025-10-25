@@ -1,4 +1,4 @@
-<div class="p-6 space-y-6">
+<div class="space-y-6">
   <!-- Stats Cards -->
   <app-role-stats [stats]="roleStats"></app-role-stats>
 
@@ -32,8 +32,8 @@
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
-          
-          <div class="flex gap-2">
+
+          <div class="flex gap-2 items-center">
             <app-button
               variant="outline"
               size="sm"
