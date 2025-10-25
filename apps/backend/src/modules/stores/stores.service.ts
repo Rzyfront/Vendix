@@ -305,4 +305,82 @@ export class StoresService {
       sales_chart: Object.entries(salesChart).map(([date, total]) => ({ date, total }))
     };
   }
+
+  async getGlobalDashboard() {
+    // Get all stores counts by status
+    const [
+      totalStores,
+      activeStores,
+      inactiveStores,
+      suspendedStores,
+      draftStores,
+      totalRevenue,
+      totalOrders,
+      totalProducts
+    ] = await Promise.all([
+      // Total stores count
+      this.prisma.stores.count(),
+      
+      // Active stores count
+      this.prisma.stores.count({
+        where: { is_active: true }
+      }),
+      
+      // Inactive stores count
+      this.prisma.stores.count({
+        where: { is_active: false }
+      }),
+      
+      // Suspended stores (assuming suspended means inactive with specific conditions)
+      this.prisma.stores.count({
+        where: {
+          is_active: false,
+          // Add additional conditions if needed for suspended status
+        }
+      }),
+      
+      // Draft stores (assuming draft means recently created but not active)
+      this.prisma.stores.count({
+        where: {
+          is_active: false,
+          created_at: {
+            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+          }
+        }
+      }),
+      
+      // Total revenue from all finished orders
+      this.prisma.orders.aggregate({
+        where: {
+          state: 'finished'
+        },
+        _sum: { grand_total: true }
+      }),
+      
+      // Total orders count (excluding cancelled)
+      this.prisma.orders.count({
+        where: {
+          state: { not: 'cancelled' }
+        }
+      }),
+      
+      // Total products count (active products)
+      this.prisma.products.count({
+        where: {
+          state: 'active'
+        }
+      })
+    ]);
+
+    return {
+      total_stores: totalStores,
+      active_stores: activeStores,
+      inactive_stores: inactiveStores,
+      suspended_stores: suspendedStores,
+      draft_stores: draftStores,
+      total_revenue: totalRevenue._sum.grand_total || 0,
+      total_orders: totalOrders,
+      total_products: totalProducts
+    };
+  }
 }

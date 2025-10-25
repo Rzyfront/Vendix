@@ -8,7 +8,7 @@ import {
   InputComponent,
   ButtonComponent
 } from '../../../../../shared/components/index';
-import { StoreListItem, UpdateStoreDto, StoreState } from '../interfaces/store.interface';
+import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-edit-modal',
@@ -72,10 +72,10 @@ import { StoreListItem, UpdateStoreDto, StoreState } from '../interfaces/store.i
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
-              formControlName="website"
-              label="Website"
-              type="url"
-              placeholder="https://example.com"
+              formControlName="store_code"
+              label="Store Code"
+              placeholder="STORE001"
+              [control]="storeForm.get('store_code')"
             ></app-input>
 
             <div class="space-y-2">
@@ -86,6 +86,75 @@ import { StoreListItem, UpdateStoreDto, StoreState } from '../interfaces/store.i
                 {{ store.organization_name }} (ID: {{ store.organization_id }})
               </div>
             </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="website"
+              label="Website"
+              type="url"
+              placeholder="https://example.com"
+            ></app-input>
+
+            <div class="space-y-2">
+              <label for="store_type" class="block text-sm font-medium text-text-primary">
+                Store Type
+              </label>
+              <select
+                id="store_type"
+                formControlName="store_type"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+              >
+                <option value="physical">Physical</option>
+                <option value="online">Online</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="popup">Popup</option>
+                <option value="kiosko">Kiosko</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="domain"
+              label="Domain"
+              placeholder="store.example.com"
+            ></app-input>
+
+            <app-input
+              formControlName="timezone"
+              label="Timezone"
+              placeholder="America/Bogota"
+            ></app-input>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="currency_code"
+              label="Currency Code"
+              placeholder="COP"
+            ></app-input>
+
+            <app-input
+              formControlName="manager_user_id"
+              label="Manager User ID"
+              type="number"
+              placeholder="1"
+            ></app-input>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="color_primary"
+              label="Primary Color"
+              placeholder="#FF0000"
+            ></app-input>
+
+            <app-input
+              formControlName="color_secondary"
+              label="Secondary Color"
+              placeholder="#00FF00"
+            ></app-input>
           </div>
 
           <div class="space-y-2">
@@ -139,19 +208,16 @@ import { StoreListItem, UpdateStoreDto, StoreState } from '../interfaces/store.i
           <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Store Status</h3>
           
           <div class="space-y-2">
-            <label for="state" class="block text-sm font-medium text-text-primary">
+            <label for="is_active" class="block text-sm font-medium text-text-primary">
               Status
             </label>
             <select
-              id="state"
-              formControlName="state"
+              id="is_active"
+              formControlName="is_active"
               class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
             >
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="draft">Draft</option>
-              <option value="suspended">Suspended</option>
-              <option value="archived">Archived</option>
+              <option [ngValue]="true">Active</option>
+              <option [ngValue]="false">Inactive</option>
             </select>
           </div>
         </div>
@@ -200,6 +266,7 @@ export class StoreEditModalComponent {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: ['', [Validators.required, Validators.minLength(2), Validators.pattern(/^[a-z0-9-]+$/)]],
+      store_code: ['', [Validators.required, Validators.minLength(2)]],
       description: [''],
       email: ['', [Validators.required, Validators.email]],
       phone: [''],
@@ -207,7 +274,14 @@ export class StoreEditModalComponent {
       address: [''],
       city: [''],
       country: [''],
-      state: ['active']
+      store_type: [StoreType.PHYSICAL, [Validators.required]],
+      is_active: [true, [Validators.required]],
+      domain: [''],
+      timezone: [''],
+      currency_code: [''],
+      manager_user_id: [null],
+      color_primary: [''],
+      color_secondary: ['']
     });
   }
 
@@ -223,6 +297,7 @@ export class StoreEditModalComponent {
     this.storeForm.patchValue({
       name: this.store.name,
       slug: this.store.slug,
+      store_code: this.store.store_code || '',
       description: '',
       email: this.store.email,
       phone: this.store.phone || '',
@@ -230,7 +305,14 @@ export class StoreEditModalComponent {
       address: '',
       city: this.store.city || '',
       country: this.store.country || '',
-      state: this.store.state
+      store_type: this.store.store_type || StoreType.PHYSICAL,
+      is_active: this.store.is_active !== undefined ? this.store.is_active : true,
+      domain: '',
+      timezone: '',
+      currency_code: '',
+      manager_user_id: null,
+      color_primary: '',
+      color_secondary: ''
     });
   }
 
@@ -253,7 +335,6 @@ export class StoreEditModalComponent {
     const formData = this.storeForm.value;
     const storeData: UpdateStoreDto = {
       name: formData.name,
-      slug: formData.slug,
       description: formData.description || undefined,
       email: formData.email,
       phone: formData.phone || undefined,
@@ -261,7 +342,14 @@ export class StoreEditModalComponent {
       address: formData.address || undefined,
       city: formData.city || undefined,
       country: formData.country || undefined,
-      state: formData.state as StoreState
+      store_type: formData.store_type as StoreType,
+      is_active: formData.is_active as boolean,
+      domain: formData.domain || undefined,
+      timezone: formData.timezone || undefined,
+      currency_code: formData.currency_code || undefined,
+      manager_user_id: formData.manager_user_id || undefined,
+      color_primary: formData.color_primary || undefined,
+      color_secondary: formData.color_secondary || undefined
     };
 
     this.submit.emit(storeData);
@@ -275,6 +363,7 @@ export class StoreEditModalComponent {
     this.storeForm.reset({
       name: '',
       slug: '',
+      store_code: '',
       description: '',
       email: '',
       phone: '',
@@ -282,7 +371,14 @@ export class StoreEditModalComponent {
       address: '',
       city: '',
       country: '',
-      state: 'active'
+      store_type: StoreType.PHYSICAL,
+      is_active: true,
+      domain: '',
+      timezone: '',
+      currency_code: '',
+      manager_user_id: null,
+      color_primary: '',
+      color_secondary: ''
     });
   }
 }

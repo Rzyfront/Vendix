@@ -5,7 +5,7 @@ import { CommonModule } from '@angular/common';
 import { ButtonComponent, IconComponent } from '../../../../../shared/components';
 
 // Import interfaces
-import { StoreListItem } from '../interfaces/store.interface';
+import { StoreListItem, StoreType } from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-card',
@@ -20,10 +20,15 @@ import { StoreListItem } from '../interfaces/store.interface';
           <p class="text-sm text-text-secondary">{{ store.slug }}</p>
         </div>
         <div class="flex items-center gap-2">
-          <span 
+          <span
             class="px-2 py-1 text-xs font-medium rounded-full"
-            [ngClass]="getStatusClasses(store.state)">
-            {{ formatStatus(store.state) }}
+            [ngClass]="getStatusClasses(store.is_active)">
+            {{ formatActiveStatus(store.is_active) }}
+          </span>
+          <span
+            class="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800"
+          >
+            {{ formatStoreType(store.store_type) }}
           </span>
         </div>
       </div>
@@ -48,6 +53,11 @@ import { StoreListItem } from '../interfaces/store.interface';
         <div class="flex items-center gap-2 text-sm">
           <app-icon name="building" [size]="16" class="text-text-secondary"></app-icon>
           <span class="text-text-primary">{{ store.organization_name }}</span>
+        </div>
+
+        <div class="flex items-center gap-2 text-sm" *ngIf="store.store_code">
+          <app-icon name="tag" [size]="16" class="text-text-secondary"></app-icon>
+          <span class="text-text-primary">{{ store.store_code }}</span>
         </div>
       </div>
 
@@ -102,29 +112,29 @@ export class StoreCardComponent {
 
   constructor() {}
 
-  formatStatus(status: string): string {
-    const statusMap: { [key: string]: string } = {
-      'active': 'Activo',
-      'inactive': 'Inactivo',
-      'draft': 'Borrador',
-      'suspended': 'Suspendido',
-      'archived': 'Archivado'
+  formatStoreType(type: StoreType): string {
+    const typeMap: { [key in StoreType]: string } = {
+      [StoreType.PHYSICAL]: 'Física',
+      [StoreType.ONLINE]: 'Online',
+      [StoreType.HYBRID]: 'Híbrida',
+      [StoreType.POPUP]: 'Temporal',
+      [StoreType.KIOSKO]: 'Kiosco'
     };
-    return statusMap[status] || status;
+    return typeMap[type] || type;
   }
 
-  getStatusClasses(status: string): string {
+  formatActiveStatus(isActive: boolean): string {
+    return isActive ? 'Activo' : 'Inactivo';
+  }
+
+  getStatusClasses(isActive: boolean): string {
     const baseClasses = 'px-2 py-1 text-xs font-medium rounded-full';
     
-    const statusClasses: { [key: string]: string } = {
-      'active': 'bg-green-100 text-green-800',
-      'inactive': 'bg-yellow-100 text-yellow-800',
-      'draft': 'bg-gray-100 text-gray-800',
-      'suspended': 'bg-red-100 text-red-800',
-      'archived': 'bg-purple-100 text-purple-800'
-    };
-    
-    return `${baseClasses} ${statusClasses[status] || 'bg-gray-100 text-gray-800'}`;
+    if (isActive) {
+      return `${baseClasses} bg-green-100 text-green-800`;
+    } else {
+      return `${baseClasses} bg-yellow-100 text-yellow-800`;
+    }
   }
 
   formatCurrency(value: number): string {

@@ -6,7 +6,7 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
 import { StoresService } from './services/stores.service';
-import { StoreListItem, StoreState, CreateStoreDto } from './interfaces/store.interface';
+import { StoreListItem, StoreState, StoreType, CreateStoreDto, StoreSettingsUpdateDto } from './interfaces/store.interface';
 
 // Import new components
 import {
@@ -16,6 +16,8 @@ import {
   StoreCreateModalComponent,
   StoreEditModalComponent
 } from './components/index';
+
+import { StoreSettingsModalComponent } from './components/store-settings-modal.component';
 
 // Import shared components
 import {
@@ -45,6 +47,7 @@ import './stores.component.css';
     StoreEmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
+    StoreSettingsModalComponent,
     InputsearchComponent,
     IconComponent,
     TableComponent,
@@ -75,6 +78,29 @@ import './stores.component.css';
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
+              
+              <!-- Filtro de tipo de tienda -->
+              <select
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onStoreTypeChange($event)"
+                [value]="selectedStoreType">
+                <option value="">All Types</option>
+                <option value="physical">Physical</option>
+                <option value="online">Online</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="popup">Popup</option>
+                <option value="kiosko">Kiosko</option>
+              </select>
+
+              <!-- Filtro de estado -->
+              <select
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onStateChange($event)"
+                [value]="selectedState">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
               
               <div class="flex gap-2 items-center">
                 <app-button
@@ -167,6 +193,16 @@ import './stores.component.css';
         (submit)="updateStore($event)"
         (cancel)="onEditModalCancel()"
       ></app-store-edit-modal>
+
+      <!-- Settings Store Modal -->
+      <app-store-settings-modal
+        *ngIf="selectedStoreForSettings"
+        [isOpen]="isSettingsModalOpen"
+        [isSubmitting]="isUpdatingSettings"
+        (openChange)="onSettingsModalChange($event)"
+        (submit)="updateStoreSettings($event)"
+        (cancel)="onSettingsModalCancel()"
+      ></app-store-settings-modal>
     </div>
   `
 })
@@ -175,11 +211,13 @@ export class StoresComponent implements OnInit, OnDestroy {
   isLoading = false;
   searchTerm = '';
   selectedState = '';
+  selectedStoreType = '';
   selectedOrganization = '';
 
   // Table configuration
   tableColumns: TableColumn[] = [
     { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
+    { key: 'store_code', label: 'Código', sortable: true, width: '120px' },
     { key: 'slug', label: 'Slug', sortable: true, width: '150px' },
     { key: 'email', label: 'Email', sortable: true, width: '250px' },
     { key: 'phone', label: 'Teléfono', sortable: true, width: '150px' },
@@ -187,7 +225,20 @@ export class StoresComponent implements OnInit, OnDestroy {
     { key: 'country', label: 'País', sortable: true, width: '120px' },
     { key: 'organization_name', label: 'Organización', sortable: true, width: '180px' },
     {
-      key: 'state',
+      key: 'store_type',
+      label: 'Tipo',
+      sortable: true,
+      width: '120px',
+      align: 'center',
+      badge: true,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm'
+      },
+      transform: (value: StoreType) => this.formatStoreType(value)
+    },
+    {
+      key: 'is_active',
       label: 'Estado',
       sortable: true,
       width: '100px',
@@ -197,7 +248,7 @@ export class StoresComponent implements OnInit, OnDestroy {
         type: 'status',
         size: 'sm'
       },
-      transform: (value: string) => this.formatStatus(value)
+      transform: (value: boolean) => this.formatActiveStatus(value)
     }
   ];
 
@@ -209,6 +260,12 @@ export class StoresComponent implements OnInit, OnDestroy {
       variant: 'primary'
     },
     {
+      label: 'Configuración',
+      icon: 'settings',
+      action: (store) => this.openSettingsModal(store),
+      variant: 'secondary'
+    },
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (store) => this.deleteStore(store),
@@ -218,11 +275,10 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   stats = {
     total_stores: 0,
-    active: 0,
-    inactive: 0,
-    draft: 0,
-    suspended: 0,
-    archived: 0,
+    active_stores: 0,
+    inactive_stores: 0,
+    suspended_stores: 0,
+    draft_stores: 0,
     total_revenue: 0,
     total_orders: 0,
     total_products: 0
@@ -244,6 +300,11 @@ export class StoresComponent implements OnInit, OnDestroy {
   isEditModalOpen = false;
   isUpdatingStore = false;
   selectedStore?: StoreListItem;
+
+  // Settings Modal state
+  isSettingsModalOpen = false;
+  isUpdatingSettings = false;
+  selectedStoreForSettings?: StoreListItem;
 
   private subscriptions: Subscription[] = [];
 
@@ -282,7 +343,7 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedState || this.selectedOrganization);
+    return !!(this.searchTerm || this.selectedState || this.selectedStoreType || this.selectedOrganization);
   }
 
   openCreateStoreModal(): void {
@@ -331,6 +392,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       storeData = {
         name: formData.name,
         slug: formData.slug,
+        store_code: formData.name.toLowerCase().replace(/\s+/g, '-'), // Generate slug-based code
         email: formData.email,
         phone: formData.phone || undefined,
         website: formData.website || undefined,
@@ -339,7 +401,8 @@ export class StoresComponent implements OnInit, OnDestroy {
         city: formData.city || undefined,
         country: formData.country || undefined,
         organization_id: formData.organization_id,
-        state: formData.state
+        is_active: formData.state === 'active' ? true : false,
+        store_type: StoreType.PHYSICAL
       };
     }
 
@@ -373,7 +436,8 @@ export class StoresComponent implements OnInit, OnDestroy {
       page: this.pagination.page,
       limit: this.pagination.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedState && { state: this.selectedState as any }),
+      ...(this.selectedState && { is_active: this.selectedState === 'active' ? true : this.selectedState === 'inactive' ? false : undefined }),
+      ...(this.selectedStoreType && { store_type: this.selectedStoreType as StoreType }),
       ...(this.selectedOrganization && { organization_id: parseInt(this.selectedOrganization) })
     };
 
@@ -384,11 +448,13 @@ export class StoresComponent implements OnInit, OnDestroy {
             id: store.id,
             name: store.name,
             slug: store.slug,
+            store_code: store.store_code || '',
             email: store.email,
             phone: store.phone || '',
             city: store.city || '',
             country: store.country || '',
-            state: store.state || 'active',
+            store_type: store.store_type || StoreType.PHYSICAL,
+            is_active: store.is_active !== undefined ? store.is_active : true,
             organization_id: store.organization_id,
             organization_name: store.organization?.name || 'Unknown',
             products_count: store.products_count || 0,
@@ -431,11 +497,12 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   updateStats(): void {
     this.stats.total_stores = this.stores.length;
-    this.stats.active = this.stores.filter(store => store.state === 'active').length;
-    this.stats.inactive = this.stores.filter(store => store.state === 'inactive').length;
-    this.stats.draft = this.stores.filter(store => store.state === 'draft').length;
-    this.stats.suspended = this.stores.filter(store => store.state === 'suspended').length;
-    this.stats.archived = this.stores.filter(store => store.state === 'archived').length;
+    this.stats.active_stores = this.stores.filter(store => store.is_active === true).length;
+    this.stats.inactive_stores = this.stores.filter(store => store.is_active === false).length;
+    // Note: suspended and draft states are not directly available in StoreListItem
+    // These would need to be calculated from the backend or additional data
+    this.stats.suspended_stores = 0;
+    this.stats.draft_stores = 0;
   }
 
   refreshStores(): void {
@@ -445,9 +512,64 @@ export class StoresComponent implements OnInit, OnDestroy {
   clearFilters(): void {
     this.searchTerm = '';
     this.selectedState = '';
+    this.selectedStoreType = '';
     this.selectedOrganization = '';
     this.pagination.page = 1;
     this.loadStores();
+  }
+
+  onStoreTypeChange(event: any): void {
+    this.selectedStoreType = event.target.value;
+    this.pagination.page = 1;
+    this.loadStores();
+  }
+
+  onStateChange(event: any): void {
+    this.selectedState = event.target.value;
+    this.pagination.page = 1;
+    this.loadStores();
+  }
+
+  openSettingsModal(store: StoreListItem): void {
+    this.selectedStoreForSettings = store;
+    this.isSettingsModalOpen = true;
+  }
+
+  onSettingsModalChange(isOpen: boolean): void {
+    this.isSettingsModalOpen = isOpen;
+    if (!isOpen) {
+      this.selectedStoreForSettings = undefined;
+    }
+  }
+
+  onSettingsModalCancel(): void {
+    this.isSettingsModalOpen = false;
+    this.selectedStoreForSettings = undefined;
+  }
+
+  updateStoreSettings(settingsData: any): void {
+    if (!this.selectedStoreForSettings) return;
+
+    this.isUpdatingSettings = true;
+
+    const sub = this.storesService.updateStoreSettings(this.selectedStoreForSettings.id, settingsData).subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.isSettingsModalOpen = false;
+          this.selectedStoreForSettings = undefined;
+          this.toastService.success('Configuración actualizada exitosamente');
+          console.log('Store settings updated successfully:', response.data);
+        }
+        this.isUpdatingSettings = false;
+      },
+      error: (error) => {
+        console.error('Error updating store settings:', error);
+        this.toastService.error('Error al actualizar la configuración');
+        this.isUpdatingSettings = false;
+      }
+    });
+
+    this.subscriptions.push(sub);
   }
 
   onSearchChange(searchTerm: string): void {
@@ -478,6 +600,21 @@ export class StoresComponent implements OnInit, OnDestroy {
       'archived': 'Archivado'
     };
     return statusMap[status] || status;
+  }
+
+  formatStoreType(type: StoreType): string {
+    const typeMap: { [key in StoreType]: string } = {
+      [StoreType.PHYSICAL]: 'Física',
+      [StoreType.ONLINE]: 'Online',
+      [StoreType.HYBRID]: 'Híbrida',
+      [StoreType.POPUP]: 'Temporal',
+      [StoreType.KIOSKO]: 'Kiosco'
+    };
+    return typeMap[type] || type;
+  }
+
+  formatActiveStatus(isActive: boolean): string {
+    return isActive ? 'Activo' : 'Inactivo';
   }
 
   formatDate(dateString: string): string {
@@ -554,7 +691,8 @@ export class StoresComponent implements OnInit, OnDestroy {
       address: storeData.address,
       city: storeData.city,
       country: storeData.country,
-      state: storeData.state
+      is_active: storeData.state === 'active' ? true : false,
+      store_type: storeData.store_type || StoreType.PHYSICAL
     };
 
     const sub = this.storesService.updateStore(this.selectedStore.id, updateData).subscribe({

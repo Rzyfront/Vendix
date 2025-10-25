@@ -91,4 +91,21 @@ export class StoresController {
       );
     }
   }
+
+  @Get('dashboard')
+  @Permissions('stores:read')
+  async getGlobalDashboard() {
+    try {
+      const result = await this.storesService.getGlobalDashboard();
+      return this.responseService.success(
+        result,
+        'Dashboard global de tiendas obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard global de tiendas',
+        error.message,
+      );
+    }
+  }
 }

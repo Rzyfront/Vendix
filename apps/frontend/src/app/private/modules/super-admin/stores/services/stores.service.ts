@@ -12,7 +12,9 @@ import {
   StoreDashboardDto,
   StoreDashboardResponse,
   StoreStats,
-  PaginatedStoresResponse
+  PaginatedStoresResponse,
+  StoreSettingsUpdateDto,
+  StoreType
 } from '../interfaces/store.interface';
 
 export interface ApiResponse<T> {
@@ -49,7 +51,8 @@ export class StoresService {
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.search) params = params.set('search', query.search);
-    if (query?.state) params = params.set('state', query.state);
+    if (query?.store_type) params = params.set('store_type', query.store_type);
+    if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
     if (query?.organization_id) params = params.set('organization_id', query.organization_id.toString());
 
     return this.http.get<PaginatedResponse<Store[]>>(`${this.apiUrl}/stores`, { params });
@@ -118,7 +121,8 @@ export class StoresService {
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.search) params = params.set('search', query.search);
-    if (query?.state) params = params.set('state', query.state);
+    if (query?.store_type) params = params.set('store_type', query.store_type);
+    if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
 
     return this.http.get<PaginatedResponse<Store[]>>(`${this.apiUrl}/organizations/${organizationId}/stores`, { params });
   }
@@ -146,8 +150,8 @@ export class StoresService {
   /**
    * Update store settings
    */
-  updateStoreSettings(storeId: number, settings: Partial<Store['settings']>): Observable<ApiResponse<Store['settings']>> {
-    return this.http.patch<ApiResponse<Store['settings']>>(`${this.apiUrl}/stores/${storeId}/settings`, settings);
+  updateStoreSettings(storeId: number, settingsData: StoreSettingsUpdateDto): Observable<ApiResponse<Store['settings']>> {
+    return this.http.patch<ApiResponse<Store['settings']>>(`${this.apiUrl}/stores/${storeId}/settings`, settingsData);
   }
 
   /**

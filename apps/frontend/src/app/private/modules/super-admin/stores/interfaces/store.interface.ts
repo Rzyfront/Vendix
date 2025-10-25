@@ -1,38 +1,9 @@
-export interface Store {
-  id: number;
-  name: string;
-  slug: string;
-  description?: string;
-  email: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  country?: string;
-  logo_url?: string;
-  banner_url?: string;
-  settings?: StoreSettings;
-  state: StoreState;
-  organization_id: number;
-  organization?: {
-    id: number;
-    name: string;
-  };
-  created_at: string;
-  updated_at: string;
-}
-
-export interface StoreSettings {
-  allow_public_store: boolean;
-  allow_multiple_locations: boolean;
-  enable_ecommerce: boolean;
-  enable_inventory: boolean;
-  enable_analytics: boolean;
-  default_currency: string;
-  timezone: string;
-  locale: string;
-  max_products?: number;
-  max_users?: number;
+export enum StoreType {
+  PHYSICAL = 'physical',
+  ONLINE = 'online',
+  HYBRID = 'hybrid',
+  POPUP = 'popup',
+  KIOSKO = 'kiosko'
 }
 
 export enum StoreState {
@@ -43,15 +14,70 @@ export enum StoreState {
   ARCHIVED = 'archived'
 }
 
+export interface Store {
+  id: number;
+  name: string;
+  slug: string;
+  store_code: string;
+  description?: string;
+  email: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  logo_url?: string;
+  color_primary?: string;
+  color_secondary?: string;
+  domain?: string;
+  timezone?: string;
+  currency_code?: string;
+  operating_hours?: OperatingHours;
+  store_type: StoreType;
+  is_active: boolean;
+  manager_user_id?: number;
+  settings?: StoreSettings;
+  organization_id: number;
+  organization?: {
+    id: number;
+    name: string;
+  };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperatingHours {
+  monday?: { open: string; close: string };
+  tuesday?: { open: string; close: string };
+  wednesday?: { open: string; close: string };
+  thursday?: { open: string; close: string };
+  friday?: { open: string; close: string };
+  saturday?: { open: string; close: string };
+  sunday?: { open: string; close: string };
+}
+
+export interface StoreSettings {
+  theme?: string;
+  notifications?: boolean;
+  language?: string;
+  currency_format?: string;
+  email_notifications?: boolean;
+  sms_notifications?: boolean;
+  inventory_alerts?: boolean;
+  low_stock_threshold?: number;
+}
+
 export interface StoreListItem {
   id: number;
   name: string;
   slug: string;
+  store_code: string;
   email: string;
   phone?: string;
   city?: string;
   country?: string;
-  state: StoreState;
+  store_type: StoreType;
+  is_active: boolean;
   organization_id: number;
   organization_name: string;
   products_count?: number;
@@ -61,19 +87,20 @@ export interface StoreListItem {
 }
 
 export interface StoreDetails extends Store {
-  stats: {
-    totalProducts: number;
-    activeProducts: number;
-    totalOrders: number;
-    completedOrders: number;
-    totalRevenue: number;
-    totalUsers: number;
-  };
-  recentActivity: Array<{
+  addresses?: Array<{
     id: number;
-    action: string;
-    timestamp: string;
+    street: string;
+    city: string;
+    country: string;
+    postal_code: string;
+    is_primary: boolean;
+  }>;
+  store_users?: Array<{
+    id: number;
+    user_id: number;
+    role: string;
     user: {
+      id: number;
       name: string;
       email: string;
     };
@@ -81,8 +108,20 @@ export interface StoreDetails extends Store {
 }
 
 export interface CreateStoreDto {
+  organization_id: number;
   name: string;
   slug: string;
+  store_code: string;
+  logo_url?: string;
+  color_primary?: string;
+  color_secondary?: string;
+  domain?: string;
+  timezone?: string;
+  currency_code?: string;
+  operating_hours?: OperatingHours;
+  store_type: StoreType;
+  is_active: boolean;
+  manager_user_id?: number;
   description?: string;
   email: string;
   phone?: string;
@@ -90,16 +129,13 @@ export interface CreateStoreDto {
   address?: string;
   city?: string;
   country?: string;
-  logo_url?: string;
-  banner_url?: string;
-  settings?: Partial<StoreSettings>;
-  state?: StoreState;
-  organization_id: number;
 }
 
 export interface UpdateStoreDto {
   name?: string;
-  slug?: string;
+  is_active?: boolean;
+  store_type?: StoreType;
+  manager_user_id?: number;
   description?: string;
   email?: string;
   phone?: string;
@@ -108,16 +144,20 @@ export interface UpdateStoreDto {
   city?: string;
   country?: string;
   logo_url?: string;
-  banner_url?: string;
-  settings?: Partial<StoreSettings>;
-  state?: StoreState;
+  color_primary?: string;
+  color_secondary?: string;
+  domain?: string;
+  timezone?: string;
+  currency_code?: string;
+  operating_hours?: OperatingHours;
 }
 
 export interface StoreQueryDto {
   page?: number;
   limit?: number;
   search?: string;
-  state?: StoreState;
+  store_type?: StoreType;
+  is_active?: boolean;
   organization_id?: number;
 }
 
@@ -127,17 +167,29 @@ export interface StoreDashboardDto {
 }
 
 export interface StoreDashboardResponse {
-  totalProducts: number;
-  activeProducts: number;
-  totalOrders: number;
-  completedOrders: number;
-  totalRevenue: number;
-  totalUsers: number;
+  store_id: number;
+  metrics: {
+    total_orders: number;
+    total_revenue: number;
+    low_stock_products: number;
+    active_customers: number;
+    revenue_today: number;
+    revenue_this_week: number;
+    average_order_value: number;
+  };
+  recent_orders: Array<any>;
+  top_products: Array<any>;
+  sales_chart: Array<any>;
+}
+
+export interface StoreSettingsUpdateDto {
+  settings: Partial<StoreSettings>;
 }
 
 export interface StoreFilters {
   search: string;
-  state: string;
+  store_type: StoreType;
+  is_active: boolean;
   organization_id: number;
   dateRange: {
     start: Date;
@@ -162,11 +214,10 @@ export interface StoreTableAction {
 
 export interface StoreStats {
   total_stores: number;
-  active: number;
-  inactive: number;
-  draft: number;
-  suspended: number;
-  archived: number;
+  active_stores: number;
+  inactive_stores: number;
+  suspended_stores: number;
+  draft_stores: number;
   total_revenue: number;
   total_orders: number;
   total_products: number;

@@ -28,7 +28,7 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Active</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">{{ stats.active }}</p>
+            <p class="text-2xl font-bold mt-1 text-green-600">{{ stats.active_stores }}</p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100">
             <app-icon name="check" [size]="24" class="text-green-600"></app-icon>
@@ -41,7 +41,7 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Inactive</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">{{ stats.inactive }}</p>
+            <p class="text-2xl font-bold mt-1 text-yellow-600">{{ stats.inactive_stores }}</p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100">
             <app-icon name="pause" [size]="24" class="text-yellow-600"></app-icon>
@@ -54,7 +54,7 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Draft</p>
-            <p class="text-2xl font-bold mt-1 text-gray-600">{{ stats.draft }}</p>
+            <p class="text-2xl font-bold mt-1 text-gray-600">{{ stats.draft_stores }}</p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-gray-100">
             <app-icon name="file-text" [size]="24" class="text-gray-600"></app-icon>
@@ -67,7 +67,7 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Suspended</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">{{ stats.suspended }}</p>
+            <p class="text-2xl font-bold mt-1 text-red-600">{{ stats.suspended_stores }}</p>
           </div>
           <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100">
             <app-icon name="alert-triangle" [size]="24" class="text-red-600"></app-icon>
@@ -124,11 +124,10 @@ import { IconComponent } from '../../../../../shared/components';
 export class StoreStatsComponent {
   @Input() stats = {
     total_stores: 0,
-    active: 0,
-    inactive: 0,
-    draft: 0,
-    suspended: 0,
-    archived: 0,
+    active_stores: 0,
+    inactive_stores: 0,
+    suspended_stores: 0,
+    draft_stores: 0,
     total_revenue: 0,
     total_orders: 0,
     total_products: 0

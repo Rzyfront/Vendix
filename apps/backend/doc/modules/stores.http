@@ -11,26 +11,64 @@
 # =================================================================
 
 ### Get All Stores
-GET {{baseUrl}}/stores?organization_id=1&page=1&limit=10
+GET {{baseUrl}}/stores?organization_id=1&page=1&limit=10&search=store&store_type=physical&is_active=true
 Content-Type: application/json
 Authorization: {{authToken}}
+
+# Query Parameters:
+# - page: Número de página (default: 1)
+# - limit: Límite de resultados por página (default: 10)
+# - search: Buscar por nombre o código de tienda
+# - store_type: Tipo de tienda (physical, online, hybrid, popup, kiosko)
+# - is_active: Estado de la tienda (true/false)
+# - organization_id: ID de la organización
 
 ### Get Store by ID
 GET {{baseUrl}}/stores/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
+# Returns detailed store information including:
+# - Organization data
+# - Addresses
+# - Store settings
+# - Store users
+# - Counts (products, orders, categories, store_users)
+
+### 🚨 GLOBAL STORES DASHBOARD - Key FASE2 Feature
+GET {{baseUrl}}/stores/dashboard
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# Returns: {
+#   total_stores: number,
+#   active_stores: number,
+#   inactive_stores: number,
+#   suspended_stores: number,
+#   draft_stores: number,
+#   total_revenue: number,
+#   total_orders: number,
+#   total_products: number
+# }
+
 ### 🚨 STORE DASHBOARD - Key FASE2 Feature
 GET {{baseUrl}}/stores/1/dashboard?start_date=2025-01-01&end_date=2025-12-31
 Content-Type: application/json
 Authorization: {{authToken}}
 
+# Query Parameters:
+# - start_date: Fecha de inicio para filtrar datos (opcional)
+# - end_date: Fecha de fin para filtrar datos (opcional)
+
 # Returns: {
+#   store_id: number,
 #   metrics: {
 #     total_orders: number,
 #     total_revenue: number,
 #     low_stock_products: number,
 #     active_customers: number,
+#     revenue_today: number,
+#     revenue_this_week: number,
 #     average_order_value: number
 #   },
 #   recent_orders: [...],
@@ -46,10 +84,29 @@ Authorization: {{authToken}}
 {
   "organization_id": 1,
   "name": "New Store",
+  "slug": "new-store",
   "store_code": "STORE001",
+  "logo_url": "https://example.com/logo.png",
+  "color_primary": "#FF0000",
+  "color_secondary": "#00FF00",
+  "domain": "store.example.com",
+  "timezone": "America/Bogota",
+  "currency_code": "COP",
+  "operating_hours": {
+    "monday": { "open": "09:00", "close": "18:00" },
+    "tuesday": { "open": "09:00", "close": "18:00" }
+  },
   "store_type": "physical",
-  "is_active": true
+  "is_active": true,
+  "manager_user_id": 1
 }
+
+# Store Types:
+# - physical: Tienda física
+# - online: Tienda online
+# - hybrid: Tienda híbrida
+# - popup: Tienda temporal
+# - kiosko: Kiosco
 
 ### Update Store
 PATCH {{baseUrl}}/stores/1
@@ -58,13 +115,17 @@ Authorization: {{authToken}}
 
 {
   "name": "Updated Store Name",
-  "is_active": true
+  "is_active": true,
+  "store_type": "hybrid",
+  "manager_user_id": 2
 }
 
 ### Delete Store
 DELETE {{baseUrl}}/stores/1
 Content-Type: application/json
 Authorization: {{authToken}}
+
+# Note: No se puede eliminar una tienda con órdenes activas
 
 ### Update Store Settings
 PATCH {{baseUrl}}/stores/1/settings
@@ -74,6 +135,38 @@ Authorization: {{authToken}}
 {
   "settings": {
     "theme": "dark",
-    "notifications": true
+    "notifications": true,
+    "language": "es",
+    "currency_format": "COP $",
+    "email_notifications": true,
+    "sms_notifications": false,
+    "inventory_alerts": true,
+    "low_stock_threshold": 10
   }
 }
+
+# =================================================================
+# 📊 STORE STATES AND STATUS
+# =================================================================
+
+# Store States (based on is_active field):
+# - Active: is_active = true
+# - Inactive: is_active = false
+# - Suspended: is_active = false (with additional conditions)
+# - Draft: is_active = false (recently created, less than 7 days)
+
+# Store Types:
+# - physical: Tienda física tradicional
+# - online: Tienda e-commerce
+# - hybrid: Combinación de física y online
+# - popup: Tienda temporal o pop-up
+# - kiosko: Punto de venta automatizado
+
+# =================================================================
+# 🔐 PERMISSIONS REQUIRED
+# =================================================================
+
+# stores:create - Crear nuevas tiendas
+# stores:read - Ver información de tiendas
+# stores:update - Actualizar información de tiendas
+# stores:delete - Eliminar tiendas

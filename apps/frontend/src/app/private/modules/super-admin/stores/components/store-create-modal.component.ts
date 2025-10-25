@@ -8,7 +8,7 @@ import {
   InputComponent,
   ButtonComponent
 } from '../../../../../shared/components/index';
-import { CreateStoreDto, StoreState } from '../interfaces/store.interface';
+import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-create-modal',
@@ -72,10 +72,11 @@ import { CreateStoreDto, StoreState } from '../interfaces/store.interface';
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
-              formControlName="website"
-              label="Website"
-              type="url"
-              placeholder="https://example.com"
+              formControlName="store_code"
+              label="Store Code"
+              placeholder="STORE001"
+              [required]="true"
+              [control]="storeForm.get('store_code')"
             ></app-input>
 
             <app-input
@@ -85,6 +86,75 @@ import { CreateStoreDto, StoreState } from '../interfaces/store.interface';
               placeholder="1"
               [required]="true"
               [control]="storeForm.get('organization_id')"
+            ></app-input>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="website"
+              label="Website"
+              type="url"
+              placeholder="https://example.com"
+            ></app-input>
+
+            <div class="space-y-2">
+              <label for="store_type" class="block text-sm font-medium text-text-primary">
+                Store Type
+              </label>
+              <select
+                id="store_type"
+                formControlName="store_type"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+              >
+                <option value="physical">Physical</option>
+                <option value="online">Online</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="popup">Popup</option>
+                <option value="kiosko">Kiosko</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="domain"
+              label="Domain"
+              placeholder="store.example.com"
+            ></app-input>
+
+            <app-input
+              formControlName="timezone"
+              label="Timezone"
+              placeholder="America/Bogota"
+            ></app-input>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="currency_code"
+              label="Currency Code"
+              placeholder="COP"
+            ></app-input>
+
+            <app-input
+              formControlName="manager_user_id"
+              label="Manager User ID"
+              type="number"
+              placeholder="1"
+            ></app-input>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="color_primary"
+              label="Primary Color"
+              placeholder="#FF0000"
+            ></app-input>
+
+            <app-input
+              formControlName="color_secondary"
+              label="Secondary Color"
+              placeholder="#00FF00"
             ></app-input>
           </div>
 
@@ -139,17 +209,16 @@ import { CreateStoreDto, StoreState } from '../interfaces/store.interface';
           <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Store Status</h3>
           
           <div class="space-y-2">
-            <label for="state" class="block text-sm font-medium text-text-primary">
+            <label for="is_active" class="block text-sm font-medium text-text-primary">
               Initial Status
             </label>
             <select
-              id="state"
-              formControlName="state"
+              id="is_active"
+              formControlName="is_active"
               class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
             >
-              <option value="active">Active</option>
-              <option value="draft">Draft</option>
-              <option value="inactive">Inactive</option>
+              <option [ngValue]="true">Active</option>
+              <option [ngValue]="false">Inactive</option>
             </select>
           </div>
         </div>
@@ -197,6 +266,7 @@ export class StoreCreateModalComponent {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: ['', [Validators.required, Validators.minLength(2), Validators.pattern(/^[a-z0-9-]+$/)]],
+      store_code: ['', [Validators.required, Validators.minLength(2)]],
       description: [''],
       email: ['', [Validators.required, Validators.email]],
       phone: [''],
@@ -205,7 +275,14 @@ export class StoreCreateModalComponent {
       city: [''],
       country: [''],
       organization_id: [null, [Validators.required, Validators.min(1)]],
-      state: ['active']
+      store_type: [StoreType.PHYSICAL, [Validators.required]],
+      is_active: [true, [Validators.required]],
+      domain: [''],
+      timezone: [''],
+      currency_code: [''],
+      manager_user_id: [null],
+      color_primary: [''],
+      color_secondary: ['']
     });
   }
 
@@ -229,6 +306,7 @@ export class StoreCreateModalComponent {
     const storeData: CreateStoreDto = {
       name: formData.name,
       slug: formData.slug,
+      store_code: formData.store_code,
       description: formData.description || undefined,
       email: formData.email,
       phone: formData.phone || undefined,
@@ -237,7 +315,14 @@ export class StoreCreateModalComponent {
       city: formData.city || undefined,
       country: formData.country || undefined,
       organization_id: formData.organization_id,
-      state: formData.state as StoreState
+      store_type: formData.store_type as StoreType,
+      is_active: formData.is_active as boolean,
+      domain: formData.domain || undefined,
+      timezone: formData.timezone || undefined,
+      currency_code: formData.currency_code || undefined,
+      manager_user_id: formData.manager_user_id || undefined,
+      color_primary: formData.color_primary || undefined,
+      color_secondary: formData.color_secondary || undefined
     };
 
     this.submit.emit(storeData);
@@ -251,6 +336,7 @@ export class StoreCreateModalComponent {
     this.storeForm.reset({
       name: '',
       slug: '',
+      store_code: '',
       description: '',
       email: '',
       phone: '',
@@ -259,7 +345,14 @@ export class StoreCreateModalComponent {
       city: '',
       country: '',
       organization_id: null,
-      state: 'active'
+      store_type: StoreType.PHYSICAL,
+      is_active: true,
+      domain: '',
+      timezone: '',
+      currency_code: '',
+      manager_user_id: null,
+      color_primary: '',
+      color_secondary: ''
     });
   }
 }
