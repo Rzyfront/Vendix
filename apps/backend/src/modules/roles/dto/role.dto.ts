@@ -112,3 +112,29 @@ export class RemoveRoleFromUserDto {
   @IsInt()
   roleId: number;
 }
+
+export class RoleDashboardStatsDto {
+  @ApiProperty({
+    description: 'Total de roles en el sistema',
+    example: 15,
+  })
+  total_roles: number;
+
+  @ApiProperty({
+    description: 'Total de roles del sistema',
+    example: 5,
+  })
+  system_roles: number;
+
+  @ApiProperty({
+    description: 'Total de roles personalizados',
+    example: 10,
+  })
+  custom_roles: number;
+
+  @ApiProperty({
+    description: 'Total de permisos disponibles',
+    example: 42,
+  })
+  total_permissions: number;
+}

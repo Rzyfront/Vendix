@@ -19,6 +19,7 @@ import {
   AssignRoleToUserDto,
   RemoveRoleFromUserDto,
 } from './dto/role.dto';
+import { RoleDashboardStatsDto } from './dto/role.dto';
 
 @Injectable()
 export class RolesService {
@@ -605,5 +606,49 @@ export class RolesService {
         },
       },
     });
+  }
+
+  // ===== DASHBOARD STATS =====
+
+  async getDashboardStats(userId: number): Promise<RoleDashboardStatsDto> {
+    // Verificar si el usuario es super_admin
+    const userRoles = await this.prismaService.user_roles.findMany({
+      where: { user_id: userId },
+      include: {
+        roles: true,
+      },
+    });
+
+    const isSuperAdmin = userRoles.some(
+      (ur) => ur.roles?.name === 'super_admin',
+    );
+
+    // Si no es super_admin, no puede ver estadísticas completas
+    if (!isSuperAdmin) {
+      throw new ForbiddenException('No tienes permisos para ver estas estadísticas');
+    }
+
+    // Obtener el total de roles
+    const totalRoles = await this.prismaService.roles.count();
+
+    // Obtener el total de roles del sistema
+    const systemRoles = await this.prismaService.roles.count({
+      where: { is_system_role: true },
+    });
+
+    // Calcular roles personalizados
+    const customRoles = totalRoles - systemRoles;
+
+    // Obtener el total de permisos
+    const totalPermissions = await this.prismaService.permissions.count({
+      where: { status: 'active' },
+    });
+
+    return {
+      total_roles: totalRoles,
+      system_roles: systemRoles,
+      custom_roles: customRoles,
+      total_permissions: totalPermissions,
+    };
   }
 }
