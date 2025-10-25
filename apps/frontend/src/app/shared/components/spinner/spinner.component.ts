@@ -78,10 +78,10 @@ export class SpinnerComponent {
   }
 
   get textClasses(): string {
-    const baseClasses = ['text-text-secondary'];
+    const baseClasses = ['text-[var(--color-primary)]'];
 
     const sizeClasses = {
-      sm: ['text-sm'],
+      sm: ['text-sm'],  
       md: ['text-base'],
       lg: ['text-lg'],
       xl: ['text-xl']

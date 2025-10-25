@@ -10,13 +10,13 @@ import { CommonModule } from '@angular/common';
       <!-- Header -->
       <div 
         *ngIf="hasHeader" 
-        class="px-6 py-4 border-b border-border"
+        class="px-6 py-4 border-b border-[var(--color-border)]"
         [class.pb-0]="!hasBody && !hasFooter"
       >
-        <h3 *ngIf="title" class="text-lg font-semibold text-text-primary">
+        <h3 *ngIf="title" class="text-lg font-semibold text-[var(--color-text-primary)]">
           {{ title }}
         </h3>
-        <p *ngIf="subtitle" class="text-sm text-text-secondary mt-1">
+        <p *ngIf="subtitle" class="text-sm text-[var(--color-text-secondary)] mt-1">
           {{ subtitle }}
         </p>
         <ng-content select="[slot=header]"></ng-content>
@@ -35,7 +35,7 @@ import { CommonModule } from '@angular/common';
       <!-- Footer -->
       <div 
         *ngIf="hasFooter" 
-        class="px-6 py-4 border-t border-border bg-gray-50"
+        class="px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-background)]"
         [class.pt-0]="!hasBody"
       >
         <ng-content select="[slot=footer]"></ng-content>
@@ -72,19 +72,19 @@ export class CardComponent {
 
   get cardClasses(): string {
     const baseClasses = [
-      'bg-white',
+      'bg-[var(--color-surface)]',
       'border',
-      'border-border',
+      'border-[var(--color-border)]',
       'rounded-lg',
       'overflow-hidden'
     ];
 
     const shadowClasses = {
       none: [],
-      sm: ['shadow-sm'],
-      md: ['shadow-md'],
-      lg: ['shadow-lg'],
-      xl: ['shadow-xl']
+      sm: ['shadow-[var(--shadow-sm)]'],
+      md: ['shadow-[var(--shadow-md)]'],
+      lg: ['shadow-[var(--shadow-lg)]'],
+      xl: ['shadow-[var(--shadow-xl)]']
     };
 
     const paddingClasses = this.padding ? [] : ['p-0'];

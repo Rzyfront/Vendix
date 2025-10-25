@@ -35,7 +35,7 @@
 - Se maneja un punto e entrada que resuelve el dominio para configurar y decidir que vista mostrar.
 - Se setea la configuracion de branding resuelta por el dominio.
 - Se usa tokens para mantener un estandar de estilos generales en la app @apps/frontend/src/styles.scss.
-- Se usan componentes reutilizables para la construccion de vistar y componentes llamados desde el index.ts de @apps/frontend/src/app/shared.
+- Se usan componentes reutilizables para la construccion de vistar y componentes llamados desde el index.ts de @apps/frontend/src/app/shared/components.
 - Se usa un gestor de estados global centralizado.
 - Se usa un guard para direccionar a layout de aplicacion especificas por rol.
 - Se usa Lucide para los iconos, con un componente Icon para modularidad.

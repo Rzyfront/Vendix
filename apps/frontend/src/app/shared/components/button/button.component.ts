@@ -93,35 +93,35 @@ export class ButtonComponent {
     // Variant classes
     const variantClasses = {
       primary: [
-        'bg-primary',
-        'hover:bg-primary/90',
-        'text-white',
-        'focus:ring-primary/50'
+        'bg-[var(--color-primary)]',
+        'hover:bg-[var(--color-primary)]/90',
+        'text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-primary)]/50'
       ],
       secondary: [
-        'bg-secondary',
-        'hover:bg-secondary/90',
-        'text-white',
-        'focus:ring-secondary/50'
+        'bg-[var(--color-secondary)]',
+        'hover:bg-[var(--color-secondary)]/90',
+        'text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-secondary)]/50'
       ],
       outline: [
         'border-2',
-        'border-primary',
-        'text-primary',
-        'hover:bg-primary',
-        'hover:text-white',
-        'focus:ring-primary/50'
+        'border-[var(--color-primary)]',
+        'text-[var(--color-primary)]',
+        'hover:bg-[var(--color-primary)]',
+        'hover:text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-primary)]/50'
       ],
       ghost: [
-        'text-text-primary',
-        'hover:bg-gray-100',
-        'focus:ring-gray-300'
+        'text-[var(--color-text-primary)]',
+        'hover:bg-[var(--color-background)]',
+        'focus:ring-[var(--color-border)]'
       ],
       danger: [
-        'bg-red-600',
-        'hover:bg-red-700',
-        'text-white',
-        'focus:ring-red-500'
+        'bg-[var(--color-destructive)]',
+        'hover:bg-[var(--color-destructive)]',
+        'text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-destructive)]/50'
       ]
     };
 

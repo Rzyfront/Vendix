@@ -22,10 +22,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <label 
         *ngIf="label" 
         [for]="inputId"
-        class="block text-sm font-medium text-text-primary mb-2"
+        class="block text-sm font-medium text-[var(--color-text-primary)] mb-2"
       >
         {{ label }}
-        <span *ngIf="required" class="text-red-500 ml-1">*</span>
+        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1">*</span>
       </label>
 
       <!-- Input wrapper -->
@@ -66,7 +66,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <!-- Helper text -->
       <p 
         *ngIf="helperText && !getValidationError()" 
-        class="mt-2 text-sm text-text-secondary"
+        class="mt-2 text-sm text-[var(--color-text-secondary)]"
       >
         {{ helperText }}
       </p>
@@ -74,7 +74,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <!-- Error message -->
       <p 
         *ngIf="getValidationError()" 
-        class="mt-2 text-sm text-red-600"
+        class="mt-2 text-sm text-[var(--color-destructive)]"
       >
         {{ getValidationError() }}
       </p>
@@ -149,9 +149,9 @@ export class InputComponent implements ControlValueAccessor {
     // State classes based on control state
     let stateClasses: string[];
     if (this.control?.invalid && this.control?.touched) {
-      stateClasses = ['border-destructive', 'focus:border-destructive', 'focus:ring-destructive/30', 'bg-red-50'];
+      stateClasses = ['border-[var(--color-destructive)]', 'focus:border-[var(--color-destructive)]', 'focus:ring-[var(--color-destructive)]/30', 'bg-[rgba(239, 68, 68, 0.1)]'];
     } else if (this.control?.valid && this.control?.touched && this.control?.value) {
-      stateClasses = ['border-green-500', 'focus:border-green-500', 'focus:ring-green-500/30', 'bg-green-50'];
+      stateClasses = ['border-[var(--color-primary)]', 'focus:border-[var(--color-primary)]', 'focus:ring-[var(--color-primary)]/30', 'bg-[rgba(126, 215, 165, 0.1)]'];
     } else {
       stateClasses = ['border-border', 'hover:border-border', 'focus:ring-primary/50', 'focus:border-primary'];
     }
