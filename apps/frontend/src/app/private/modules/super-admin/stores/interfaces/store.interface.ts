@@ -72,18 +72,40 @@ export interface StoreListItem {
   name: string;
   slug: string;
   store_code: string;
-  email: string;
-  phone?: string;
-  city?: string;
-  country?: string;
   store_type: StoreType;
+  timezone: string;
   is_active: boolean;
+  manager_user_id?: number;
   organization_id: number;
-  organization_name: string;
-  products_count?: number;
-  orders_count?: number;
-  revenue?: number;
   created_at: string;
+  updated_at: string;
+  organizations?: {
+    id: number;
+    name: string;
+    slug: string;
+  };
+  addresses?: Array<{
+    id: number;
+    store_id: number;
+    address_line1: string;
+    address_line2?: string;
+    city: string;
+    state_province: string;
+    country_code: string;
+    postal_code: string;
+    phone_number?: string;
+    type: string;
+    is_primary: boolean;
+    latitude?: number;
+    longitude?: number;
+    organization_id?: number;
+    user_id?: number;
+  }>;
+  _count?: {
+    products: number;
+    orders: number;
+    store_users: number;
+  };
 }
 
 export interface StoreDetails extends Store {
@@ -224,7 +246,7 @@ export interface StoreStats {
 }
 
 export interface PaginatedStoresResponse {
-  data: Store[];
+  data: StoreListItem[];
   pagination: {
     page: number;
     limit: number;

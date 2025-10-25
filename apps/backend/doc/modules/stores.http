@@ -36,7 +36,7 @@ Authorization: {{authToken}}
 # - Counts (products, orders, categories, store_users)
 
 ### 🚨 GLOBAL STORES DASHBOARD - Key FASE2 Feature
-GET {{baseUrl}}/stores/dashboard
+GET {{baseUrl}}/stores/global/dashboard
 Content-Type: application/json
 Authorization: {{authToken}}
 

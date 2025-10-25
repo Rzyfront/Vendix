@@ -32,44 +32,171 @@ export class StoresController {
 
   @Post()
   @Permissions('stores:create')
-  create(@Body() createStoreDto: CreateStoreDto) {
-    return this.storesService.create(createStoreDto);
+  async create(@Body() createStoreDto: CreateStoreDto) {
+    try {
+      const store = await this.storesService.create(createStoreDto);
+      return this.responseService.created(
+        store,
+        'Tienda creada exitosamente'
+      );
+    } catch (error) {
+      if (error.code === 'P2002') {
+        return this.responseService.conflict(
+          'La tienda ya existe en esta organización',
+          error.meta?.target || 'Duplicate entry'
+        );
+      }
+      if (error.message.includes('Organization not found')) {
+        return this.responseService.notFound(
+          'Organización no encontrada',
+          'Organization'
+        );
+      }
+      return this.responseService.error(
+        'Error al crear la tienda',
+        error.message
+      );
+    }
   }
 
   @Get()
   @Permissions('stores:read')
-  findAll(@Query() query: StoreQueryDto) {
-    return this.storesService.findAll(query);
+  async findAll(@Query() query: StoreQueryDto) {
+    try {
+      const result = await this.storesService.findAll(query);
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
+        'Tiendas obtenidas exitosamente'
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las tiendas',
+        error.message
+      );
+    }
   }
 
   @Get(':id')
   @Permissions('stores:read')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.storesService.findOne(id);
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const store = await this.storesService.findOne(id);
+      return this.responseService.success(
+        store,
+        'Tienda obtenida exitosamente'
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound(
+          'Tienda no encontrada',
+          'Store'
+        );
+      }
+      return this.responseService.error(
+        'Error al obtener la tienda',
+        error.message
+      );
+    }
   }
 
   @Patch(':id')
   @Permissions('stores:update')
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateStoreDto: UpdateStoreDto,
   ) {
-    return this.storesService.update(id, updateStoreDto);
+    try {
+      const store = await this.storesService.update(id, updateStoreDto);
+      return this.responseService.updated(
+        store,
+        'Tienda actualizada exitosamente'
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound(
+          'Tienda no encontrada',
+          'Store'
+        );
+      }
+      return this.responseService.error(
+        'Error al actualizar la tienda',
+        error.message
+      );
+    }
   }
 
   @Delete(':id')
   @Permissions('stores:delete')
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.storesService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number) {
+    try {
+      await this.storesService.remove(id);
+      return this.responseService.deleted(
+        'Tienda eliminada exitosamente'
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound(
+          'Tienda no encontrada',
+          'Store'
+        );
+      }
+      if (error.message.includes('Cannot delete store with active orders')) {
+        return this.responseService.conflict(
+          'No se puede eliminar la tienda porque tiene órdenes activas',
+          error.message
+        );
+      }
+      return this.responseService.error(
+        'Error al eliminar la tienda',
+        error.message
+      );
+    }
   }
 
   @Patch(':id/settings')
   @Permissions('stores:update')
-  updateSettings(
+  async updateSettings(
     @Param('id', ParseIntPipe) storeId: number,
     @Body() settingsDto: UpdateStoreSettingsDto,
   ) {
-    return this.storesService.updateStoreSettings(storeId, settingsDto);
+    try {
+      const settings = await this.storesService.updateStoreSettings(storeId, settingsDto);
+      return this.responseService.updated(
+        settings,
+        'Configuración de tienda actualizada exitosamente'
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound(
+          'Tienda no encontrada',
+          'Store'
+        );
+      }
+      return this.responseService.error(
+        'Error al actualizar la configuración de la tienda',
+        error.message
+      );
+    }
+  }
+
+  @Get('global/dashboard')
+  @Permissions('stores:read')
+  async getGlobalDashboard() {
+    try {
+      const result = await this.storesService.getGlobalDashboard();
+      return this.responseService.success(
+        result,
+        'Dashboard global de tiendas obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener el dashboard global de tiendas',
+        error.message,
+      );
+    }
   }
 
   @Get(':id/dashboard')
@@ -87,23 +214,6 @@ export class StoresController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener el dashboard de tienda',
-        error.message,
-      );
-    }
-  }
-
-  @Get('dashboard')
-  @Permissions('stores:read')
-  async getGlobalDashboard() {
-    try {
-      const result = await this.storesService.getGlobalDashboard();
-      return this.responseService.success(
-        result,
-        'Dashboard global de tiendas obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener el dashboard global de tiendas',
         error.message,
       );
     }

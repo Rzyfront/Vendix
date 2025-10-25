@@ -36,44 +36,42 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
       <!-- Store Info -->
       <div class="space-y-3 mb-4">
         <div class="flex items-center gap-2 text-sm">
-          <app-icon name="mail" [size]="16" class="text-text-secondary"></app-icon>
-          <span class="text-text-primary">{{ store.email }}</span>
-        </div>
-        
-        <div class="flex items-center gap-2 text-sm" *ngIf="store.phone">
-          <app-icon name="phone" [size]="16" class="text-text-secondary"></app-icon>
-          <span class="text-text-primary">{{ store.phone }}</span>
-        </div>
-        
-        <div class="flex items-center gap-2 text-sm" *ngIf="store.city">
-          <app-icon name="map-pin" [size]="16" class="text-text-secondary"></app-icon>
-          <span class="text-text-primary">{{ store.city }}, {{ store.country }}</span>
-        </div>
-        
-        <div class="flex items-center gap-2 text-sm">
           <app-icon name="building" [size]="16" class="text-text-secondary"></app-icon>
-          <span class="text-text-primary">{{ store.organization_name }}</span>
+          <span class="text-text-primary">{{ store.organizations?.name || 'N/A' }}</span>
         </div>
 
         <div class="flex items-center gap-2 text-sm" *ngIf="store.store_code">
           <app-icon name="tag" [size]="16" class="text-text-secondary"></app-icon>
           <span class="text-text-primary">{{ store.store_code }}</span>
         </div>
+        
+        <div class="flex items-center gap-2 text-sm" *ngIf="store.addresses && store.addresses.length > 0">
+          <app-icon name="map-pin" [size]="16" class="text-text-secondary"></app-icon>
+          <span class="text-text-primary">
+            {{ getPrimaryAddress(store.addresses)?.city || 'N/A' }},
+            {{ getPrimaryAddress(store.addresses)?.state_province || 'N/A' }}
+          </span>
+        </div>
+        
+        <div class="flex items-center gap-2 text-sm">
+          <app-icon name="clock" [size]="16" class="text-text-secondary"></app-icon>
+          <span class="text-text-primary">{{ store.timezone }}</span>
+        </div>
       </div>
 
       <!-- Stats -->
       <div class="grid grid-cols-3 gap-4 mb-4">
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">{{ store.products_count || 0 }}</p>
+          <p class="text-2xl font-bold text-text-primary">{{ store._count?.products || 0 }}</p>
           <p class="text-xs text-text-secondary">Products</p>
         </div>
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">{{ store.orders_count || 0 }}</p>
+          <p class="text-2xl font-bold text-text-primary">{{ store._count?.orders || 0 }}</p>
           <p class="text-xs text-text-secondary">Orders</p>
         </div>
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">$ {{ formatCurrency(store.revenue || 0) }}</p>
-          <p class="text-xs text-text-secondary">Revenue</p>
+          <p class="text-2xl font-bold text-text-primary">{{ store._count?.store_users || 0 }}</p>
+          <p class="text-xs text-text-secondary">Users</p>
         </div>
       </div>
 
@@ -144,6 +142,11 @@ export class StoreCardComponent {
       return (value / 1000).toFixed(1) + 'K';
     }
     return value.toFixed(0);
+  }
+
+  getPrimaryAddress(addresses: any[]): any {
+    if (!addresses || addresses.length === 0) return null;
+    return addresses.find(addr => addr.is_primary) || addresses[0];
   }
 
   viewStore(): void {

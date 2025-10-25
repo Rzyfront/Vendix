@@ -308,6 +308,11 @@ export class TableComponent implements AfterContentInit {
       // Handle UserState enum values and common status strings
       let statusValue = String(originalValue)?.toLowerCase() || 'default';
       
+      // Handle boolean values for active/inactive status
+      if (typeof originalValue === 'boolean') {
+        statusValue = originalValue ? 'active' : 'inactive';
+      }
+      
       // Map common status variations to standard CSS classes
       const statusMap: Record<string, string> = {
         'active': 'active',

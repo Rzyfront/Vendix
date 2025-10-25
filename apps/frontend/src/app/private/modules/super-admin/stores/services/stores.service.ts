@@ -45,7 +45,7 @@ export class StoresService {
   /**
    * Get all stores with pagination and filtering
    */
-  getStores(query?: StoreQueryDto): Observable<PaginatedResponse<Store[]>> {
+  getStores(query?: StoreQueryDto): Observable<PaginatedResponse<StoreListItem[]>> {
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
@@ -55,7 +55,10 @@ export class StoresService {
     if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
     if (query?.organization_id) params = params.set('organization_id', query.organization_id.toString());
 
-    return this.http.get<PaginatedResponse<Store[]>>(`${this.apiUrl}/stores`, { params });
+    const url = `${this.apiUrl}/stores`;
+    console.log('Fetching stores from:', url, 'with params:', params.toString());
+    
+    return this.http.get<PaginatedResponse<StoreListItem[]>>(url, { params });
   }
 
   /**
@@ -109,13 +112,13 @@ export class StoresService {
    * Get store statistics (simplified version for dashboard)
    */
   getStoreStats(): Observable<ApiResponse<StoreStats>> {
-    return this.http.get<ApiResponse<StoreStats>>(`${this.apiUrl}/stores/dashboard`);
+    return this.http.get<ApiResponse<StoreStats>>(`${this.apiUrl}/stores/global/dashboard`);
   }
 
   /**
    * Get stores by organization ID
    */
-  getStoresByOrganization(organizationId: number, query?: Omit<StoreQueryDto, 'organization_id'>): Observable<PaginatedResponse<Store[]>> {
+  getStoresByOrganization(organizationId: number, query?: Omit<StoreQueryDto, 'organization_id'>): Observable<PaginatedResponse<StoreListItem[]>> {
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
@@ -124,7 +127,7 @@ export class StoresService {
     if (query?.store_type) params = params.set('store_type', query.store_type);
     if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
 
-    return this.http.get<PaginatedResponse<Store[]>>(`${this.apiUrl}/organizations/${organizationId}/stores`, { params });
+    return this.http.get<PaginatedResponse<StoreListItem[]>>(`${this.apiUrl}/organizations/${organizationId}/stores`, { params });
   }
 
   /**

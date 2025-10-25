@@ -83,7 +83,7 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
                 Organization
               </label>
               <div class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary">
-                {{ store.organization_name }} (ID: {{ store.organization_id }})
+                {{ store.organizations?.name || 'N/A' }} (ID: {{ store.organization_id }})
               </div>
             </div>
           </div>
@@ -294,23 +294,26 @@ export class StoreEditModalComponent {
   private populateForm(): void {
     if (!this.store) return;
 
+    // Get primary address if available
+    const primaryAddress = this.store.addresses?.find(addr => addr.is_primary) || this.store.addresses?.[0];
+
     this.storeForm.patchValue({
       name: this.store.name,
       slug: this.store.slug,
       store_code: this.store.store_code || '',
       description: '',
-      email: this.store.email,
-      phone: this.store.phone || '',
+      email: '', // Email is not in the new structure
+      phone: primaryAddress?.phone_number || '',
       website: '',
-      address: '',
-      city: this.store.city || '',
-      country: this.store.country || '',
+      address: primaryAddress?.address_line1 || '',
+      city: primaryAddress?.city || '',
+      country: primaryAddress?.country_code || '',
       store_type: this.store.store_type || StoreType.PHYSICAL,
       is_active: this.store.is_active !== undefined ? this.store.is_active : true,
       domain: '',
-      timezone: '',
+      timezone: this.store.timezone || '',
       currency_code: '',
-      manager_user_id: null,
+      manager_user_id: this.store.manager_user_id || null,
       color_primary: '',
       color_secondary: ''
     });
