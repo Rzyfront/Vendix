@@ -1,5 +1,13 @@
 # 🎭 ROLES & PERMISSIONS MANAGEMENT
 # Sistema de autorización RBAC multi-tenant
+#
+# Este archivo contiene pruebas HTTP para el módulo de roles y permisos.
+# Basado en la implementación actual de los controladores y servicios.
+#
+# Requisitos:
+# - Tener un usuario autenticado con token JWT válido
+# - El usuario debe tener los permisos adecuados según la operación
+# - Para operaciones críticas se requiere rol SUPER_ADMIN o ADMIN
 
 @baseUrl = http://localhost:3000/api
 @authToken = Bearer YOUR_JWT_TOKEN_HERE
@@ -9,61 +17,133 @@
 # =================================================================
 # 🎭 ROLES MANAGEMENT
 # =================================================================
+#
+# Endpoints implementados en roles.controller.ts:
+# - GET /roles - Obtener todos los roles (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - GET /roles/:id - Obtener rol por ID (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - POST /roles - Crear rol (requiere: SUPER_ADMIN, ADMIN)
+# - PATCH /roles/:id - Actualizar rol (requiere: SUPER_ADMIN, ADMIN)
+# - DELETE /roles/:id - Eliminar rol (requiere: SUPER_ADMIN, ADMIN)
+# - POST /roles/:id/permissions - Asignar permisos a rol (requiere: SUPER_ADMIN, ADMIN)
+# - DELETE /roles/:id/permissions - Remover permisos de rol (requiere: SUPER_ADMIN, ADMIN)
+# - POST /roles/assign-to-user - Asignar rol a usuario (requiere: SUPER_ADMIN, ADMIN)
+# - POST /roles/remove-from-user - Remover rol de usuario (requiere: SUPER_ADMIN, ADMIN)
+# - GET /roles/user/:userId/permissions - Obtener permisos de usuario (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - GET /roles/user/:userId/roles - Obtener roles de usuario (requiere: SUPER_ADMIN, ADMIN, MANAGER)
 
 ### Get All Roles
+# Obtiene todos los roles del sistema.
+# Los usuarios no super_admin no verán el rol super_admin en los resultados.
 GET {{baseUrl}}/roles
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Get Role by ID
+# Obtiene un rol específico por su ID.
+# Si el rol es super_admin y el usuario no es super_admin, retornará 404.
 GET {{baseUrl}}/roles/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Create Role
+# Crea un nuevo rol en el sistema.
+# El nombre debe ser único y no puede existir otro rol con el mismo nombre.
+# is_system_role es opcional (default: false) y no se puede modificar después.
 POST {{baseUrl}}/roles
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
   "name": "store_manager",
-  "description": "Store Manager Role",
+  "description": "Store Manager Role with administrative permissions",
   "is_system_role": false
 }
 
+###
+
+### Create System Role
+# Crea un rol del sistema (no se puede eliminar ni modificar después).
+POST {{baseUrl}}/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "system_role",
+  "description": "System role that cannot be modified",
+  "is_system_role": true
+}
+
+###
+
 ### Update Role
+# Actualiza un rol existente.
+# No se pueden modificar roles del sistema (is_system_role: true).
+# El nombre debe ser único si se cambia.
 PATCH {{baseUrl}}/roles/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
-  "description": "Updated description"
+  "name": "senior_store_manager",
+  "description": "Senior Store Manager with advanced permissions"
 }
 
+###
+
 ### Delete Role
+# Elimina un rol del sistema.
+# No se pueden eliminar roles del sistema.
+# No se pueden eliminar roles que tengan usuarios asignados.
 DELETE {{baseUrl}}/roles/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
+# =================================================================
+# 🔗 GESTIÓN DE PERMISOS DE ROLES
+# =================================================================
+
 ### Assign Permissions to Role
+# Asigna una lista de permisos a un rol.
+# Todos los permisos deben existir y estar en estado 'active'.
+# Se ignoran los duplicados automáticamente.
 POST {{baseUrl}}/roles/1/permissions
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
-  "permissionIds": [1, 2, 3]
+  "permissionIds": [1, 2, 3, 4, 5]
 }
 
+###
+
 ### Remove Permissions from Role
+# Remueve una lista de permisos de un rol.
+# Si un permiso no está asignado, simplemente se ignora.
 DELETE {{baseUrl}}/roles/1/permissions
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
-  "permissionIds": [2]
+  "permissionIds": [2, 4]
 }
 
+###
+
+# =================================================================
+# 👥 GESTIÓN DE ROLES DE USUARIOS
+# =================================================================
+
 ### Assign Role to User
+# Asigna un rol a un usuario específico.
+# Para asignar el rol super_admin, el usuario que realiza la operación debe ser super_admin.
+# Solo puede existir un super_admin en el sistema.
+# El usuario no debe tener ya este rol asignado.
 POST {{baseUrl}}/roles/assign-to-user
 Content-Type: application/json
 Authorization: {{authToken}}
@@ -73,7 +153,26 @@ Authorization: {{authToken}}
   "roleId": 2
 }
 
+###
+
+### Assign Super Admin Role
+# Asigna el rol super_admin a un usuario.
+# Solo un super_admin existente puede realizar esta operación.
+# Solo puede existir un super_admin en el sistema.
+POST {{baseUrl}}/roles/assign-to-user
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "userId": 10,
+  "roleId": 1
+}
+
+###
+
 ### Remove Role from User
+# Remueve un rol de un usuario específico.
+# No se puede remover el último rol del sistema de un usuario.
 POST {{baseUrl}}/roles/remove-from-user
 Content-Type: application/json
 Authorization: {{authToken}}
@@ -83,62 +182,335 @@ Authorization: {{authToken}}
   "roleId": 2
 }
 
+###
+
+# =================================================================
+# 🔍 UTILIDADES DE USUARIOS
+# =================================================================
+
 ### Get User Roles
+# Obtiene todos los roles asignados a un usuario específico.
+# Incluye los permisos asociados a cada rol.
 GET {{baseUrl}}/roles/user/5/roles
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Get User Permissions
+# Obtiene todos los permisos de un usuario (agregados de todos sus roles).
+# Elimina duplicados automáticamente.
 GET {{baseUrl}}/roles/user/5/permissions
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 # =================================================================
 # 🗝️ PERMISSIONS MANAGEMENT
 # =================================================================
+#
+# Endpoints implementados en permissions.controller.ts:
+# - GET /permissions - Obtener todos los permisos con filtros (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - GET /permissions/:id - Obtener permiso por ID (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - POST /permissions - Crear permiso (requiere: SUPER_ADMIN, ADMIN)
+# - PATCH /permissions/:id - Actualizar permiso (requiere: SUPER_ADMIN, ADMIN)
+# - DELETE /permissions/:id - Eliminar permiso (requiere: SUPER_ADMIN, ADMIN)
+# - GET /permissions/search/by-name/:name - Buscar permiso por nombre (requiere: SUPER_ADMIN, ADMIN, MANAGER)
+# - GET /permissions/search/by-path-method - Buscar permiso por ruta y método (requiere: SUPER_ADMIN, ADMIN, MANAGER)
 
 ### Get All Permissions
-GET {{baseUrl}}/permissions?page=1&limit=10
+# Obtiene todos los permisos del sistema con filtros opcionales.
+# Soporta filtros por método HTTP, estado y búsqueda por texto.
+GET {{baseUrl}}/permissions?method=POST&status=active&search=user
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Get Permission by ID
+# Obtiene un permiso específico por su ID.
+# Incluye información de roles asociados y conteos.
 GET {{baseUrl}}/permissions/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Search Permission by Name
+# Busca un permiso específico por su nombre único.
 GET {{baseUrl}}/permissions/search/by-name/users.create
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Search Permission by Path and Method
+# Busca un permiso específico por su ruta y método HTTP.
+# Ambos parámetros son requeridos.
 GET {{baseUrl}}/permissions/search/by-path-method?path=/api/users&method=POST
 Content-Type: application/json
 Authorization: {{authToken}}
 
+###
+
 ### Create Permission
+# Crea un nuevo permiso en el sistema.
+# El nombre debe ser único.
+# La combinación path-method debe ser única.
+# El método HTTP debe ser uno de: GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
 POST {{baseUrl}}/permissions
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
   "name": "orders.create",
-  "description": "Create new orders",
+  "description": "Create new orders in the system",
   "path": "/api/orders",
-  "method": "POST"
+  "method": "POST",
+  "status": "active"
 }
 
+###
+
+### Create Permission with Different HTTP Methods
+# Ejemplos de creación de permisos con diferentes métodos HTTP
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "users.update",
+  "description": "Update existing users",
+  "path": "/api/users",
+  "method": "PUT",
+  "status": "active"
+}
+
+###
+
 ### Update Permission
+# Actualiza un permiso existente.
+# El nombre y la combinación path-method deben seguir siendo únicos.
+# No se puede actualizar si tiene roles asignados y se produce conflicto.
 PATCH {{baseUrl}}/permissions/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
-  "description": "Updated permission description"
+  "name": "users.create.admin",
+  "description": "Create admin users with elevated privileges",
+  "path": "/api/admin/users",
+  "method": "POST",
+  "status": "active"
 }
 
+###
+
+### Deactivate Permission
+# Desactiva un permiso sin eliminarlo (cambia estado a 'inactive').
+PATCH {{baseUrl}}/permissions/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "status": "inactive"
+}
+
+###
+
 ### Delete Permission
+# Elimina un permiso del sistema.
+# No se puede eliminar si tiene roles asignados.
 DELETE {{baseUrl}}/permissions/1
 Content-Type: application/json
 Authorization: {{authToken}}
+
+###
+
+# =================================================================
+# 📊 ESCENARIOS DE PRUEBA COMPLETOS
+# =================================================================
+
+### Complete Workflow: Create Role -> Assign Permissions -> Assign to User
+# Flujo completo: Crear rol, asignar permisos y asignar a usuario
+
+# 1. Crear un nuevo rol
+POST {{baseUrl}}/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "inventory_manager",
+  "description": "Manager for inventory operations",
+  "is_system_role": false
+}
+
+###
+
+# 2. Crear permisos para el rol (si no existen)
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "inventory.read",
+  "description": "Read inventory items",
+  "path": "/api/inventory",
+  "method": "GET",
+  "status": "active"
+}
+
+###
+
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "inventory.update",
+  "description": "Update inventory items",
+  "path": "/api/inventory",
+  "method": "PATCH",
+  "status": "active"
+}
+
+###
+
+# 3. Asignar permisos al rol (asumiendo que el rol tiene ID 3 y los permisos IDs 10, 11)
+POST {{baseUrl}}/roles/3/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "permissionIds": [10, 11]
+}
+
+###
+
+# 4. Asignar el rol a un usuario
+POST {{baseUrl}}/roles/assign-to-user
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "userId": 5,
+  "roleId": 3
+}
+
+###
+
+# 5. Verificar los permisos del usuario
+GET {{baseUrl}}/roles/user/5/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+###
+
+# 6. Verificar los roles del usuario
+GET {{baseUrl}}/roles/user/5/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+###
+
+# =================================================================
+# 🔐 ESCENARIOS DE ERROR Y VALIDACIÓN
+# =================================================================
+
+### Error: Create Role with Duplicate Name
+# Intentar crear un rol con un nombre que ya existe
+POST {{baseUrl}}/roles
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "store_manager",
+  "description": "Duplicate role name",
+  "is_system_role": false
+}
+
+###
+
+### Error: Delete System Role
+# Intentar eliminar un rol del sistema
+DELETE {{baseUrl}}/roles/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+###
+
+### Error: Delete Role with Assigned Users
+# Intentar eliminar un rol que tiene usuarios asignados
+DELETE {{baseUrl}}/roles/2
+Content-Type: application/json
+Authorization: {{authToken}}
+
+###
+
+### Error: Create Permission with Duplicate Name
+# Intentar crear un permiso con nombre duplicado
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "users.create",
+  "description": "Duplicate permission name",
+  "path": "/api/users",
+  "method": "POST"
+}
+
+###
+
+### Error: Create Permission with Duplicate Path-Method
+# Intentar crear un permiso con combinación ruta-método duplicada
+POST {{baseUrl}}/permissions
+Content-Type: application/json
+Authorization: {{authToken}}
+
+{
+  "name": "users.create.duplicate",
+  "description": "Duplicate path-method combination",
+  "path": "/api/users",
+  "method": "POST"
+}
+
+###
+
+### Error: Delete Permission with Assigned Roles
+# Intentar eliminar un permiso que tiene roles asignados
+DELETE {{baseUrl}}/permissions/1
+Content-Type: application/json
+Authorization: {{authToken}}
+
+###
+
+# =================================================================
+# 📝 NOTAS IMPORTANTES
+# =================================================================
+
+# Consideraciones de Seguridad:
+# - Todas las operaciones requieren autenticación válida
+# - Las operaciones críticas requieren roles SUPER_ADMIN o ADMIN
+# - Solo puede existir un super_admin en el sistema
+# - Los roles del sistema no pueden ser modificados ni eliminados
+# - Los permisos con roles asignados no pueden ser eliminados
+#
+# Estados de Permisos:
+# - active: Permiso activo y disponible para asignación
+# - inactive: Permiso inactivo, no se puede asignar a nuevos roles
+# - deprecated: Permiso obsoleto, se mantiene por compatibilidad
+#
+# Métodos HTTP Válidos:
+# - GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD
+#
+# Respuestas Esperadas:
+# - 200: Operación exitosa
+# - 201: Recurso creado exitosamente
+# - 400: Datos inválidos o solicitud incorrecta
+# - 401: No autenticado
+# - 403: No autorizado (permisos insuficientes)
+# - 404: Recurso no encontrado
+# - 409: Conflicto (recurso duplicado)
+# - 500: Error interno del servidor
