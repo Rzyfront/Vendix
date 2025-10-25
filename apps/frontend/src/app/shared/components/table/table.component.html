@@ -1,8 +1,8 @@
 <div class="table-container" [class]="getTableClasses()">
   <!-- Loading overlay -->
-  <div *ngIf="loading" class="absolute inset-0 bg-surface/80 flex items-center justify-center z-10">
-    <div class="flex items-center gap-2 text-text-secondary">
-      <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+  <div *ngIf="loading" class="loading-overlay">
+    <div class="loading-content">
+      <svg class="loading-spinner" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
       </svg>
@@ -11,7 +11,7 @@
   </div>
 
   <!-- Table -->
-  <table class="w-full overflow-hidden table-auto">
+  <table class="table-element">
     <!-- Header -->
     <thead *ngIf="showHeader" [class]="getHeaderClasses()">
       <tr>
@@ -20,15 +20,15 @@
           *ngFor="let column of columns"
           [class]="getCellClasses(column)"
           (click)="onSort(column)"
-          [class.cursor-pointer]="sortable && column.sortable"
+          [class.sortable-header]="sortable && column.sortable"
         >
-          <div class="flex items-center gap-2" [class.justify-end]="column.align === 'right'" [class.justify-center]="column.align === 'center'">
+          <div class="header-content" [class.header-align-right]="column.align === 'right'" [class.header-align-center]="column.align === 'center'">
             <span>{{ column.label }}</span>
           </div>
         </th>
 
         <!-- Actions header -->
-        <th *ngIf="actions || actionsTemplate" class="w-20 text-center">
+        <th *ngIf="actions || actionsTemplate" class="actions-header">
           <span>Acciones</span>
         </th>
       </tr>
@@ -38,11 +38,11 @@
     <tbody>
       <!-- Data rows -->
       <ng-container *ngIf="data.length > 0">
-        <tr 
-          *ngFor="let item of data; let i = index" 
+        <tr
+          *ngFor="let item of data; let i = index"
           [class]="getRowClasses(i)"
           (click)="onRowClick(item)"
-          [class.cursor-pointer]="rowClick.observers.length > 0"
+          [class.clickable-row]="rowClick.observers.length > 0"
         >
           <!-- Data cells -->
           <td
@@ -51,15 +51,11 @@
           >
             <!-- Status template for state column -->
             <ng-container *ngIf="column.key === 'state'">
-              <span class="px-2 py-1 text-xs font-medium rounded-full"
-                    [class.bg-green-100]="item.state === 'active'"
-                    [class.text-green-800]="item.state === 'active'"
-                    [class.bg-orange-100]="item.state === 'inactive'"
-                    [class.text-orange-800]="item.state === 'inactive'"
-                    [class.bg-red-100]="item.state === 'suspended'"
-                    [class.text-red-800]="item.state === 'suspended'"
-                    [class.bg-gray-100]="item.state === 'draft'"
-                    [class.text-gray-800]="item.state === 'draft'">
+              <span class="status-badge"
+                    [class.status-active]="item.state === 'active'"
+                    [class.status-inactive]="item.state === 'inactive'"
+                    [class.status-suspended]="item.state === 'suspended'"
+                    [class.status-draft]="item.state === 'draft'">
                 {{ item.state === 'active' ? 'Active' : item.state === 'inactive' ? 'Inactive' : item.state === 'suspended' ? 'Suspended' : 'Draft' }}
               </span>
             </ng-container>
@@ -73,29 +69,29 @@
             
             <!-- Default content -->
             <ng-template #defaultContent>
-              <span class="text-text-primary" *ngIf="column.key !== 'state'">
+              <span class="cell-content" *ngIf="column.key !== 'state'">
                 <ng-container *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''; else noDataTemplate">
                   {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item, column.key) }}
                 </ng-container>
                 <ng-template #noDataTemplate>
-                  <span class="text-muted">{{ column.defaultValue || 'Data not found' }}</span>
+                  <span class="cell-content-empty">{{ column.defaultValue || 'Data not found' }}</span>
                 </ng-template>
               </span>
             </ng-template>
           </td>
 
           <!-- Actions cell -->
-          <td *ngIf="actions || actionsTemplate" class="text-center">
+          <td *ngIf="actions || actionsTemplate" class="actions-cell">
             <!-- Custom actions template -->
-            <ng-container 
+            <ng-container
               *ngIf="actionsTemplate; else defaultActions"
-              [ngTemplateOutlet]="actionsTemplate" 
+              [ngTemplateOutlet]="actionsTemplate"
               [ngTemplateOutletContext]="{ $implicit: item }"
             ></ng-container>
             
             <!-- Default actions -->
             <ng-template #defaultActions>
-              <div class="flex items-center justify-center gap-1">
+              <div class="table-actions">
                 <ng-container *ngFor="let action of actions">
                   <button
                     *ngIf="isActionVisible(action, item)"
@@ -123,12 +119,12 @@
 
       <!-- Empty state -->
       <tr *ngIf="!loading && data.length === 0">
-        <td [attr.colspan]="columns.length + (actions || actionsTemplate ? 1 : 0)" class="text-center py-8">
-          <div class="flex flex-col items-center gap-2 text-text-secondary">
-            <svg class="w-12 h-12 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <td [attr.colspan]="columns.length + (actions || actionsTemplate ? 1 : 0)" class="empty-cell">
+          <div class="empty-state">
+            <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
             </svg>
-            <span>{{ emptyMessage }}</span>
+            <span class="empty-message">{{ emptyMessage }}</span>
           </div>
         </td>
       </tr>

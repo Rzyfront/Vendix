@@ -1,16 +1,13 @@
 // Estilos para el componente de tabla usando tokens CSS de la aplicación
 
-// Clases de colores para estados
-.bg-orange-100 { background-color: #fed7aa; }
-.text-orange-800 { color: #9a3412; }
-
+// Contenedor principal de la tabla
 .table-container {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-sm);
   border: var(--border-width) solid var(--color-border);
   background-color: var(--color-surface);
-  box-shadow: none;
+  box-shadow: var(--shadow-sm);
 
   // Contenedor con scroll horizontal para tablas muy anchas
   &.table-scrollable {
@@ -45,7 +42,7 @@
 }
 
 // Estilos base para la tabla
-table {
+.table-element {
   width: 100%;
   border-collapse: collapse;
   font-family: var(--font-primary);
@@ -63,13 +60,14 @@ table {
       top: 0;
       z-index: 5;
       transition: background-color var(--transition-fast) ease;
-      padding: 16px 12px;
+      padding: var(--control-padding);
 
-      // Efecto hover en columnas ordenables
-      &.cursor-pointer {
+      // Efecto hover suave en columnas ordenables
+      &.sortable-header {
+        cursor: pointer;
+        
         &:hover {
-          background-color: var(--color-text-secondary);
-          opacity: 0.1;
+          background-color: rgba(var(--color-primary), 0.05);
         }
       }
 
@@ -88,21 +86,27 @@ table {
   tbody {
     tr {
       border-bottom: var(--border-width) solid var(--color-border);
-      transition: background-color var(--transition-fast) ease;
+      transition: all var(--transition-fast) ease;
 
-      // Efecto hover en filas
+      // Efecto hover suave y sutil en filas
       &:hover {
-        background-color: var(--color-background);
+        background-color: rgba(var(--color-primary), 0.02);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
 
-      // Filas con efecto striped (cebra)
+      // Filas con efecto striped (cebra) más sutil
       &:nth-child(even) {
-        background-color: var(--color-background);
+        background-color: rgba(var(--color-background), 0.3);
         
         &:hover {
-          background-color: var(--color-text-secondary);
-          opacity: 0.05;
+          background-color: rgba(var(--color-primary), 0.03);
         }
+      }
+
+      // Filas clicables
+      &.clickable-row {
+        cursor: pointer;
       }
 
       // Celdas de datos
@@ -110,6 +114,7 @@ table {
         padding: var(--control-padding);
         vertical-align: middle;
         border-bottom: var(--border-width) solid var(--color-border);
+        transition: all var(--transition-fast) ease;
 
         // Alineación de texto
         &.text-center {
@@ -121,12 +126,19 @@ table {
         }
 
         // Contenido de las celdas
-        span {
+        .cell-content {
           display: block;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
           max-width: 200px;
+          color: var(--color-text-primary);
+          transition: color var(--transition-fast) ease;
+        }
+
+        .cell-content-empty {
+          color: var(--color-text-muted);
+          font-style: italic;
         }
       }
 
@@ -142,20 +154,122 @@ table {
   }
 }
 
+// Badges de estado compactos y centrados
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  border-radius: var(--radius-pill);
+  text-align: center;
+  white-space: nowrap;
+  transition: all var(--transition-fast) ease;
+  min-width: 70px;
+  box-shadow: var(--shadow-sm);
+
+  // Estado activo - verde
+  &.status-active {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #166534;
+    border: 1px solid rgba(34, 197, 94, 0.2);
+
+    &:hover {
+      background-color: rgba(34, 197, 94, 0.15);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+
+  // Estado inactivo - naranja
+  &.status-inactive {
+    background-color: rgba(251, 146, 60, 0.1);
+    color: #9a3412;
+    border: 1px solid rgba(251, 146, 60, 0.2);
+
+    &:hover {
+      background-color: rgba(251, 146, 60, 0.15);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+
+  // Estado suspendido - rojo
+  &.status-suspended {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #991b1b;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+
+    &:hover {
+      background-color: rgba(239, 68, 68, 0.15);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+
+  // Estado borrador - gris
+  &.status-draft {
+    background-color: rgba(148, 163, 184, 0.1);
+    color: #475569;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+
+    &:hover {
+      background-color: rgba(148, 163, 184, 0.15);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-md);
+    }
+  }
+}
+
+// Contenido del encabezado
+.header-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &.header-align-right {
+    justify-content: flex-end;
+  }
+
+  &.header-align-center {
+    justify-content: center;
+  }
+}
+
+// Encabezado de acciones
+.actions-header {
+  width: 120px;
+  text-align: center;
+  font-weight: var(--fw-semibold);
+}
+
+// Celda de acciones
+.actions-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
 // Estados de tamaño
 .table-size-sm {
-  table {
+  .table-element {
     font-size: var(--fs-xs);
     
     thead th,
     tbody td {
       padding: 6px 8px;
     }
+
+    .status-badge {
+      padding: 2px 6px;
+      font-size: 10px;
+      min-width: 60px;
+    }
   }
 }
 
 .table-size-md {
-  table {
+  .table-element {
     font-size: var(--fs-sm);
     
     thead th,
@@ -166,12 +280,18 @@ table {
 }
 
 .table-size-lg {
-  table {
+  .table-element {
     font-size: var(--fs-base);
     
     thead th,
     tbody td {
       padding: 16px 20px;
+    }
+
+    .status-badge {
+      padding: 6px 14px;
+      font-size: var(--fs-sm);
+      min-width: 80px;
     }
   }
 }
@@ -180,7 +300,7 @@ table {
 .table-bordered {
   border: var(--border-width) solid var(--color-border);
   
-  table {
+  .table-element {
     thead th,
     tbody td {
       border: var(--border-width) solid var(--color-border);
@@ -189,35 +309,43 @@ table {
 }
 
 .table-striped {
-  table {
+  .table-element {
     tbody tr:nth-child(even) {
-      background-color: var(--color-background);
+      background-color: rgba(var(--color-background), 0.3);
     }
   }
 }
 
 .table-hoverable {
-  table {
+  .table-element {
     tbody tr {
       cursor: pointer;
       
       &:hover {
-        background-color: var(--color-background);
+        background-color: rgba(var(--color-primary), 0.02);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
     }
   }
 }
 
 .table-compact {
-  table {
+  .table-element {
     thead th,
     tbody td {
       padding: 8px 12px;
     }
+
+    .status-badge {
+      padding: 2px 6px;
+      font-size: 10px;
+      min-width: 60px;
+    }
   }
 }
 
-// Botones de acciones
+// Botones de acciones mejorados
 .table-actions {
   display: flex;
   gap: 4px;
@@ -228,8 +356,8 @@ table {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
-    border-radius: 0;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
     font-size: var(--fs-xs);
     font-weight: var(--fw-medium);
     border: none;
@@ -238,7 +366,28 @@ table {
     min-width: auto;
     background: transparent;
     color: var(--color-text-secondary);
-    opacity: 0.7;
+    opacity: 0.8;
+    position: relative;
+    overflow: hidden;
+
+    // Efecto ripple sutil
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 50%;
+      background: rgba(var(--color-primary), 0.1);
+      transform: translate(-50%, -50%);
+      transition: width 0.3s ease, height 0.3s ease;
+    }
+
+    &:hover::before {
+      width: 100%;
+      height: 100%;
+    }
 
     // Variante primaria
     &.action-primary {
@@ -246,7 +395,9 @@ table {
       
       &:hover:not(:disabled) {
         opacity: 1;
-        background-color: rgba(126, 215, 165, 0.1);
+        background-color: rgba(var(--color-primary), 0.1);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
     }
 
@@ -257,6 +408,8 @@ table {
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: var(--color-background);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
     }
 
@@ -267,6 +420,8 @@ table {
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: rgba(239, 68, 68, 0.1);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
     }
 
@@ -278,6 +433,8 @@ table {
         opacity: 1;
         background-color: var(--color-background);
         color: var(--color-text-primary);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
     }
 
@@ -285,61 +442,81 @@ table {
     &:disabled {
       opacity: 0.3;
       cursor: not-allowed;
+      transform: none !important;
     }
 
     // Iconos
     svg {
       width: 12px;
       height: 12px;
+      z-index: 1;
+    }
+
+    span {
+      z-index: 1;
     }
   }
 }
 
-// Estado de carga
+// Estado de carga mejorado
 .loading-overlay {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(255, 255, 255, 0.8);
+  background-color: rgba(var(--color-surface), 0.9);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
 
   .loading-content {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
     color: var(--color-text-secondary);
     
-    svg {
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
       animation: spin 1s linear infinite;
     }
   }
 }
 
-// Estado vacío
+// Estado vacío mejorado
 .empty-state {
-  padding: 32px 16px;
+  padding: 48px 16px;
   text-align: center;
   color: var(--color-text-secondary);
   
   .empty-icon {
     width: 48px;
     height: 48px;
-    margin: 0 auto 12px;
-    opacity: 0.5;
+    margin: 0 auto 16px;
+    opacity: 0.4;
+    transition: all var(--transition-fast) ease;
+  }
+
+  &:hover .empty-icon {
+    opacity: 0.6;
+    transform: scale(1.05);
   }
   
   .empty-message {
     font-size: var(--fs-sm);
     margin: 0;
+    color: var(--color-text-muted);
   }
+}
+
+.empty-cell {
+  padding: 0;
+  text-align: center;
 }
 
 // Animación de spin para el loading
@@ -352,17 +529,23 @@ table {
   }
 }
 
-// Responsive design
+// Responsive design mejorado
 @media (max-width: 768px) {
   .table-container {
     border-radius: var(--radius-sm);
     
-    table {
+    .table-element {
       font-size: var(--fs-xs);
       
       thead th,
       tbody td {
         padding: 8px 12px;
+      }
+
+      .status-badge {
+        padding: 2px 6px;
+        font-size: 10px;
+        min-width: 60px;
       }
     }
   }
@@ -386,34 +569,70 @@ table {
   .table-container {
     border-radius: var(--radius-sm);
     
-    table {
+    .table-element {
       thead th,
       tbody td {
         padding: 6px 8px;
+      }
+
+      .status-badge {
+        min-width: 50px;
+        font-size: 9px;
       }
     }
   }
 }
 
-// Tema oscuro
+// Tema oscuro mejorado
 [data-theme="dark"] {
   .loading-overlay {
-    background-color: rgba(11, 18, 32, 0.8);
+    background-color: rgba(var(--color-surface), 0.95);
   }
   
-  table {
+  .table-element {
     tbody tr {
       &:hover {
-        background-color: rgba(255, 255, 255, 0.05);
+        background-color: rgba(255, 255, 255, 0.03);
       }
       
       &:nth-child(even) {
-        background-color: rgba(255, 255, 255, 0.02);
+        background-color: rgba(255, 255, 255, 0.01);
         
         &:hover {
-          background-color: rgba(255, 255, 255, 0.05);
+          background-color: rgba(255, 255, 255, 0.04);
         }
       }
+    }
+  }
+
+  // Badges en tema oscuro
+  .status-badge {
+    // Estado activo - verde en tema oscuro
+    &.status-active {
+      background-color: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+
+    // Estado inactivo - naranja en tema oscuro
+    &.status-inactive {
+      background-color: rgba(251, 146, 60, 0.15);
+      color: #fb923c;
+      border-color: rgba(251, 146, 60, 0.3);
+    }
+
+    // Estado suspendido - rojo en tema oscuro
+    &.status-suspended {
+      background-color: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    // Estado borrador - gris en tema oscuro
+    &.status-draft {
+      background-color: rgba(148, 163, 184, 0.15);
+      color: #94a3b8;
+      border-color: rgba(148, 163, 184, 0.3);
     }
   }
 }

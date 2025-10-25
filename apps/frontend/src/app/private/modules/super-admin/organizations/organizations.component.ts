@@ -44,7 +44,7 @@ import './organizations.component.css';
   ],
   providers: [OrganizationsService],
   template: `
-    <div class="space-y-6">
+    <div class="p-6 space-y-6">
       <!-- Stats Cards -->
       <app-organization-stats [stats]="stats"></app-organization-stats>
 

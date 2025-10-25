@@ -2,16 +2,16 @@ import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 // Import shared components
-import { CardComponent, IconComponent } from '../../../../../shared/components';
+import { IconComponent } from '../../../../../shared/components';
 
 @Component({
   selector: 'app-organization-stats',
   standalone: true,
-  imports: [CommonModule, CardComponent, IconComponent],
+  imports: [CommonModule, IconComponent],
   template: `
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
       <!-- Total Organizations -->
-      <app-card shadow="sm" customClasses="p-4">
+      <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Total Organizations</p>
@@ -21,10 +21,10 @@ import { CardComponent, IconComponent } from '../../../../../shared/components';
             <app-icon name="building" [size]="24" class="text-primary"></app-icon>
           </div>
         </div>
-      </app-card>
+      </div>
 
       <!-- Active Organizations -->
-      <app-card shadow="sm" customClasses="p-4">
+      <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Active</p>
@@ -34,10 +34,10 @@ import { CardComponent, IconComponent } from '../../../../../shared/components';
             <app-icon name="check" [size]="24" class="text-green-600"></app-icon>
           </div>
         </div>
-      </app-card>
+      </div>
 
       <!-- Inactive Organizations -->
-      <app-card shadow="sm" customClasses="p-4">
+      <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Inactive</p>
@@ -47,10 +47,10 @@ import { CardComponent, IconComponent } from '../../../../../shared/components';
             <app-icon name="warning" [size]="24" class="text-yellow-600"></app-icon>
           </div>
         </div>
-      </app-card>
+      </div>
 
       <!-- Suspended Organizations -->
-      <app-card shadow="sm" customClasses="p-4">
+      <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Suspended</p>
@@ -60,7 +60,7 @@ import { CardComponent, IconComponent } from '../../../../../shared/components';
             <app-icon name="close" [size]="24" class="text-red-600"></app-icon>
           </div>
         </div>
-      </app-card>
+      </div>
     </div>
   `,
   styles: [`

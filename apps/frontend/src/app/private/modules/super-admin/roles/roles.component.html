@@ -1,0 +1,160 @@
+<div class="p-6 space-y-6">
+  <!-- Stats Cards -->
+  <app-role-stats [stats]="roleStats"></app-role-stats>
+
+  <!-- Roles List -->
+  <div class="bg-surface rounded-card shadow-card border border-border">
+    <div class="px-6 py-4 border-b border-border">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            All Roles
+          </h2>
+        </div>
+        
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <!-- Filter by role type -->
+          <select
+            class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            [(ngModel)]="filterForm.value.is_system_role"
+            (ngModelChange)="filterForm.patchValue({ is_system_role: $event })"
+          >
+            <option *ngFor="let type of roleTypes" [value]="type.value">
+              {{ type.label }}
+            </option>
+          </select>
+          
+          <!-- Input de búsqueda compacto -->
+          <app-inputsearch
+            class="w-full sm:w-64"
+            size="sm"
+            placeholder="Search roles..."
+            [debounceTime]="1000"
+            (searchChange)="onSearchChange($event)"
+          ></app-inputsearch>
+          
+          <div class="flex gap-2">
+            <button
+              class="px-3 py-2 rounded-button font-medium border border-border text-text-primary hover:bg-muted/20 disabled:opacity-50 text-sm"
+              (click)="refreshRoles()"
+              [disabled]="isLoading"
+              title="Refresh"
+            >
+              <app-icon name="refresh" [size]="16"></app-icon>
+            </button>
+            <button
+              class="px-3 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 text-sm flex items-center gap-2"
+              (click)="createRole()"
+              title="New Role"
+            >
+              <app-icon name="plus" [size]="16"></app-icon>
+              <span class="hidden sm:inline">New Role</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="p-8 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <p class="mt-2 text-text-secondary">Loading roles...</p>
+    </div>
+
+    <!-- Empty State -->
+    <app-role-empty-state
+      *ngIf="!isLoading && roles.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      (actionClick)="createRole()">
+    </app-role-empty-state>
+
+    <!-- Roles Table -->
+    <div *ngIf="!isLoading && roles.length > 0" class="p-6">
+      <app-table
+        [data]="roles"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [loading]="isLoading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onSortChange($event)"
+        (rowClick)="editRole($event)">
+      </app-table>
+    </div>
+  </div>
+
+  <!-- Create Role Modal -->
+  <app-role-create-modal
+    [isOpen]="showCreateModal"
+    [isSubmitting]="isCreatingRole"
+    (openChange)="showCreateModal = $event"
+    (submit)="onRoleCreated($event)"
+    (cancel)="showCreateModal = false"
+  ></app-role-create-modal>
+
+  <!-- Edit Role Modal -->
+  <app-role-edit-modal
+    [isOpen]="showEditModal"
+    [isSubmitting]="isUpdatingRole"
+    [role]="currentRole"
+    (openChange)="showEditModal = $event"
+    (submit)="onRoleUpdated($event)"
+    (cancel)="showEditModal = false"
+  ></app-role-edit-modal>
+
+  <!-- Delete Confirmation Modal -->
+  <div *ngIf="showDeleteModal" class="fixed inset-0 z-50 overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+      <!-- Background overlay -->
+      <div class="fixed inset-0 transition-opacity" aria-hidden="true">
+        <div class="absolute inset-0 bg-gray-500 opacity-75"></div>
+      </div>
+
+      <!-- Modal panel -->
+      <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+        <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+          <div class="sm:flex sm:items-start">
+            <div class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
+              <svg class="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+              <h3 class="text-lg leading-6 font-medium text-gray-900">
+                Delete Role
+              </h3>
+              <div class="mt-2">
+                <p class="text-sm text-gray-500">
+                  Are you sure you want to delete the role "{{ roleToDelete?.name }}"? This action cannot be undone.
+                </p>
+                <p *ngIf="roleToDelete && roleToDelete._count && roleToDelete._count.user_roles > 0" class="text-sm text-red-600 mt-2">
+                  Warning: This role is assigned to {{ roleToDelete._count.user_roles }} user(s). You must remove the role from all users before deleting it.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+          <button
+            type="button"
+            class="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+            (click)="deleteRole()"
+            [disabled]="roleToDelete && roleToDelete._count && roleToDelete._count.user_roles > 0"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+            (click)="showDeleteModal = false"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
