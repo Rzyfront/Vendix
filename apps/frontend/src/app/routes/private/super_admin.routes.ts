@@ -27,6 +27,10 @@ export const superAdminRoutes: Routes = [
       {
         path: 'roles',
         loadComponent: () => import('../../private/modules/super-admin/roles/roles.component').then(c => c.RolesComponent)
+      },
+      {
+        path: 'stores',
+        loadComponent: () => import('../../private/modules/super-admin/stores/stores.component').then(c => c.StoresComponent)
       }
     ]
   }

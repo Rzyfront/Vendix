@@ -78,6 +78,11 @@ export class SuperAdminLayoutComponent implements OnInit {
       route: '/super-admin/organizations'
     },
     {
+      label: 'Stores',
+      icon: 'store',
+      route: '/super-admin/stores'
+    },
+    {
       label: 'Users',
       icon: 'users',
       route: '/super-admin/users'

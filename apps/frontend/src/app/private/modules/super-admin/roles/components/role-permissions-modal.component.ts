@@ -42,22 +42,22 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
             ></app-inputsearch>
           </div>
           <div class="flex gap-2">
-            <button
-              type="button"
-              class="btn btn-secondary"
-              (click)="selectAllPermissions()"
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="selectAllPermissions()"
               [disabled]="isLoading"
             >
               Seleccionar todos
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              (click)="deselectAllPermissions()"
+            </app-button>
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="deselectAllPermissions()"
               [disabled]="isLoading"
             >
               Deseleccionar todos
-            </button>
+            </app-button>
           </div>
         </div>
 
@@ -150,24 +150,21 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
       </div>
 
       <div slot="footer" class="modal-footer">
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="onCancel()"
+        <app-button
+          variant="outline"
+          (clicked)="onCancel()"
           [disabled]="isSubmitting"
         >
           Cancelar
-        </button>
-        <button
-          type="button"
-          class="btn btn-primary"
-          (click)="onSave()"
+        </app-button>
+        <app-button
+          variant="primary"
+          (clicked)="onSave()"
           [disabled]="isSubmitting || selectedPermissions.length === 0"
+          [loading]="isSubmitting"
         >
-          <app-icon *ngIf="isSubmitting" name="refresh" class="animate-spin" size="16"></app-icon>
           <span *ngIf="!isSubmitting">Guardar Cambios</span>
-          <span *ngIf="isSubmitting">Guardando...</span>
-        </button>
+        </app-button>
       </div>
     </app-modal>
   `,
