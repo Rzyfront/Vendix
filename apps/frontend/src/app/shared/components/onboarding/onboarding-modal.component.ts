@@ -57,7 +57,7 @@ import { DomainConfigStepComponent } from './steps/domain-config-step.component'
       [showCloseButton]="false"
       [closeOnBackdrop]="false"
       [closeOnEscape]="false"
-      (closed)="onModalClosed()"
+      (closed)="closeModal()"
     >
       <div slot="header">
         <div class="flex items-center justify-between">
@@ -536,7 +536,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     });
   }
 
-  private closeModal(): void {
+  closeModal(): void {
     this.isOpen = false;
     this.isOpenChange.emit(false);
     this.onboardingService.closeOnboarding();

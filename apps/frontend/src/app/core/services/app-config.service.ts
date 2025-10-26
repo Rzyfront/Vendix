@@ -144,12 +144,21 @@ export class AppConfigService {
   }
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
-    const currentHostname =
+    const rawHostname =
       hostname ||
       (typeof window !== 'undefined' ? window.location.hostname : 'localhost');
+    const currentHostname = this.cleanHostname(rawHostname);
     const domainInfo = await this.resolveDomainFromAPI(currentHostname);
     if (!domainInfo) throw new Error(`Domain ${currentHostname} not found`);
     return this.buildDomainConfig(currentHostname, domainInfo);
+  }
+
+  private cleanHostname(hostname: string): string {
+    // Remover el subdominio www si está presente
+    if (hostname.startsWith('www.')) {
+      return hostname.substring(4);
+    }
+    return hostname;
   }
 
   private async resolveDomainFromAPI(

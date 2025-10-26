@@ -24,13 +24,7 @@ import { UserConfigData } from '../interfaces/onboarding.interface';
 @Component({
   selector: 'app-user-config-step',
   standalone: true,
-  imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    InputComponent,
-    ButtonComponent,
-    IconComponent,
-  ],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, IconComponent],
   template: `
     <div class="space-y-6">
       <!-- Header del Paso -->

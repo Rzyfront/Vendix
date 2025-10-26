@@ -32,7 +32,6 @@ import {
     CommonModule,
     ReactiveFormsModule,
     InputComponent,
-    ButtonComponent,
     IconComponent,
     SelectorComponent,
   ],

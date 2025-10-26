@@ -65,7 +65,6 @@ import { takeUntil } from 'rxjs/operators';
         (isOpenChange)="onOnboardingModalChange($event)"
         (completed)="onOnboardingCompleted($event)"
       ></app-onboarding-modal>
-      </div>
     </div>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
