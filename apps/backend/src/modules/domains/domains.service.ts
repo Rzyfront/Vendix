@@ -16,49 +16,13 @@ import {
   VerifyDomainDto,
   VerifyDomainResult,
 } from './dto/domain-settings.dto';
-
-export interface DomainSettingResponse {
-  id: number;
-  hostname: string;
-  organization_id: number;
-  store_id?: number;
-  config: any;
-  created_at: string;
-  updated_at: string;
-  organization?: {
-    id: number;
-    name: string;
-    slug: string;
-  };
-  store?: {
-    id: number;
-    name: string;
-    slug: string;
-  };
-  domain_type?: string;
-  status?: string;
-  ssl_status?: string;
-  is_primary?: boolean;
-  verification_token?: string | null;
-}
-
-export interface DomainResolutionResponse {
-  id: number;
-  hostname: string;
-  organization_id: number;
-  store_id?: number;
-  config: any;
-  created_at: string;
-  updated_at: string;
-  store_name?: string;
-  store_slug?: string;
-  organization_name?: string;
-  organization_slug?: string;
-  domain_type: string;
-  status?: string;
-  ssl_status?: string;
-  is_primary?: boolean;
-}
+import {
+  DomainSettingResponse,
+  DomainResolutionResponse,
+  DomainListResponse,
+  DomainAvailabilityResponse,
+  DomainValidationResponse,
+} from './types/domain.types';
 
 /**
  * Servicio de Dominios
@@ -236,6 +200,7 @@ export class DomainsService implements OnModuleInit {
       status: domainConfig.status,
       ssl_status: domainConfig.ssl_status,
       is_primary: domainConfig.is_primary,
+      ownership: domainConfig.ownership,
     };
 
     // Guardar en caché
@@ -253,7 +218,7 @@ export class DomainsService implements OnModuleInit {
    */
   async checkHostnameAvailability(
     hostname: string,
-  ): Promise<{ available: boolean; reason?: string }> {
+  ): Promise<DomainAvailabilityResponse> {
     this.logger.log(`🔍 Checking hostname availability: ${hostname}`);
 
     try {
@@ -336,10 +301,13 @@ export class DomainsService implements OnModuleInit {
       data.domainType,
     );
 
+    // Inferir ownership si no se pasa
+    const inferredOwnership =
+      data.ownership || this.inferOwnership(data.hostname, inferredType);
+
     // Estado inicial
     const status =
-      data.status ||
-      (inferredType === 'store' ? 'pending_dns' : 'active');
+      data.status || (inferredType === 'store' ? 'pending_dns' : 'active');
     const sslStatus = data.sslStatus || 'none';
 
     // Verificación: un dominio primario por (org, store?) y tipo base organizacional/tienda
@@ -379,6 +347,7 @@ export class DomainsService implements OnModuleInit {
         status: status as any,
         ssl_status: sslStatus as any,
         is_primary: isPrimary,
+        ownership: inferredOwnership as any,
         verification_token: verificationToken,
       },
       include: {
@@ -405,12 +374,7 @@ export class DomainsService implements OnModuleInit {
     search?: string;
     limit?: number;
     offset?: number;
-  }): Promise<{
-    data: DomainSettingResponse[];
-    total: number;
-    limit: number;
-    offset: number;
-  }> {
+  }): Promise<DomainListResponse> {
     const where: any = {};
 
     if (filters?.organizationId) {
@@ -807,9 +771,7 @@ export class DomainsService implements OnModuleInit {
   /**
    * Validar formato de hostname
    */
-  async validateHostname(
-    hostname: string,
-  ): Promise<{ valid: boolean; reason?: string }> {
+  async validateHostname(hostname: string): Promise<DomainValidationResponse> {
     try {
       const exists = await this.prisma.domain_settings.findUnique({
         where: { hostname },
@@ -850,6 +812,7 @@ export class DomainsService implements OnModuleInit {
       status: domainSetting.status,
       ssl_status: domainSetting.ssl_status,
       is_primary: domainSetting.is_primary,
+      ownership: domainSetting.ownership,
       verification_token: domainSetting.verification_token || null,
     };
   }
@@ -862,12 +825,30 @@ export class DomainsService implements OnModuleInit {
     if (provided) return provided;
     if (hostname.endsWith('.vendix.com')) {
       const parts = hostname.split('.');
-      if (parts.length === 3)
-        return hasStore ? 'ecommerce' : 'organization';
+      if (parts.length === 3) return hasStore ? 'ecommerce' : 'organization';
       if (parts.length === 4) return 'ecommerce';
       return 'vendix_core';
     }
     return hasStore ? 'store' : 'organization';
+  }
+
+  private inferOwnership(hostname: string, domainType?: string): string {
+    // Si es un subdominio de vendix
+    if (hostname.endsWith('.vendix.com')) {
+      const parts = hostname.split('.');
+      if (parts.length === 2) return 'vendix_core'; // vendix.com
+      if (parts.length === 3) return 'vendix_subdomain'; // tienda.vendix.com
+      return 'vendix_subdomain'; // app.tienda.vendix.com
+    }
+
+    // Si es un subdominio de un dominio personalizado
+    const parts = hostname.split('.');
+    if (parts.length > 2) {
+      return 'custom_subdomain';
+    }
+
+    // Dominio personalizado directo
+    return 'custom_domain';
   }
 
   private async clearExistingPrimary(
@@ -892,5 +873,88 @@ export class DomainsService implements OnModuleInit {
       Math.random().toString(36).substring(2, 12) +
       Date.now().toString(36)
     );
+  }
+
+  // ==================== ESTADÍSTICAS DE DOMINIOS ====================
+
+  /**
+   * Obtener estadísticas generales de dominios
+   */
+  async getDomainStats(): Promise<{
+    total: number;
+    active: number;
+    pending: number;
+    verified: number;
+    platformSubdomains: number;
+    customDomains: number;
+    clientSubdomains: number;
+    aliasDomains: number;
+  }> {
+    this.logger.log('📊 Fetching domain statistics');
+
+    // Obtener todos los dominios con sus estados
+    const domains = await this.prisma.domain_settings.findMany({
+      select: {
+        status: true,
+        ssl_status: true,
+        ownership: true,
+        domain_type: true,
+        last_verified_at: true,
+      },
+    });
+
+    // Calcular estadísticas
+    const stats = {
+      total: domains.length,
+      active: 0,
+      pending: 0,
+      verified: 0,
+      platformSubdomains: 0,
+      customDomains: 0,
+      clientSubdomains: 0,
+      aliasDomains: 0,
+    };
+
+    domains.forEach((domain) => {
+      // Estadísticas por estado
+      if (domain.status === 'active') {
+        stats.active++;
+      } else if (
+        domain.status === 'pending_dns' ||
+        domain.status === 'pending_ssl'
+      ) {
+        stats.pending++;
+      }
+
+      // Estadísticas de verificación (SSL)
+      if (domain.ssl_status === 'issued' || domain.last_verified_at) {
+        stats.verified++;
+      }
+
+      // Estadísticas por ownership
+      switch (domain.ownership) {
+        case 'vendix_subdomain':
+          stats.platformSubdomains++;
+          break;
+        case 'custom_domain':
+          stats.customDomains++;
+          break;
+        case 'custom_subdomain':
+          stats.clientSubdomains++;
+          break;
+        case 'third_party_subdomain':
+          stats.aliasDomains++;
+          break;
+        case 'vendix_core':
+          stats.platformSubdomains++;
+          break;
+      }
+    });
+
+    this.logger.log(
+      `✅ Domain stats calculated: Total=${stats.total}, Active=${stats.active}, Pending=${stats.pending}`,
+    );
+
+    return stats;
   }
 }

@@ -1,0 +1,385 @@
+// Componente Selector usando tokens CSS de la aplicación - Estilo similar a InputSearch
+@use "../_constants.scss" as constants;
+
+// Contenedor principal - siempre ocupa todo el ancho disponible
+.selector-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-family: var(--font-primary);
+
+  // Estados
+  &.selector-disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  &.selector-error {
+    .selector-wrapper {
+      border-color: var(--color-destructive);
+    }
+  }
+
+  &.selector-focused {
+    .selector-wrapper {
+      box-shadow: 0 0 0 2px var(--color-ring);
+    }
+  }
+
+  // Variaciones de tamaño para el contenedor
+  &.selector-sm {
+    max-width: 100%;
+  }
+
+  &.selector-md {
+    max-width: 100%;
+  }
+
+  &.selector-lg {
+    max-width: 100%;
+  }
+}
+
+// Etiqueta
+.selector-label {
+  display: block;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-primary);
+  margin-bottom: 0.5rem;
+
+  &.opacity-50 {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// Wrapper del select y icono
+.selector-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast) ease;
+
+  &:hover:not(.selector-disabled) {
+    border-color: var(--color-text-secondary);
+  }
+
+  // Estados
+  &.selector-focused {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+
+  &.selector-error {
+    border-color: var(--color-destructive);
+
+    &:focus {
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+    }
+  }
+
+  &.selector-disabled {
+    background-color: var(--color-background);
+    cursor: not-allowed;
+  }
+
+  // Variaciones de tamaño
+  &.selector-sm {
+    height: constants.$height-sm; // 36px
+    padding: 0 constants.$padding-x-sm;
+  }
+
+  &.selector-md {
+    height: constants.$height-md; // 44px
+    padding: 0 constants.$padding-x-md;
+  }
+
+  &.selector-lg {
+    height: constants.$height-lg; // 52px
+    padding: 0 constants.$padding-x-lg;
+  }
+}
+
+// Select principal
+.selector-select {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  cursor: pointer;
+  appearance: none;
+  transition: all var(--transition-fast) ease;
+  display: block;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  line-height: 1.5;
+  vertical-align: middle;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &::placeholder {
+    color: var(--color-text-secondary);
+  }
+
+  &::placeholder {
+    color: var(--color-text-secondary);
+  }
+
+  // Estados
+  &.selector-disabled {
+    cursor: not-allowed;
+    color: var(--color-text-secondary);
+  }
+
+  &.selector-error {
+    color: var(--color-destructive);
+  }
+
+  // Variaciones de tamaño
+  &.selector-sm {
+    font-size: constants.$font-size-sm;
+    padding: 0.5rem constants.$padding-x-sm;
+    padding-right: 2rem;
+    height: constants.$height-sm;
+    line-height: 1.25;
+    min-height: constants.$height-sm;
+    max-height: constants.$height-sm;
+  }
+
+  &.selector-md {
+    font-size: constants.$font-size-md;
+    padding: 0.75rem constants.$padding-x-md;
+    padding-right: 2.5rem;
+    height: constants.$height-md;
+    line-height: 1.25;
+    min-height: constants.$height-md;
+    max-height: constants.$height-md;
+  }
+
+  &.selector-lg {
+    font-size: constants.$font-size-lg;
+    padding: 1rem constants.$padding-x-lg;
+    padding-right: 3rem;
+    height: constants.$height-lg;
+    line-height: 1.25;
+    min-height: constants.$height-lg;
+    max-height: constants.$height-lg;
+  }
+
+  // Ajustar padding cuando hay iconos (similar a inputsearch)
+  &:has(+ .selector-icon) {
+    padding-right: 2.5rem;
+  }
+
+  // Variantes
+  &.selector-outline {
+    border-width: 2px;
+  }
+
+  &.selector-filled {
+    background-color: rgba(148, 163, 184, 0.2);
+    border-color: transparent;
+
+    &:focus {
+      background-color: var(--color-surface);
+      border-color: var(--color-border);
+    }
+  }
+
+  // Hover states
+  &:hover:not(:disabled) {
+    border-color: var(--color-text-secondary);
+  }
+
+  // Focus states
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-ring);
+    border-color: transparent;
+  }
+
+  // Error state
+  &.border-error-500 {
+    border-color: var(--color-destructive);
+  }
+
+  &.border-error-500:focus {
+    box-shadow: 0 0 0 2px var(--color-destructive);
+  }
+
+  // Custom scrollbar para dropdowns largos
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: var(--color-background);
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 3px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-secondary);
+  }
+}
+
+// Icono de flecha
+.selector-icon {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transition: color var(--transition-fast) ease;
+
+  // Variaciones de tamaño
+  &.selector-sm {
+    right: constants.$icon-spacing-sm;
+  }
+
+  &.selector-md {
+    right: constants.$icon-spacing-md;
+  }
+
+  &.selector-lg {
+    right: constants.$icon-spacing-lg;
+  }
+
+  // Error state
+  &.text-error-500 {
+    color: var(--color-destructive);
+  }
+}
+
+// Texto de ayuda/error
+.selector-help {
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  margin-top: 0.25rem;
+
+  .text-text-secondary {
+    color: var(--color-text-secondary);
+  }
+
+  .text-error-500 {
+    color: var(--color-destructive);
+    font-weight: var(--fw-medium);
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  &.selector-help-error {
+    .text-error-500 {
+      display: block;
+    }
+  }
+}
+
+// Estados de foco para accesibilidad
+.selector-wrapper:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-ring);
+}
+
+.selector-wrapper.selector-error:focus-within {
+  border-color: var(--color-destructive);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+// Responsive design
+@media (max-width: 640px) {
+  .selector-wrapper {
+    &.selector-lg {
+      height: 2.75rem; // Reducir tamaño en móvil
+      padding: 0 0.75rem;
+    }
+  }
+
+  .selector-select {
+    &.selector-lg {
+      font-size: var(--fs-base);
+      padding: 0 0.75rem;
+      padding-right: 2.5rem;
+    }
+  }
+
+  .selector-icon {
+    &.selector-lg {
+      right: 0.75rem;
+    }
+  }
+}
+
+// Animaciones suaves
+@keyframes selector-focus-in {
+  from {
+    box-shadow: 0 0 0 0 var(--color-ring);
+  }
+  to {
+    box-shadow: 0 0 0 2px var(--color-ring);
+  }
+}
+
+@keyframes selector-icon-rotate {
+  from {
+    transform: translateY(-50%) rotate(0deg);
+  }
+  to {
+    transform: translateY(-50%) rotate(180deg);
+  }
+}
+
+// Clases para temas personalizados
+[data-theme="dark"] {
+  .selector-wrapper {
+    background-color: var(--color-surface);
+    border-color: var(--color-border);
+
+    &:hover:not(.selector-disabled) {
+      border-color: var(--color-text-secondary);
+    }
+  }
+
+  .selector-select {
+    color: var(--color-text-primary);
+
+    &::placeholder {
+      color: var(--color-text-secondary);
+    }
+  }
+
+  .selector-icon {
+    color: var(--color-text-muted);
+  }
+
+  .selector-filled .selector-select {
+    background-color: rgba(154, 166, 178, 0.2);
+
+    &:focus {
+      background-color: var(--color-surface);
+      border-color: var(--color-border);
+    }
+  }
+}

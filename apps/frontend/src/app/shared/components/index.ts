@@ -13,6 +13,7 @@ export { IconComponent } from './icon/icon.component';
 export { InputsearchComponent } from './inputsearch/inputsearch.component';
 export { TableComponent } from './table/table.component';
 export { TooltipComponent } from './tooltip/tooltip.component';
+export { SelectorComponent } from './selector/selector.component';
 
 // Types
 export type { ButtonVariant, ButtonSize } from './button/button.component';
@@ -31,3 +32,8 @@ export type {
   TooltipPosition,
   TooltipColor,
 } from './tooltip/tooltip.component';
+export type {
+  SelectorOption,
+  SelectorSize,
+  SelectorVariant,
+} from './selector/selector.component';

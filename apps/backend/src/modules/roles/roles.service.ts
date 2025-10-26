@@ -19,7 +19,10 @@ import {
   AssignRoleToUserDto,
   RemoveRoleFromUserDto,
 } from './dto/role.dto';
-import { RoleDashboardStatsDto, RoleWithPermissionDescriptionsDto } from './dto/role.dto';
+import {
+  RoleDashboardStatsDto,
+  RoleWithPermissionDescriptionsDto,
+} from './dto/role.dto';
 
 @Injectable()
 export class RolesService {
@@ -33,7 +36,9 @@ export class RolesService {
   /**
    * Transforma un rol con permisos completos a un rol con solo descripciones de permisos
    */
-  private transformRoleWithPermissionDescriptions(role: any): RoleWithPermissionDescriptionsDto {
+  private transformRoleWithPermissionDescriptions(
+    role: any,
+  ): RoleWithPermissionDescriptionsDto {
     return {
       id: role.id,
       name: role.name,
@@ -41,7 +46,10 @@ export class RolesService {
       is_system_role: role.is_system_role,
       created_at: role.created_at,
       updated_at: role.updated_at,
-      permissions: role.role_permissions?.map((rp: any) => rp.permissions?.description).filter(Boolean) || [],
+      permissions:
+        role.role_permissions
+          ?.map((rp: any) => rp.permissions?.description)
+          .filter(Boolean) || [],
       user_roles: role.user_roles,
       _count: role._count,
     };
@@ -147,7 +155,9 @@ export class RolesService {
     });
 
     // Transformar cada rol para incluir solo las descripciones de los permisos
-    return roles.map(role => this.transformRoleWithPermissionDescriptions(role));
+    return roles.map((role) =>
+      this.transformRoleWithPermissionDescriptions(role),
+    );
   }
 
   async findOne(id: number, userId?: number) {
@@ -448,7 +458,7 @@ export class RolesService {
     });
 
     // Extraer solo los IDs de los permisos
-    const permissionIds = rolePermissions.map(rp => rp.permission_id);
+    const permissionIds = rolePermissions.map((rp) => rp.permission_id);
 
     return {
       role_id: roleId,
@@ -714,7 +724,9 @@ export class RolesService {
 
     // Si no es super_admin, no puede ver estadísticas completas
     if (!isSuperAdmin) {
-      throw new ForbiddenException('No tienes permisos para ver estas estadísticas');
+      throw new ForbiddenException(
+        'No tienes permisos para ver estas estadísticas',
+      );
     }
 
     // Obtener el total de roles

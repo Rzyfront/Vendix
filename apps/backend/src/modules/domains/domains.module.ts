@@ -3,6 +3,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DomainsController } from './domains.controller';
 import { DomainsService } from './domains.service';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { ResponseModule } from '../../common/responses';
 
 /**
  * Módulo de Dominios
@@ -17,6 +18,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
   imports: [
     PrismaModule,
     EventEmitterModule.forRoot(), // EventEmitter para gestión de caché
+    ResponseModule,
   ],
   controllers: [DomainsController],
   providers: [DomainsService],

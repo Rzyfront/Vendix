@@ -58,3 +58,24 @@ Authorization: {{authToken}}
 ### Resolve Domain (Public)
 GET {{baseUrl}}/public/domains/resolve/store.organization.com
 Content-Type: application/json
+
+### Get Domain Statistics
+GET {{baseUrl}}/domains/stats
+Content-Type: application/json
+Authorization: {{authToken}}
+
+# Expected Response:
+# {
+#   "success": true,
+#   "message": "Domain statistics retrieved successfully",
+#   "data": {
+#     "total": 150,
+#     "active": 120,
+#     "pending": 25,
+#     "verified": 110,
+#     "platformSubdomains": 80,
+#     "customDomains": 45,
+#     "clientSubdomains": 20,
+#     "aliasDomains": 5
+#   }
+# }

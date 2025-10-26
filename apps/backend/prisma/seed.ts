@@ -1870,6 +1870,24 @@ async function main() {
   ];
 
   for (const domain of domainSettings) {
+    // Inferir ownership basado en el hostname
+    let ownership = 'custom_domain'; // default
+    if (domain.hostname.endsWith('.vendix.com')) {
+      const parts = domain.hostname.split('.');
+      if (parts.length === 2) {
+        ownership = 'vendix_core'; // vendix.com
+      } else {
+        ownership = 'vendix_subdomain'; // subdominio.vendix.com
+      }
+    } else {
+      const parts = domain.hostname.split('.');
+      if (parts.length > 2) {
+        ownership = 'custom_subdomain'; // subdominio.dominio.com
+      } else {
+        ownership = 'custom_domain'; // dominio.com
+      }
+    }
+
     await prisma.domain_settings.create({
       data: {
         hostname: domain.hostname,
@@ -1879,6 +1897,7 @@ async function main() {
         is_primary: domain.is_primary,
         status: domain.status as any,
         ssl_status: domain.ssl_status as any,
+        ownership: ownership as any,
         config: domain.config,
       },
     });

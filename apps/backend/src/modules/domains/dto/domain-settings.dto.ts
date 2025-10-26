@@ -430,12 +430,7 @@ export class CreateDomainSettingDto {
 
   @ApiPropertyOptional({ example: 'ecommerce' })
   @IsOptional()
-  @IsIn([
-    'vendix_core',
-    'organization',
-    'store',
-    'ecommerce',
-  ])
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
   domainType?: string;
 
   @ApiPropertyOptional({ example: 'pending_dns' })
@@ -452,6 +447,17 @@ export class CreateDomainSettingDto {
   @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;
+
+  @ApiPropertyOptional({ example: 'vendix_subdomain' })
+  @IsOptional()
+  @IsIn([
+    'vendix_subdomain',
+    'custom_domain',
+    'custom_subdomain',
+    'vendix_core',
+    'third_party_subdomain',
+  ])
+  ownership?: string;
 
   @ApiProperty({ example: 1 })
   @IsNumber()
@@ -480,12 +486,7 @@ export class UpdateDomainSettingDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsIn([
-    'vendix_core',
-    'organization',
-    'store',
-    'ecommerce',
-  ])
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
   domainType?: string;
 
   @ApiPropertyOptional()
@@ -502,6 +503,17 @@ export class UpdateDomainSettingDto {
   @IsOptional()
   @IsBoolean()
   isPrimary?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsIn([
+    'vendix_subdomain',
+    'custom_domain',
+    'custom_subdomain',
+    'vendix_core',
+    'third_party_subdomain',
+  ])
+  ownership?: string;
 }
 
 export class ValidateHostnameDto {

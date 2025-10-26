@@ -168,6 +168,9 @@ export interface DomainStats {
   customer_domains: number;
   primary_domains: number;
   alias_domains: number;
+  vendix_subdomains: number;
+  customer_custom_domains: number;
+  customer_subdomains: number;
 }
 
 export interface PaginatedDomainsResponse {

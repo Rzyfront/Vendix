@@ -189,10 +189,10 @@ export class AuthService {
               billing: true,
               ecommerce: true,
               audit: true,
-              settings: true
-            }
-          }
-        }
+              settings: true,
+            },
+          },
+        },
       });
 
       // Asignar rol owner al usuario (si no lo tiene ya)
@@ -389,7 +389,7 @@ export class AuthService {
         billing: true,
         ecommerce: true,
         audit: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ADMIN') {
       panel_ui = {
@@ -400,7 +400,7 @@ export class AuthService {
         reports: true,
         billing: true,
         ecommerce: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ECOMMERCE') {
       panel_ui = {
@@ -409,14 +409,14 @@ export class AuthService {
         dashboard: true,
         favorites: true,
         orders: true,
-        settings: true
+        settings: true,
       };
     }
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui }
-      }
+        config: { app, panel_ui },
+      },
     });
 
     // Asignar rol customer al usuario
@@ -664,7 +664,7 @@ export class AuthService {
         billing: true,
         ecommerce: true,
         audit: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ADMIN') {
       panel_ui = {
@@ -675,7 +675,7 @@ export class AuthService {
         reports: true,
         billing: true,
         ecommerce: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ECOMMERCE') {
       panel_ui = {
@@ -684,14 +684,14 @@ export class AuthService {
         dashboard: true,
         favorites: true,
         orders: true,
-        settings: true
+        settings: true,
       };
     }
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui }
-      }
+        config: { app, panel_ui },
+      },
     });
 
     // Asignar rol
@@ -937,7 +937,7 @@ export class AuthService {
 
     // Obtener user_settings
     const userSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: user.id }
+      where: { user_id: user.id },
     });
 
     // Remover password del response
@@ -1515,6 +1515,91 @@ export class AuthService {
   async verifyPasswordChangeToken(token: string): Promise<{ message: string }> {
     // Este método puede implementarse más adelante si se decide agregar verificación por email
     throw new BadRequestException('Funcionalidad no implementada aún');
+  }
+
+  // ===== FUNCIONES DE SUPER ADMIN =====
+
+  async verifyUserEmailAsSuperAdmin(
+    targetUserId: number,
+    superAdminId: number,
+  ): Promise<{ message: string; user: any }> {
+    // Verificar que el super admin tenga permisos
+    const superAdmin = await this.prismaService.users.findUnique({
+      where: { id: superAdminId },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    if (!superAdmin) {
+      throw new NotFoundException('Super administrador no encontrado');
+    }
+
+    // Verificar que sea super admin
+    const isSuperAdmin = superAdmin.user_roles.some(
+      (ur) => ur.roles?.name === 'super_admin',
+    );
+
+    if (!isSuperAdmin) {
+      throw new UnauthorizedException(
+        'No tienes permisos para realizar esta acción',
+      );
+    }
+
+    // Buscar el usuario objetivo
+    const targetUser = await this.prismaService.users.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!targetUser) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    if (targetUser.email_verified) {
+      throw new BadRequestException('El email del usuario ya está verificado');
+    }
+
+    // Marcar email como verificado
+    const updatedUser = await this.prismaService.users.update({
+      where: { id: targetUserId },
+      data: {
+        email_verified: true,
+        state: 'active', // Activar usuario si estaba inactivo
+        updated_at: new Date(),
+      },
+    });
+
+    // Invalidar tokens de verificación de email pendientes
+    await this.prismaService.email_verification_tokens.updateMany({
+      where: { user_id: targetUserId, verified: false },
+      data: { verified: true },
+    });
+
+    // Registrar auditoría
+    await this.auditService.logUpdate(
+      superAdminId,
+      AuditResource.USERS,
+      targetUserId,
+      { email_verified: false, state: targetUser.state },
+      { email_verified: true, state: 'active' },
+      {
+        action: 'super_admin_email_verification',
+        verified_by: superAdminId,
+        verified_by_email: superAdmin.email,
+      },
+    );
+
+    // Remover password del response
+    const { password, ...userWithoutPassword } = updatedUser;
+
+    return {
+      message: 'Email verificado exitosamente por super administrador',
+      user: userWithoutPassword,
+    };
   }
 
   // Método auxiliar para validar fortaleza de contraseña

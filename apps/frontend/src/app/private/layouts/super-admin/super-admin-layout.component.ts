@@ -114,6 +114,11 @@ export class SuperAdminLayoutComponent implements OnInit {
       route: '/super-admin/roles',
     },
     {
+      label: 'Domains',
+      icon: 'globe-2',
+      route: '/super-admin/domains',
+    },
+    {
       label: 'Auditoría',
       icon: 'eye',
       route: '/super-admin/audit',

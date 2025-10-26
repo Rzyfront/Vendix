@@ -8,3 +8,4 @@ export * from './refresh-token.dto';
 export * from './verify-email.dto';
 export * from './password.dto';
 export * from './onboarding.dto';
+export * from './super-admin.dto';

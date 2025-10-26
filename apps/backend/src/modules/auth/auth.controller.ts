@@ -8,6 +8,8 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  UseGuards,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -24,6 +26,9 @@ import {
 } from './dto/password.dto';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
+import { Roles } from './decorators/roles.decorator';
+import { RolesGuard } from './guards/roles.guard';
+import { UserRole } from './enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('auth')
@@ -427,11 +432,10 @@ export class AuthController {
         );
       }
 
-      const result =
-        await this.authService.createOrganizationDuringOnboarding(
-          user.id,
-          organizationData,
-        );
+      const result = await this.authService.createOrganizationDuringOnboarding(
+        user.id,
+        organizationData,
+      );
       return this.responseService.success(result, result.message);
     } catch (error) {
       return this.responseService.error(
@@ -631,6 +635,53 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al completar el onboarding',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  // ===== RUTAS DE SUPER ADMIN =====
+
+  @Post('super-admin/verify-email/:userId')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verificar email de usuario como Super Admin',
+    description:
+      'Permite a un super administrador marcar el email de cualquier usuario como verificado',
+  })
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Email verificado exitosamente',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'No autorizado - se requiere rol de super admin',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Usuario no encontrado',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'El email ya está verificado',
+  })
+  async verifyUserEmailAsSuperAdmin(
+    @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: any,
+  ) {
+    try {
+      const result = await this.authService.verifyUserEmailAsSuperAdmin(
+        userId,
+        user.id,
+      );
+      return this.responseService.success(result.user, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al verificar el email',
         error.response?.message || error.message,
         error.status || 400,
       );

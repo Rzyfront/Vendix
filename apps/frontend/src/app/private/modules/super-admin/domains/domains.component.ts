@@ -19,6 +19,7 @@ import {
 import {
   DomainCreateModalComponent,
   DomainEditModalComponent,
+  DomainStatsComponent,
 } from './components/index';
 
 // Import shared components
@@ -49,115 +50,13 @@ import './domains.component.css';
     ButtonComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
+    DomainStatsComponent,
   ],
   providers: [DomainsService],
   template: `
     <div class="space-y-6">
-      <!-- Header -->
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-      >
-        <div>
-          <h1 class="text-2xl font-bold text-text-primary">Dominios</h1>
-          <p class="text-text-secondary mt-1">
-            Gestiona los dominios y configuraciones de branding
-          </p>
-        </div>
-        <app-button
-          variant="primary"
-          size="sm"
-          (clicked)="openCreateDomainModal()"
-          title="Nuevo Dominio"
-        >
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-          <span class="hidden sm:inline">Nuevo Dominio</span>
-        </app-button>
-      </div>
-
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div
-          class="bg-surface rounded-card shadow-card border border-border p-4"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-text-secondary">
-                Total Dominios
-              </p>
-              <p class="text-2xl font-bold text-text-primary mt-1">
-                {{ stats.total_domains }}
-              </p>
-            </div>
-            <div class="p-2 bg-primary/10 rounded-full">
-              <app-icon
-                name="globe"
-                [size]="20"
-                class="text-primary"
-              ></app-icon>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="bg-surface rounded-card shadow-card border border-border p-4"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-text-secondary">Activos</p>
-              <p class="text-2xl font-bold text-success mt-1">
-                {{ stats.active_domains }}
-              </p>
-            </div>
-            <div class="p-2 bg-success/10 rounded-full">
-              <app-icon
-                name="check-circle"
-                [size]="20"
-                class="text-success"
-              ></app-icon>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="bg-surface rounded-card shadow-card border border-border p-4"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-text-secondary">Pendientes</p>
-              <p class="text-2xl font-bold text-warning mt-1">
-                {{ stats.pending_domains }}
-              </p>
-            </div>
-            <div class="p-2 bg-warning/10 rounded-full">
-              <app-icon
-                name="clock"
-                [size]="20"
-                class="text-warning"
-              ></app-icon>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="bg-surface rounded-card shadow-card border border-border p-4"
-        >
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm font-medium text-text-secondary">Verificados</p>
-              <p class="text-2xl font-bold text-info mt-1">
-                {{ stats.verified_domains }}
-              </p>
-            </div>
-            <div class="p-2 bg-info/10 rounded-full">
-              <app-icon
-                name="shield-check"
-                [size]="20"
-                class="text-info"
-              ></app-icon>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- Domain Stats Component -->
+      <app-domain-stats [stats]="stats"></app-domain-stats>
 
       <!-- Domains List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -185,6 +84,15 @@ import './domains.component.css';
 
               <div class="flex gap-2 items-center">
                 <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="openCreateDomainModal()"
+                  title="Nuevo Dominio"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  <span class="hidden sm:inline">Nuevo Dominio</span>
+                </app-button>
+                <app-button
                   variant="outline"
                   size="sm"
                   (clicked)="refreshDomains()"
@@ -211,7 +119,7 @@ import './domains.component.css';
           <div class="flex flex-col items-center justify-center space-y-4">
             <div class="p-4 bg-surface rounded-full">
               <app-icon
-                name="globe"
+                name="globe-2"
                 [size]="32"
                 class="text-text-tertiary"
               ></app-icon>
@@ -401,6 +309,9 @@ export class DomainsComponent implements OnInit, OnDestroy {
     customer_domains: 0,
     primary_domains: 0,
     alias_domains: 0,
+    vendix_subdomains: 0,
+    customer_custom_domains: 0,
+    customer_subdomains: 0,
   };
 
   pagination = {
@@ -620,6 +531,11 @@ export class DomainsComponent implements OnInit, OnDestroy {
     this.stats.customer_domains = this.domains.filter(
       (domain) => domain.domain_type === DomainType.CUSTOMER,
     ).length;
+
+    // Calculate new stats
+    this.stats.vendix_subdomains = this.stats.primary_domains;
+    this.stats.customer_custom_domains = this.stats.customer_domains;
+    this.stats.customer_subdomains = this.stats.alias_domains;
   }
 
   refreshDomains(): void {

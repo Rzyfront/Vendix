@@ -1,13 +1,12 @@
 import { Controller, Get } from '@nestjs/common';
-import { JonathanService } from "./jonathan.service";
+import { JonathanService } from './jonathan.service';
 
-@Controller("jonathan")
+@Controller('jonathan')
 export class JonathanController {
-    constructor(private readonly jonathanService: JonathanService) {}
+  constructor(private readonly jonathanService: JonathanService) {}
 
-    @Get("saludar")
-    saludar(): string {
-        return this.jonathanService.saludar();
-        
-    }
+  @Get('saludar')
+  saludar(): string {
+    return this.jonathanService.saludar();
+  }
 }

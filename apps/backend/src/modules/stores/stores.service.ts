@@ -168,7 +168,8 @@ export class StoresService {
     const { start_date, end_date } = query;
 
     // Default last 30 days
-    const startDate = start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const startDate =
+      start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const endDate = end_date || new Date();
 
     // Base metrics
@@ -179,15 +180,15 @@ export class StoresService {
       activeCustomersCount,
       recentOrders,
       topProducts,
-      salesByPeriod
+      salesByPeriod,
     ] = await Promise.all([
       // Total orders count in period
       this.prisma.orders.count({
         where: {
           store_id: id,
           created_at: { gte: startDate },
-          state: { not: 'cancelled' }
-        }
+          state: { not: 'cancelled' },
+        },
       }),
 
       // Total revenue
@@ -195,9 +196,9 @@ export class StoresService {
         where: {
           store_id: id,
           created_at: { gte: startDate },
-          state: 'finished'
+          state: 'finished',
         },
-        _sum: { grand_total: true }
+        _sum: { grand_total: true },
       }),
 
       // Products with low stock (less than 10 units)
@@ -205,31 +206,33 @@ export class StoresService {
         where: {
           store_id: id,
           state: 'active',
-          stock_quantity: { lt: 10, gte: 0 }
-        }
+          stock_quantity: { lt: 10, gte: 0 },
+        },
       }),
 
       // Active customers (unique customers who made orders)
-      this.prisma.orders.findMany({
-        where: {
-          store_id: id,
-          created_at: { gte: startDate },
-          state: { not: 'cancelled' }
-        },
-        select: { customer_id: true },
-        distinct: ['customer_id']
-      }).then(orders => orders.length),
+      this.prisma.orders
+        .findMany({
+          where: {
+            store_id: id,
+            created_at: { gte: startDate },
+            state: { not: 'cancelled' },
+          },
+          select: { customer_id: true },
+          distinct: ['customer_id'],
+        })
+        .then((orders) => orders.length),
 
       // Recent orders (last 10)
       this.prisma.orders.findMany({
         where: { store_id: id },
         include: {
           addresses_orders_billing_address_idToaddresses: {
-            select: { id: true, city: true, country_code: true }
-          }
+            select: { id: true, city: true, country_code: true },
+          },
         },
         orderBy: { created_at: 'desc' },
-        take: 10
+        take: 10,
       }),
 
       // Top selling products
@@ -239,19 +242,19 @@ export class StoresService {
           orders: {
             store_id: id,
             created_at: { gte: startDate },
-            state: { not: 'cancelled' }
-          }
+            state: { not: 'cancelled' },
+          },
         },
         _sum: {
           quantity: true,
-          total_price: true
+          total_price: true,
         },
         orderBy: {
           _sum: {
-            quantity: 'desc'
-          }
+            quantity: 'desc',
+          },
         },
-        take: 10
+        take: 10,
       }),
 
       // Sales by day for chart (last 7 days)
@@ -259,23 +262,26 @@ export class StoresService {
         where: {
           store_id: id,
           created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
-          state: 'finished'
+          state: 'finished',
         },
         select: {
           created_at: true,
-          grand_total: true
+          grand_total: true,
         },
-        orderBy: { created_at: 'asc' }
-      })
+        orderBy: { created_at: 'asc' },
+      }),
     ]);
 
     // Process sales by period for chart
-    const salesChart = salesByPeriod.reduce((acc, order) => {
-      const date = order.created_at.toISOString().split('T')[0];
-      if (!acc[date]) acc[date] = 0;
-      acc[date] += Number(order.grand_total || 0);
-      return acc;
-    }, {} as Record<string, number>);
+    const salesChart = salesByPeriod.reduce(
+      (acc, order) => {
+        const date = order.created_at.toISOString().split('T')[0];
+        if (!acc[date]) acc[date] = 0;
+        acc[date] += Number(order.grand_total || 0);
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     return {
       store_id: id,
@@ -285,24 +291,35 @@ export class StoresService {
         low_stock_products: productsLowStockCount,
         active_customers: activeCustomersCount,
         revenue_today: 0, // Placeholder for more complex calculation
-        revenue_this_week: Object.values(salesChart).reduce((sum: number, val: number) => sum + val, 0),
-        average_order_value: totalOrdersCount > 0 ? (totalRevenue._sum.grand_total || 0) / totalOrdersCount : 0
+        revenue_this_week: Object.values(salesChart).reduce(
+          (sum: number, val: number) => sum + val,
+          0,
+        ),
+        average_order_value:
+          totalOrdersCount > 0
+            ? (totalRevenue._sum.grand_total || 0) / totalOrdersCount
+            : 0,
       },
-      recent_orders: recentOrders.map(order => ({
+      recent_orders: recentOrders.map((order) => ({
         id: order.id,
         order_number: order.order_number,
         grand_total: order.grand_total,
         state: order.state,
         created_at: order.created_at,
-        customer_location: order.addresses_orders_billing_address_idToaddresses?.country_code || 'Unknown'
+        customer_location:
+          order.addresses_orders_billing_address_idToaddresses?.country_code ||
+          'Unknown',
       })),
-      top_products: topProducts.slice(0, 5).map(item => ({
+      top_products: topProducts.slice(0, 5).map((item) => ({
         product_id: item.product_id,
         product_name: item.product_name,
         total_sold: item.quantity,
-        total_revenue: item._sum.total_price || 0
+        total_revenue: item._sum.total_price || 0,
       })),
-      sales_chart: Object.entries(salesChart).map(([date, total]) => ({ date, total }))
+      sales_chart: Object.entries(salesChart).map(([date, total]) => ({
+        date,
+        total,
+      })),
     };
   }
 
@@ -316,60 +333,60 @@ export class StoresService {
       draftStores,
       totalRevenue,
       totalOrders,
-      totalProducts
+      totalProducts,
     ] = await Promise.all([
       // Total stores count
       this.prisma.stores.count(),
-      
+
       // Active stores count
       this.prisma.stores.count({
-        where: { is_active: true }
+        where: { is_active: true },
       }),
-      
+
       // Inactive stores count
       this.prisma.stores.count({
-        where: { is_active: false }
+        where: { is_active: false },
       }),
-      
+
       // Suspended stores (assuming suspended means inactive with specific conditions)
       this.prisma.stores.count({
         where: {
           is_active: false,
           // Add additional conditions if needed for suspended status
-        }
+        },
       }),
-      
+
       // Draft stores (assuming draft means recently created but not active)
       this.prisma.stores.count({
         where: {
           is_active: false,
           created_at: {
-            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
-          }
-        }
+            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // Last 7 days
+          },
+        },
       }),
-      
+
       // Total revenue from all finished orders
       this.prisma.orders.aggregate({
         where: {
-          state: 'finished'
+          state: 'finished',
         },
-        _sum: { grand_total: true }
+        _sum: { grand_total: true },
       }),
-      
+
       // Total orders count (excluding cancelled)
       this.prisma.orders.count({
         where: {
-          state: { not: 'cancelled' }
-        }
+          state: { not: 'cancelled' },
+        },
       }),
-      
+
       // Total products count (active products)
       this.prisma.products.count({
         where: {
-          state: 'active'
-        }
-      })
+          state: 'active',
+        },
+      }),
     ]);
 
     return {
@@ -380,7 +397,7 @@ export class StoresService {
       draft_stores: draftStores,
       total_revenue: totalRevenue._sum.grand_total || 0,
       total_orders: totalOrders,
-      total_products: totalProducts
+      total_products: totalProducts,
     };
   }
 }

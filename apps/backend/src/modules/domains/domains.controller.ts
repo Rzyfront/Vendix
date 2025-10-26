@@ -18,7 +18,19 @@ import { Public } from '../auth/decorators/public.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { DomainsService, DomainSettingResponse } from './domains.service';
+import {
+  ResponseService,
+  SuccessResponse,
+  PaginatedResponse,
+} from '../../common/responses';
+import { DomainsService } from './domains.service';
+import {
+  DomainSettingResponse,
+  DomainResolutionResponse,
+  DomainListResponse,
+  DomainAvailabilityResponse,
+  DomainValidationResponse,
+} from './types/domain.types';
 import {
   CreateDomainSettingDto,
   UpdateDomainSettingDto,
@@ -37,7 +49,10 @@ import {
 export class DomainsController {
   private readonly logger = new Logger(DomainsController.name);
 
-  constructor(private readonly domainsService: DomainsService) {}
+  constructor(
+    private readonly domainsService: DomainsService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   // ========== ENDPOINTS PÚBLICOS ==========
 
@@ -51,12 +66,13 @@ export class DomainsController {
     @Param('hostname') hostname: string,
     @Query('subdomain') subdomain?: string,
     @Headers('x-forwarded-host') forwardedHost?: string,
-  ): Promise<any> {
-    return this.domainsService.resolveDomain(
+  ): Promise<SuccessResponse<DomainResolutionResponse>> {
+    const result = await this.domainsService.resolveDomain(
       hostname,
       subdomain,
       forwardedHost,
     );
+    return this.responseService.success(result, 'Domain resolved successfully');
   }
 
   /**
@@ -67,8 +83,13 @@ export class DomainsController {
   @HttpCode(HttpStatus.OK)
   async checkHostnameAvailability(
     @Param('hostname') hostname: string,
-  ): Promise<{ available: boolean; reason?: string }> {
-    return this.domainsService.checkHostnameAvailability(hostname);
+  ): Promise<SuccessResponse<DomainAvailabilityResponse>> {
+    const result =
+      await this.domainsService.checkHostnameAvailability(hostname);
+    return this.responseService.success(
+      result,
+      'Hostname availability checked successfully',
+    );
   }
 
   // ========== ENDPOINTS PRIVADOS (requieren autenticación) ==========
@@ -82,8 +103,14 @@ export class DomainsController {
   async createDomainSetting(
     @Body() createDomainSettingDto: CreateDomainSettingDto,
     @CurrentUser() user: any,
-  ): Promise<DomainSettingResponse> {
-    return this.domainsService.createDomainSetting(createDomainSettingDto);
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const result = await this.domainsService.createDomainSetting(
+      createDomainSettingDto,
+    );
+    return this.responseService.created(
+      result,
+      'Domain setting created successfully',
+    );
   }
 
   /**
@@ -97,12 +124,7 @@ export class DomainsController {
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-  ): Promise<{
-    data: DomainSettingResponse[];
-    total: number;
-    limit: number;
-    offset: number;
-  }> {
+  ): Promise<PaginatedResponse<DomainSettingResponse>> {
     const filters: any = {};
 
     if (organizationId) {
@@ -137,7 +159,30 @@ export class DomainsController {
       filters.offset = off;
     }
 
-    return this.domainsService.getAllDomainSettings(filters);
+    const result = await this.domainsService.getAllDomainSettings(filters);
+    const page = Math.floor((filters.offset || 0) / (filters.limit || 10)) + 1;
+    const limitValue = filters.limit || 10;
+
+    return this.responseService.paginated(
+      result.data,
+      result.total,
+      page,
+      limitValue,
+      'Domain settings retrieved successfully',
+    );
+  }
+
+  /**
+   * 📊 Obtener estadísticas de dominios
+   */
+  @Get('stats')
+  @Roles('super_admin', 'admin', 'owner')
+  async getDomainStats(): Promise<SuccessResponse<any>> {
+    const stats = await this.domainsService.getDomainStats();
+    return this.responseService.success(
+      stats,
+      'Domain statistics retrieved successfully',
+    );
   }
 
   /**
@@ -147,8 +192,13 @@ export class DomainsController {
   @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingByHostname(
     @Param('hostname') hostname: string,
-  ): Promise<DomainSettingResponse> {
-    return this.domainsService.getDomainSettingByHostname(hostname);
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const result =
+      await this.domainsService.getDomainSettingByHostname(hostname);
+    return this.responseService.success(
+      result,
+      'Domain setting retrieved successfully',
+    );
   }
 
   /**
@@ -158,12 +208,16 @@ export class DomainsController {
   @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingById(
     @Param('id') id: string,
-  ): Promise<DomainSettingResponse> {
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
     const domainId = parseInt(id, 10);
     if (isNaN(domainId)) {
       throw new BadRequestException('Invalid domain ID');
     }
-    return this.domainsService.getDomainSettingById(domainId);
+    const result = await this.domainsService.getDomainSettingById(domainId);
+    return this.responseService.success(
+      result,
+      'Domain setting retrieved successfully',
+    );
   }
 
   /**
@@ -174,10 +228,14 @@ export class DomainsController {
   async updateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() updateDomainSettingDto: UpdateDomainSettingDto,
-  ): Promise<DomainSettingResponse> {
-    return this.domainsService.updateDomainSetting(
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const result = await this.domainsService.updateDomainSetting(
       hostname,
       updateDomainSettingDto,
+    );
+    return this.responseService.updated(
+      result,
+      'Domain setting updated successfully',
     );
   }
 
@@ -186,11 +244,12 @@ export class DomainsController {
    */
   @Delete('hostname/:hostname')
   @Roles('super_admin', 'admin', 'owner')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   async deleteDomainSetting(
     @Param('hostname') hostname: string,
-  ): Promise<void> {
+  ): Promise<SuccessResponse<null>> {
     await this.domainsService.deleteDomainSetting(hostname);
+    return this.responseService.deleted('Domain setting deleted successfully');
   }
 
   /**
@@ -201,10 +260,14 @@ export class DomainsController {
   async duplicateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() duplicateData: DuplicateDomainDto,
-  ): Promise<DomainSettingResponse> {
-    return this.domainsService.duplicateDomainSetting(
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const result = await this.domainsService.duplicateDomainSetting(
       hostname,
       duplicateData.newHostname,
+    );
+    return this.responseService.created(
+      result,
+      'Domain setting duplicated successfully',
     );
   }
 
@@ -215,7 +278,7 @@ export class DomainsController {
   @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingsByOrganization(
     @Param('organizationId') organizationId: string,
-  ): Promise<DomainSettingResponse[]> {
+  ): Promise<SuccessResponse<DomainSettingResponse[]>> {
     const orgId = parseInt(organizationId, 10);
     if (isNaN(orgId)) {
       throw new BadRequestException('Invalid organization ID');
@@ -223,7 +286,10 @@ export class DomainsController {
     const result = await this.domainsService.getAllDomainSettings({
       organizationId: orgId,
     });
-    return result.data;
+    return this.responseService.success(
+      result.data,
+      'Domain settings retrieved successfully',
+    );
   }
 
   /**
@@ -233,7 +299,7 @@ export class DomainsController {
   @Roles('super_admin', 'admin', 'owner')
   async getDomainSettingsByStore(
     @Param('storeId') storeId: string,
-  ): Promise<DomainSettingResponse[]> {
+  ): Promise<SuccessResponse<DomainSettingResponse[]>> {
     const sId = parseInt(storeId, 10);
     if (isNaN(sId)) {
       throw new BadRequestException('Invalid store ID');
@@ -241,7 +307,10 @@ export class DomainsController {
     const result = await this.domainsService.getAllDomainSettings({
       storeId: sId,
     });
-    return result.data;
+    return this.responseService.success(
+      result.data,
+      'Domain settings retrieved successfully',
+    );
   }
 
   /**
@@ -251,8 +320,12 @@ export class DomainsController {
   @Roles('super_admin', 'admin', 'owner')
   async validateHostname(
     @Body() data: ValidateHostnameDto,
-  ): Promise<{ valid: boolean; reason?: string }> {
-    return this.domainsService.validateHostname(data.hostname);
+  ): Promise<SuccessResponse<DomainValidationResponse>> {
+    const result = await this.domainsService.validateHostname(data.hostname);
+    return this.responseService.success(
+      result,
+      'Hostname validated successfully',
+    );
   }
 
   /**
@@ -263,7 +336,8 @@ export class DomainsController {
   async verifyDomain(
     @Param('hostname') hostname: string,
     @Body() body: VerifyDomainDto,
-  ): Promise<VerifyDomainResult> {
-    return this.domainsService.verifyDomain(hostname, body);
+  ): Promise<SuccessResponse<VerifyDomainResult>> {
+    const result = await this.domainsService.verifyDomain(hostname, body);
+    return this.responseService.success(result, 'Domain verified successfully');
   }
 }

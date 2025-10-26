@@ -4,7 +4,12 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto, UsersDashboardDto } from './dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserQueryDto,
+  UsersDashboardDto,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../email/email.service';
@@ -18,7 +23,13 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto) {
-  const { organization_id, email, password, app = 'VENDIX_LANDING', ...rest } = createUserDto;
+    const {
+      organization_id,
+      email,
+      password,
+      app = 'VENDIX_LANDING',
+      ...rest
+    } = createUserDto;
 
     const existingUser = await this.prisma.users.findFirst({
       where: { email, organization_id },
@@ -65,7 +76,7 @@ export class UsersService {
         billing: true,
         ecommerce: true,
         audit: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ADMIN') {
       panel_ui = {
@@ -76,7 +87,7 @@ export class UsersService {
         reports: true,
         billing: true,
         ecommerce: true,
-        settings: true
+        settings: true,
       };
     } else if (app === 'STORE_ECOMMERCE') {
       panel_ui = {
@@ -85,14 +96,14 @@ export class UsersService {
         dashboard: true,
         favorites: true,
         orders: true,
-        settings: true
+        settings: true,
       };
     }
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui }
-      }
+        config: { app, panel_ui },
+      },
     });
 
     // Generate email verification token
@@ -249,68 +260,68 @@ export class UsersService {
       usuariosInactivos,
       usuariosSuspendidos,
       usuariosEmailVerificado,
-      usuariosArchivados
+      usuariosArchivados,
     ] = await Promise.all([
       // Total Usuarios
       this.prisma.users.count({
-        where: organization_id ? { organization_id } : {}
+        where: organization_id ? { organization_id } : {},
       }),
-      
+
       // Activos
       this.prisma.users.count({
         where: {
           state: 'active',
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Pendientes
       this.prisma.users.count({
         where: {
           state: 'pending_verification',
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Con 2FA
       this.prisma.users.count({
         where: {
           two_factor_enabled: true,
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Inactivos
       this.prisma.users.count({
         where: {
           state: 'inactive',
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Suspendidos
       this.prisma.users.count({
         where: {
           state: 'suspended',
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Email Verificado
       this.prisma.users.count({
         where: {
           email_verified: true,
-          ...(organization_id && { organization_id })
-        }
+          ...(organization_id && { organization_id }),
+        },
       }),
-      
+
       // Archivados
       this.prisma.users.count({
         where: {
           state: 'archived',
-          ...(organization_id && { organization_id })
-        }
-      })
+          ...(organization_id && { organization_id }),
+        },
+      }),
     ]);
 
     return {
@@ -322,8 +333,8 @@ export class UsersService {
         inactivos: usuariosInactivos,
         suspendidos: usuariosSuspendidos,
         email_verificado: usuariosEmailVerificado,
-        archivados: usuariosArchivados
-      }
+        archivados: usuariosArchivados,
+      },
     };
   }
 }

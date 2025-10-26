@@ -1,7 +1,12 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'outline'
+  | 'ghost'
+  | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 @Component({
@@ -9,7 +14,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <button 
+    <button
       [type]="type"
       [disabled]="disabled || loading"
       [class]="buttonClasses"
@@ -17,30 +22,30 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
     >
       <div class="flex items-center justify-center">
         <!-- Loading spinner -->
-        <svg 
-          *ngIf="loading" 
-          class="animate-spin h-4 w-4" 
-          fill="none" 
+        <svg
+          *ngIf="loading"
+          class="animate-spin h-4 w-4"
+          fill="none"
           viewBox="0 0 24 24"
         >
-          <circle 
-            class="opacity-25" 
-            cx="12" 
-            cy="12" 
-            r="10" 
-            stroke="currentColor" 
+          <circle
+            class="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
             stroke-width="4"
           ></circle>
-          <path 
-            class="opacity-75" 
-            fill="currentColor" 
+          <path
+            class="opacity-75"
+            fill="currentColor"
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
         </svg>
-        
+
         <!-- Icon slot -->
         <ng-content select="[slot=icon]"></ng-content>
-        
+
         <!-- Button text -->
         <span *ngIf="!loading || showTextWhileLoading">
           <ng-content></ng-content>
@@ -48,11 +53,26 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
       </div>
     </button>
   `,
-  styles: [`
-    :host {
-      display: inline-block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: inline-block;
+      }
+
+      /* Asegurar alturas exactas para consistencia */
+      .h-9 {
+        height: 2.25rem; /* 36px */
+      }
+
+      .h-11 {
+        height: 2.75rem; /* 44px */
+      }
+
+      .h-13 {
+        height: 3.25rem; /* 52px */
+      }
+    `,
+  ],
 })
 export class ButtonComponent {
   @Input() variant: ButtonVariant = 'primary';
@@ -80,14 +100,14 @@ export class ButtonComponent {
       'relative',
       'inline-flex',
       'items-center',
-      'justify-center'
+      'justify-center',
     ];
 
-    // Size classes
+    // Size classes - alturas consistentes con inputs y selectors
     const sizeClasses = {
-      sm: ['px-3', 'py-1.5', 'text-sm'],
-      md: ['px-4', 'py-2', 'text-base'],
-      lg: ['px-6', 'py-3', 'text-lg']
+      sm: ['h-9', 'px-3', 'text-sm'], // 36px
+      md: ['h-11', 'px-4', 'text-base'], // 44px
+      lg: ['h-13', 'px-6', 'text-lg'], // 52px
     };
 
     // Variant classes
@@ -96,13 +116,13 @@ export class ButtonComponent {
         'bg-[var(--color-primary)]',
         'hover:bg-[var(--color-primary)]/90',
         'text-[var(--color-text-on-primary)]',
-        'focus:ring-[var(--color-primary)]/50'
+        'focus:ring-[var(--color-primary)]/50',
       ],
       secondary: [
         'bg-[var(--color-secondary)]',
         'hover:bg-[var(--color-secondary)]/90',
         'text-[var(--color-text-on-primary)]',
-        'focus:ring-[var(--color-secondary)]/50'
+        'focus:ring-[var(--color-secondary)]/50',
       ],
       outline: [
         'border-2',
@@ -110,19 +130,19 @@ export class ButtonComponent {
         'text-[var(--color-primary)]',
         'hover:bg-[var(--color-primary)]',
         'hover:text-[var(--color-text-on-primary)]',
-        'focus:ring-[var(--color-primary)]/50'
+        'focus:ring-[var(--color-primary)]/50',
       ],
       ghost: [
         'text-[var(--color-text-primary)]',
         'hover:bg-[var(--color-background)]',
-        'focus:ring-[var(--color-border)]'
+        'focus:ring-[var(--color-border)]',
       ],
       danger: [
         'bg-[var(--color-destructive)]',
         'hover:bg-[var(--color-destructive)]',
         'text-[var(--color-text-on-primary)]',
-        'focus:ring-[var(--color-destructive)]/50'
-      ]
+        'focus:ring-[var(--color-destructive)]/50',
+      ],
     };
 
     // Width classes
@@ -132,7 +152,7 @@ export class ButtonComponent {
       ...baseClasses,
       ...sizeClasses[this.size],
       ...variantClasses[this.variant],
-      ...widthClasses
+      ...widthClasses,
     ];
 
     if (this.customClasses) {
