@@ -15,7 +15,12 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto, UsersDashboardDto } from './dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserQueryDto,
+  UsersDashboardDto,
+} from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { ResponseService } from '../../common/responses/response.service';
@@ -46,18 +51,18 @@ export class UsersController {
     );
   }
 
-  @Get('dashboard')
+  @Get('stats')
   @Permissions('users:read')
-  async getDashboard(@Query() query: UsersDashboardDto) {
+  async getStats(@Query() query: UsersDashboardDto) {
     try {
       const result = await this.usersService.getDashboard(query);
       return this.responseService.success(
         result.data,
-        'Dashboard de usuarios obtenido exitosamente',
+        'Estadísticas de usuarios obtenidas exitosamente',
       );
     } catch (error) {
       return this.responseService.error(
-        'Error al obtener el dashboard de usuarios',
+        'Error al obtener las estadísticas de usuarios',
         error.message,
       );
     }

@@ -6,12 +6,16 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
+import { ResponseService } from '../../common/responses/response.service';
 
 @ApiTags('Audit')
 @Controller('audit')
 @ApiBearerAuth()
 export class AuditController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Get('logs')
   @ApiOperation({
@@ -24,7 +28,7 @@ export class AuditController {
   })
   async getAuditLogs(
     @Query('userId') userId?: string,
-    @Query('storeId') storeId?: string, // ✅ Nuevo parámetro storeId
+    @Query('storeId') storeId?: string,
     @Query('action') action?: AuditAction,
     @Query('resource') resource?: AuditResource,
     @Query('resourceId') resourceId?: string,
@@ -37,7 +41,7 @@ export class AuditController {
     const filters: any = {};
 
     if (userId) filters.userId = parseInt(userId);
-    if (storeId) filters.storeId = parseInt(storeId); // ✅ Procesar storeId
+    if (storeId) filters.storeId = parseInt(storeId);
     if (action) filters.action = action;
     if (resource) filters.resource = resource;
     if (resourceId) filters.resourceId = parseInt(resourceId);
@@ -47,7 +51,11 @@ export class AuditController {
     if (offset) filters.offset = parseInt(offset);
     if (organizationId) filters.organizationId = parseInt(organizationId);
 
-    return await this.auditService.getAuditLogs(filters);
+    const logs = await this.auditService.getAuditLogs(filters);
+    return this.responseService.success(
+      logs,
+      'Audit logs retrieved successfully',
+    );
   }
 
   @Get('stats')
@@ -66,6 +74,10 @@ export class AuditController {
     const from = fromDate ? new Date(fromDate) : undefined;
     const to = toDate ? new Date(toDate) : undefined;
 
-    return await this.auditService.getAuditStats(from, to);
+    const stats = await this.auditService.getAuditStats(from, to);
+    return this.responseService.success(
+      stats,
+      'Audit statistics retrieved successfully',
+    );
   }
 }

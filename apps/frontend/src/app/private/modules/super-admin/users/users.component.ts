@@ -6,14 +6,14 @@ import {
   UserQueryDto,
   UserStats,
   UserState,
-  PaginatedUsersResponse
+  PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
   UserEditModalComponent,
-  UserEmptyStateComponent
+  UserEmptyStateComponent,
 } from './components/index';
 
 // Import components from shared
@@ -25,9 +25,14 @@ import {
   IconComponent,
   ButtonComponent,
   DialogService,
-  ToastService
+  ToastService,
 } from '../../../../shared/components/index';
-import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+} from '@angular/forms';
 
 @Component({
   selector: 'app-users',
@@ -43,10 +48,10 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angul
     TableComponent,
     InputsearchComponent,
     IconComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   templateUrl: './users.component.html',
-  styleUrls: ['./users.component.css']
+  styleUrls: ['./users.component.css'],
 })
 export class UsersComponent implements OnInit, OnDestroy {
   users: User[] = [];
@@ -76,28 +81,28 @@ export class UsersComponent implements OnInit, OnDestroy {
       badge: true,
       badgeConfig: {
         type: 'status',
-        size: 'sm'
+        size: 'sm',
       },
-      transform: (value: UserState) => this.getStateDisplay(value).text
+      transform: (value: UserState) => this.getStateDisplay(value).text,
     },
     {
       key: 'organizations.name',
       label: 'Organización',
       sortable: false,
-      defaultValue: 'N/A'
+      defaultValue: 'N/A',
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
-      transform: (value: string) => value ? this.formatDate(value) : 'Nunca'
+      transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
     },
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
-      transform: (value: string) => this.formatDate(value)
-    }
+      transform: (value: string) => this.formatDate(value),
+    },
   ];
 
   tableActions: TableAction[] = [
@@ -105,14 +110,14 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'primary'
+      variant: 'primary',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (user: User) => this.confirmDelete(user),
-      variant: 'danger'
-    }
+      variant: 'danger',
+    },
   ];
 
   // Pagination
@@ -120,7 +125,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0
+    totalPages: 0,
   };
 
   // Filter states
@@ -128,32 +133,34 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: '', label: 'Todos los estados' },
     { value: UserState.ACTIVE, label: 'Activo' },
     { value: UserState.INACTIVE, label: 'Inactivo' },
-    { value: UserState.PENDING_VERIFICATION, label: 'Pendiente de Verificación' },
+    {
+      value: UserState.PENDING_VERIFICATION,
+      label: 'Pendiente de Verificación',
+    },
     { value: UserState.SUSPENDED, label: 'Suspendido' },
-    { value: UserState.ARCHIVED, label: 'Archivado' }
+    { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
 
   constructor(
     private usersService: UsersService,
     private fb: FormBuilder,
     private dialogService: DialogService,
-    private toastService: ToastService
+    private toastService: ToastService,
   ) {
     this.filterForm = this.fb.group({
       search: [''],
       state: [''],
-      organization_id: ['']
+      organization_id: [''],
     });
 
     // Setup search debounce
     this.searchSubject
-      .pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        takeUntil(this.destroy$)
-      )
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe((searchTerm: string) => {
-        this.filterForm.patchValue({ search: searchTerm }, { emitEvent: false });
+        this.filterForm.patchValue(
+          { search: searchTerm },
+          { emitEvent: false },
+        );
         this.pagination.page = 1;
         this.loadUsers();
       });
@@ -174,13 +181,13 @@ export class UsersComponent implements OnInit, OnDestroy {
     // Subscribe to service loading states
     this.usersService.isCreatingUser
       .pipe(takeUntil(this.destroy$))
-      .subscribe(isCreating => {
+      .subscribe((isCreating) => {
         // Optional: Handle global loading state
       });
 
     this.usersService.isUpdatingUser
       .pipe(takeUntil(this.destroy$))
-      .subscribe(isUpdating => {
+      .subscribe((isUpdating) => {
         // Optional: Handle global loading state
       });
   }
@@ -198,51 +205,57 @@ export class UsersComponent implements OnInit, OnDestroy {
       limit: this.pagination.limit,
       search: filters.search || undefined,
       state: filters.state || undefined,
-      organization_id: filters.organization_id || undefined
+      organization_id: filters.organization_id || undefined,
     };
 
-    this.usersService.getUsers(query).subscribe({
-      next: (response: PaginatedUsersResponse) => {
-        this.users = response.data || [];
-        
-        // Validar que response.pagination exista y tenga las propiedades esperadas
-        if (response.pagination) {
-          this.pagination = {
-            page: response.pagination.page || 1,
-            limit: response.pagination.limit || 10,
-            total: response.pagination.total || 0,
-            totalPages: response.pagination.total_pages || 0
-          };
-        } else {
-          // Si no hay paginación, mantener valores por defecto
-          console.warn('La respuesta no contiene información de paginación:', response);
+    this.usersService
+      .getUsers(query)
+      .subscribe({
+        next: (response: PaginatedUsersResponse) => {
+          this.users = response.data || [];
+
+          // Validar que response.pagination exista y tenga las propiedades esperadas
+          if (response.pagination) {
+            this.pagination = {
+              page: response.pagination.page || 1,
+              limit: response.pagination.limit || 10,
+              total: response.pagination.total || 0,
+              totalPages: response.pagination.total_pages || 0,
+            };
+          } else {
+            // Si no hay paginación, mantener valores por defecto
+            console.warn(
+              'La respuesta no contiene información de paginación:',
+              response,
+            );
+            this.pagination = {
+              page: 1,
+              limit: 10,
+              total: this.users.length,
+              totalPages: 1,
+            };
+          }
+        },
+        error: (error) => {
+          console.error('Error loading users:', error);
+          this.users = []; // Limpiar usuarios en caso de error
+          // Resetear paginación a valores seguros
           this.pagination = {
             page: 1,
             limit: 10,
-            total: this.users.length,
-            totalPages: 1
+            total: 0,
+            totalPages: 0,
           };
-        }
-      },
-      error: (error) => {
-        console.error('Error loading users:', error);
-        this.users = []; // Limpiar usuarios en caso de error
-        // Resetear paginación a valores seguros
-        this.pagination = {
-          page: 1,
-          limit: 10,
-          total: 0,
-          totalPages: 0
-        };
-        // Handle error - show toast or notification
-      }
-    }).add(() => {
-      this.isLoading = false; // Asegurar que el estado de carga se resetee
-    });
+          // Handle error - show toast or notification
+        },
+      })
+      .add(() => {
+        this.isLoading = false; // Asegurar que el estado de carga se resetee
+      });
   }
 
   loadUserStats(): void {
-    this.usersService.getUsersDashboard().subscribe({
+    this.usersService.getUsersStats().subscribe({
       next: (stats: UserStats) => {
         this.userStats = stats;
       },
@@ -257,9 +270,9 @@ export class UsersComponent implements OnInit, OnDestroy {
           inactivos: 0,
           suspendidos: 0,
           email_verificado: 0,
-          archivados: 0
+          archivados: 0,
         };
-      }
+      },
     });
   }
 
@@ -305,17 +318,19 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   confirmDelete(user: User): void {
-    this.dialogService.confirm({
-      title: 'Eliminar Usuario',
-      message: `¿Estás seguro de que deseas eliminar al usuario "${user.first_name} ${user.last_name}"? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger'
-    }).then((confirmed) => {
-      if (confirmed) {
-        this.deleteUser();
-      }
-    });
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Usuario',
+        message: `¿Estás seguro de que deseas eliminar al usuario "${user.first_name} ${user.last_name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.deleteUser();
+        }
+      });
   }
 
   deleteUser(): void {
@@ -331,7 +346,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error deleting user:', error);
         this.toastService.error('Error al eliminar el usuario');
-      }
+      },
     });
   }
 
@@ -339,41 +354,43 @@ export class UsersComponent implements OnInit, OnDestroy {
     const action = user.state === UserState.ACTIVE ? 'archive' : 'reactivate';
     const actionText = action === 'archive' ? 'archivar' : 'reactivar';
 
-    this.dialogService.confirm({
-      title: `${action === 'archive' ? 'Archivar' : 'Reactivar'} Usuario`,
-      message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
-      confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger'
-    }).then((confirmed) => {
-      if (confirmed) {
-        if (action === 'archive') {
-          this.usersService.archiveUser(user.id).subscribe({
-            next: () => {
-              this.loadUsers();
-              this.loadUserStats();
-              this.toastService.success('Usuario archivado exitosamente');
-            },
-            error: (error) => {
-              console.error('Error archiving user:', error);
-              this.toastService.error('Error al archivar el usuario');
-            }
-          });
-        } else {
-          this.usersService.reactivateUser(user.id).subscribe({
-            next: () => {
-              this.loadUsers();
-              this.loadUserStats();
-              this.toastService.success('Usuario reactivado exitosamente');
-            },
-            error: (error) => {
-              console.error('Error reactivating user:', error);
-              this.toastService.error('Error al reactivar el usuario');
-            }
-          });
+    this.dialogService
+      .confirm({
+        title: `${action === 'archive' ? 'Archivar' : 'Reactivar'} Usuario`,
+        message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
+        confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          if (action === 'archive') {
+            this.usersService.archiveUser(user.id).subscribe({
+              next: () => {
+                this.loadUsers();
+                this.loadUserStats();
+                this.toastService.success('Usuario archivado exitosamente');
+              },
+              error: (error) => {
+                console.error('Error archiving user:', error);
+                this.toastService.error('Error al archivar el usuario');
+              },
+            });
+          } else {
+            this.usersService.reactivateUser(user.id).subscribe({
+              next: () => {
+                this.loadUsers();
+                this.loadUserStats();
+                this.toastService.success('Usuario reactivado exitosamente');
+              },
+              error: (error) => {
+                console.error('Error reactivating user:', error);
+                this.toastService.error('Error al reactivar el usuario');
+              },
+            });
+          }
         }
-      }
-    });
+      });
   }
 
   getStateDisplay(state: UserState): { text: string; class: string } {
@@ -400,7 +417,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   }
 

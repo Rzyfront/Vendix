@@ -5,7 +5,10 @@ import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
-import { OrganizationsService, CreateOrganizationDto } from './services/organizations.service';
+import {
+  OrganizationsService,
+  CreateOrganizationDto,
+} from './services/organizations.service';
 import { OrganizationListItem } from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
 
@@ -15,7 +18,7 @@ import {
   OrganizationPaginationComponent,
   OrganizationEmptyStateComponent,
   OrganizationCreateModalComponent,
-  OrganizationEditModalComponent
+  OrganizationEditModalComponent,
 } from './components/index';
 
 // Import shared components
@@ -26,7 +29,7 @@ import {
   TableComponent,
   ButtonComponent,
   DialogService,
-  ToastService
+  ToastService,
 } from '../../../../shared/components/index';
 import { TableColumn, TableAction } from '../../../../shared/components/index';
 
@@ -49,7 +52,7 @@ import './organizations.component.css';
     InputsearchComponent,
     IconComponent,
     TableComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   providers: [OrganizationsService],
   template: `
@@ -60,14 +63,18 @@ import './organizations.component.css';
       <!-- Organizations List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
         <div class="px-6 py-4 border-b border-border">
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
                 All Organizations ({{ pagination.total }})
               </h2>
             </div>
-            
-            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+
+            <div
+              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            >
               <!-- Input de búsqueda compacto -->
               <app-inputsearch
                 class="w-full sm:w-64"
@@ -76,7 +83,7 @@ import './organizations.component.css';
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
-              
+
               <div class="flex gap-2 items-center">
                 <app-button
                   variant="outline"
@@ -98,7 +105,7 @@ import './organizations.component.css';
                 </app-button>
               </div>
             </div>
-            
+
             <!-- Paginación info -->
             <div class="flex items-center gap-2 mt-2 sm:mt-0">
               <span class="text-sm text-text-secondary">
@@ -108,10 +115,11 @@ import './organizations.component.css';
           </div>
         </div>
 
-
         <!-- Loading State -->
         <div *ngIf="isLoading" class="p-8 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
           <p class="mt-2 text-text-secondary">Loading organizations...</p>
         </div>
 
@@ -120,7 +128,8 @@ import './organizations.component.css';
           *ngIf="!isLoading && organizations.length === 0"
           [title]="getEmptyStateTitle()"
           [description]="getEmptyStateDescription()"
-          (actionClick)="openCreateOrganizationModal()">
+          (actionClick)="openCreateOrganizationModal()"
+        >
         </app-organization-empty-state>
 
         <!-- Organizations Table -->
@@ -135,14 +144,16 @@ import './organizations.component.css';
             [striped]="true"
             size="md"
             (sort)="onTableSort($event)"
-            (rowClick)="viewOrganization($event)">
+            (rowClick)="viewOrganization($event)"
+          >
           </app-table>
 
           <!-- Pagination -->
           <div class="mt-6 flex justify-center">
             <app-organization-pagination
               [pagination]="pagination"
-              (pageChange)="changePage($event)">
+              (pageChange)="changePage($event)"
+            >
             </app-organization-pagination>
           </div>
         </div>
@@ -167,7 +178,7 @@ import './organizations.component.css';
         (cancel)="onEditModalCancel()"
       ></app-organization-edit-modal>
     </div>
-  `
+  `,
 })
 export class OrganizationsComponent implements OnInit, OnDestroy {
   organizations: OrganizationListItem[] = [];
@@ -191,10 +202,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       badge: true,
       badgeConfig: {
         type: 'status',
-        size: 'sm'
+        size: 'sm',
       },
-      transform: (value: string) => this.formatStatus(value)
-    }
+      transform: (value: string) => this.formatStatus(value),
+    },
   ];
 
   tableActions: TableAction[] = [
@@ -202,28 +213,28 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (org) => this.editOrganization(org),
-      variant: 'primary'
+      variant: 'primary',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (org) => this.deleteOrganization(org),
-      variant: 'danger'
-    }
+      variant: 'danger',
+    },
   ];
 
   stats = {
     total: 0,
     active: 0,
     inactive: 0,
-    suspended: 0
+    suspended: 0,
   };
 
   pagination = {
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0
+    totalPages: 0,
   };
 
   // Modal state
@@ -242,7 +253,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     private organizationsService: OrganizationsService,
     private fb: FormBuilder,
     private dialogService: DialogService,
-    private toastService: ToastService
+    private toastService: ToastService,
   ) {
     this.initializeCreateForm();
   }
@@ -253,7 +264,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions.forEach((sub) => sub.unsubscribe());
   }
 
   private initializeCreateForm(): void {
@@ -265,7 +276,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       description: [''],
       legalName: [''],
       taxId: [''],
-      state: ['active']
+      state: ['active'],
     });
   }
 
@@ -279,7 +290,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       description: '',
       legalName: '',
       taxId: '',
-      state: 'active'
+      state: 'active',
     });
   }
 
@@ -302,7 +313,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     if (!organizationData || organizationData instanceof Event) {
       if (this.createOrganizationForm.invalid) {
         // Mark all fields as touched to trigger validation messages
-        Object.keys(this.createOrganizationForm.controls).forEach(key => {
+        Object.keys(this.createOrganizationForm.controls).forEach((key) => {
           this.createOrganizationForm.get(key)?.markAsTouched();
         });
         return;
@@ -317,29 +328,31 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         description: formData.description || undefined,
         legal_name: formData.legalName || undefined,
         tax_id: formData.taxId || undefined,
-        state: formData.state
+        state: formData.state,
       };
     }
 
     this.isCreatingOrganization = true;
 
-    const sub = this.organizationsService.createOrganization(organizationData as CreateOrganizationDto).subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.isCreateModalOpen = false;
-          this.loadOrganizations(); // Reload the list
-          this.loadStats(); // Reload stats
-          this.toastService.success('Organización creada exitosamente');
-          console.log('Organization created successfully:', response.data);
-        }
-        this.isCreatingOrganization = false;
-      },
-      error: (error) => {
-        console.error('Error creating organization:', error);
-        this.toastService.error('Error al crear la organización');
-        this.isCreatingOrganization = false;
-      }
-    });
+    const sub = this.organizationsService
+      .createOrganization(organizationData as CreateOrganizationDto)
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.isCreateModalOpen = false;
+            this.loadOrganizations(); // Reload the list
+            this.loadStats(); // Reload stats
+            this.toastService.success('Organización creada exitosamente');
+            console.log('Organization created successfully:', response.data);
+          }
+          this.isCreatingOrganization = false;
+        },
+        error: (error) => {
+          console.error('Error creating organization:', error);
+          this.toastService.error('Error al crear la organización');
+          this.isCreatingOrganization = false;
+        },
+      });
 
     this.subscriptions.push(sub);
   }
@@ -351,7 +364,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       page: this.pagination.page,
       limit: this.pagination.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedStatus && { state: this.selectedStatus as any })
+      ...(this.selectedStatus && { state: this.selectedStatus as any }),
     };
 
     const sub = this.organizationsService.getOrganizations(query).subscribe({
@@ -371,8 +384,8 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
             settings: {
               maxStores: 5, // Default value
               maxUsers: 50, // Default value
-              allowMultipleStores: true // Default value
-            }
+              allowMultipleStores: true, // Default value
+            },
           }));
 
           this.pagination.total = response.meta.total;
@@ -384,14 +397,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         console.error('Error loading organizations:', error);
         this.isLoading = false;
         // TODO: Show error notification
-      }
+      },
     });
 
     this.subscriptions.push(sub);
   }
 
   loadStats(): void {
-    const sub = this.organizationsService.getOrganizationStats().subscribe({
+    const sub = this.organizationsService.getOrganizationStatsList().subscribe({
       next: (response) => {
         if (response.success) {
           this.stats.total = response.data.total_organizations;
@@ -404,7 +417,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         console.error('Error loading organization stats:', error);
         // Fallback to calculating stats from loaded data
         this.updateStats();
-      }
+      },
     });
 
     this.subscriptions.push(sub);
@@ -412,9 +425,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   updateStats(): void {
     this.stats.total = this.organizations.length;
-    this.stats.active = this.organizations.filter(org => org.status === 'active').length;
-    this.stats.inactive = this.organizations.filter(org => org.status === 'inactive').length;
-    this.stats.suspended = this.organizations.filter(org => org.status === 'suspended').length;
+    this.stats.active = this.organizations.filter(
+      (org) => org.status === 'active',
+    ).length;
+    this.stats.inactive = this.organizations.filter(
+      (org) => org.status === 'inactive',
+    ).length;
+    this.stats.suspended = this.organizations.filter(
+      (org) => org.status === 'suspended',
+    ).length;
   }
 
   refreshOrganizations(): void {
@@ -427,7 +446,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadOrganizations();
   }
 
-  onTableSort(sortEvent: { column: string; direction: 'asc' | 'desc' | null }): void {
+  onTableSort(sortEvent: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     // TODO: Implement server-side sorting
     console.log('Sort event:', sortEvent);
     // For now, just reload the organizations
@@ -442,9 +464,9 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   // Helper methods for table display
   formatStatus(status: string): string {
     const statusMap: { [key: string]: string } = {
-      'active': 'Activo',
-      'inactive': 'Inactivo',
-      'suspended': 'Suspendido'
+      active: 'Activo',
+      inactive: 'Inactivo',
+      suspended: 'Suspendido',
     };
     return statusMap[status] || status;
   }
@@ -453,35 +475,41 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     return new Date(dateString).toLocaleDateString('es-ES', {
       year: 'numeric',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
     });
   }
 
   deleteOrganization(org: OrganizationListItem): void {
-    this.dialogService.confirm({
-      title: 'Eliminar Organización',
-      message: `¿Estás seguro de que deseas eliminar la organización "${org.name}"? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger'
-    }).then((confirmed) => {
-      if (confirmed) {
-        const sub = this.organizationsService.deleteOrganization(org.id).subscribe({
-          next: (response) => {
-            if (response.success) {
-              this.loadOrganizations(); // Reload the list
-              this.toastService.success('Organización eliminada exitosamente');
-            }
-          },
-          error: (error) => {
-            console.error('Error deleting organization:', error);
-            this.toastService.error('Error al eliminar la organización');
-          }
-        });
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Organización',
+        message: `¿Estás seguro de que deseas eliminar la organización "${org.name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          const sub = this.organizationsService
+            .deleteOrganization(org.id)
+            .subscribe({
+              next: (response) => {
+                if (response.success) {
+                  this.loadOrganizations(); // Reload the list
+                  this.toastService.success(
+                    'Organización eliminada exitosamente',
+                  );
+                }
+              },
+              error: (error) => {
+                console.error('Error deleting organization:', error);
+                this.toastService.error('Error al eliminar la organización');
+              },
+            });
 
-        this.subscriptions.push(sub);
-      }
-    });
+          this.subscriptions.push(sub);
+        }
+      });
   }
 
   viewOrganization(org: OrganizationListItem): void {
@@ -522,31 +550,32 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       phone: organizationData.phone,
       website: organizationData.website,
       description: organizationData.description,
-      state: organizationData.state
+      state: organizationData.state,
     };
 
-    const sub = this.organizationsService.updateOrganization(this.selectedOrganization.id, updateData).subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.isEditModalOpen = false;
-          this.selectedOrganization = undefined;
-          this.loadOrganizations(); // Reload the list
-          this.loadStats(); // Reload stats
-          this.toastService.success('Organización actualizada exitosamente');
-          console.log('Organization updated successfully:', response.data);
-        }
-        this.isUpdatingOrganization = false;
-      },
-      error: (error) => {
-        console.error('Error updating organization:', error);
-        this.toastService.error('Error al actualizar la organización');
-        this.isUpdatingOrganization = false;
-      }
-    });
+    const sub = this.organizationsService
+      .updateOrganization(this.selectedOrganization.id, updateData)
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.isEditModalOpen = false;
+            this.selectedOrganization = undefined;
+            this.loadOrganizations(); // Reload the list
+            this.loadStats(); // Reload stats
+            this.toastService.success('Organización actualizada exitosamente');
+            console.log('Organization updated successfully:', response.data);
+          }
+          this.isUpdatingOrganization = false;
+        },
+        error: (error) => {
+          console.error('Error updating organization:', error);
+          this.toastService.error('Error al actualizar la organización');
+          this.isUpdatingOrganization = false;
+        },
+      });
 
     this.subscriptions.push(sub);
   }
-
 
   getEmptyStateTitle(): string {
     if (this.searchTerm || this.selectedStatus) {

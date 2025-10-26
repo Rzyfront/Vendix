@@ -89,22 +89,28 @@ export class RolesController {
 
   // ===== DASHBOARD STATS =====
 
-  @Get('dashboard')
+  @Get('stats')
   @Roles(UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Obtener estadísticas del dashboard de roles' })
-  @ApiResponse({ status: 200, description: 'Estadísticas obtenidas exitosamente' })
-  @ApiResponse({ status: 403, description: 'No tienes permisos para ver estas estadísticas' })
-  async getDashboardStats(@Request() req) {
+  @ApiOperation({ summary: 'Obtener estadísticas de roles' })
+  @ApiResponse({
+    status: 200,
+    description: 'Estadísticas obtenidas exitosamente',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'No tienes permisos para ver estas estadísticas',
+  })
+  async getStats(@Request() req) {
     try {
       const result = await this.rolesService.getDashboardStats(req.user.id);
       return this.responseService.success(
         result,
-        'Estadísticas del dashboard obtenidas exitosamente',
+        'Estadísticas obtenidas exitosamente',
         req.url,
       );
     } catch (error) {
       return this.responseService.error(
-        'Error al obtener las estadísticas del dashboard',
+        'Error al obtener las estadísticas',
         error.message,
       );
     }
@@ -116,14 +122,20 @@ export class RolesController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
   @Permissions('roles.permissions.read')
   @ApiOperation({ summary: 'Obtener IDs de permisos de un rol' })
-  @ApiResponse({ status: 200, description: 'IDs de permisos obtenidos exitosamente' })
+  @ApiResponse({
+    status: 200,
+    description: 'IDs de permisos obtenidos exitosamente',
+  })
   @ApiResponse({ status: 404, description: 'Rol no encontrado' })
   async getRolePermissions(
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ) {
     try {
-      const result = await this.rolesService.getRolePermissions(id, req.user.id);
+      const result = await this.rolesService.getRolePermissions(
+        id,
+        req.user.id,
+      );
       return this.responseService.success(
         result,
         'IDs de permisos obtenidos exitosamente',
@@ -369,5 +381,4 @@ export class RolesController {
       );
     }
   }
-
 }

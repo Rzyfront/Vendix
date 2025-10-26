@@ -69,6 +69,23 @@ export class OrganizationsController {
     }
   }
 
+  @Get('stats')
+  @Permissions('organizations:read')
+  async getStats() {
+    try {
+      const result = await this.organizationsService.getDashboardStats();
+      return this.responseService.success(
+        result,
+        'Estadísticas de organizaciones obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener las estadísticas de organizaciones',
+        error.message,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('organizations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -143,9 +160,9 @@ export class OrganizationsController {
     }
   }
 
-  @Get(':id/dashboard')
+  @Get(':id/stats')
   @Permissions('organizations:read')
-  async getDashboard(
+  async getOrganizationStats(
     @Param('id', ParseIntPipe) id: number,
     @Query() query: OrganizationDashboardDto,
   ) {
@@ -153,28 +170,11 @@ export class OrganizationsController {
       const result = await this.organizationsService.getDashboard(id, query);
       return this.responseService.success(
         result,
-        'Dashboard organizacional obtenido exitosamente',
+        'Estadísticas organizacionales obtenidas exitosamente',
       );
     } catch (error) {
       return this.responseService.error(
-        'Error al obtener el dashboard organizacional',
-        error.message,
-      );
-    }
-  }
-
-  @Get('dashboard')
-  @Permissions('organizations:read')
-  async getDashboardStats() {
-    try {
-      const result = await this.organizationsService.getDashboardStats();
-      return this.responseService.success(
-        result,
-        'Estadísticas del dashboard de organizaciones obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas del dashboard de organizaciones',
+        'Error al obtener las estadísticas organizacionales',
         error.message,
       );
     }

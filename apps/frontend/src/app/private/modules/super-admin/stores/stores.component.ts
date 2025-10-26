@@ -1,4 +1,10 @@
-import { Component, OnInit, OnDestroy, OnChanges, SimpleChanges } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  OnChanges,
+  SimpleChanges,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -6,14 +12,20 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
 import { StoresService } from './services/stores.service';
-import { StoreListItem, StoreState, StoreType, CreateStoreDto, StoreSettingsUpdateDto } from './interfaces/store.interface';
+import {
+  StoreListItem,
+  StoreState,
+  StoreType,
+  CreateStoreDto,
+  StoreSettingsUpdateDto,
+} from './interfaces/store.interface';
 
 // Import new components
 import {
   StoreStatsComponent,
   StoreEmptyStateComponent,
   StoreCreateModalComponent,
-  StoreEditModalComponent
+  StoreEditModalComponent,
 } from './components/index';
 
 import { StoreSettingsModalComponent } from './components/store-settings-modal.component';
@@ -26,7 +38,7 @@ import {
   TableComponent,
   ButtonComponent,
   DialogService,
-  ToastService
+  ToastService,
 } from '../../../../shared/components/index';
 import { TableColumn, TableAction } from '../../../../shared/components/index';
 
@@ -49,10 +61,10 @@ import './stores.component.css';
     InputsearchComponent,
     IconComponent,
     TableComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   providers: [StoresService],
-  templateUrl: './stores.component.html'
+  templateUrl: './stores.component.html',
 })
 export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   stores: StoreListItem[] = [];
@@ -71,7 +83,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Organización',
       sortable: true,
       width: '180px',
-      defaultValue: 'N/A'
+      defaultValue: 'N/A',
     },
     {
       key: 'addresses',
@@ -85,7 +97,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
           return `${primaryAddress.city}, ${primaryAddress.state_province}`;
         }
         return `${value[0].city}, ${value[0].state_province}`;
-      }
+      },
     },
     {
       key: 'store_type',
@@ -98,14 +110,14 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         type: 'custom',
         size: 'sm',
         colorMap: {
-          'physical': '#22c55e',
-          'online': '#3b82f6',
-          'hybrid': '#8b5cf6',
-          'popup': '#f59e0b',
-          'kiosko': '#ef4444'
-        }
+          physical: '#22c55e',
+          online: '#3b82f6',
+          hybrid: '#8b5cf6',
+          popup: '#f59e0b',
+          kiosko: '#ef4444',
+        },
       },
-      transform: (value: StoreType) => this.formatStoreType(value)
+      transform: (value: StoreType) => this.formatStoreType(value),
     },
     {
       key: '_count.store_users',
@@ -113,7 +125,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       sortable: false,
       width: '100px',
       align: 'center',
-      defaultValue: '0'
+      defaultValue: '0',
     },
     {
       key: 'is_active',
@@ -124,10 +136,10 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       badge: true,
       badgeConfig: {
         type: 'status',
-        size: 'sm'
+        size: 'sm',
       },
-      transform: (value: boolean) => this.formatActiveStatus(value)
-    }
+      transform: (value: boolean) => this.formatActiveStatus(value),
+    },
   ];
 
   tableActions: TableAction[] = [
@@ -135,20 +147,20 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'primary'
+      variant: 'primary',
     },
     {
       label: 'Configuración',
       icon: 'settings',
       action: (store) => this.openSettingsModal(store),
-      variant: 'secondary'
+      variant: 'secondary',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (store) => this.deleteStore(store),
-      variant: 'danger'
-    }
+      variant: 'danger',
+    },
   ];
 
   stats = {
@@ -159,7 +171,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     draft_stores: 0,
     total_revenue: 0,
     total_orders: 0,
-    total_products: 0
+    total_products: 0,
   };
 
   // Modal state
@@ -183,7 +195,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     private storesService: StoresService,
     private fb: FormBuilder,
     private dialogService: DialogService,
-    private toastService: ToastService
+    private toastService: ToastService,
   ) {
     this.initializeCreateForm();
   }
@@ -201,7 +213,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   ngOnDestroy(): void {
-    this.subscriptions.forEach(sub => sub.unsubscribe());
+    this.subscriptions.forEach((sub) => sub.unsubscribe());
   }
 
   private initializeCreateForm(): void {
@@ -216,12 +228,17 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: [''],
       country: [''],
       organization_id: [null, [Validators.required]],
-      state: ['active']
+      state: ['active'],
     });
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedState || this.selectedStoreType || this.selectedOrganization);
+    return !!(
+      this.searchTerm ||
+      this.selectedState ||
+      this.selectedStoreType ||
+      this.selectedOrganization
+    );
   }
 
   openCreateStoreModal(): void {
@@ -237,7 +254,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: '',
       country: '',
       organization_id: null,
-      state: 'active'
+      state: 'active',
     });
   }
 
@@ -260,7 +277,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     if (!storeData || storeData instanceof Event) {
       if (this.createStoreForm.invalid) {
         // Mark all fields as touched to trigger validation messages
-        Object.keys(this.createStoreForm.controls).forEach(key => {
+        Object.keys(this.createStoreForm.controls).forEach((key) => {
           this.createStoreForm.get(key)?.markAsTouched();
         });
         return;
@@ -280,33 +297,35 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         country: formData.country || undefined,
         organization_id: formData.organization_id,
         is_active: formData.state === 'active' ? true : false,
-        store_type: StoreType.PHYSICAL
+        store_type: StoreType.PHYSICAL,
       };
     }
 
     this.isCreatingStore = true;
 
-    const sub = this.storesService.createStore(storeData as CreateStoreDto).subscribe({
-      next: (response) => {
-        console.log('Create store response:', response);
-        if (response.success && response.data) {
-          this.isCreateModalOpen = false;
-          this.loadStores(); // Reload the list
-          this.loadStats(); // Reload stats
-          this.toastService.success('Tienda creada exitosamente');
-          console.log('Store created successfully:', response.data);
-        } else {
-          console.warn('Invalid create store response:', response);
-          this.toastService.error('Respuesta inválida al crear la tienda');
-        }
-        this.isCreatingStore = false;
-      },
-      error: (error) => {
-        console.error('Error creating store:', error);
-        this.toastService.error('Error al crear la tienda');
-        this.isCreatingStore = false;
-      }
-    });
+    const sub = this.storesService
+      .createStore(storeData as CreateStoreDto)
+      .subscribe({
+        next: (response) => {
+          console.log('Create store response:', response);
+          if (response.success && response.data) {
+            this.isCreateModalOpen = false;
+            this.loadStores(); // Reload the list
+            this.loadStats(); // Reload stats
+            this.toastService.success('Tienda creada exitosamente');
+            console.log('Store created successfully:', response.data);
+          } else {
+            console.warn('Invalid create store response:', response);
+            this.toastService.error('Respuesta inválida al crear la tienda');
+          }
+          this.isCreatingStore = false;
+        },
+        error: (error) => {
+          console.error('Error creating store:', error);
+          this.toastService.error('Error al crear la tienda');
+          this.isCreatingStore = false;
+        },
+      });
 
     this.subscriptions.push(sub);
   }
@@ -316,9 +335,20 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     const query = {
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedState && { is_active: this.selectedState === 'active' ? true : this.selectedState === 'inactive' ? false : undefined }),
-      ...(this.selectedStoreType && { store_type: this.selectedStoreType as StoreType }),
-      ...(this.selectedOrganization && { organization_id: parseInt(this.selectedOrganization) })
+      ...(this.selectedState && {
+        is_active:
+          this.selectedState === 'active'
+            ? true
+            : this.selectedState === 'inactive'
+              ? false
+              : undefined,
+      }),
+      ...(this.selectedStoreType && {
+        store_type: this.selectedStoreType as StoreType,
+      }),
+      ...(this.selectedOrganization && {
+        organization_id: parseInt(this.selectedOrganization),
+      }),
     };
 
     const sub = this.storesService.getStores(query).subscribe({
@@ -337,9 +367,13 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
             organization_id: store.organization_id,
             created_at: store.created_at || new Date().toISOString(),
             updated_at: store.updated_at || new Date().toISOString(),
-            organizations: store.organizations || { id: store.organization_id, name: 'Unknown', slug: 'unknown' },
+            organizations: store.organizations || {
+              id: store.organization_id,
+              name: 'Unknown',
+              slug: 'unknown',
+            },
             addresses: store.addresses || [],
-            _count: store._count || { products: 0, orders: 0, store_users: 0 }
+            _count: store._count || { products: 0, orders: 0, store_users: 0 },
           }));
           console.log('Processed stores:', this.stores);
         } else {
@@ -352,14 +386,14 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         console.error('Error loading stores:', error);
         this.isLoading = false;
         // TODO: Show error notification
-      }
+      },
     });
 
     this.subscriptions.push(sub);
   }
 
   loadStats(): void {
-    const sub = this.storesService.getStoreStats().subscribe({
+    const sub = this.storesService.getStoreStatsList().subscribe({
       next: (response) => {
         console.log('Store stats response:', response);
         if (response.success && response.data) {
@@ -374,7 +408,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         console.error('Error loading store stats:', error);
         // Fallback to calculating stats from loaded data
         this.updateStats();
-      }
+      },
     });
 
     this.subscriptions.push(sub);
@@ -382,8 +416,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   updateStats(): void {
     this.stats.total_stores = this.stores.length;
-    this.stats.active_stores = this.stores.filter(store => store.is_active === true).length;
-    this.stats.inactive_stores = this.stores.filter(store => store.is_active === false).length;
+    this.stats.active_stores = this.stores.filter(
+      (store) => store.is_active === true,
+    ).length;
+    this.stats.inactive_stores = this.stores.filter(
+      (store) => store.is_active === false,
+    ).length;
     // Note: suspended and draft states are not directly available in StoreListItem
     // These would need to be calculated from the backend or additional data
     this.stats.suspended_stores = 0;
@@ -434,26 +472,30 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     this.isUpdatingSettings = true;
 
-    const sub = this.storesService.updateStoreSettings(this.selectedStoreForSettings.id, settingsData).subscribe({
-      next: (response) => {
-        console.log('Update store settings response:', response);
-        if (response.success && response.data) {
-          this.isSettingsModalOpen = false;
-          this.selectedStoreForSettings = undefined;
-          this.toastService.success('Configuración actualizada exitosamente');
-          console.log('Store settings updated successfully:', response.data);
-        } else {
-          console.warn('Invalid update store settings response:', response);
-          this.toastService.error('Respuesta inválida al actualizar la configuración');
-        }
-        this.isUpdatingSettings = false;
-      },
-      error: (error) => {
-        console.error('Error updating store settings:', error);
-        this.toastService.error('Error al actualizar la configuración');
-        this.isUpdatingSettings = false;
-      }
-    });
+    const sub = this.storesService
+      .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
+      .subscribe({
+        next: (response) => {
+          console.log('Update store settings response:', response);
+          if (response.success && response.data) {
+            this.isSettingsModalOpen = false;
+            this.selectedStoreForSettings = undefined;
+            this.toastService.success('Configuración actualizada exitosamente');
+            console.log('Store settings updated successfully:', response.data);
+          } else {
+            console.warn('Invalid update store settings response:', response);
+            this.toastService.error(
+              'Respuesta inválida al actualizar la configuración',
+            );
+          }
+          this.isUpdatingSettings = false;
+        },
+        error: (error) => {
+          console.error('Error updating store settings:', error);
+          this.toastService.error('Error al actualizar la configuración');
+          this.isUpdatingSettings = false;
+        },
+      });
 
     this.subscriptions.push(sub);
   }
@@ -463,22 +505,24 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     this.loadStores();
   }
 
-  onTableSort(sortEvent: { column: string; direction: 'asc' | 'desc' | null }): void {
+  onTableSort(sortEvent: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     // TODO: Implement server-side sorting
     console.log('Sort event:', sortEvent);
     // For now, just reload the stores
     this.loadStores();
   }
 
-
   // Helper methods for table display
   formatStatus(status: string): string {
     const statusMap: { [key: string]: string } = {
-      'active': 'Activo',
-      'inactive': 'Inactivo',
-      'draft': 'Borrador',
-      'suspended': 'Suspendido',
-      'archived': 'Archivado'
+      active: 'Activo',
+      inactive: 'Inactivo',
+      draft: 'Borrador',
+      suspended: 'Suspendido',
+      archived: 'Archivado',
     };
     return statusMap[status] || status;
   }
@@ -489,7 +533,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       [StoreType.ONLINE]: 'Online',
       [StoreType.HYBRID]: 'Híbrida',
       [StoreType.POPUP]: 'Temporal',
-      [StoreType.KIOSKO]: 'Kiosco'
+      [StoreType.KIOSKO]: 'Kiosco',
     };
     return typeMap[type] || type;
   }
@@ -502,39 +546,43 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     return new Date(dateString).toLocaleDateString('es-ES', {
       year: 'numeric',
       month: 'short',
-      day: 'numeric'
+      day: 'numeric',
     });
   }
 
   deleteStore(store: StoreListItem): void {
-    this.dialogService.confirm({
-      title: 'Eliminar Tienda',
-      message: `¿Estás seguro de que deseas eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger'
-    }).then((confirmed) => {
-      if (confirmed) {
-        const sub = this.storesService.deleteStore(store.id).subscribe({
-          next: (response) => {
-            console.log('Delete store response:', response);
-            if (response.success) {
-              this.loadStores(); // Reload the list
-              this.toastService.success('Tienda eliminada exitosamente');
-            } else {
-              console.warn('Invalid delete store response:', response);
-              this.toastService.error('Respuesta inválida al eliminar la tienda');
-            }
-          },
-          error: (error) => {
-            console.error('Error deleting store:', error);
-            this.toastService.error('Error al eliminar la tienda');
-          }
-        });
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Tienda',
+        message: `¿Estás seguro de que deseas eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          const sub = this.storesService.deleteStore(store.id).subscribe({
+            next: (response) => {
+              console.log('Delete store response:', response);
+              if (response.success) {
+                this.loadStores(); // Reload the list
+                this.toastService.success('Tienda eliminada exitosamente');
+              } else {
+                console.warn('Invalid delete store response:', response);
+                this.toastService.error(
+                  'Respuesta inválida al eliminar la tienda',
+                );
+              }
+            },
+            error: (error) => {
+              console.error('Error deleting store:', error);
+              this.toastService.error('Error al eliminar la tienda');
+            },
+          });
 
-        this.subscriptions.push(sub);
-      }
-    });
+          this.subscriptions.push(sub);
+        }
+      });
   }
 
   viewStore(store: StoreListItem): void {
@@ -577,31 +625,35 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: storeData.city,
       country: storeData.country,
       is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL
+      store_type: storeData.store_type || StoreType.PHYSICAL,
     };
 
-    const sub = this.storesService.updateStore(this.selectedStore.id, updateData).subscribe({
-      next: (response) => {
-        console.log('Update store response:', response);
-        if (response.success && response.data) {
-          this.isEditModalOpen = false;
-          this.selectedStore = undefined;
-          this.loadStores(); // Reload the list
-          this.loadStats(); // Reload stats
-          this.toastService.success('Tienda actualizada exitosamente');
-          console.log('Store updated successfully:', response.data);
-        } else {
-          console.warn('Invalid update store response:', response);
-          this.toastService.error('Respuesta inválida al actualizar la tienda');
-        }
-        this.isUpdatingStore = false;
-      },
-      error: (error) => {
-        console.error('Error updating store:', error);
-        this.toastService.error('Error al actualizar la tienda');
-        this.isUpdatingStore = false;
-      }
-    });
+    const sub = this.storesService
+      .updateStore(this.selectedStore.id, updateData)
+      .subscribe({
+        next: (response) => {
+          console.log('Update store response:', response);
+          if (response.success && response.data) {
+            this.isEditModalOpen = false;
+            this.selectedStore = undefined;
+            this.loadStores(); // Reload the list
+            this.loadStats(); // Reload stats
+            this.toastService.success('Tienda actualizada exitosamente');
+            console.log('Store updated successfully:', response.data);
+          } else {
+            console.warn('Invalid update store response:', response);
+            this.toastService.error(
+              'Respuesta inválida al actualizar la tienda',
+            );
+          }
+          this.isUpdatingStore = false;
+        },
+        error: (error) => {
+          console.error('Error updating store:', error);
+          this.toastService.error('Error al actualizar la tienda');
+          this.isUpdatingStore = false;
+        },
+      });
 
     this.subscriptions.push(sub);
   }

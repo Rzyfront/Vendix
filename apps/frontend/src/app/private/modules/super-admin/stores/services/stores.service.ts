@@ -14,7 +14,7 @@ import {
   StoreStats,
   PaginatedStoresResponse,
   StoreSettingsUpdateDto,
-  StoreType
+  StoreType,
 } from '../interfaces/store.interface';
 
 export interface ApiResponse<T> {
@@ -35,7 +35,7 @@ export interface PaginatedResponse<T> {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class StoresService {
   private readonly apiUrl = environment.apiUrl;
@@ -45,19 +45,28 @@ export class StoresService {
   /**
    * Get all stores with pagination and filtering
    */
-  getStores(query?: StoreQueryDto): Observable<PaginatedResponse<StoreListItem[]>> {
+  getStores(
+    query?: StoreQueryDto,
+  ): Observable<PaginatedResponse<StoreListItem[]>> {
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.search) params = params.set('search', query.search);
     if (query?.store_type) params = params.set('store_type', query.store_type);
-    if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
-    if (query?.organization_id) params = params.set('organization_id', query.organization_id.toString());
+    if (query?.is_active !== undefined)
+      params = params.set('is_active', query.is_active.toString());
+    if (query?.organization_id)
+      params = params.set('organization_id', query.organization_id.toString());
 
     const url = `${this.apiUrl}/stores`;
-    console.log('Fetching stores from:', url, 'with params:', params.toString());
-    
+    console.log(
+      'Fetching stores from:',
+      url,
+      'with params:',
+      params.toString(),
+    );
+
     return this.http.get<PaginatedResponse<StoreListItem[]>>(url, { params });
   }
 
@@ -72,7 +81,9 @@ export class StoresService {
    * Get store by slug
    */
   getStoreBySlug(slug: string): Observable<ApiResponse<Store>> {
-    return this.http.get<ApiResponse<Store>>(`${this.apiUrl}/stores/slug/${slug}`);
+    return this.http.get<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/slug/${slug}`,
+    );
   }
 
   /**
@@ -85,8 +96,14 @@ export class StoresService {
   /**
    * Update an existing store
    */
-  updateStore(id: number, data: UpdateStoreDto): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`, data);
+  updateStore(
+    id: number,
+    data: UpdateStoreDto,
+  ): Observable<ApiResponse<Store>> {
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}`,
+      data,
+    );
   }
 
   /**
@@ -97,78 +114,119 @@ export class StoresService {
   }
 
   /**
-   * Get store dashboard metrics
+   * Get store stats metrics
    */
-  getStoreDashboard(id: number, dashboardData?: StoreDashboardDto): Observable<ApiResponse<StoreDashboardResponse>> {
+  getStoreStats(
+    id: number,
+    dashboardData?: StoreDashboardDto,
+  ): Observable<ApiResponse<StoreDashboardResponse>> {
     let params = new HttpParams();
 
-    if (dashboardData?.start_date) params = params.set('start_date', dashboardData.start_date);
-    if (dashboardData?.end_date) params = params.set('end_date', dashboardData.end_date);
+    if (dashboardData?.start_date)
+      params = params.set('start_date', dashboardData.start_date);
+    if (dashboardData?.end_date)
+      params = params.set('end_date', dashboardData.end_date);
 
-    return this.http.get<ApiResponse<StoreDashboardResponse>>(`${this.apiUrl}/stores/${id}/dashboard`, { params });
+    return this.http.get<ApiResponse<StoreDashboardResponse>>(
+      `${this.apiUrl}/stores/${id}/stats`,
+      { params },
+    );
   }
 
   /**
    * Get store statistics (simplified version for dashboard)
    */
-  getStoreStats(): Observable<ApiResponse<StoreStats>> {
-    return this.http.get<ApiResponse<StoreStats>>(`${this.apiUrl}/stores/global/dashboard`);
+  getStoreStatsList(): Observable<ApiResponse<StoreStats>> {
+    return this.http.get<ApiResponse<StoreStats>>(
+      `${this.apiUrl}/stores/stats`,
+    );
   }
 
   /**
    * Get stores by organization ID
    */
-  getStoresByOrganization(organizationId: number, query?: Omit<StoreQueryDto, 'organization_id'>): Observable<PaginatedResponse<StoreListItem[]>> {
+  getStoresByOrganization(
+    organizationId: number,
+    query?: Omit<StoreQueryDto, 'organization_id'>,
+  ): Observable<PaginatedResponse<StoreListItem[]>> {
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.search) params = params.set('search', query.search);
     if (query?.store_type) params = params.set('store_type', query.store_type);
-    if (query?.is_active !== undefined) params = params.set('is_active', query.is_active.toString());
+    if (query?.is_active !== undefined)
+      params = params.set('is_active', query.is_active.toString());
 
-    return this.http.get<PaginatedResponse<StoreListItem[]>>(`${this.apiUrl}/organizations/${organizationId}/stores`, { params });
+    return this.http.get<PaginatedResponse<StoreListItem[]>>(
+      `${this.apiUrl}/organizations/${organizationId}/stores`,
+      { params },
+    );
   }
 
   /**
    * Upload store logo
    */
-  uploadStoreLogo(storeId: number, file: File): Observable<ApiResponse<{ logo_url: string }>> {
+  uploadStoreLogo(
+    storeId: number,
+    file: File,
+  ): Observable<ApiResponse<{ logo_url: string }>> {
     const formData = new FormData();
     formData.append('logo', file);
 
-    return this.http.post<ApiResponse<{ logo_url: string }>>(`${this.apiUrl}/stores/${storeId}/logo`, formData);
+    return this.http.post<ApiResponse<{ logo_url: string }>>(
+      `${this.apiUrl}/stores/${storeId}/logo`,
+      formData,
+    );
   }
 
   /**
    * Upload store banner
    */
-  uploadStoreBanner(storeId: number, file: File): Observable<ApiResponse<{ banner_url: string }>> {
+  uploadStoreBanner(
+    storeId: number,
+    file: File,
+  ): Observable<ApiResponse<{ banner_url: string }>> {
     const formData = new FormData();
     formData.append('banner', file);
 
-    return this.http.post<ApiResponse<{ banner_url: string }>>(`${this.apiUrl}/stores/${storeId}/banner`, formData);
+    return this.http.post<ApiResponse<{ banner_url: string }>>(
+      `${this.apiUrl}/stores/${storeId}/banner`,
+      formData,
+    );
   }
 
   /**
    * Update store settings
    */
-  updateStoreSettings(storeId: number, settingsData: StoreSettingsUpdateDto): Observable<ApiResponse<Store['settings']>> {
-    return this.http.patch<ApiResponse<Store['settings']>>(`${this.apiUrl}/stores/${storeId}/settings`, settingsData);
+  updateStoreSettings(
+    storeId: number,
+    settingsData: StoreSettingsUpdateDto,
+  ): Observable<ApiResponse<Store['settings']>> {
+    return this.http.patch<ApiResponse<Store['settings']>>(
+      `${this.apiUrl}/stores/${storeId}/settings`,
+      settingsData,
+    );
   }
 
   /**
    * Activate store
    */
   activateStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}/activate`, {});
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}/activate`,
+      {},
+    );
   }
 
   /**
    * Deactivate store
    */
   deactivateStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}/deactivate`, {});
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}/deactivate`,
+      {},
+    );
   }
 
   /**
@@ -176,13 +234,19 @@ export class StoresService {
    */
   suspendStore(id: number, reason?: string): Observable<ApiResponse<Store>> {
     const body = reason ? { reason } : {};
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}/suspend`, body);
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}/suspend`,
+      body,
+    );
   }
 
   /**
    * Archive store
    */
   archiveStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}/archive`, {});
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}/archive`,
+      {},
+    );
   }
 }

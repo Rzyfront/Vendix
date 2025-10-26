@@ -69,7 +69,7 @@ export interface PaginatedResponse<T> {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class OrganizationsService {
   private readonly apiUrl = environment.apiUrl;
@@ -79,7 +79,9 @@ export class OrganizationsService {
   /**
    * Get all organizations with pagination and filtering
    */
-  getOrganizations(query?: OrganizationQueryDto): Observable<PaginatedResponse<Organization[]>> {
+  getOrganizations(
+    query?: OrganizationQueryDto,
+  ): Observable<PaginatedResponse<Organization[]>> {
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
@@ -87,65 +89,97 @@ export class OrganizationsService {
     if (query?.search) params = params.set('search', query.search);
     if (query?.state) params = params.set('state', query.state);
 
-    return this.http.get<PaginatedResponse<Organization[]>>(`${this.apiUrl}/organizations`, { params });
+    return this.http.get<PaginatedResponse<Organization[]>>(
+      `${this.apiUrl}/organizations`,
+      { params },
+    );
   }
 
   /**
    * Get organization by ID
    */
   getOrganizationById(id: number): Observable<ApiResponse<Organization>> {
-    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/organizations/${id}`);
+    return this.http.get<ApiResponse<Organization>>(
+      `${this.apiUrl}/organizations/${id}`,
+    );
   }
 
   /**
    * Get organization by slug
    */
   getOrganizationBySlug(slug: string): Observable<ApiResponse<Organization>> {
-    return this.http.get<ApiResponse<Organization>>(`${this.apiUrl}/organizations/slug/${slug}`);
+    return this.http.get<ApiResponse<Organization>>(
+      `${this.apiUrl}/organizations/slug/${slug}`,
+    );
   }
 
   /**
    * Create a new organization
    */
-  createOrganization(data: CreateOrganizationDto): Observable<ApiResponse<Organization>> {
-    return this.http.post<ApiResponse<Organization>>(`${this.apiUrl}/organizations`, data);
+  createOrganization(
+    data: CreateOrganizationDto,
+  ): Observable<ApiResponse<Organization>> {
+    return this.http.post<ApiResponse<Organization>>(
+      `${this.apiUrl}/organizations`,
+      data,
+    );
   }
 
   /**
    * Update an existing organization
    */
-  updateOrganization(id: number, data: UpdateOrganizationDto): Observable<ApiResponse<Organization>> {
-    return this.http.patch<ApiResponse<Organization>>(`${this.apiUrl}/organizations/${id}`, data);
+  updateOrganization(
+    id: number,
+    data: UpdateOrganizationDto,
+  ): Observable<ApiResponse<Organization>> {
+    return this.http.patch<ApiResponse<Organization>>(
+      `${this.apiUrl}/organizations/${id}`,
+      data,
+    );
   }
 
   /**
    * Delete an organization
    */
   deleteOrganization(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/organizations/${id}`);
+    return this.http.delete<ApiResponse<void>>(
+      `${this.apiUrl}/organizations/${id}`,
+    );
   }
 
   /**
-   * Get organization dashboard metrics
+   * Get organization stats metrics
    */
-  getOrganizationDashboard(id: number, dashboardData?: OrganizationDashboardDto): Observable<ApiResponse<OrganizationDashboardResponse>> {
+  getOrganizationStats(
+    id: number,
+    dashboardData?: OrganizationDashboardDto,
+  ): Observable<ApiResponse<OrganizationDashboardResponse>> {
     let params = new HttpParams();
 
-    if (dashboardData?.start_date) params = params.set('start_date', dashboardData.start_date);
-    if (dashboardData?.end_date) params = params.set('end_date', dashboardData.end_date);
+    if (dashboardData?.start_date)
+      params = params.set('start_date', dashboardData.start_date);
+    if (dashboardData?.end_date)
+      params = params.set('end_date', dashboardData.end_date);
 
-    return this.http.get<ApiResponse<OrganizationDashboardResponse>>(`${this.apiUrl}/organizations/${id}/dashboard`, { params });
+    return this.http.get<ApiResponse<OrganizationDashboardResponse>>(
+      `${this.apiUrl}/organizations/${id}/stats`,
+      { params },
+    );
   }
 
   /**
    * Get organization statistics (simplified version for dashboard)
    */
-  getOrganizationStats(): Observable<ApiResponse<{
-    total_organizations: number;
-    active: number;
-    inactive: number;
-    suspended: number;
-  }>> {
-    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/organizations/dashboard`);
+  getOrganizationStatsList(): Observable<
+    ApiResponse<{
+      total_organizations: number;
+      active: number;
+      inactive: number;
+      suspended: number;
+    }>
+  > {
+    return this.http.get<ApiResponse<any>>(
+      `${this.apiUrl}/organizations/stats`,
+    );
   }
 }
