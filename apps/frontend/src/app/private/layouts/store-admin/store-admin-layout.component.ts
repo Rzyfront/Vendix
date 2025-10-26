@@ -6,6 +6,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { Observable } from 'rxjs';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -16,9 +18,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <!-- Sidebar -->
       <app-sidebar
         [menuItems]="menuItems"
-        [title]="storeName"
+        [title]="(storeName$ | async) || storeName"
         subtitle="Store Admin"
-        [vlink]="storeSlug"
+        [vlink]="(storeSlug$ | async) || storeSlug"
         [collapsed]="sidebarCollapsed"
       >
       </app-sidebar>
@@ -56,6 +58,15 @@ export class StoreAdminLayoutComponent {
   currentVlink = 'store-admin';
   storeName = 'Main Street Store';
   storeSlug = 'main-street-store';
+
+  // Dynamic user data
+  storeName$: Observable<string | null>;
+  storeSlug$: Observable<string | null>;
+
+  constructor(private authFacade: AuthFacade) {
+    this.storeName$ = this.authFacade.userStoreName$;
+    this.storeSlug$ = this.authFacade.userStoreSlug$;
+  }
 
   breadcrumb = {
     parent: 'Store',

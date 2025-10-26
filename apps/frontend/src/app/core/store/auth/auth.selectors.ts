@@ -5,128 +5,140 @@ export const selectAuthState = createFeatureSelector<AuthState>('auth');
 
 export const selectUser = createSelector(
   selectAuthState,
-  (state: AuthState) => state.user
+  (state: AuthState) => state.user,
 );
 
 export const selectPermissions = createSelector(
   selectAuthState,
-  (state: AuthState) => state.permissions
+  (state: AuthState) => state.permissions,
 );
 
 export const selectRoles = createSelector(
   selectAuthState,
-  (state: AuthState) => state.roles
+  (state: AuthState) => state.roles,
 );
 
 export const selectTokens = createSelector(
   selectAuthState,
-  (state: AuthState) => state.tokens
+  (state: AuthState) => state.tokens,
 );
 
 export const selectAccessToken = createSelector(
   selectTokens,
-  (tokens: any) => tokens?.accessToken || null
+  (tokens: any) => tokens?.accessToken || null,
 );
 
 export const selectRefreshToken = createSelector(
   selectTokens,
-  (tokens: any) => tokens?.refreshToken || null
+  (tokens: any) => tokens?.refreshToken || null,
 );
 
 export const selectIsAuthenticated = createSelector(
   selectUser,
-  (user: any) => !!user
+  (user: any) => !!user,
 );
 
 export const selectAuthLoading = createSelector(
   selectAuthState,
-  (state: AuthState) => state.loading
+  (state: AuthState) => state.loading,
 );
 
 export const selectAuthError = createSelector(
   selectAuthState,
-  (state: AuthState) => state.error
+  (state: AuthState) => state.error,
 );
 
-export const selectUserRole = createSelector(
-  selectUser,
-  (user: any) => {
-    // Handle both role (string) and roles (array) formats
-    if (user?.role) {
-      return user.role;
-    }
-    if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
-      // Return the first role or the highest priority role
-      return user.roles[0];
-    }
-    // Handle user_roles structure from backend
-    if (user?.user_roles && Array.isArray(user.user_roles) && user.user_roles.length > 0) {
-      const firstRole = user.user_roles[0]?.roles?.name;
-      return firstRole;
-    }
-    return null;
+export const selectUserRole = createSelector(selectUser, (user: any) => {
+  // Handle both role (string) and roles (array) formats
+  if (user?.role) {
+    return user.role;
   }
-);
+  if (user?.roles && Array.isArray(user.roles) && user.roles.length > 0) {
+    // Return the first role or the highest priority role
+    return user.roles[0];
+  }
+  // Handle user_roles structure from backend
+  if (
+    user?.user_roles &&
+    Array.isArray(user.user_roles) &&
+    user.user_roles.length > 0
+  ) {
+    const firstRole = user.user_roles[0]?.roles?.name;
+    return firstRole;
+  }
+  return null;
+});
 
 export const selectUserId = createSelector(
   selectUser,
-  (user: any) => user?.id || null
+  (user: any) => user?.id || null,
 );
 
 export const selectUserEmail = createSelector(
   selectUser,
-  (user: any) => user?.email || null
+  (user: any) => user?.email || null,
 );
 
-export const selectUserName = createSelector(
-  selectUser,
-  (user: any) => user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user?.name || null
+export const selectUserName = createSelector(selectUser, (user: any) =>
+  user?.firstName
+    ? `${user.firstName} ${user.lastName || ''}`.trim()
+    : user?.name || null,
 );
 
 export const selectIsAdmin = createSelector(
   selectUserRole,
-  (role: string) => role === 'super_admin' || role === 'admin' || role === 'SUPER_ADMIN' || role === 'ADMIN'
+  (role: string) =>
+    role === 'super_admin' ||
+    role === 'admin' ||
+    role === 'SUPER_ADMIN' ||
+    role === 'ADMIN',
 );
 
 export const selectIsOwner = createSelector(
   selectUserRole,
-  (role: string) => role === 'owner' || role === 'OWNER'
+  (role: string) => role === 'owner' || role === 'OWNER',
 );
 
 export const selectIsManager = createSelector(
   selectUserRole,
-  (role: string) => role === 'manager' || role === 'MANAGER'
+  (role: string) => role === 'manager' || role === 'MANAGER',
 );
 
 export const selectIsEmployee = createSelector(
   selectUserRole,
-  (role: string) => role === 'employee' || role === 'cashier' || role === 'EMPLOYEE' || role === 'CASHIER'
+  (role: string) =>
+    role === 'employee' ||
+    role === 'cashier' ||
+    role === 'EMPLOYEE' ||
+    role === 'CASHIER',
 );
 
 export const selectIsCustomer = createSelector(
   selectUserRole,
-  (role: string) => role === 'customer' || role === 'viewer' || role === 'CUSTOMER' || role === 'VIEWER'
+  (role: string) =>
+    role === 'customer' ||
+    role === 'viewer' ||
+    role === 'CUSTOMER' ||
+    role === 'VIEWER',
 );
 
-export const selectHasPermission = (permission: string) => createSelector(
-  selectPermissions,
-  (permissions: string[]) => permissions.includes(permission)
-);
+export const selectHasPermission = (permission: string) =>
+  createSelector(selectPermissions, (permissions: string[]) =>
+    permissions.includes(permission),
+  );
 
-export const selectHasAnyPermission = (permissions: string[]) => createSelector(
-  selectPermissions,
-  (userPermissions: string[]) => permissions.some(permission => userPermissions.includes(permission))
-);
+export const selectHasAnyPermission = (permissions: string[]) =>
+  createSelector(selectPermissions, (userPermissions: string[]) =>
+    permissions.some((permission) => userPermissions.includes(permission)),
+  );
 
-export const selectHasRole = (role: string) => createSelector(
-  selectRoles,
-  (roles: string[]) => roles.includes(role)
-);
+export const selectHasRole = (role: string) =>
+  createSelector(selectRoles, (roles: string[]) => roles.includes(role));
 
-export const selectHasAnyRole = (roles: string[]) => createSelector(
-  selectRoles,
-  (userRoles: string[]) => roles.some(role => userRoles.includes(role))
-);
+export const selectHasAnyRole = (roles: string[]) =>
+  createSelector(selectRoles, (userRoles: string[]) =>
+    roles.some((role) => userRoles.includes(role)),
+  );
 
 export const selectAuthInfo = createSelector(
   selectUser,
@@ -134,11 +146,47 @@ export const selectAuthInfo = createSelector(
   selectAuthLoading,
   selectPermissions,
   selectRoles,
-  (user: any, isAuthenticated: boolean, loading: boolean, permissions: string[], roles: string[]) => ({
+  (
+    user: any,
+    isAuthenticated: boolean,
+    loading: boolean,
+    permissions: string[],
+    roles: string[],
+  ) => ({
     user,
     isAuthenticated,
     loading,
     permissions,
-    roles
-  })
+    roles,
+  }),
+);
+
+export const selectUserOrganization = createSelector(
+  selectUser,
+  (user: any) => user?.organizations || null,
+);
+
+export const selectUserOrganizationName = createSelector(
+  selectUserOrganization,
+  (organization: any) => organization?.name || null,
+);
+
+export const selectUserOrganizationSlug = createSelector(
+  selectUserOrganization,
+  (organization: any) => organization?.slug || null,
+);
+
+export const selectUserStore = createSelector(
+  selectUser,
+  (user: any) => user?.stores || null,
+);
+
+export const selectUserStoreName = createSelector(
+  selectUserStore,
+  (store: any) => store?.name || null,
+);
+
+export const selectUserStoreSlug = createSelector(
+  selectUserStore,
+  (store: any) => store?.slug || null,
 );

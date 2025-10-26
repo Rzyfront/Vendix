@@ -6,6 +6,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { Observable } from 'rxjs';
 
 @Component({
   selector: 'app-organization-admin-layout',
@@ -16,9 +18,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <!-- Sidebar -->
       <app-sidebar
         [menuItems]="menuItems"
-        [title]="organizationName"
+        [title]="(organizationName$ | async) || organizationName"
         subtitle="Organization Admin"
-        [vlink]="organizationSlug"
+        [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
       >
       </app-sidebar>
@@ -55,6 +57,15 @@ export class OrganizationAdminLayoutComponent {
   currentVlink = 'organization-admin';
   organizationName = 'Acme Corporation';
   organizationSlug = 'acme-corp';
+
+  // Dynamic user data
+  organizationName$: Observable<string | null>;
+  organizationSlug$: Observable<string | null>;
+
+  constructor(private authFacade: AuthFacade) {
+    this.organizationName$ = this.authFacade.userOrganizationName$;
+    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
+  }
 
   breadcrumb = {
     parent: { label: 'Organización', url: '/organization' },

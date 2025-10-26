@@ -6,6 +6,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { Observable } from 'rxjs';
 
 @Component({
   selector: 'app-super-admin-layout',
@@ -16,9 +18,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
       <!-- Sidebar -->
       <app-sidebar
         [menuItems]="menuItems"
-        [title]="platformTitle"
+        [title]="(organizationName$ | async) || platformTitle"
         subtitle="Super Admin"
-        [vlink]="currentVlink"
+        [vlink]="(organizationSlug$ | async) || currentVlink"
         [collapsed]="sidebarCollapsed"
       >
       </app-sidebar>
@@ -56,9 +58,16 @@ export class SuperAdminLayoutComponent implements OnInit {
   currentVlink = 'super-admin';
   platformTitle = 'Vendix Platform';
 
-  constructor() {
+  // Dynamic user data
+  organizationName$: Observable<string | null>;
+  organizationSlug$: Observable<string | null>;
+
+  constructor(private authFacade: AuthFacade) {
     console.log('[DEBUG] SuperAdminLayoutComponent has been constructed!');
     console.log('[DEBUG] Menu items:', this.menuItems);
+
+    this.organizationName$ = this.authFacade.userOrganizationName$;
+    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
   }
 
   ngOnInit(): void {
@@ -120,7 +129,7 @@ export class SuperAdminLayoutComponent implements OnInit {
       route: '/super-admin/support',
       badge: '3',
     },
-       {
+    {
       label: 'Analytics',
       icon: 'chart-line',
       children: [
@@ -141,7 +150,7 @@ export class SuperAdminLayoutComponent implements OnInit {
         },
       ],
     },
-      {
+    {
       label: 'System',
       icon: 'settings',
       children: [
@@ -157,7 +166,7 @@ export class SuperAdminLayoutComponent implements OnInit {
           route: '/super-admin/system/backups',
         },
       ],
-    }
+    },
   ];
 
   toggleSidebar() {
