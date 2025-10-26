@@ -255,8 +255,12 @@
 }
 
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Dropdown Menu Styles */
@@ -270,7 +274,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 
 .dropdown-item {
@@ -309,18 +313,18 @@
     grid-template-columns: 1fr;
     gap: 1rem;
   }
-  
+
   .filter-row {
     flex-direction: column;
     gap: 1rem;
   }
-  
+
   .card-content {
     flex-direction: column;
     align-items: flex-start;
     gap: 1rem;
   }
-  
+
   .card-actions {
     width: 100%;
     justify-content: space-between;

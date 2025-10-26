@@ -1,7 +1,25 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnInit,
+  OnDestroy,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { IconComponent } from '../../../../../shared/components/index';
+import {
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
+import {
+  IconComponent,
+  InputComponent,
+  ButtonComponent,
+  ModalComponent,
+} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 import { Observable, Subject, takeUntil } from 'rxjs';
@@ -9,290 +27,260 @@ import { Observable, Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-edit-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    IconComponent,
+    InputComponent,
+    ButtonComponent,
+    ModalComponent,
+  ],
   template: `
-    <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-surface rounded-lg border border-border w-full max-w-2xl max-h-[90vh] overflow-y-auto m-4">
-        <div class="p-6">
-          <!-- Header -->
-          <div class="flex items-center justify-between mb-6">
-            <h2 class="text-xl font-semibold text-text">Editar Usuario</h2>
-            <button
-              (click)="onClose.emit()"
-              class="text-text-muted hover:text-text transition-colors"
+    <app-modal
+      [isOpen]="isOpen"
+      [size]="'lg'"
+      title="Editar Usuario"
+      [subtitle]="
+        user
+          ? 'Modificando información de ' +
+            user.first_name +
+            ' ' +
+            user.last_name
+          : ''
+      "
+      (openChange)="onClose.emit()"
+    >
+      <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-input
+            formControlName="first_name"
+            label="Nombre"
+            placeholder="Juan"
+            [required]="true"
+            [control]="userForm.get('first_name')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <app-input
+            formControlName="last_name"
+            label="Apellido"
+            placeholder="Pérez"
+            [required]="true"
+            [control]="userForm.get('last_name')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <app-input
+            formControlName="username"
+            label="Nombre de Usuario"
+            placeholder="juanperez"
+            [required]="true"
+            [control]="userForm.get('username')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <app-input
+            formControlName="email"
+            label="Email"
+            type="email"
+            placeholder="juan@ejemplo.com"
+            [required]="true"
+            [control]="userForm.get('email')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <app-input
+            formControlName="organization_id"
+            label="ID de Organización"
+            type="number"
+            placeholder="1"
+            [required]="true"
+            [control]="userForm.get('organization_id')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <app-input
+            formControlName="password"
+            label="Nueva Contraseña"
+            type="password"
+            placeholder="Dejar en blanco para no cambiar"
+            [control]="userForm.get('password')"
+            [disabled]="isUpdating"
+          ></app-input>
+
+          <div class="space-y-2">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)]"
+            >
+              Aplicación
+            </label>
+            <select
+              formControlName="app"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
               [disabled]="isUpdating"
             >
-              <app-icon name="x" class="w-6 h-6"></app-icon>
-            </button>
+              <option value="">Seleccionar aplicación</option>
+              <option value="ORG_ADMIN">ORG_ADMIN</option>
+              <option value="STORE_ADMIN">STORE_ADMIN</option>
+              <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
+              <option value="VENDIX_LANDING">VENDIX_LANDING</option>
+            </select>
           </div>
 
-          <!-- Form -->
-          <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- First Name -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Nombre *
-                </label>
-                <input
-                  type="text"
-                  formControlName="first_name"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="Juan"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('first_name')?.touched && userForm.get('first_name')?.errors?.['required']"
-                  class="text-red-500 text-xs"
-                >
-                  El nombre es requerido
+          <div class="space-y-2">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)]"
+            >
+              Estado
+            </label>
+            <select
+              formControlName="state"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              [disabled]="isUpdating"
+            >
+              <option value="">Seleccionar estado</option>
+              <option [value]="UserState.ACTIVE">Activo</option>
+              <option [value]="UserState.INACTIVE">Inactivo</option>
+              <option [value]="UserState.PENDING_VERIFICATION">
+                Pendiente de Verificación
+              </option>
+              <option [value]="UserState.SUSPENDED">Suspendido</option>
+              <option [value]="UserState.ARCHIVED">Archivado</option>
+            </select>
+          </div>
+
+          <!-- Security Options -->
+          <div class="md:col-span-2 space-y-4">
+            <h3
+              class="text-sm font-medium text-[var(--color-text-primary)] mb-3"
+            >
+              Opciones de Seguridad
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <!-- Email Verification -->
+              <div
+                class="flex items-center justify-between p-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg hover:shadow-md transition-shadow"
+              >
+                <div class="flex-1">
+                  <p
+                    class="text-sm font-medium text-[var(--color-text-primary)]"
+                  >
+                    Verificar Email
+                  </p>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-1">
+                    {{
+                      user?.email_verified
+                        ? 'Email ya verificado'
+                        : 'Marcar email como verificado'
+                    }}
+                  </p>
                 </div>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="verifyEmail()"
+                  [disabled]="isUpdating || !!user?.email_verified"
+                >
+                  <app-icon
+                    name="mail-check"
+                    class="w-4 h-4"
+                    slot="icon"
+                  ></app-icon>
+                </app-button>
               </div>
 
-              <!-- Last Name -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Apellido *
-                </label>
-                <input
-                  type="text"
-                  formControlName="last_name"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="Pérez"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('last_name')?.touched && userForm.get('last_name')?.errors?.['required']"
-                  class="text-red-500 text-xs"
-                >
-                  El apellido es requerido
+              <!-- 2FA Toggle -->
+              <div
+                class="flex items-center justify-between p-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg hover:shadow-md transition-shadow"
+              >
+                <div class="flex-1">
+                  <p
+                    class="text-sm font-medium text-[var(--color-text-primary)]"
+                  >
+                    2FA
+                  </p>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-1">
+                    {{
+                      user?.two_factor_enabled ? '2FA activado' : 'Activar 2FA'
+                    }}
+                  </p>
                 </div>
-              </div>
-
-              <!-- Username -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Nombre de Usuario *
-                </label>
-                <input
-                  type="text"
-                  formControlName="username"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="juanperez"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('username')?.touched && userForm.get('username')?.errors?.['required']"
-                  class="text-red-500 text-xs"
-                >
-                  El nombre de usuario es requerido
-                </div>
-                <div
-                  *ngIf="userForm.get('username')?.touched && userForm.get('username')?.errors?.['minlength']"
-                  class="text-red-500 text-xs"
-                >
-                  Mínimo 3 caracteres
-                </div>
-              </div>
-
-              <!-- Email -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Email *
-                </label>
-                <input
-                  type="email"
-                  formControlName="email"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="juan@ejemplo.com"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('email')?.touched && userForm.get('email')?.errors?.['required']"
-                  class="text-red-500 text-xs"
-                >
-                  El email es requerido
-                </div>
-                <div
-                  *ngIf="userForm.get('email')?.touched && userForm.get('email')?.errors?.['email']"
-                  class="text-red-500 text-xs"
-                >
-                  Email inválido
-                </div>
-              </div>
-
-              <!-- Organization ID -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  ID de Organización *
-                </label>
-                <input
-                  type="number"
-                  formControlName="organization_id"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="1"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('organization_id')?.touched && userForm.get('organization_id')?.errors?.['required']"
-                  class="text-red-500 text-xs"
-                >
-                  El ID de organización es requerido
-                </div>
-              </div>
-
-              <!-- Password -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Nueva Contraseña
-                </label>
-                <input
-                  type="password"
-                  formControlName="password"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  placeholder="Dejar en blanco para no cambiar"
-                  [disabled]="isUpdating"
-                />
-                <div
-                  *ngIf="userForm.get('password')?.touched && userForm.get('password')?.errors?.['minlength']"
-                  class="text-red-500 text-xs"
-                >
-                  Mínimo 8 caracteres
-                </div>
-              </div>
-
-              <!-- App -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Aplicación
-                </label>
-                <select
-                  formControlName="app"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                <app-button
+                  [variant]="user?.two_factor_enabled ? 'danger' : 'primary'"
+                  size="sm"
+                  (clicked)="toggle2FA()"
                   [disabled]="isUpdating"
                 >
-                  <option value="">Seleccionar aplicación</option>
-                  <option value="ORG_ADMIN">ORG_ADMIN</option>
-                  <option value="STORE_ADMIN">STORE_ADMIN</option>
-                  <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
-                  <option value="VENDIX_LANDING">VENDIX_LANDING</option>
-                </select>
+                  <app-icon
+                    [name]="user?.two_factor_enabled ? 'shield-off' : 'shield'"
+                    class="w-4 h-4"
+                    slot="icon"
+                  ></app-icon>
+                </app-button>
               </div>
 
-              <!-- State -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-text">
-                  Estado
-                </label>
-                <select
-                  formControlName="state"
-                  class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  [disabled]="isUpdating"
-                >
-                  <option value="">Seleccionar estado</option>
-                  <option [value]="UserState.ACTIVE">Activo</option>
-                  <option [value]="UserState.INACTIVE">Inactivo</option>
-                  <option [value]="UserState.PENDING_VERIFICATION">Pendiente de Verificación</option>
-                  <option [value]="UserState.SUSPENDED">Suspendido</option>
-                  <option [value]="UserState.ARCHIVED">Archivado</option>
-                </select>
-              </div>
-
-              <!-- Security Options -->
-              <div class="md:col-span-2 space-y-4">
-                <h3 class="text-sm font-medium text-text">Opciones de Seguridad</h3>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <!-- Email Verification -->
-                  <div class="flex items-center justify-between p-3 bg-surface border border-border rounded">
-                    <div>
-                      <p class="text-sm font-medium text-text">Verificar Email</p>
-                      <p class="text-xs text-text-muted">
-                        {{ user?.email_verified ? 'Email ya verificado' : 'Marcar email como verificado' }}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      (click)="verifyEmail()"
-                      [disabled]="isUpdating || user?.email_verified"
-                      class="px-3 py-1 text-sm bg-green-500 hover:bg-green-600 text-white rounded transition-colors disabled:opacity-50"
-                    >
-                      <app-icon name="mail-check" class="w-4 h-4"></app-icon>
-                    </button>
-                  </div>
-
-                  <!-- 2FA Toggle -->
-                  <div class="flex items-center justify-between p-3 bg-surface border border-border rounded">
-                    <div>
-                      <p class="text-sm font-medium text-text">2FA</p>
-                      <p class="text-xs text-text-muted">
-                        {{ user?.two_factor_enabled ? '2FA activado' : 'Activar 2FA' }}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      (click)="toggle2FA()"
-                      [disabled]="isUpdating"
-                      [class]="user?.two_factor_enabled ? 'bg-red-500 hover:bg-red-600' : 'bg-blue-500 hover:bg-blue-600'"
-                      class="px-3 py-1 text-sm text-white rounded transition-colors"
-                    >
-                      <app-icon [name]="user?.two_factor_enabled ? 'shield-off' : 'shield'" class="w-4 h-4"></app-icon>
-                    </button>
-                  </div>
-
-                  <!-- Unlock User -->
-                  <div class="flex items-center justify-between p-3 bg-surface border border-border rounded">
-                    <div>
-                      <p class="text-sm font-medium text-text">Desbloquear</p>
-                      <p class="text-xs text-text-muted">
-                        @if (user?.locked_until) {
-                          Bloqueado hasta {{ lockedUntilDisplay }}
-                        } @else {
-                          No bloqueado
-                        }
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      (click)="unlockUser()"
-                      [disabled]="isUpdating || !user?.locked_until"
-                      class="px-3 py-1 text-sm bg-yellow-500 hover:bg-yellow-600 text-white rounded transition-colors disabled:opacity-50"
-                    >
-                      <app-icon name="unlock" class="w-4 h-4"></app-icon>
-                    </button>
-                  </div>
+              <!-- Unlock User -->
+              <div
+                class="flex items-center justify-between p-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg hover:shadow-md transition-shadow"
+              >
+                <div class="flex-1">
+                  <p
+                    class="text-sm font-medium text-[var(--color-text-primary)]"
+                  >
+                    Desbloquear
+                  </p>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-1">
+                    @if (user?.locked_until) {
+                      Bloqueado hasta {{ lockedUntilDisplay }}
+                    } @else {
+                      No bloqueado
+                    }
+                  </p>
                 </div>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="unlockUser()"
+                  [disabled]="isUpdating || !user?.locked_until"
+                >
+                  <app-icon
+                    name="unlock"
+                    class="w-4 h-4"
+                    slot="icon"
+                  ></app-icon>
+                </app-button>
               </div>
             </div>
-
-            <!-- Actions -->
-            <div class="flex justify-end gap-3 mt-6 pt-4 border-t border-border">
-              <button
-                type="button"
-                (click)="onClose.emit()"
-                class="px-4 py-2 text-text bg-surface border border-border rounded-md hover:bg-surface-hover transition-colors"
-                [disabled]="isUpdating"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                class="px-4 py-2 text-white bg-primary rounded-md hover:bg-primary-hover transition-colors flex items-center gap-2 disabled:opacity-50"
-                [disabled]="userForm.invalid || isUpdating"
-              >
-                <app-icon *ngIf="isUpdating" name="loader-2" class="w-4 h-4 animate-spin"></app-icon>
-                {{ isUpdating ? 'Actualizando...' : 'Actualizar Usuario' }}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
+      </form>
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button
+          variant="outline"
+          (clicked)="onClose.emit()"
+          [disabled]="isUpdating"
+        >
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          (clicked)="onSubmit()"
+          [disabled]="userForm.invalid || isUpdating"
+          [loading]="isUpdating"
+        >
+          Actualizar Usuario
+        </app-button>
       </div>
-    </div>
+    </app-modal>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class UserEditModalComponent implements OnInit, OnDestroy {
   @Input() user: User | null = null;
@@ -307,17 +295,27 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
 
   constructor(
     private fb: FormBuilder,
-    private usersService: UsersService
+    private usersService: UsersService,
   ) {
     this.userForm = this.fb.group({
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
-      username: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(50)]],
-      email: ['', [Validators.required, Validators.email, Validators.maxLength(255)]],
+      username: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(3),
+          Validators.maxLength(50),
+        ],
+      ],
+      email: [
+        '',
+        [Validators.required, Validators.email, Validators.maxLength(255)],
+      ],
       organization_id: [null, [Validators.required]],
       password: ['', [Validators.minLength(8)]],
       app: [''],
-      state: [UserState.ACTIVE]
+      state: [UserState.ACTIVE],
     });
   }
 
@@ -331,7 +329,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         organization_id: this.user.organization_id,
         app: this.user.app || '',
         state: this.user.state,
-        password: '' // No mostrar la contraseña actual
+        password: '', // No mostrar la contraseña actual
       });
     }
   }
@@ -354,7 +352,8 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       delete updateData.password;
     }
 
-    this.usersService.updateUser(this.user.id, updateData)
+    this.usersService
+      .updateUser(this.user.id, updateData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -365,7 +364,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isUpdating = false;
           console.error('Error updating user:', error);
-        }
+        },
       });
   }
 
@@ -373,7 +372,8 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     if (!this.user || this.isUpdating) return;
 
     this.isUpdating = true;
-    this.usersService.verifyUserEmail(this.user.id)
+    this.usersService
+      .verifyUserEmail(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -383,7 +383,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isUpdating = false;
           console.error('Error verifying email:', error);
-        }
+        },
       });
   }
 
@@ -393,7 +393,8 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     this.isUpdating = true;
     const newState = !this.user.two_factor_enabled;
 
-    this.usersService.toggleUser2FA(this.user.id, newState)
+    this.usersService
+      .toggleUser2FA(this.user.id, newState)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -403,7 +404,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isUpdating = false;
           console.error('Error toggling 2FA:', error);
-        }
+        },
       });
   }
 
@@ -411,7 +412,8 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     if (!this.user || this.isUpdating) return;
 
     this.isUpdating = true;
-    this.usersService.unlockUser(this.user.id)
+    this.usersService
+      .unlockUser(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -421,7 +423,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isUpdating = false;
           console.error('Error unlocking user:', error);
-        }
+        },
       });
   }
 

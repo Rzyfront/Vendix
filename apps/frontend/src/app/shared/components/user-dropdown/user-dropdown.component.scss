@@ -78,7 +78,7 @@
     visibility: hidden;
     transform: translateY(-8px);
     transition: all 0.2s ease;
-    z-index: 1000;
+    z-index: var(--z-dropdown);
     overflow: hidden;
 
     &.show {

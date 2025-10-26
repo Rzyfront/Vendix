@@ -24,153 +24,6 @@
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
 
-          <!-- Filters Dropdown -->
-          <div class="relative" [class.show]="showFiltersDropdown">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="toggleFiltersDropdown()"
-              [class.active]="hasActiveFilters()"
-            >
-              <app-icon name="filter" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">Filtros</span>
-              <span
-                *ngIf="hasActiveFilters()"
-                class="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full"
-              >
-                {{ getActiveFiltersCount() }}
-              </span>
-            </app-button>
-
-            <!-- Dropdown Menu -->
-            <div
-              *ngIf="showFiltersDropdown"
-              class="absolute right-0 mt-2 w-80 bg-surface border border-border rounded-card shadow-lg z-50 p-4"
-            >
-              <form [formGroup]="filterForm">
-                <!-- Action Filter -->
-                <div class="mb-3">
-                  <label
-                    class="block text-xs font-medium text-text-secondary mb-1"
-                  >
-                    Acción
-                  </label>
-                  <select
-                    formControlName="action"
-                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  >
-                    <option
-                      *ngFor="let option of actionOptions"
-                      [value]="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </div>
-
-                <!-- Resource Filter -->
-                <div class="mb-3">
-                  <label
-                    class="block text-xs font-medium text-text-secondary mb-1"
-                  >
-                    Recurso
-                  </label>
-                  <select
-                    formControlName="resource"
-                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                  >
-                    <option
-                      *ngFor="let option of resourceOptions"
-                      [value]="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </div>
-
-                <!-- Date Range -->
-                <div class="grid grid-cols-2 gap-2 mb-3">
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-text-secondary mb-1"
-                    >
-                      Desde
-                    </label>
-                    <input
-                      type="date"
-                      formControlName="fromDate"
-                      class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-text-secondary mb-1"
-                    >
-                      Hasta
-                    </label>
-                    <input
-                      type="date"
-                      formControlName="toDate"
-                      class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                    />
-                  </div>
-                </div>
-
-                <!-- Organization ID Filter -->
-                <div class="mb-3">
-                  <label
-                    class="block text-xs font-medium text-text-secondary mb-1"
-                  >
-                    ID Organización
-                  </label>
-                  <input
-                    type="number"
-                    formControlName="organizationId"
-                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                    placeholder="ID Org"
-                  />
-                </div>
-
-                <!-- Store ID Filter -->
-                <div class="mb-3">
-                  <label
-                    class="block text-xs font-medium text-text-secondary mb-1"
-                  >
-                    ID Tienda
-                  </label>
-                  <input
-                    type="number"
-                    formControlName="storeId"
-                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-                    placeholder="ID Tienda"
-                  />
-                </div>
-
-                <!-- Actions -->
-                <div class="flex gap-2 pt-2 border-t border-border">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    (clicked)="clearFilters()"
-                    class="flex-1"
-                  >
-                    <app-icon name="x" [size]="14" slot="icon"></app-icon>
-                    Limpiar
-                  </app-button>
-                  <app-button
-                    variant="primary"
-                    size="sm"
-                    (clicked)="toggleFiltersDropdown()"
-                    class="flex-1"
-                  >
-                    <app-icon name="check" [size]="14" slot="icon"></app-icon>
-                    Aplicar
-                  </app-button>
-                </div>
-              </form>
-            </div>
-          </div>
-
           <div class="flex gap-2 items-center">
             <app-button
               variant="outline"
@@ -181,6 +34,153 @@
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
+          </div>
+        </div>
+
+        <!-- Filters Dropdown -->
+        <div class="relative" [class.show]="showFiltersDropdown">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="toggleFiltersDropdown()"
+            [class.active]="hasActiveFilters()"
+          >
+            <app-icon name="filter" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Filtros</span>
+            <span
+              *ngIf="hasActiveFilters()"
+              class="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full"
+            >
+              {{ getActiveFiltersCount() }}
+            </span>
+          </app-button>
+
+          <!-- Dropdown Menu -->
+          <div
+            *ngIf="showFiltersDropdown"
+            class="absolute right-0 mt-2 w-80 bg-surface border border-border rounded-card shadow-lg z-50 p-4"
+          >
+            <form [formGroup]="filterForm">
+              <!-- Action Filter -->
+              <div class="mb-3">
+                <label
+                  class="block text-xs font-medium text-text-secondary mb-1"
+                >
+                  Acción
+                </label>
+                <select
+                  formControlName="action"
+                  class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                >
+                  <option
+                    *ngFor="let option of actionOptions"
+                    [value]="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Resource Filter -->
+              <div class="mb-3">
+                <label
+                  class="block text-xs font-medium text-text-secondary mb-1"
+                >
+                  Recurso
+                </label>
+                <select
+                  formControlName="resource"
+                  class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                >
+                  <option
+                    *ngFor="let option of resourceOptions"
+                    [value]="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Date Range -->
+              <div class="grid grid-cols-2 gap-2 mb-3">
+                <div>
+                  <label
+                    class="block text-xs font-medium text-text-secondary mb-1"
+                  >
+                    Desde
+                  </label>
+                  <input
+                    type="date"
+                    formControlName="fromDate"
+                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="block text-xs font-medium text-text-secondary mb-1"
+                  >
+                    Hasta
+                  </label>
+                  <input
+                    type="date"
+                    formControlName="toDate"
+                    class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                  />
+                </div>
+              </div>
+
+              <!-- Organization ID Filter -->
+              <div class="mb-3">
+                <label
+                  class="block text-xs font-medium text-text-secondary mb-1"
+                >
+                  ID Organización
+                </label>
+                <input
+                  type="number"
+                  formControlName="organizationId"
+                  class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                  placeholder="ID Org"
+                />
+              </div>
+
+              <!-- Store ID Filter -->
+              <div class="mb-3">
+                <label
+                  class="block text-xs font-medium text-text-secondary mb-1"
+                >
+                  ID Tienda
+                </label>
+                <input
+                  type="number"
+                  formControlName="storeId"
+                  class="w-full px-2 py-1.5 text-sm border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+                  placeholder="ID Tienda"
+                />
+              </div>
+
+              <!-- Actions -->
+              <div class="flex gap-2 pt-2 border-t border-border">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="clearFilters()"
+                  class="flex-1"
+                >
+                  <app-icon name="refresh" [size]="14" slot="icon"></app-icon>
+                  Limpiar
+                </app-button>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="toggleFiltersDropdown()"
+                  class="flex-1"
+                >
+                  <app-icon name="check" [size]="14" slot="icon"></app-icon>
+                  Aplicar
+                </app-button>
+              </div>
+            </form>
           </div>
         </div>
 
@@ -216,16 +216,6 @@
         [loading]="isLoading"
         (sort)="onSortChange($event)"
       >
-        <!-- Custom cell for action -->
-        <ng-template #actionCell let-item>
-          <span
-            class="px-2 py-1 text-xs font-medium rounded-full"
-            [class]="getActionDisplay(item.action).class"
-          >
-            {{ getActionDisplay(item.action).text }}
-          </span>
-        </ng-template>
-
         <!-- Custom cell for resource -->
         <ng-template #resourceCell let-item>
           <span class="text-sm text-text">
@@ -278,4 +268,11 @@
       </div>
     </div>
   </div>
+
+  <!-- Audit Details Modal -->
+  <app-audit-details-modal
+    [isOpen]="isDetailsModalOpen"
+    [log]="selectedAuditLog"
+    (openChange)="onDetailsModalChange($event)"
+  ></app-audit-details-modal>
 </div>

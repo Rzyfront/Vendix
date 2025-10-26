@@ -16,7 +16,7 @@
   box-shadow: var(--shadow-md);
   position: sticky;
   top: 0;
-  z-index: 1000;
+  z-index: var(--z-fixed);
 
   .header-content {
     display: flex;
@@ -78,7 +78,11 @@
 // Hero Section
 .hero-section {
   padding: 4rem 0;
-  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-primary) 0%,
+    var(--color-secondary) 100%
+  );
   color: var(--color-text-on-primary);
 
   .container {
@@ -170,9 +174,15 @@
         font-size: var(--fs-sm);
       }
 
-      &.admin { border-top: 4px solid var(--color-primary); }
-      &.store { border-top: 4px solid var(--color-accent); }
-      &.pos { border-top: 4px solid var(--color-destructive); }
+      &.admin {
+        border-top: 4px solid var(--color-primary);
+      }
+      &.store {
+        border-top: 4px solid var(--color-accent);
+      }
+      &.pos {
+        border-top: 4px solid var(--color-destructive);
+      }
     }
   }
 }
@@ -275,7 +285,7 @@
         padding-left: 1.5rem;
 
         &::before {
-          content: '✓';
+          content: "✓";
           position: absolute;
           left: 0;
           color: var(--color-primary);

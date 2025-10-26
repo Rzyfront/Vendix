@@ -12,27 +12,27 @@
   // Contenedor con scroll horizontal para tablas muy anchas
   &.table-scrollable {
     overflow-x: auto;
-    
+
     // Personalización del scroll horizontal usando tokens
     &::-webkit-scrollbar {
       height: 8px;
     }
-    
+
     &::-webkit-scrollbar-track {
       background: var(--color-muted);
       border-radius: var(--radius-sm);
     }
-    
+
     &::-webkit-scrollbar-thumb {
       background: var(--color-border);
       border-radius: var(--radius-sm);
       transition: background-color var(--transition-fast) ease;
-      
+
       &:hover {
         background: var(--color-text-secondary);
       }
     }
-    
+
     // Scrollbar para Firefox
     & {
       scrollbar-width: thin;
@@ -58,14 +58,14 @@
       border-bottom: var(--border-width) solid var(--color-border);
       position: sticky;
       top: 0;
-      z-index: 5;
+      z-index: var(--z-sticky);
       transition: background-color var(--transition-fast) ease;
       padding: var(--control-padding);
 
       // Efecto hover suave en columnas ordenables
       &.sortable-header {
         cursor: pointer;
-        
+
         &:hover {
           background-color: rgba(var(--color-primary), 0.05);
         }
@@ -74,7 +74,7 @@
       // Icono de ordenamiento
       svg {
         transition: transform var(--transition-fast) ease;
-        
+
         &.rotate-180 {
           transform: rotate(180deg);
         }
@@ -98,7 +98,7 @@
       // Filas con efecto striped (cebra) más sutil
       &:nth-child(even) {
         background-color: rgba(var(--color-background), 0.3);
-        
+
         &:hover {
           background-color: rgba(var(--color-primary), 0.03);
         }
@@ -120,7 +120,7 @@
         &.text-center {
           text-align: center;
         }
-        
+
         &.text-right {
           text-align: right;
         }
@@ -145,7 +145,7 @@
       // Última fila sin borde inferior
       &:last-child {
         border-bottom: none;
-        
+
         td {
           border-bottom: none;
         }
@@ -282,9 +282,19 @@
 
   // Custom badge class for dynamically configured colors
   &.status-badge-custom {
-    background-color: rgba(150, 150, 150, 0.12); // Will be overridden by inline styles
+    background-color: rgba(
+      150,
+      150,
+      150,
+      0.12
+    ); // Will be overridden by inline styles
     color: #6b7280; // Will be overridden by inline styles
-    border-color: rgba(150, 150, 150, 0.25); // Will be overridden by inline styles
+    border-color: rgba(
+      150,
+      150,
+      150,
+      0.25
+    ); // Will be overridden by inline styles
   }
 }
 
@@ -339,7 +349,7 @@
 .table-size-sm {
   .table-element {
     font-size: var(--fs-xs);
-    
+
     thead th,
     tbody td {
       padding: 6px 8px;
@@ -356,7 +366,7 @@
 .table-size-md {
   .table-element {
     font-size: var(--fs-sm);
-    
+
     thead th,
     tbody td {
       padding: var(--control-padding);
@@ -367,7 +377,7 @@
 .table-size-lg {
   .table-element {
     font-size: var(--fs-base);
-    
+
     thead th,
     tbody td {
       padding: 16px 20px;
@@ -384,7 +394,7 @@
 // Estados de la tabla
 .table-bordered {
   border: var(--border-width) solid var(--color-border);
-  
+
   .table-element {
     thead th,
     tbody td {
@@ -405,7 +415,7 @@
   .table-element {
     tbody tr {
       cursor: pointer;
-      
+
       &:hover {
         background-color: rgba(var(--color-primary), 0.02);
         transform: translateY(-1px);
@@ -457,7 +467,7 @@
 
     // Efecto ripple sutil
     &::before {
-      content: '';
+      content: "";
       position: absolute;
       top: 50%;
       left: 50%;
@@ -466,7 +476,9 @@
       border-radius: 50%;
       background: rgba(var(--color-primary), 0.1);
       transform: translate(-50%, -50%);
-      transition: width 0.3s ease, height 0.3s ease;
+      transition:
+        width 0.3s ease,
+        height 0.3s ease;
     }
 
     &:hover::before {
@@ -477,7 +489,7 @@
     // Variante primaria
     &.action-primary {
       color: var(--color-primary);
-      
+
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: rgba(var(--color-primary), 0.1);
@@ -489,7 +501,7 @@
     // Variante secundaria
     &.action-secondary {
       color: var(--color-text-primary);
-      
+
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: var(--color-background);
@@ -501,7 +513,7 @@
     // Variante peligrosa
     &.action-danger {
       color: var(--color-destructive);
-      
+
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: rgba(239, 68, 68, 0.1);
@@ -513,7 +525,7 @@
     // Variante fantasma
     &.action-ghost {
       color: var(--color-text-secondary);
-      
+
       &:hover:not(:disabled) {
         opacity: 1;
         background-color: var(--color-background);
@@ -534,11 +546,11 @@
     svg {
       width: 12px;
       height: 12px;
-      z-index: 1;
+      z-index: var(--z-base);
     }
 
     span {
-      z-index: 1;
+      z-index: var(--z-base);
     }
   }
 }
@@ -556,7 +568,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10;
+  z-index: var(--z-dropdown);
 
   .loading-content {
     display: flex;
@@ -564,7 +576,7 @@
     align-items: center;
     gap: 12px;
     color: var(--color-text-secondary);
-    
+
     .loading-spinner {
       width: 24px;
       height: 24px;
@@ -578,7 +590,7 @@
   padding: 48px 16px;
   text-align: center;
   color: var(--color-text-secondary);
-  
+
   .empty-icon {
     width: 48px;
     height: 48px;
@@ -591,7 +603,7 @@
     opacity: 0.6;
     transform: scale(1.05);
   }
-  
+
   .empty-message {
     font-size: var(--fs-sm);
     margin: 0;
@@ -618,10 +630,10 @@
 @media (max-width: 768px) {
   .table-container {
     border-radius: var(--radius-sm);
-    
+
     .table-element {
       font-size: var(--fs-xs);
-      
+
       thead th,
       tbody td {
         padding: 8px 12px;
@@ -634,15 +646,15 @@
       }
     }
   }
-  
+
   .table-actions {
     flex-direction: column;
     gap: 2px;
-    
+
     button {
       padding: 6px;
       min-width: 32px;
-      
+
       span {
         display: none;
       }
@@ -653,7 +665,7 @@
 @media (max-width: 480px) {
   .table-container {
     border-radius: var(--radius-sm);
-    
+
     .table-element {
       thead th,
       tbody td {
@@ -673,16 +685,16 @@
   .loading-overlay {
     background-color: rgba(var(--color-surface), 0.95);
   }
-  
+
   .table-element {
     tbody tr {
       &:hover {
         background-color: rgba(255, 255, 255, 0.03);
       }
-      
+
       &:nth-child(even) {
         background-color: rgba(255, 255, 255, 0.01);
-        
+
         &:hover {
           background-color: rgba(255, 255, 255, 0.04);
         }

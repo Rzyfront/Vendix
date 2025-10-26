@@ -1,0 +1,121 @@
+/* Domains Component Styles */
+
+.domain-status-badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.domain-status-active {
+  @apply bg-success/10 text-success;
+}
+
+.domain-status-inactive {
+  @apply bg-danger/10 text-danger;
+}
+
+.domain-status-pending {
+  @apply bg-warning/10 text-warning;
+}
+
+.domain-status-verified {
+  @apply bg-info/10 text-info;
+}
+
+.domain-type-badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+.domain-type-primary {
+  @apply bg-success/10 text-success;
+}
+
+.domain-type-alias {
+  @apply bg-primary/10 text-primary;
+}
+
+.domain-type-customer {
+  @apply bg-purple-100 text-purple-800;
+}
+
+/* Modal styles */
+.domain-modal {
+  @apply max-w-2xl;
+}
+
+.domain-form {
+  @apply space-y-4;
+}
+
+.domain-form-field {
+  @apply space-y-2;
+}
+
+.domain-form-label {
+  @apply block text-sm font-medium text-text-primary;
+}
+
+.domain-form-input {
+  @apply w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+}
+
+.domain-form-select {
+  @apply w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+}
+
+.domain-form-error {
+  @apply text-danger text-sm mt-1;
+}
+
+/* Stats cards */
+.stats-card {
+  @apply bg-surface rounded-card shadow-card border border-border p-4;
+}
+
+.stats-card-icon {
+  @apply p-2 rounded-full;
+}
+
+.stats-card-primary {
+  @apply bg-primary/10 text-primary;
+}
+
+.stats-card-success {
+  @apply bg-success/10 text-success;
+}
+
+.stats-card-warning {
+  @apply bg-warning/10 text-warning;
+}
+
+.stats-card-info {
+  @apply bg-info/10 text-info;
+}
+
+/* Table styles */
+.domains-table {
+  @apply w-full;
+}
+
+.domains-table-header {
+  @apply px-6 py-4 border-b border-border;
+}
+
+.domains-table-content {
+  @apply p-6;
+}
+
+/* Empty state */
+.empty-state {
+  @apply p-8 text-center;
+}
+
+.empty-state-icon {
+  @apply p-4 bg-surface rounded-full;
+}
+
+.empty-state-title {
+  @apply text-lg font-medium text-text-primary;
+}
+
+.empty-state-description {
+  @apply text-text-secondary mt-1;
+}

@@ -1,7 +1,10 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { SidebarComponent, MenuItem } from '../../../shared/components/sidebar/sidebar.component';
+import {
+  SidebarComponent,
+  MenuItem,
+} from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 
 @Component({
@@ -16,93 +19,150 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
         [title]="organizationName"
         subtitle="Organization Admin"
         [vlink]="organizationSlug"
-        [collapsed]="sidebarCollapsed">
+        [collapsed]="sidebarCollapsed"
+      >
       </app-sidebar>
-      
+
       <!-- Main Content -->
-      <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
-           [class.ml-16]="sidebarCollapsed">
+      <div
+        class="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
+      >
         <!-- Header -->
         <app-header
           [breadcrumb]="breadcrumb"
           [user]="user"
-          (toggleSidebar)="toggleSidebar()">
+          (toggleSidebar)="toggleSidebar()"
+        >
         </app-header>
-        
+
         <!-- Page Content -->
-        <main class="flex-1 overflow-y-auto px-4 py-2" style="background-color: var(--background);">
-          <router-outlet></router-outlet>
+        <main
+          class="flex-1 overflow-y-auto px-4 py-2 transition-all duration-300 ease-in-out"
+          style="background-color: var(--background);"
+        >
+          <div class="w-full h-full">
+            <router-outlet></router-outlet>
+          </div>
         </main>
       </div>
     </div>
   `,
-  styleUrls: ['./organization-admin-layout.component.scss']
+  styleUrls: ['./organization-admin-layout.component.scss'],
 })
 export class OrganizationAdminLayoutComponent {
   sidebarCollapsed = false;
   currentVlink = 'organization-admin';
   organizationName = 'Acme Corporation';
   organizationSlug = 'acme-corp';
-  
+
   breadcrumb = {
     parent: { label: 'Organización', url: '/organization' },
-    current: { label: 'Dashboard' }
+    current: { label: 'Dashboard' },
   };
 
   user = {
     name: 'Admin User',
     role: 'Organization Admin',
-    initials: 'AU'
+    initials: 'AU',
   };
 
   menuItems: MenuItem[] = [
     {
       label: 'Dashboard',
       icon: 'fas fa-home',
-      route: '/organization/dashboard'
+      route: '/organization/dashboard',
     },
     {
       label: 'Analytics',
       icon: 'fas fa-chart-line',
       children: [
-        { label: 'Reports', icon: 'fas fa-circle', route: '/organization/analytics/reports' },
-        { label: 'Statistics', icon: 'fas fa-circle', route: '/organization/analytics/statistics' },
-        { label: 'Insights', icon: 'fas fa-circle', route: '/organization/analytics/insights' }
-      ]
+        {
+          label: 'Reports',
+          icon: 'fas fa-circle',
+          route: '/organization/analytics/reports',
+        },
+        {
+          label: 'Statistics',
+          icon: 'fas fa-circle',
+          route: '/organization/analytics/statistics',
+        },
+        {
+          label: 'Insights',
+          icon: 'fas fa-circle',
+          route: '/organization/analytics/insights',
+        },
+      ],
     },
     {
       label: 'Users',
       icon: 'fas fa-users',
       children: [
-        { label: 'All Users', icon: 'fas fa-circle', route: '/organization/users/all' },
-        { label: 'Roles', icon: 'fas fa-circle', route: '/organization/users/roles' },
-        { label: 'Permissions', icon: 'fas fa-circle', route: '/organization/users/permissions' }
-      ]
+        {
+          label: 'All Users',
+          icon: 'fas fa-circle',
+          route: '/organization/users/all',
+        },
+        {
+          label: 'Roles',
+          icon: 'fas fa-circle',
+          route: '/organization/users/roles',
+        },
+        {
+          label: 'Permissions',
+          icon: 'fas fa-circle',
+          route: '/organization/users/permissions',
+        },
+      ],
     },
     {
       label: 'Products',
       icon: 'fas fa-box',
       children: [
-        { label: 'All Products', icon: 'fas fa-circle', route: '/organization/products/all' },
-        { label: 'Categories', icon: 'fas fa-circle', route: '/organization/products/categories' },
-        { label: 'Inventory', icon: 'fas fa-circle', route: '/organization/products/inventory' }
-      ]
+        {
+          label: 'All Products',
+          icon: 'fas fa-circle',
+          route: '/organization/products/all',
+        },
+        {
+          label: 'Categories',
+          icon: 'fas fa-circle',
+          route: '/organization/products/categories',
+        },
+        {
+          label: 'Inventory',
+          icon: 'fas fa-circle',
+          route: '/organization/products/inventory',
+        },
+      ],
     },
     {
       label: 'Orders',
       icon: 'fas fa-shopping-cart',
       route: '/organization/orders',
-      badge: '12'
+      badge: '12',
     },
     {
       label: 'Settings',
       icon: 'fas fa-cog',
       children: [
-        { label: 'General', icon: 'fas fa-circle', route: '/organization/settings/general' },
-        { label: 'Security', icon: 'fas fa-circle', route: '/organization/settings/security' },
-        { label: 'Notifications', icon: 'fas fa-circle', route: '/organization/settings/notifications' }
-      ]
-    }
+        {
+          label: 'General',
+          icon: 'fas fa-circle',
+          route: '/organization/settings/general',
+        },
+        {
+          label: 'Security',
+          icon: 'fas fa-circle',
+          route: '/organization/settings/security',
+        },
+        {
+          label: 'Notifications',
+          icon: 'fas fa-circle',
+          route: '/organization/settings/notifications',
+        },
+      ],
+    },
   ];
 
   toggleSidebar() {

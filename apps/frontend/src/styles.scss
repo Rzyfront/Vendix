@@ -7,9 +7,15 @@
 /* 🎨 Design Tokens: Single Source of Truth */
 :root {
   /* Typography */
-  --font-primary: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  --font-secondary: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-  --font-headings: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  --font-primary:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial;
+  --font-secondary:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial;
+  --font-headings:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial;
   --font-base: var(--font-primary); /* Default base font */
 
   /* Font Weights */
@@ -30,8 +36,8 @@
   /* Default Theme Colors (Light) */
   --color-background: #f8fafc;
   --color-surface: #ffffff;
-  --color-primary: #7ED7A5;   /* Vendix green */
-  --color-secondary: #2F6F4E;
+  --color-primary: #7ed7a5; /* Vendix green */
+  --color-secondary: #2f6f4e;
   --color-accent: #06b6d4;
   --color-destructive: #ef4444;
   --color-border: #e6edf3;
@@ -54,7 +60,20 @@
   --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.04);
   --shadow-md: 0 4px 8px rgba(15, 23, 42, 0.06);
   --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
-  --shadow-xl: 0 20px 50px rgba(2, 6, 23, 0.10);
+  --shadow-xl: 0 20px 50px rgba(2, 6, 23, 0.1);
+
+  /* Z-Index Scale */
+  --z-base: 1;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-sidebar: 30;
+  --z-modal-backdrop: 40;
+  --z-modal: 50;
+  --z-notification: 60;
+  --z-tooltip: 80;
+  --z-toast: 70;
+  --z-maximum: 100;
 
   /* Misc */
   --border-width: 1px;
@@ -67,8 +86,8 @@
   /* Dark Theme Colors */
   --color-background: #0b1220;
   --color-surface: #0f1724;
-  --color-primary: #7ED7A5;
-  --color-secondary: #2F6F4E;
+  --color-primary: #7ed7a5;
+  --color-secondary: #2f6f4e;
   --color-accent: #06b6d4;
   --color-destructive: #ef4444;
   --color-border: rgba(255, 255, 255, 0.06);
@@ -101,12 +120,13 @@ body {
 }
 
 /* Loading Inter Font */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
 
 /* Dialog (CDK Overlay) base styles */
 .app-dialog-backdrop {
   background-color: rgba(0, 0, 0, 0.5);
   animation: backdrop-in 150ms ease-out;
+  z-index: var(--z-modal-backdrop);
 }
 
 .app-dialog-panel {
@@ -119,6 +139,7 @@ body {
   width: calc(100vw - 2rem);
   padding: 1rem; /* let inner components decide spacing */
   animation: dialog-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: var(--z-modal);
 }
 
 /* Exit state for dialog (added via class) */
@@ -129,10 +150,42 @@ body {
   animation: dialog-out 140ms ease-in forwards;
 }
 
-@keyframes backdrop-in { from { opacity: 0 } to { opacity: 1 } }
-@keyframes backdrop-out { from { opacity: 1 } to { opacity: 0 } }
-@keyframes dialog-in { from { opacity: 0; transform: translateY(4px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
-@keyframes dialog-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-4px) scale(0.98) } }
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
 
 /* Toast animations */
 .toast-item {
@@ -144,15 +197,40 @@ body {
 .toast-leave {
   animation: toast-out 140ms ease-in forwards;
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(-6px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
-@keyframes toast-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-6px) scale(0.98) } }
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
 
 /* Progress bar drains left-to-right over toast duration */
 .toast-progress {
   animation: toast-progress var(--toast-duration, 3500ms) linear forwards;
   transform-origin: left center;
 }
-@keyframes toast-progress { from { transform: scaleX(1) } to { transform: scaleX(0) } }
+@keyframes toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
 
 /* Utility classes for consistent styling */
 .bg-gradient-primary {
@@ -169,4 +247,21 @@ body {
 
 .shadow-card {
   box-shadow: var(--shadow-md);
+}
+
+/* Enhanced modal utilities */
+.modal-enhanced {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.modal-glow-effect {
+  box-shadow:
+    var(--shadow-xl),
+    0 0 20px rgba(126, 215, 165, 0.1);
+}
+
+/* Smooth transitions for modal interactions */
+.modal-smooth-transition {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

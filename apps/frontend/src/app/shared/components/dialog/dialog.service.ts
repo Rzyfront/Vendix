@@ -1,4 +1,9 @@
-import { Injectable, createComponent, EnvironmentInjector, ApplicationRef } from '@angular/core';
+import {
+  Injectable,
+  createComponent,
+  EnvironmentInjector,
+  ApplicationRef,
+} from '@angular/core';
 import { ConfirmationModalComponent } from '../confirmation-modal/confirmation-modal.component';
 
 export interface DialogConfig {
@@ -6,6 +11,10 @@ export interface DialogConfig {
   backdropClass?: string;
   panelClass?: string;
   closeOnBackdropClick?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+  centered?: boolean;
+  showCloseButton?: boolean;
+  customClasses?: string;
 }
 
 export interface ConfirmData {
@@ -29,18 +38,22 @@ export interface PromptData {
 export class DialogService {
   constructor(
     private injector: EnvironmentInjector,
-    private appRef: ApplicationRef
+    private appRef: ApplicationRef,
   ) {}
 
   confirm(data: ConfirmData, config: DialogConfig = {}): Promise<boolean> {
-    return new Promise<boolean>(resolve => {
-      const componentRef = createComponent(ConfirmationModalComponent, { environmentInjector: this.injector });
+    return new Promise<boolean>((resolve) => {
+      const componentRef = createComponent(ConfirmationModalComponent, {
+        environmentInjector: this.injector,
+      });
 
       componentRef.instance.title = data.title;
       componentRef.instance.message = data.message;
-      if (data.confirmText) componentRef.instance.confirmText = data.confirmText;
+      if (data.confirmText)
+        componentRef.instance.confirmText = data.confirmText;
       if (data.cancelText) componentRef.instance.cancelText = data.cancelText;
-      if (data.confirmVariant) componentRef.instance.confirmVariant = data.confirmVariant;
+      if (data.confirmVariant)
+        componentRef.instance.confirmVariant = data.confirmVariant;
 
       const sub = componentRef.instance.confirm.subscribe(() => {
         resolve(true);
@@ -57,12 +70,16 @@ export class DialogService {
       });
 
       this.appRef.attachView(componentRef.hostView);
-      const domElem = (componentRef.hostView as any).rootNodes[0] as HTMLElement;
+      const domElem = (componentRef.hostView as any)
+        .rootNodes[0] as HTMLElement;
       document.body.appendChild(domElem);
     });
   }
 
-  prompt(data: PromptData, config: DialogConfig = {}): Promise<string | undefined> {
+  prompt(
+    data: PromptData,
+    config: DialogConfig = {},
+  ): Promise<string | undefined> {
     console.warn('DialogService.prompt not implemented:', data, config);
     return Promise.resolve(undefined);
   }

@@ -1,10 +1,23 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnInit,
+  OnDestroy,
+  inject,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent
+  ModalComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
@@ -13,7 +26,13 @@ import { Observable, Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-create-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ButtonComponent, ModalComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    InputComponent,
+    ButtonComponent,
+    ModalComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -81,12 +100,14 @@ import { Observable, Subject, takeUntil } from 'rxjs';
           ></app-input>
 
           <div class="space-y-2">
-            <label class="block text-sm font-medium text-text">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)]"
+            >
               Aplicación
             </label>
             <select
               formControlName="app"
-              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
               [disabled]="isCreating"
             >
               <option value="">Seleccionar aplicación</option>
@@ -98,18 +119,22 @@ import { Observable, Subject, takeUntil } from 'rxjs';
           </div>
 
           <div class="space-y-2">
-            <label class="block text-sm font-medium text-text">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)]"
+            >
               Estado Inicial
             </label>
             <select
               formControlName="state"
-              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
               [disabled]="isCreating"
             >
               <option value="">Seleccionar estado</option>
               <option [value]="UserState.ACTIVE">Activo</option>
               <option [value]="UserState.INACTIVE">Inactivo</option>
-              <option [value]="UserState.PENDING_VERIFICATION">Pendiente de Verificación</option>
+              <option [value]="UserState.PENDING_VERIFICATION">
+                Pendiente de Verificación
+              </option>
             </select>
           </div>
         </div>
@@ -134,11 +159,13 @@ import { Observable, Subject, takeUntil } from 'rxjs';
       </div>
     </app-modal>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class UserCreateModalComponent implements OnInit, OnDestroy {
   @Input() isOpen: boolean = false;
@@ -152,23 +179,30 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
 
   usersService = inject(UsersService);
 
-  constructor(
-    private fb: FormBuilder
-  ) {
+  constructor(private fb: FormBuilder) {
     this.userForm = this.fb.group({
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
-      username: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(50)]],
-      email: ['', [Validators.required, Validators.email, Validators.maxLength(255)]],
+      username: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(3),
+          Validators.maxLength(50),
+        ],
+      ],
+      email: [
+        '',
+        [Validators.required, Validators.email, Validators.maxLength(255)],
+      ],
       organization_id: [null, [Validators.required]],
       password: ['', [Validators.required, Validators.minLength(8)]],
       app: [''],
-      state: [UserState.PENDING_VERIFICATION]
+      state: [UserState.PENDING_VERIFICATION],
     });
   }
 
-  ngOnInit(): void {
-  }
+  ngOnInit(): void {}
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -183,7 +217,8 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
     this.isCreating = true;
     const userData: CreateUserDto = this.userForm.value;
 
-    this.usersService.createUser(userData)
+    this.usersService
+      .createUser(userData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -195,7 +230,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isCreating = false;
           console.error('Error creating user:', error);
-        }
+        },
       });
   }
 
@@ -208,7 +243,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
       organization_id: null,
       password: '',
       app: '',
-      state: UserState.PENDING_VERIFICATION
+      state: UserState.PENDING_VERIFICATION,
     });
   }
 }

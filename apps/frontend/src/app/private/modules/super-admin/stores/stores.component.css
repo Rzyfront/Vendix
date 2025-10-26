@@ -5,8 +5,12 @@
 
 /* Loading spinner animation */
 @keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .animate-spin {
@@ -22,11 +26,11 @@
 
 /* Modal z-index fixes */
 .modal-backdrop {
-  z-index: 1000;
+  z-index: var(--z-modal-backdrop);
 }
 
 .modal-content {
-  z-index: 1001;
+  z-index: var(--z-modal);
 }
 
 /* Status badge styles */
@@ -102,7 +106,9 @@
 
 .stats-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
 /* Pagination styles */
@@ -158,12 +164,12 @@
   .stats-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .table-actions {
     flex-direction: column;
     gap: 0.25rem;
   }
-  
+
   .modal-content {
     margin: 1rem;
     max-width: calc(100% - 2rem);
@@ -181,7 +187,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 999;
+  z-index: calc(var(--z-modal) - 1);
 }
 
 /* Form validation styles */

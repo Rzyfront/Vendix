@@ -13,6 +13,7 @@ import { AuditService } from './services/audit.service';
 import {
   AuditStatsComponent,
   AuditEmptyStateComponent,
+  AuditDetailsModalComponent,
 } from './components/index';
 
 // Import components from shared
@@ -23,7 +24,6 @@ import {
   InputsearchComponent,
   IconComponent,
   ButtonComponent,
-  DialogService,
   ToastService,
 } from '../../../../shared/components/index';
 import {
@@ -42,6 +42,7 @@ import {
     ReactiveFormsModule,
     AuditStatsComponent,
     AuditEmptyStateComponent,
+    AuditDetailsModalComponent,
     TableComponent,
     InputsearchComponent,
     IconComponent,
@@ -63,16 +64,31 @@ export class AuditComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'user_name', label: 'Usuario', sortable: true },
-    { key: 'user_email', label: 'Email', sortable: true },
+    {
+      key: 'users',
+      label: 'Usuario',
+      sortable: true,
+      transform: (value: any) =>
+        value ? `${value.first_name} ${value.last_name}` : 'N/A',
+    },
+
     {
       key: 'action',
       label: 'Acción',
       sortable: true,
       badge: true,
       badgeConfig: {
-        type: 'status',
+        type: 'custom',
         size: 'sm',
+        colorMap: {
+          CREATE: '#22c55e',
+          UPDATE: '#3b82f6',
+          DELETE: '#ef4444',
+          LOGIN: '#10b981',
+          LOGOUT: '#6b7280',
+          READ: '#f59e0b',
+          PERMISSION_CHANGE: '#8b5cf6',
+        },
       },
       transform: (value: AuditAction) => this.getActionDisplay(value).text,
     },
@@ -82,10 +98,26 @@ export class AuditComponent implements OnInit, OnDestroy {
       sortable: true,
       transform: (value: AuditResource) => this.getResourceDisplay(value),
     },
-    { key: 'resource_id', label: 'ID Recurso', sortable: false },
-    { key: 'organization_name', label: 'Organización', sortable: true },
-    { key: 'store_name', label: 'Tienda', sortable: true },
-    { key: 'ip_address', label: 'IP', sortable: false },
+
+    {
+      key: 'users',
+      label: 'Organización',
+      sortable: true,
+      transform: (value: any) =>
+        value?.organization_id ? `Org ${value.organization_id}` : 'N/A',
+    },
+    {
+      key: 'stores',
+      label: 'Tienda',
+      sortable: true,
+      transform: (value: any) => value?.name || 'N/A',
+    },
+    {
+      key: 'ip_address',
+      label: 'IP',
+      sortable: true,
+      transform: (value: string) => value || 'N/A',
+    },
     {
       key: 'created_at',
       label: 'Fecha',
@@ -111,6 +143,10 @@ export class AuditComponent implements OnInit, OnDestroy {
     totalPages: 0,
   };
 
+  // Audit Details Modal state
+  isDetailsModalOpen = false;
+  selectedAuditLog: AuditLog | null = null;
+
   // Filter options
   actionOptions = [
     { value: '', label: 'Todas las acciones' },
@@ -120,6 +156,7 @@ export class AuditComponent implements OnInit, OnDestroy {
     { value: AuditAction.LOGIN, label: 'Login' },
     { value: AuditAction.LOGOUT, label: 'Logout' },
     { value: AuditAction.READ, label: 'Lectura' },
+    { value: AuditAction.PERMISSION_CHANGE, label: 'Cambio Permisos' },
   ];
 
   resourceOptions = [
@@ -137,7 +174,6 @@ export class AuditComponent implements OnInit, OnDestroy {
   constructor(
     private auditService: AuditService,
     private fb: FormBuilder,
-    private dialogService: DialogService,
     private toastService: ToastService,
   ) {
     this.filterForm = this.fb.group({
@@ -304,14 +340,8 @@ export class AuditComponent implements OnInit, OnDestroy {
   }
 
   viewLogDetails(log: AuditLog): void {
-    this.dialogService.confirm({
-      title: 'Detalles del Log de Auditoría',
-      message: this.formatLogDetails(log),
-      confirmText: 'Cerrar',
-      cancelText: '',
-      // showCancel: false,
-      // size: 'lg',
-    });
+    this.selectedAuditLog = log;
+    this.isDetailsModalOpen = true;
   }
 
   clearFilters(): void {
@@ -330,19 +360,50 @@ export class AuditComponent implements OnInit, OnDestroy {
   getActionDisplay(action: AuditAction): { text: string; class: string } {
     switch (action) {
       case AuditAction.CREATE:
-        return { text: 'Crear', class: 'bg-green-100 text-green-800' };
+        return {
+          text: 'Crear',
+          class:
+            'bg-green-50 text-green-700 border border-green-200 font-medium',
+        };
       case AuditAction.UPDATE:
-        return { text: 'Actualizar', class: 'bg-blue-100 text-blue-800' };
+        return {
+          text: 'Actualizar',
+          class: 'bg-blue-50 text-blue-700 border border-blue-200 font-medium',
+        };
       case AuditAction.DELETE:
-        return { text: 'Eliminar', class: 'bg-red-100 text-red-800' };
+        return {
+          text: 'Eliminar',
+          class: 'bg-red-50 text-red-700 border border-red-200 font-medium',
+        };
       case AuditAction.LOGIN:
-        return { text: 'Login', class: 'bg-purple-100 text-purple-800' };
+        return {
+          text: 'Login',
+          class:
+            'bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium',
+        };
       case AuditAction.LOGOUT:
-        return { text: 'Logout', class: 'bg-gray-100 text-gray-800' };
+        return {
+          text: 'Logout',
+          class:
+            'bg-slate-50 text-slate-700 border border-slate-200 font-medium',
+        };
       case AuditAction.READ:
-        return { text: 'Lectura', class: 'bg-yellow-100 text-yellow-800' };
+        return {
+          text: 'Lectura',
+          class:
+            'bg-amber-50 text-amber-700 border border-amber-200 font-medium',
+        };
+      case AuditAction.PERMISSION_CHANGE:
+        return {
+          text: 'Cambio Permisos',
+          class:
+            'bg-violet-50 text-violet-700 border border-violet-200 font-medium',
+        };
       default:
-        return { text: 'Desconocido', class: 'bg-gray-100 text-gray-800' };
+        return {
+          text: 'Desconocido',
+          class: 'bg-gray-50 text-gray-700 border border-gray-200 font-medium',
+        };
     }
   }
 
@@ -371,22 +432,11 @@ export class AuditComponent implements OnInit, OnDestroy {
     });
   }
 
-  formatLogDetails(log: AuditLog): string {
-    return `
-      <div class="space-y-2">
-        <div><strong>Usuario:</strong> ${log.user_name} (${log.user_email})</div>
-        <div><strong>Acción:</strong> ${this.getActionDisplay(log.action).text}</div>
-        <div><strong>Recurso:</strong> ${this.getResourceDisplay(log.resource)}</div>
-        <div><strong>ID Recurso:</strong> ${log.resource_id}</div>
-        <div><strong>Organización:</strong> ${log.organization_name || 'N/A'}</div>
-        <div><strong>Tienda:</strong> ${log.store_name || 'N/A'}</div>
-        <div><strong>IP:</strong> ${log.ip_address}</div>
-        <div><strong>User Agent:</strong> ${log.user_agent}</div>
-        <div><strong>Fecha:</strong> ${this.formatDate(log.created_at)}</div>
-        ${log.old_data ? `<div><strong>Datos Anteriores:</strong><pre class="mt-1 p-2 bg-gray-100 rounded text-xs">${JSON.stringify(log.old_data, null, 2)}</pre></div>` : ''}
-        ${log.new_data ? `<div><strong>Datos Nuevos:</strong><pre class="mt-1 p-2 bg-gray-100 rounded text-xs">${JSON.stringify(log.new_data, null, 2)}</pre></div>` : ''}
-      </div>
-    `;
+  onDetailsModalChange(isOpen: boolean): void {
+    this.isDetailsModalOpen = isOpen;
+    if (!isOpen) {
+      this.selectedAuditLog = null;
+    }
   }
 
   getEmptyStateTitle(): string {

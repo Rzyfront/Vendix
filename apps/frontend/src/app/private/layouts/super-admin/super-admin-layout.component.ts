@@ -25,8 +25,8 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 
       <!-- Main Content -->
       <div
-        class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
-        [class.ml-16]="sidebarCollapsed"
+        class="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
       >
         <!-- Header -->
         <app-header
@@ -38,10 +38,12 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 
         <!-- Page Content -->
         <main
-          class="flex-1 overflow-y-auto px-4 py-2"
+          class="flex-1 overflow-y-auto px-4 py-2 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
-          <router-outlet></router-outlet>
+          <div class="w-full h-full">
+            <router-outlet></router-outlet>
+          </div>
         </main>
       </div>
     </div>
@@ -104,7 +106,7 @@ export class SuperAdminLayoutComponent implements OnInit {
     },
     {
       label: 'Auditoría',
-      icon: 'file-text',
+      icon: 'eye',
       route: '/super-admin/audit',
     },
     {

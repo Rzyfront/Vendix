@@ -57,6 +57,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/audit/audit.component'
           ).then((c) => c.AuditComponent),
       },
+      {
+        path: 'domains',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/domains/domains.component'
+          ).then((c) => c.DomainsComponent),
+      },
     ],
   },
 ];

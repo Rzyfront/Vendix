@@ -15,6 +15,9 @@ export class ConfirmationModalComponent {
   @Input() confirmText = 'Aceptar';
   @Input() cancelText = 'Cancelar';
   @Input() confirmVariant: 'primary' | 'danger' = 'primary';
+  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
+  @Input() showCloseButton = true;
+  @Input() customClasses = '';
 
   @Output() confirm = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();

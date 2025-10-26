@@ -1,20 +1,28 @@
 export interface AuditLog {
-  id: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  organization_id: string;
-  organization_name: string;
-  store_id: string;
-  store_name: string;
+  id: number;
+  user_id: number;
   action: AuditAction;
   resource: AuditResource;
-  resource_id: string;
-  old_data: Record<string, any> | null;
-  new_data: Record<string, any> | null;
-  ip_address: string;
-  user_agent: string;
+  resource_id: number | null;
+  old_values: Record<string, any> | null;
+  new_values: Record<string, any> | null;
+  ip_address: string | null;
+  user_agent: string | null;
   created_at: string;
+  organization_id: number | null;
+  store_id: number | null;
+  users: {
+    id: number;
+    email: string;
+    first_name: string;
+    last_name: string;
+    organization_id: number;
+  } | null;
+  stores: {
+    id: number;
+    name: string;
+    organization_id: number;
+  } | null;
 }
 
 export enum AuditAction {
@@ -24,6 +32,7 @@ export enum AuditAction {
   LOGIN = 'LOGIN',
   LOGOUT = 'LOGOUT',
   READ = 'READ',
+  PERMISSION_CHANGE = 'PERMISSION_CHANGE',
 }
 
 export enum AuditResource {

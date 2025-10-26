@@ -1,9 +1,22 @@
-<app-modal [isOpen]="isOpen" [title]="title" (closed)="onCancel()">
-  <div class="p-6">
-    <p>{{ message }}</p>
+<app-modal
+  [isOpen]="isOpen"
+  [title]="title"
+  [size]="size"
+  [showCloseButton]="showCloseButton"
+  [customClasses]="customClasses"
+  (closed)="onCancel()"
+>
+  <div class="px-6 py-5">
+    <p class="text-[var(--color-text-secondary)] leading-relaxed">
+      {{ message }}
+    </p>
   </div>
-  <div class="px-6 py-4 bg-[var(--color-background)] dark:bg-gray-800 flex justify-end gap-3">
-    <app-button variant="outline" (clicked)="onCancel()">{{ cancelText }}</app-button>
-    <app-button [variant]="confirmVariant" (clicked)="onConfirm()">{{ confirmText }}</app-button>
+  <div slot="footer" class="flex justify-end gap-3">
+    <app-button variant="outline" (clicked)="onCancel()">{{
+      cancelText
+    }}</app-button>
+    <app-button [variant]="confirmVariant" (clicked)="onConfirm()">{{
+      confirmText
+    }}</app-button>
   </div>
 </app-modal>

@@ -270,10 +270,21 @@ export class AuditService {
       }),
     ]);
 
+    // Convertir a la estructura que espera el frontend
+    const logsByActionFormatted: Record<string, number> = {};
+    logsByAction.forEach((item) => {
+      logsByActionFormatted[item.action] = item._count.id;
+    });
+
+    const logsByResourceFormatted: Record<string, number> = {};
+    logsByResource.forEach((item) => {
+      logsByResourceFormatted[item.resource] = item._count.id;
+    });
+
     return {
-      totalLogs,
-      logsByAction,
-      logsByResource,
+      total_logs: totalLogs,
+      logs_by_action: logsByActionFormatted,
+      logs_by_resource: logsByResourceFormatted,
     };
   }
 }

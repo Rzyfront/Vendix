@@ -24,11 +24,7 @@ import {
           <div
             class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
           >
-            <app-icon
-              name="file-text"
-              [size]="24"
-              class="text-primary"
-            ></app-icon>
+            <app-icon name="list" [size]="24" class="text-primary"></app-icon>
           </div>
         </div>
       </div>
@@ -53,11 +49,7 @@ import {
           <div
             class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
           >
-            <app-icon
-              name="plus-circle"
-              [size]="24"
-              class="text-green-600"
-            ></app-icon>
+            <app-icon name="plus" [size]="24" class="text-green-600"></app-icon>
           </div>
         </div>
       </div>

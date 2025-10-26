@@ -33,7 +33,7 @@
 }
 
 .z-50 {
-  z-index: 50;
+  z-index: var(--z-modal);
 }
 
 /* Dropdown animation */
