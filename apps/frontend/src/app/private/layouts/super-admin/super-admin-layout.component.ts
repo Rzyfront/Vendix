@@ -110,23 +110,17 @@ export class SuperAdminLayoutComponent implements OnInit {
       route: '/super-admin/audit',
     },
     {
-      label: 'System',
-      icon: 'settings',
-      children: [
-        {
-          label: 'System Settings',
-          icon: 'circle',
-          route: '/super-admin/system/settings',
-        },
-        { label: 'Logs', icon: 'circle', route: '/super-admin/system/logs' },
-        {
-          label: 'Backups',
-          icon: 'circle',
-          route: '/super-admin/system/backups',
-        },
-      ],
+      label: 'Billing',
+      icon: 'credit-card',
+      route: '/super-admin/billing',
     },
     {
+      label: 'Support',
+      icon: 'headset',
+      route: '/super-admin/support',
+      badge: '3',
+    },
+       {
       label: 'Analytics',
       icon: 'chart-line',
       children: [
@@ -147,17 +141,23 @@ export class SuperAdminLayoutComponent implements OnInit {
         },
       ],
     },
-    {
-      label: 'Billing',
-      icon: 'credit-card',
-      route: '/super-admin/billing',
-    },
-    {
-      label: 'Support',
-      icon: 'headset',
-      route: '/super-admin/support',
-      badge: '3',
-    },
+      {
+      label: 'System',
+      icon: 'settings',
+      children: [
+        {
+          label: 'System Settings',
+          icon: 'circle',
+          route: '/super-admin/system/settings',
+        },
+        { label: 'Logs', icon: 'circle', route: '/super-admin/system/logs' },
+        {
+          label: 'Backups',
+          icon: 'circle',
+          route: '/super-admin/system/backups',
+        },
+      ],
+    }
   ];
 
   toggleSidebar() {
