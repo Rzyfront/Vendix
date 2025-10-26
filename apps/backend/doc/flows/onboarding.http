@@ -1,107 +1,329 @@
-# 🎯 USER ONBOARDING FLOW
-# Flujo completo de registro y activación de usuario
+# 🎯 COMPLETE ONBOARDING FLOW
+# Flujo completo de registro y configuración inicial para Organization Owner
 
 @baseUrl = http://localhost:3000/api
+@ownerToken = YOUR_JWT_TOKEN_HERE
+@organizationId = YOUR_ORG_ID_HERE
+@storeId = YOUR_STORE_ID_HERE
+@addressId = YOUR_ADDRESS_ID_HERE
+@domainId = YOUR_DOMAIN_ID_HERE
 
 ###
 
 # =================================================================
-# 📝 STEP 1: USER REGISTRATION
+# 📝 STEP 1: OWNER REGISTRATION
 # =================================================================
 
-### Register Organization Owner
+### Register Organization Owner (Start Onboarding)
 POST {{baseUrl}}/auth/register-owner
 Content-Type: application/json
 
 {
-  "email": "new.owner@company.com",
+  "email": "owner@company.com",
   "password": "SecurePass123!",
   "first_name": "John",
   "last_name": "Smith",
   "organization_name": "Tech Solutions Inc"
 }
 
-### Register Organization Staff
-POST {{baseUrl}}/auth/register-staff
-Content-Type: application/json
-Authorization: Bearer JWT_TOKEN_HERE
+# Response: { user, organization, tokens, onboarding_status }
 
-{
-  "email": "staff@company.com",
-  "password": "SecurePass123!",
-  "first_name": "Jane",
-  "last_name": "Doe",
-  "role": "manager"
-}
-
-### Register Store Customer
-POST {{baseUrl}}/auth/register-customer
-Content-Type: application/json
-
-{
-  "email": "customer@store.com",
-  "password": "SecurePass123!",
-  "first_name": "Bob",
-  "last_name": "Johnson",
-  "store_id": 1
-}
+###
 
 # =================================================================
 # 📧 STEP 2: EMAIL VERIFICATION
 # =================================================================
-# El sistema envía automáticamente email de verificación después del registro
 
-### Check User Email Status (for testing)
-GET {{baseUrl}}/test/check-user-email-status?email=customer@store.com
+### Verify Email Address
+POST {{baseUrl}}/auth/verify-email
 Content-Type: application/json
 
-### Manual Email Verification (in development/testing)
-GET {{baseUrl}}/auth/verify-email?token=EMAIL_VERIFICATION_TOKEN
+{
+  "token": "EMAIL_VERIFICATION_TOKEN_FROM_EMAIL"
+}
+
+### Resend Verification Email (if needed)
+POST {{baseUrl}}/auth/resend-verification
 Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "email": "owner@company.com"
+}
+
+###
 
 # =================================================================
-# 🔑 STEP 3: FIRST LOGIN
+# 🔑 STEP 3: AUTHENTICATION & CONTEXT
 # =================================================================
 
-### Login Contextual (Auto Domain Resolution)
-# Frontend automatically detects domain and calls /public/domains/resolve
+### Login After Email Verification
 POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "customer@store.com",
-  "password": "SecurePass123!",
-  "organization_slug": "store-organization",
-  "store_slug": "main-store"
+  "email": "owner@company.com",
+  "password": "SecurePass123!"
 }
 
+# Save the token from response to @ownerToken variable
+
+### Get Current User Profile
+GET {{baseUrl}}/auth/me
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+### Check Onboarding Status
+GET {{baseUrl}}/auth/onboarding/status
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+###
+
 # =================================================================
-# 👤 STEP 4: PROFILE COMPLETION
+# 👤 STEP 4: COMPLETE USER PROFILE
 # =================================================================
 
-### Update User Profile (if not complete during registration)
-PATCH {{baseUrl}}/users/1
+### Update User Profile with Complete Information
+PATCH {{baseUrl}}/users/{{ownerToken.user_id}}
 Content-Type: application/json
-Authorization: Bearer JWT_TOKEN_HERE
+Authorization: Bearer {{ownerToken}}
 
 {
-  "first_name": "Updated First Name",
-  "last_name": "Updated Last Name",
+  "first_name": "John",
+  "last_name": "Smith",
+  "phone": "+1234567890",
+  "bio": "Tech entrepreneur and founder"
+}
+
+###
+
+# =================================================================
+# 🏢 STEP 5: ORGANIZATION SETUP
+# =================================================================
+
+### Create Organization During Onboarding
+POST {{baseUrl}}/auth/onboarding/create-organization
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "name": "Tech Solutions Inc",
+  "description": "Technology solutions provider",
+  "industry": "Technology",
+  "website": "https://techsolutions.com",
   "phone": "+1234567890"
 }
 
+# Save organization ID from response to @organizationId variable
+
+### Setup Organization Details
+POST {{baseUrl}}/auth/onboarding/setup-organization/{{organizationId}}
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "settings": {
+    "timezone": "America/New_York",
+    "currency": "USD",
+    "language": "en",
+    "date_format": "MM/DD/YYYY"
+  },
+  "billing": {
+    "tax_id": "123456789",
+    "billing_email": "billing@company.com"
+  }
+}
+
+### Create Organization Address
+POST {{baseUrl}}/addresses
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "street_address": "123 Business Ave",
+  "city": "San Francisco",
+  "state": "CA",
+  "postal_code": "94105",
+  "country": "US",
+  "address_type": "business",
+  "is_primary": true,
+  "organization_id": {{organizationId}}
+}
+
+# Save address ID from response to @addressId variable
+
+###
+
 # =================================================================
-# ✅ STEP 5: ACTIVATION COMPLETE
+# 🏪 STEP 6: STORE SETUP
 # =================================================================
 
-### Verify User State (should be 'active')
-GET {{baseUrl}}/users/1
+### Create Store During Onboarding
+POST {{baseUrl}}/auth/onboarding/create-store/{{organizationId}}
 Content-Type: application/json
-Authorization: Bearer JWT_TOKEN_HERE
+Authorization: Bearer {{ownerToken}}
+
+{
+  "name": "Main Store",
+  "description": "Primary retail location",
+  "store_type": "retail",
+  "phone": "+1234567890",
+  "email": "store@company.com"
+}
+
+# Save store ID from response to @storeId variable
+
+### Setup Store Details
+POST {{baseUrl}}/auth/onboarding/setup-store/{{storeId}}
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "settings": {
+    "timezone": "America/New_York",
+    "currency": "USD",
+    "language": "en",
+    "inventory_tracking": true,
+    "tax_calculation": true
+  },
+  "business_hours": {
+    "monday": { "open": "09:00", "close": "18:00" },
+    "tuesday": { "open": "09:00", "close": "18:00" },
+    "wednesday": { "open": "09:00", "close": "18:00" },
+    "thursday": { "open": "09:00", "close": "18:00" },
+    "friday": { "open": "09:00", "close": "18:00" },
+    "saturday": { "open": "10:00", "close": "16:00" },
+    "sunday": { "closed": true }
+  }
+}
+
+### Create Store Address
+POST {{baseUrl}}/addresses
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "street_address": "456 Retail Street",
+  "city": "San Francisco",
+  "state": "CA",
+  "postal_code": "94102",
+  "country": "US",
+  "address_type": "store",
+  "is_primary": true,
+  "store_id": {{storeId}}
+}
+
+###
+
+# =================================================================
+# 🌐 STEP 7: DOMAIN CONFIGURATION
+# =================================================================
+
+### Check Domain Availability
+GET {{baseUrl}}/domains/check/techsolutions.myapp.com
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+### Create Domain Setting
+POST {{baseUrl}}/domains
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "hostname": "techsolutions.myapp.com",
+  "domain_type": "primary",
+  "is_active": true,
+  "ssl_enabled": false,
+  "organization_id": {{organizationId}},
+  "store_id": {{storeId}},
+  "settings": {
+    "branding": {
+      "primary_color": "#007bff",
+      "secondary_color": "#6c757d",
+      "logo_url": "https://example.com/logo.png"
+    },
+    "features": {
+      "ecommerce": true,
+      "inventory": true,
+      "analytics": true
+    }
+  }
+}
+
+# Save domain ID from response to @domainId variable
+
+### Verify Domain DNS Configuration
+POST {{baseUrl}}/domains/hostname/techsolutions.myapp.com/verify
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+###
+
+# =================================================================
+# 🎯 STEP 8: FINALIZE ONBOARDING
+# =================================================================
+
+### Complete Onboarding Process
+POST {{baseUrl}}/auth/onboarding/complete
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+{
+  "organization_id": {{organizationId}},
+  "store_id": {{storeId}},
+  "domain_id": {{domainId}}
+}
+
+### Verify Final User State
+GET {{baseUrl}}/auth/me
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
 
 # Response should show:
 # {
 #   "email_verified": true,
 #   "state": "active",
-#   "onboarding_completed": true
+#   "onboarding_completed": true,
+#   "roles": ["owner"],
+#   "organization": { "id": {{organizationId}}, "name": "Tech Solutions Inc" },
+#   "store": { "id": {{storeId}}, "name": "Main Store" }
 # }
+
+### Get Organization Dashboard Stats
+GET {{baseUrl}}/organizations/{{organizationId}}/stats
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+### Get Store Dashboard Stats
+GET {{baseUrl}}/stores/{{storeId}}/stats
+Content-Type: application/json
+Authorization: Bearer {{ownerToken}}
+
+### Test Domain Resolution
+GET {{baseUrl}}/domains/resolve/techsolutions.myapp.com
+Content-Type: application/json
+
+###
+
+# =================================================================
+# 📋 SUMMARY OF COMPLETE ONBOARDING
+# =================================================================
+# 
+# ✅ User registered and email verified
+# ✅ User profile completed with phone and bio
+# ✅ Organization created with full details and address
+# ✅ Store created with settings, business hours and address
+# ✅ Domain configured and verified
+# ✅ Onboarding marked as complete
+# ✅ User has owner role with full permissions
+# ✅ Dashboard stats available for organization and store
+# ✅ Domain resolution working correctly
+#
+# The user now has full access to:
+# - Organization management
+# - Store management  
+# - User management (invite staff)
+# - Domain configuration
+# - Analytics and reporting
+# - All platform features
