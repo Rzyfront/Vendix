@@ -1,7 +1,10 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { SidebarComponent, MenuItem } from '../../../shared/components/sidebar/sidebar.component';
+import {
+  SidebarComponent,
+  MenuItem,
+} from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 
 @Component({
@@ -16,27 +19,34 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
         [title]="platformTitle"
         subtitle="Super Admin"
         [vlink]="currentVlink"
-        [collapsed]="sidebarCollapsed">
+        [collapsed]="sidebarCollapsed"
+      >
       </app-sidebar>
-      
+
       <!-- Main Content -->
-      <div class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
-           [class.ml-16]="sidebarCollapsed">
+      <div
+        class="flex-1 flex flex-col overflow-hidden ml-64 transition-all duration-300"
+        [class.ml-16]="sidebarCollapsed"
+      >
         <!-- Header -->
         <app-header
           [breadcrumb]="breadcrumb"
           [user]="user"
-          (toggleSidebar)="toggleSidebar()">
+          (toggleSidebar)="toggleSidebar()"
+        >
         </app-header>
-        
+
         <!-- Page Content -->
-        <main class="flex-1 overflow-y-auto px-4 py-2" style="background-color: var(--background);">
+        <main
+          class="flex-1 overflow-y-auto px-4 py-2"
+          style="background-color: var(--background);"
+        >
           <router-outlet></router-outlet>
         </main>
       </div>
     </div>
   `,
-  styleUrls: ['./super-admin-layout.component.scss']
+  styleUrls: ['./super-admin-layout.component.scss'],
 })
 export class SuperAdminLayoutComponent implements OnInit {
   sidebarCollapsed = false;
@@ -54,73 +64,98 @@ export class SuperAdminLayoutComponent implements OnInit {
     // Ensure menu items are properly set
     console.log('[DEBUG] Menu items on init:', this.menuItems);
   }
-  
+
   breadcrumb = {
     parent: 'Super Admin',
-    current: 'Dashboard'
+    current: 'Dashboard',
   };
 
   user = {
     name: 'Admin User',
     role: 'Super Administrator',
-    initials: 'AU'
+    initials: 'AU',
   };
 
   menuItems: MenuItem[] = [
     {
       label: 'Dashboard',
       icon: 'home',
-      route: '/super-admin/dashboard'
+      route: '/super-admin/dashboard',
     },
     {
       label: 'Organizations',
       icon: 'building',
-      route: '/super-admin/organizations'
+      route: '/super-admin/organizations',
     },
     {
       label: 'Stores',
       icon: 'store',
-      route: '/super-admin/stores'
+      route: '/super-admin/stores',
     },
     {
       label: 'Users',
       icon: 'users',
-      route: '/super-admin/users'
+      route: '/super-admin/users',
     },
     {
       label: 'Roles',
       icon: 'shield',
-      route: '/super-admin/roles'
+      route: '/super-admin/roles',
+    },
+    {
+      label: 'Auditoría',
+      icon: 'file-text',
+      route: '/super-admin/audit',
     },
     {
       label: 'System',
       icon: 'settings',
       children: [
-        { label: 'System Settings', icon: 'circle', route: '/super-admin/system/settings' },
+        {
+          label: 'System Settings',
+          icon: 'circle',
+          route: '/super-admin/system/settings',
+        },
         { label: 'Logs', icon: 'circle', route: '/super-admin/system/logs' },
-        { label: 'Backups', icon: 'circle', route: '/super-admin/system/backups' }
-      ]
+        {
+          label: 'Backups',
+          icon: 'circle',
+          route: '/super-admin/system/backups',
+        },
+      ],
     },
     {
       label: 'Analytics',
       icon: 'chart-line',
       children: [
-        { label: 'Platform Analytics', icon: 'circle', route: '/super-admin/analytics/platform' },
-        { label: 'User Analytics', icon: 'circle', route: '/super-admin/analytics/users' },
-        { label: 'Performance', icon: 'circle', route: '/super-admin/analytics/performance' }
-      ]
+        {
+          label: 'Platform Analytics',
+          icon: 'circle',
+          route: '/super-admin/analytics/platform',
+        },
+        {
+          label: 'User Analytics',
+          icon: 'circle',
+          route: '/super-admin/analytics/users',
+        },
+        {
+          label: 'Performance',
+          icon: 'circle',
+          route: '/super-admin/analytics/performance',
+        },
+      ],
     },
     {
       label: 'Billing',
       icon: 'credit-card',
-      route: '/super-admin/billing'
+      route: '/super-admin/billing',
     },
     {
       label: 'Support',
       icon: 'headset',
       route: '/super-admin/support',
-      badge: '3'
-    }
+      badge: '3',
+    },
   ];
 
   toggleSidebar() {

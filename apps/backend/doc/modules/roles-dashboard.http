@@ -1,14 +1,14 @@
-### Roles Dashboard API Tests
+### Roles Stats API Tests
 
-### Get Dashboard Stats
-GET http://localhost:3000/api/roles/dashboard
+### Get Stats
+GET http://localhost:3000/api/roles/stats
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
-### Get Dashboard Stats - Expected Response
+### Get Stats - Expected Response
 {
   "success": true,
-  "message": "Estadísticas del dashboard obtenidas exitosamente",
+  "message": "Estadísticas de roles obtenidas exitosamente",
   "data": {
     "total_roles": 15,
     "system_roles": 5,
@@ -16,14 +16,14 @@ Content-Type: application/json
     "total_permissions": 42
   },
   "timestamp": "2024-01-01T00:00:00.000Z",
-  "path": "/api/roles/dashboard"
+  "path": "/api/roles/stats"
 }
 
-### Get Dashboard Stats - Unauthorized (403)
-GET http://localhost:3000/api/roles/dashboard
+### Get Stats - Unauthorized (403)
+GET http://localhost:3000/api/roles/stats
 Authorization: Bearer invalid_token
 Content-Type: application/json
 
-### Get Dashboard Stats - No Token (401)
-GET http://localhost:3000/api/roles/dashboard
+### Get Stats - No Token (401)
+GET http://localhost:3000/api/roles/stats
 Content-Type: application/json

@@ -25,13 +25,13 @@
 - Herramientas específicas se crean reutilizables en carpetas `utils/`.
 
 ## Backend
-- Se puede ver el build en modo watch con el comando: docker logs --tail 20 vendix_backend
+- Se puede ver el build en modo watch con el comando: docker logs --tail 40 vendix_backend
 - Se maneja authenticacion globales en JWT desde el app.module.ts y se expluyen rutas publicas con @Public
 - Se manejan contextos automaticos globales en prisma service para organization_id y store_id y desde el app.module.ts
 - Se registrar permisos para rutas granularmente con @Permissions
 
 ## Front
-- Se puede ver el build en modo watch con el comando: docker logs --tail 20 vendix_frontend
+- Se puede ver el build en modo watch con el comando: docker logs --tail 40 vendix_frontend
 - Se maneja un punto e entrada que resuelve el dominio para configurar y decidir que vista mostrar.
 - Se setea la configuracion de branding resuelta por el dominio.
 - Se usa tokens para mantener un estandar de estilos generales en la app @apps/frontend/src/styles.scss.

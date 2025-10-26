@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -10,11 +10,10 @@ import {
   AuditResource,
 } from './interfaces/audit.interface';
 import { AuditService } from './services/audit.service';
-// Components will be imported after creation
-// import {
-//   AuditStatsComponent,
-//   AuditEmptyStateComponent,
-// } from './components/index';
+import {
+  AuditStatsComponent,
+  AuditEmptyStateComponent,
+} from './components/index';
 
 // Import components from shared
 import {
@@ -41,8 +40,8 @@ import {
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    // AuditStatsComponent,
-    // AuditEmptyStateComponent,
+    AuditStatsComponent,
+    AuditEmptyStateComponent,
     TableComponent,
     InputsearchComponent,
     IconComponent,
@@ -56,6 +55,7 @@ export class AuditComponent implements OnInit, OnDestroy {
   auditStats: AuditStats | null = null;
   isLoading = false;
   searchSubject = new Subject<string>();
+  showFiltersDropdown = false;
   private destroy$ = new Subject<void>();
 
   // Form for filters
@@ -189,12 +189,50 @@ export class AuditComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  toggleFiltersDropdown(): void {
+    this.showFiltersDropdown = !this.showFiltersDropdown;
+  }
+
+  hasActiveFilters(): boolean {
+    const filters = this.filterForm.value;
+    return !!(
+      filters.action ||
+      filters.resource ||
+      filters.fromDate ||
+      filters.toDate ||
+      filters.organizationId ||
+      filters.storeId
+    );
+  }
+
+  getActiveFiltersCount(): number {
+    const filters = this.filterForm.value;
+    let count = 0;
+    if (filters.action) count++;
+    if (filters.resource) count++;
+    if (filters.fromDate) count++;
+    if (filters.toDate) count++;
+    if (filters.organizationId) count++;
+    if (filters.storeId) count++;
+    return count;
+  }
+
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    const dropdownElement = target.closest('.relative');
+
+    if (!dropdownElement && this.showFiltersDropdown) {
+      this.showFiltersDropdown = false;
+    }
+  }
+
   loadAuditLogs(): void {
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
       limit: this.pagination.limit,
       offset: (this.pagination.page - 1) * this.pagination.limit,
-      search: filters.search || undefined,
+      // search: filters.search || undefined,
       action: filters.action || undefined,
       resource: filters.resource || undefined,
       userId: filters.userId || undefined,
@@ -251,9 +289,12 @@ export class AuditComponent implements OnInit, OnDestroy {
     this.loadAuditLogs();
   }
 
-  onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
+  onSortChange(event: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     // TODO: Implement sorting logic
-    console.log('Sort changed:', column, direction);
+    console.log('Sort changed:', event.column, event.direction);
     this.loadAuditLogs();
   }
 
@@ -268,8 +309,8 @@ export class AuditComponent implements OnInit, OnDestroy {
       message: this.formatLogDetails(log),
       confirmText: 'Cerrar',
       cancelText: '',
-      showCancel: false,
-      size: 'lg',
+      // showCancel: false,
+      // size: 'lg',
     });
   }
 

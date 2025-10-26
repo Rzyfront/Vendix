@@ -1,5 +1,5 @@
 # 🏢 ORGANIZATIONS MODULE
-# Panel administrativo de organizaciones con dashboards
+# Panel administrativo de organizaciones con estadísticas
 
 @baseUrl = http://localhost:3000/api
 @authToken = Bearer YOUR_JWT_TOKEN_HERE
@@ -25,8 +25,8 @@ GET {{baseUrl}}/organizations/slug/my-corporation
 Content-Type: application/json
 Authorization: {{authToken}}
 
-### 🚨 ORGANIZATION DASHBOARD - Key FASE2 Feature
-GET {{baseUrl}}/organizations/1/dashboard?start_date=2025-01-01&end_date=2025-12-31
+### 🚨 ORGANIZATION STATS - Key FASE2 Feature
+GET {{baseUrl}}/organizations/1/stats
 Content-Type: application/json
 Authorization: {{authToken}}
 

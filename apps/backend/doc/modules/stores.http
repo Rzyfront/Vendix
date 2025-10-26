@@ -1,5 +1,5 @@
 # 🏪 STORES MODULE
-# Gestión de tiendas con dashboards y analytics
+# Gestión de tiendas con estadísticas y analytics
 
 @baseUrl = http://localhost:3000/api
 @authToken = Bearer YOUR_JWT_TOKEN_HERE
@@ -35,8 +35,8 @@ Authorization: {{authToken}}
 # - Store users
 # - Counts (products, orders, categories, store_users)
 
-### 🚨 GLOBAL STORES DASHBOARD - Key FASE2 Feature
-GET {{baseUrl}}/stores/global/dashboard
+### 🚨 GLOBAL STORES STATS - Key FASE2 Feature
+GET {{baseUrl}}/stores/stats
 Content-Type: application/json
 Authorization: {{authToken}}
 
@@ -51,8 +51,8 @@ Authorization: {{authToken}}
 #   total_products: number
 # }
 
-### 🚨 STORE DASHBOARD - Key FASE2 Feature
-GET {{baseUrl}}/stores/1/dashboard?start_date=2025-01-01&end_date=2025-12-31
+### 🚨 STORE STATS - Key FASE2 Feature
+GET {{baseUrl}}/stores/1/stats
 Content-Type: application/json
 Authorization: {{authToken}}
 

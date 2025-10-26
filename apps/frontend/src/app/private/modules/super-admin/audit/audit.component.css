@@ -1,0 +1,78 @@
+/* Audit component styles */
+:host {
+  display: block;
+}
+
+/* Filter dropdown styles */
+.filter-compact {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Dropdown menu positioning */
+.relative {
+  position: relative;
+}
+
+.absolute {
+  position: absolute;
+}
+
+.right-0 {
+  right: 0;
+}
+
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.w-80 {
+  width: 20rem;
+}
+
+.z-50 {
+  z-index: 50;
+}
+
+/* Dropdown animation */
+.show .absolute {
+  animation: dropdownSlide 0.2s ease-out;
+}
+
+@keyframes dropdownSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Active filter button styles */
+app-button.active {
+  background-color: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .filter-compact {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .filter-compact > * {
+    width: 100%;
+  }
+
+  .absolute.w-80 {
+    width: calc(100vw - 2rem);
+    right: -1rem;
+  }
+}

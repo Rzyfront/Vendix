@@ -1,5 +1,5 @@
 # 👥 USERS MODULE
-# Gestión completa de usuarios multi-tenant con dashboard avanzado
+# Gestión completa de usuarios multi-tenant con estadísticas avanzadas
 
 @baseUrl = http://localhost:3000/api
 @authToken = Bearer YOUR_JWT_TOKEN_HERE
@@ -20,8 +20,8 @@ GET {{baseUrl}}/users/1
 Content-Type: application/json
 Authorization: {{authToken}}
 
-### 🚨 USERS DASHBOARD - Advanced Panel FASE2
-GET {{baseUrl}}/users/dashboard?page=1&limit=10&role=manager&include_inactive=false
+### 🚨 USERS STATS - Advanced Panel FASE2
+GET {{baseUrl}}/users/stats
 Content-Type: application/json
 Authorization: {{authToken}}
 
@@ -31,8 +31,8 @@ Authorization: {{authToken}}
 #   statistics: {roles_stats, states_stats}
 # }
 
-### 📊 USER DASHBOARD STATS - Estadísticas de usuarios
-GET {{baseUrl}}/users/user/dashboard?organization_id=1
+### 📊 USER STATS - Estadísticas de usuarios
+GET {{baseUrl}}/users/stats?organization_id=1
 Content-Type: application/json
 Authorization: {{authToken}}
 

@@ -8,25 +8,34 @@ import { User, UserState } from '../interfaces/user.interface';
   standalone: true,
   imports: [CommonModule, IconComponent],
   template: `
-    <div class="bg-surface rounded-lg border border-border p-4 shadow-sm hover:shadow-md transition-shadow duration-200">
+    <div
+      class="bg-surface rounded-lg border border-border p-4 shadow-sm hover:shadow-md transition-shadow duration-200"
+    >
       <!-- User Info -->
       <div class="flex items-start justify-between mb-3">
         <div class="flex-1">
           <div class="flex items-center gap-3">
-            <div class="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+            <div
+              class="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center"
+            >
               <span class="text-primary font-semibold text-lg">
                 {{ getInitials(user.first_name, user.last_name) }}
               </span>
             </div>
             <div>
-              <h3 class="font-semibold text-text">{{ user.first_name }} {{ user.last_name }}</h3>
+              <h3 class="font-semibold text-text">
+                {{ user.first_name }} {{ user.last_name }}
+              </h3>
               <p class="text-sm text-text-muted">{{ '@' + user.username }}</p>
             </div>
           </div>
         </div>
 
         <!-- Status Badge -->
-        <div class="px-2 py-1 rounded-full text-xs font-medium" [class]="getStatusClass(user.state)">
+        <div
+          class="px-2 py-1 rounded-full text-xs font-medium"
+          [class]="getStatusClass(user.state)"
+        >
           {{ getStatusText(user.state) }}
         </div>
       </div>
@@ -45,20 +54,20 @@ import { User, UserState } from '../interfaces/user.interface';
       </div>
 
       <!-- Organization -->
-      <div class="mb-3" *ngIf="user.organization">
+      <div class="mb-3" *ngIf="user.organizations">
         <p class="text-sm text-text-muted">Organización</p>
-        <p class="text-text">{{ user.organization.name }}</p>
+        <p class="text-text">{{ user.organizations.name }}</p>
       </div>
 
       <!-- Roles -->
-      <div class="mb-3" *ngIf="user.roles && user.roles.length > 0">
+      <div class="mb-3" *ngIf="user.user_roles && user.user_roles.length > 0">
         <p class="text-sm text-text-muted">Roles</p>
         <div class="flex flex-wrap gap-1">
           <span
-            *ngFor="let role of user.roles"
+            *ngFor="let userRole of user.user_roles"
             class="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-xs rounded"
           >
-            {{ role.role.name }}
+            {{ userRole.roles.name }}
           </span>
         </div>
       </div>
@@ -68,14 +77,20 @@ import { User, UserState } from '../interfaces/user.interface';
         <div class="flex items-center gap-1">
           <app-icon name="shield" class="w-4 h-4"></app-icon>
           <span>2FA</span>
-          <span [class]="user.two_factor_enabled ? 'text-green-500' : 'text-gray-400'">
+          <span
+            [class]="
+              user.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
+            "
+          >
             {{ user.two_factor_enabled ? 'Activo' : 'Inactivo' }}
           </span>
         </div>
         <div class="flex items-center gap-1">
           <app-icon name="search" class="w-4 h-4"></app-icon>
           <span>Email</span>
-          <span [class]="user.email_verified ? 'text-green-500' : 'text-yellow-500'">
+          <span
+            [class]="user.email_verified ? 'text-green-500' : 'text-yellow-500'"
+          >
             {{ user.email_verified ? 'Verificado' : 'Pendiente' }}
           </span>
         </div>
@@ -83,7 +98,10 @@ import { User, UserState } from '../interfaces/user.interface';
 
       <!-- Last Login -->
       <div class="text-sm text-text-muted">
-        <p>Último acceso: {{ user.last_login ? formatDate(user.last_login) : 'Nunca' }}</p>
+        <p>
+          Último acceso:
+          {{ user.last_login ? formatDate(user.last_login) : 'Nunca' }}
+        </p>
       </div>
 
       <!-- Actions -->
@@ -121,11 +139,13 @@ import { User, UserState } from '../interfaces/user.interface';
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class UserCardComponent {
   @Input() user!: User;
@@ -145,7 +165,9 @@ export class UserCardComponent {
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
 
     if (diffInHours < 1) {
-      const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+      const diffInMinutes = Math.floor(
+        (now.getTime() - date.getTime()) / (1000 * 60),
+      );
       return `Hace ${diffInMinutes} minuto${diffInMinutes !== 1 ? 's' : ''}`;
     } else if (diffInHours < 24) {
       return `Hace ${Math.floor(diffInHours)} hora${Math.floor(diffInHours) !== 1 ? 's' : ''}`;
