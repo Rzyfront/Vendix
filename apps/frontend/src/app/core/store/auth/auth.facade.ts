@@ -42,6 +42,20 @@ export class AuthFacade {
   // Combined observables
   readonly authInfo$ = this.store.select(AuthSelectors.selectAuthInfo);
 
+  // Onboarding observables
+  readonly onboardingCompleted$ = this.store.select(
+    AuthSelectors.selectOnboardingCompleted,
+  );
+  readonly onboardingCurrentStep$ = this.store.select(
+    AuthSelectors.selectOnboardingCurrentStep,
+  );
+  readonly onboardingCompletedSteps$ = this.store.select(
+    AuthSelectors.selectOnboardingCompletedSteps,
+  );
+  readonly needsOnboarding$ = this.store.select(
+    AuthSelectors.selectNeedsOnboarding,
+  );
+
   // Organization and Store observables
   readonly userOrganization$ = this.store.select(
     AuthSelectors.selectUserOrganization,
@@ -229,6 +243,46 @@ export class AuthFacade {
   getRoles(): string[] {
     let result: string[] = [];
     this.userRoles$.pipe(take(1)).subscribe((roles) => (result = roles));
+    return result;
+  }
+
+  // Onboarding methods
+  checkOnboardingStatus(): void {
+    this.store.dispatch(AuthActions.checkOnboardingStatus());
+  }
+
+  setOnboardingCompleted(completed: boolean): void {
+    this.store.dispatch(AuthActions.setOnboardingCompleted({ completed }));
+  }
+
+  // Synchronous onboarding getters
+  isOnboardingCompleted(): boolean {
+    let result = false;
+    this.onboardingCompleted$
+      .pipe(take(1))
+      .subscribe((completed) => (result = completed));
+    return result;
+  }
+
+  getOnboardingCurrentStep(): string | undefined {
+    let result: string | undefined;
+    this.onboardingCurrentStep$
+      .pipe(take(1))
+      .subscribe((step) => (result = step));
+    return result;
+  }
+
+  getOnboardingCompletedSteps(): string[] {
+    let result: string[] = [];
+    this.onboardingCompletedSteps$
+      .pipe(take(1))
+      .subscribe((steps) => (result = steps));
+    return result;
+  }
+
+  needsOnboarding(): boolean {
+    let result = false;
+    this.needsOnboarding$.pipe(take(1)).subscribe((needs) => (result = needs));
     return result;
   }
 }

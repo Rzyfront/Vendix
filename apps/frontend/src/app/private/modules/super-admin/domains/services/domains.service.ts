@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 
 import {
@@ -98,8 +99,31 @@ export class DomainsService {
    * Get domain statistics (simplified version for dashboard)
    */
   getDomainStatsList(): Observable<ApiResponse<DomainStats>> {
-    return this.http.get<ApiResponse<DomainStats>>(
-      `${this.apiUrl}/domains/stats`,
+    return this.http.get<any>(`${this.apiUrl}/domains/stats`).pipe(
+      map((response: any) => {
+        if (response.success && response.data) {
+          // Map backend response to frontend interface
+          const mappedData: DomainStats = {
+            total_domains: response.data.total || 0,
+            active_domains: response.data.active || 0,
+            pending_domains: response.data.pending || 0,
+            verified_domains: response.data.verified || 0,
+            customer_domains: response.data.customDomains || 0,
+            primary_domains: response.data.platformSubdomains || 0,
+            alias_domains: response.data.aliasDomains || 0,
+            vendix_subdomains: response.data.platformSubdomains || 0,
+            customer_custom_domains: response.data.customDomains || 0,
+            customer_subdomains: response.data.clientSubdomains || 0,
+          };
+
+          return {
+            success: response.success,
+            data: mappedData,
+            message: response.message,
+          };
+        }
+        return response;
+      }),
     );
   }
 

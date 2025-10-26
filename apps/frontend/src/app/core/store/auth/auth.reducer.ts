@@ -1,6 +1,9 @@
 import { createReducer, on } from '@ngrx/store';
 import * as AuthActions from './auth.actions';
-import { extractApiErrorMessage, NormalizedApiPayload } from '../../utils/api-error-handler';
+import {
+  extractApiErrorMessage,
+  NormalizedApiPayload,
+} from '../../utils/api-error-handler';
 import { saveAuthState, clearAuthState } from '../persistence';
 
 export interface AuthState {
@@ -11,6 +14,9 @@ export interface AuthState {
   loading: boolean;
   error: NormalizedApiPayload | string | null;
   isAuthenticated: boolean;
+  onboardingCompleted: boolean;
+  onboardingCurrentStep?: string;
+  onboardingCompletedSteps: string[];
 }
 
 export const initialAuthState: AuthState = {
@@ -20,7 +26,9 @@ export const initialAuthState: AuthState = {
   roles: [],
   loading: true,
   error: null,
-  isAuthenticated: false
+  isAuthenticated: false,
+  onboardingCompleted: false,
+  onboardingCompletedSteps: [],
 };
 
 export const authReducer = createReducer(
@@ -29,45 +37,51 @@ export const authReducer = createReducer(
   on(AuthActions.login, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
-  on(AuthActions.loginSuccess, (state, { user, tokens, permissions, roles }) => {
-    const newState = {
-      ...state,
-      user,
-      tokens,
-      permissions: permissions || [],
-      roles: roles || [],
-      loading: false,
-      error: null,
-      isAuthenticated: true
-    };
-    // Save to localStorage for persistence
-    saveAuthState(newState);
-    return newState;
-  }),
+  on(
+    AuthActions.loginSuccess,
+    (state, { user, tokens, permissions, roles }) => {
+      const newState = {
+        ...state,
+        user,
+        tokens,
+        permissions: permissions || [],
+        roles: roles || [],
+        loading: false,
+        error: null,
+        isAuthenticated: true,
+      };
+      // Save to localStorage for persistence
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
 
   on(AuthActions.loginFailure, (state, { error }) => ({
     ...state,
     loading: false,
     // error may already be normalized by effects, but ensure fallback to string
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    isAuthenticated: false
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+    isAuthenticated: false,
   })),
 
   on(AuthActions.logout, (state) => ({
     ...state,
-    loading: true
+    loading: true,
   })),
 
   on(AuthActions.logoutSuccess, (state) => ({
-    ...initialAuthState
+    ...initialAuthState,
   })),
 
   on(AuthActions.refreshToken, (state) => ({
     ...state,
-    loading: true
+    loading: true,
   })),
 
   on(AuthActions.refreshTokenSuccess, (state, { tokens }) => {
@@ -75,7 +89,7 @@ export const authReducer = createReducer(
       ...state,
       tokens,
       loading: false,
-      error: null
+      error: null,
     };
     // Save updated tokens to localStorage
     saveAuthState(newState);
@@ -85,136 +99,190 @@ export const authReducer = createReducer(
   on(AuthActions.refreshTokenFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    isAuthenticated: false
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+    isAuthenticated: false,
   })),
 
   on(AuthActions.loadUser, (state) => ({
     ...state,
-    loading: true
+    loading: true,
   })),
 
   on(AuthActions.loadUserSuccess, (state, { user }) => ({
     ...state,
     user,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.loadUserFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
   on(AuthActions.updateUser, (state, { user }) => ({
     ...state,
-    user
+    user,
   })),
 
   on(AuthActions.clearAuthState, (state) => ({
-    ...initialAuthState
+    ...initialAuthState,
   })),
 
   on(AuthActions.setLoading, (state, { loading }) => ({
     ...state,
-    loading
+    loading,
   })),
 
   on(AuthActions.setError, (state, { error }) => ({
     ...state,
-    error
+    error,
   })),
 
-  on(AuthActions.restoreAuthState, (state, { user, tokens, permissions, roles }) => {
-    const newState = {
-      ...state,
-      user,
-      tokens,
-      permissions: permissions || [],
-      roles: roles || [],
-      isAuthenticated: true,
-      loading: false,
-      error: null
-    };
-    // Save to localStorage to ensure consistency
-    saveAuthState(newState);
-    return newState;
-  }),
+  on(
+    AuthActions.restoreAuthState,
+    (state, { user, tokens, permissions, roles }) => {
+      const newState = {
+        ...state,
+        user,
+        tokens,
+        permissions: permissions || [],
+        roles: roles || [],
+        isAuthenticated: true,
+        loading: false,
+        error: null,
+      };
+      // Save to localStorage to ensure consistency
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
 
   // Forgot Owner Password
   on(AuthActions.forgotOwnerPassword, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.forgotOwnerPasswordSuccess, (state) => ({
     ...state,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.forgotOwnerPasswordFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
   // Reset Owner Password
   on(AuthActions.resetOwnerPassword, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resetOwnerPasswordSuccess, (state) => ({
     ...state,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resetOwnerPasswordFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
   // Verify Email
   on(AuthActions.verifyEmail, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.verifyEmailSuccess, (state) => ({
     ...state,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.verifyEmailFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
   // Resend Verification Email
   on(AuthActions.resendVerificationEmail, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resendVerificationEmailSuccess, (state) => ({
     ...state,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(AuthActions.resendVerificationEmailFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error: typeof error === 'string' ? error : (error as NormalizedApiPayload) || extractApiErrorMessage(error)
-  }))
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
+  // Onboarding Actions
+  on(AuthActions.checkOnboardingStatus, (state) => ({
+    ...state,
+    loading: true,
+    error: null,
+  })),
+
+  on(
+    AuthActions.checkOnboardingStatusSuccess,
+    (state, { onboardingCompleted, currentStep, completedSteps }) => ({
+      ...state,
+      loading: false,
+      error: null,
+      onboardingCompleted,
+      onboardingCurrentStep: currentStep,
+      onboardingCompletedSteps: completedSteps || [],
+    }),
+  ),
+
+  on(AuthActions.checkOnboardingStatusFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
+  on(AuthActions.setOnboardingCompleted, (state, { completed }) => ({
+    ...state,
+    onboardingCompleted: completed,
+  })),
 );

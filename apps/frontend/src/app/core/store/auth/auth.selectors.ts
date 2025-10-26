@@ -190,3 +190,24 @@ export const selectUserStoreSlug = createSelector(
   selectUserStore,
   (store: any) => store?.slug || null,
 );
+
+// Onboarding selectors
+export const selectOnboardingCompleted = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.onboardingCompleted,
+);
+
+export const selectOnboardingCurrentStep = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.onboardingCurrentStep,
+);
+
+export const selectOnboardingCompletedSteps = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.onboardingCompletedSteps,
+);
+
+export const selectNeedsOnboarding = createSelector(
+  selectOnboardingCompleted,
+  (onboardingCompleted: boolean) => !onboardingCompleted,
+);

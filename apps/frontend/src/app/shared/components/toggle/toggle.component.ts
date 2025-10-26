@@ -1,4 +1,10 @@
-import { Component, Input, Output, EventEmitter, forwardRef } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  forwardRef,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 
@@ -21,8 +27,8 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
       [disabled]="disabled"
       (click)="onToggle()"
       class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2"
-      [class.bg-\[var\(--color-primary\)\]]="checked"
-      [class.bg-\[var\(--color-muted\)\]]="!checked"
+      [class.bg-[var(--color-primary)]]="checked"
+      [class.bg-[var(--color-muted)]]="!checked"
     >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition duration-200 ease-in-out"
@@ -30,7 +36,11 @@ import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
         [class.translate-x-0]="!checked"
       ></span>
     </button>
-    <span *ngIf="label" class="ml-2 align-middle text-sm text-[var(--color-text-primary)]">{{ label }}</span>
+    <span
+      *ngIf="label"
+      class="ml-2 align-middle text-sm text-[var(--color-text-primary)]"
+      >{{ label }}</span
+    >
   `,
 })
 export class ToggleComponent implements ControlValueAccessor {
@@ -40,6 +50,7 @@ export class ToggleComponent implements ControlValueAccessor {
   @Input() ariaLabel?: string;
 
   @Output() toggled = new EventEmitter<boolean>();
+  @Output() changed = new EventEmitter<boolean>();
 
   private onChange: (value: boolean) => void = () => {};
   private onTouched: () => void = () => {};
@@ -65,6 +76,7 @@ export class ToggleComponent implements ControlValueAccessor {
     this.checked = !this.checked;
     this.onChange(this.checked);
     this.toggled.emit(this.checked);
+    this.changed.emit(this.checked);
     this.onTouched();
   }
 }

@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -7,12 +7,21 @@ import {
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { Observable } from 'rxjs';
+import { OnboardingService } from '../../../shared/components/onboarding/services/onboarding.service';
+import { OnboardingModalComponent } from '../../../shared/components/onboarding/onboarding-modal.component';
+import { Observable, Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    OnboardingModalComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -48,11 +57,20 @@ import { Observable } from 'rxjs';
           </div>
         </main>
       </div>
+
+      <!-- Onboarding Modal -->
+      <app-onboarding-modal
+        *ngIf="showOnboardingModal"
+        [isOpen]="showOnboardingModal"
+        (isOpenChange)="onOnboardingModalChange($event)"
+        (completed)="onOnboardingCompleted($event)"
+      ></app-onboarding-modal>
+      </div>
     </div>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
-export class StoreAdminLayoutComponent {
+export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   sidebarCollapsed = false;
   currentPageTitle = 'Store Dashboard';
   currentVlink = 'store-admin';
@@ -63,9 +81,40 @@ export class StoreAdminLayoutComponent {
   storeName$: Observable<string | null>;
   storeSlug$: Observable<string | null>;
 
-  constructor(private authFacade: AuthFacade) {
+  // Onboarding
+  showOnboardingModal = false;
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private authFacade: AuthFacade,
+    private onboardingService: OnboardingService,
+  ) {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
+  }
+
+  ngOnInit(): void {
+    // Check onboarding status when component initializes
+    this.authFacade.needsOnboarding$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((needsOnboarding) => {
+        if (needsOnboarding) {
+          this.showOnboardingModal = true;
+          this.onboardingService.openOnboarding();
+        }
+      });
+
+    // Escuchar estado del onboarding
+    this.onboardingService.onboardingState$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((state) => {
+        this.showOnboardingModal = state.isOpen;
+      });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   breadcrumb = {
@@ -190,5 +239,20 @@ export class StoreAdminLayoutComponent {
 
   toggleSidebar() {
     this.sidebarCollapsed = !this.sidebarCollapsed;
+  }
+
+  onOnboardingModalChange(isOpen: boolean): void {
+    if (!isOpen) {
+      this.onboardingService.closeOnboarding();
+    }
+  }
+
+  onOnboardingCompleted(event: any): void {
+    console.log('Onboarding completed:', event);
+    // Update auth state to reflect onboarding completion
+    this.authFacade.setOnboardingCompleted(true);
+    this.onboardingService.setCompleted(true);
+    // Reload user data to get updated organization/store info
+    this.authFacade.loadUser();
   }
 }
