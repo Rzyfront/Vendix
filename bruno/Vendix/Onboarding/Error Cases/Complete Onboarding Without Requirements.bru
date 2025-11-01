@@ -1,0 +1,30 @@
+meta {
+  name: Complete Onboarding Without Requirements
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{url}}/auth/onboarding/complete
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "organization_id": "invalid-org-id",
+    "store_id": "invalid-store-id",
+    "domain_id": "invalid-domain-id"
+  }
+}
+
+tests {
+  test("Complete onboarding with invalid IDs fails", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('message');
+  });
+}

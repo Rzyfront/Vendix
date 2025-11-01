@@ -1,0 +1,32 @@
+meta {
+  name: Invalid Registration
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/auth/register-owner
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "invalid-email",
+    "password": "123",
+    "first_name": "",
+    "last_name": "",
+    "organization_name": ""
+  }
+}
+
+tests {
+  test("Registration fails with invalid data", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('message');
+  });
+  
+  test("Validation errors present", function() {
+    expect(res.body).to.have.property('errors');
+  });
+}

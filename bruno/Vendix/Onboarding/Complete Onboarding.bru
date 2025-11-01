@@ -1,0 +1,32 @@
+meta {
+  name: Complete Onboarding
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{url}}/auth/onboarding/complete
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "organization_id": "ORG_ID_HERE",
+    "store_id": "STORE_ID_HERE",
+    "domain_id": "DOMAIN_ID_HERE"
+  }
+}
+
+tests {
+  test("Onboarding completed successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('message');
+    expect(res.body).to.have.property('onboarding_completed');
+    expect(res.body.onboarding_completed).to.be.true;
+  });
+}

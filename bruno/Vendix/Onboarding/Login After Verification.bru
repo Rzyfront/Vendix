@@ -1,0 +1,32 @@
+meta {
+  name: Login After Verification
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "owner@company.com",
+    "password": "SecurePass123!"
+  }
+}
+
+tests {
+  test("Login successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('access_token');
+    expect(res.body).to.have.property('user');
+    expect(res.body.user.email_verified).to.be.true;
+  });
+  
+  test("User has valid token", function() {
+    expect(res.body.access_token).to.be.a('string');
+    expect(res.body.access_token.length).to.be.greaterThan(50);
+  });
+}

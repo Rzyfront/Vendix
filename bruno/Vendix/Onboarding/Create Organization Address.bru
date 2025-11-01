@@ -1,0 +1,40 @@
+meta {
+  name: Create Organization Address
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{url}}/addresses
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "street_address": "123 Business Ave",
+    "city": "San Francisco",
+    "state": "CA",
+    "postal_code": "94105",
+    "country": "US",
+    "address_type": "business",
+    "is_primary": true,
+    "organization_id": "ORG_ID_HERE"
+  }
+}
+
+tests {
+  test("Organization address created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('id');
+    expect(res.body.street_address).to.equal('123 Business Ave');
+  });
+  
+  test("Address is marked as primary", function() {
+    expect(res.body.is_primary).to.be.true;
+  });
+}

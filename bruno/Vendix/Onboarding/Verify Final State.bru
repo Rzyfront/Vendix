@@ -1,0 +1,33 @@
+meta {
+  name: Verify Final State
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{url}}/auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+tests {
+  test("User has completed onboarding", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.email_verified).to.be.true;
+    expect(res.body.state).to.equal('active');
+    expect(res.body.onboarding_completed).to.be.true;
+  });
+  
+  test("User has owner role", function() {
+    expect(res.body.roles).to.include('owner');
+  });
+  
+  test("User has organization and store", function() {
+    expect(res.body).to.have.property('organization');
+    expect(res.body).to.have.property('store');
+  });
+}

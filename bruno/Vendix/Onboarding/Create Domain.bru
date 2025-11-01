@@ -1,0 +1,51 @@
+meta {
+  name: Create Domain
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{url}}/domains
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "hostname": "techsolutions.myapp.com",
+    "domain_type": "primary",
+    "is_active": true,
+    "ssl_enabled": false,
+    "organization_id": "ORG_ID_HERE",
+    "store_id": "STORE_ID_HERE",
+    "settings": {
+      "branding": {
+        "primary_color": "#007bff",
+        "secondary_color": "#6c757d",
+        "logo_url": "https://example.com/logo.png"
+      },
+      "features": {
+        "ecommerce": true,
+        "inventory": true,
+        "analytics": true
+      }
+    }
+  }
+}
+
+tests {
+  test("Domain created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('id');
+    expect(res.body.hostname).to.equal('techsolutions.myapp.com');
+  });
+  
+  test("Domain has correct settings", function() {
+    expect(res.body.settings.branding.primary_color).to.equal('#007bff');
+    expect(res.body.settings.features.ecommerce).to.be.true;
+  });
+}

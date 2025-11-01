@@ -1,0 +1,34 @@
+meta {
+  name: Create Organization
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/auth/onboarding/create-organization
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "name": "Tech Solutions Inc",
+    "description": "Technology solutions provider",
+    "industry": "Technology",
+    "website": "https://techsolutions.com",
+    "phone": "+1234567890"
+  }
+}
+
+tests {
+  test("Organization created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('id');
+    expect(res.body.name).to.equal('Tech Solutions Inc');
+    expect(res.body.description).to.equal('Technology solutions provider');
+  });
+}

@@ -1,0 +1,23 @@
+meta {
+  name: Check Domain Availability
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{url}}/domains/check/techsolutions.myapp.com
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+tests {
+  test("Domain availability checked", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('available');
+    expect(res.body).to.have.property('hostname');
+  });
+}

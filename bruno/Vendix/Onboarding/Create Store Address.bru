@@ -1,0 +1,36 @@
+meta {
+  name: Create Store Address
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{url}}/addresses
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "street_address": "456 Retail Street",
+    "city": "San Francisco",
+    "state": "CA",
+    "postal_code": "94102",
+    "country": "US",
+    "address_type": "store",
+    "is_primary": true,
+    "store_id": "STORE_ID_HERE"
+  }
+}
+
+tests {
+  test("Store address created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('id');
+    expect(res.body.street_address).to.equal('456 Retail Street');
+  });
+}

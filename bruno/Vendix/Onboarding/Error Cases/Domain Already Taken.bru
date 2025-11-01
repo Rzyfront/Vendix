@@ -1,0 +1,34 @@
+meta {
+  name: Domain Already Taken
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{url}}/domains
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "hostname": "techsolutions.myapp.com",
+    "domain_type": "primary",
+    "is_active": true,
+    "ssl_enabled": false,
+    "organization_id": {{organizationId}},
+    "store_id": {{storeId}}
+  }
+}
+
+tests {
+  test("Duplicate domain creation fails", function() {
+    expect(res.status).to.equal(409);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('already taken');
+  });
+}

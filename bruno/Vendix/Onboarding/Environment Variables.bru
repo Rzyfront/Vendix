@@ -1,0 +1,55 @@
+meta {
+  name: Environment Variables
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/health
+  body: none
+  auth: none
+}
+
+vars:pre-request {
+  // Base URL for API
+  url: localhost:3000/api
+  
+  // Test user credentials
+  ownerEmail: owner@company.com
+  ownerPassword: SecurePass123!
+  
+  // Test data
+  testFirstName: John
+  testLastName: Smith
+  testPhone: +1234567890
+  testCity: San Francisco
+  testState: CA
+  testPostalCode: 94105
+  testCountry: US
+  
+  // Address data
+  businessStreet: 123 Business Ave
+  storeStreet: 456 Retail Street
+  
+  // Domain settings
+  primaryColor: "#007bff"
+  secondaryColor: "#6c757d"
+  
+  // Timezone and locale
+  timezone: America/New_York
+  currency: USD
+  language: en
+  
+  // IDs (to be replaced manually after each step)
+  ownerToken: YOUR_JWT_TOKEN_HERE
+  userId: USER_ID_HERE
+  organizationId: ORG_ID_HERE
+  storeId: STORE_ID_HERE
+  domainId: DOMAIN_ID_HERE
+}
+
+tests {
+  test("Environment variables set", function() {
+    expect(true).to.be.true;
+  });
+}

@@ -1,0 +1,40 @@
+meta {
+  name: Owner Registration
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/auth/register-owner
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "owner@company.com",
+    "password": "SecurePass123!",
+    "first_name": "John",
+    "last_name": "Smith",
+    "organization_name": "Tech Solutions Inc"
+  }
+}
+
+tests {
+  test("Owner registration successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('user');
+    expect(res.body).to.have.property('organization');
+    expect(res.body).to.have.property('access_token');
+    expect(res.body.user.email).to.equal('owner@company.com');
+    expect(res.body.organization.name).to.equal('Tech Solutions Inc');
+  });
+  
+  test("User has owner role", function() {
+    expect(res.body.user.roles).to.include('owner');
+  });
+  
+  test("Onboarding status is pending", function() {
+    expect(res.body.user.onboarding_completed).to.be.false;
+  });
+}

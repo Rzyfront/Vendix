@@ -1,0 +1,22 @@
+meta {
+  name: Unauthorized Access
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{url}}/auth/onboarding/status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: invalid_token_here
+}
+
+tests {
+  test("Unauthorized access fails", function() {
+    expect(res.status).to.equal(401);
+    expect(res.body).to.have.property('message');
+  });
+}

@@ -1,0 +1,29 @@
+meta {
+  name: Duplicate Email Registration
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/auth/register-owner
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "owner@company.com",
+    "password": "SecurePass123!",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "organization_name": "Another Company"
+  }
+}
+
+tests {
+  test("Duplicate email registration fails", function() {
+    expect(res.status).to.equal(409);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('already exists');
+  });
+}

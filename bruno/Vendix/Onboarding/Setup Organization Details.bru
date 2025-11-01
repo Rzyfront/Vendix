@@ -1,0 +1,39 @@
+meta {
+  name: Setup Organization Details
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{url}}/auth/onboarding/setup-organization/ORG_ID_HERE
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "settings": {
+      "timezone": "America/New_York",
+      "currency": "USD",
+      "language": "en",
+      "date_format": "MM/DD/YYYY"
+    },
+    "billing": {
+      "tax_id": "123456789",
+      "billing_email": "billing@company.com"
+    }
+  }
+}
+
+tests {
+  test("Organization details updated", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('settings');
+    expect(res.body).to.have.property('billing');
+    expect(res.body.settings.timezone).to.equal('America/New_York');
+  });
+}
