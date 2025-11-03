@@ -22,6 +22,20 @@ tests {
     expect(res.status).to.equal(200);
     expect(res.body).to.have.property('success', true);
     expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
+  });
+  
+  test("Pagination meta is valid", function() {
+    expect(res.body.meta).to.have.property('total');
+    expect(res.body.meta).to.have.property('page', 1);
+    expect(res.body.meta).to.have.property('limit', 10);
+    expect(res.body.meta).to.have.property('totalPages');
+    expect(res.body.meta).to.have.property('hasNextPage');
+    expect(res.body.meta).to.have.property('hasPreviousPage');
+  });
+  
+  test("Data is valid array", function() {
+    expect(res.body.data).to.be.an('array');
   });
   
   test("Search results contain query term", function() {
@@ -32,6 +46,21 @@ tests {
         org.email?.toLowerCase().includes('tech')
       );
       expect(hasSearchTerm).to.be.true;
+    }
+  });
+  
+  test("Organizations have required fields", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.have.property('id');
+      expect(res.body.data[0]).to.have.property('name');
+      expect(res.body.data[0]).to.have.property('slug');
+    }
+  });
+  
+  test("No sensitive data in response", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.not.have.property('password');
+      expect(res.body.data[0]).to.not.have.property('api_key');
     }
   });
 }

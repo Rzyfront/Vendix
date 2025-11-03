@@ -5,30 +5,48 @@ meta {
 }
 
 get {
-  url: http://{{url}}/admin/stores/1
+  url: http://{{url}}/admin/stores/{{created_store_id}}
   body: none
   auth: inherit
 }
 
 
 tests {
-  test("Get store by ID successful", function() {
+  test("Get store by ID successful - validates success response structure", function() {
     expect(res.status).to.equal(200);
     expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
     expect(res.body.data).to.have.property('id');
     expect(res.body.data).to.have.property('name');
   });
   
-  test("Store has organization data", function() {
+  test("Get store by ID data structure validation", function() {
     expect(res.body.data).to.have.property('organization');
-  });
-  
-  test("Store has addresses data", function() {
     expect(res.body.data).to.have.property('addresses');
+    expect(res.body.data).to.have.property('users');
+    expect(res.body.data).to.have.property('store_type');
     expect(res.body.data.addresses).to.be.an('array');
   });
   
-  test("Store has users data", function() {
-    expect(res.body.data).to.have.property('users');
+  test("Get store by ID organization data validation", function() {
+    expect(res.body.data.organization).to.be.an('object');
+    if (res.body.data.organization) {
+      expect(res.body.data.organization).to.have.property('id');
+      expect(res.body.data.organization).to.have.property('name');
+    }
+  });
+  
+  test("Get store by ID no sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
+    expect(res.body.data).to.not.have.property('secret_token');
+    
+    if (res.body.data.users && res.body.data.users.length > 0) {
+      res.body.data.users.forEach(user => {
+        expect(user).to.not.have.property('password');
+        expect(user).to.not.have.property('api_key');
+        expect(user).to.not.have.property('secret_token');
+      });
+    }
   });
 }

@@ -27,20 +27,33 @@ vars:post-response {
 }
 
 tests {
-  test("Create store successful", function() {
+  test("Create store successful - validates success response structure", function() {
     expect(res.status).to.equal(201);
     expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
     expect(res.body.data).to.have.property('id');
-    expect(res.body.data.name).to.equal('Test Store');
   });
   
-  test("Store has slug", function() {
+  test("Create store response data validation", function() {
+    expect(res.body.data.name).to.equal('Test Store');
+    expect(res.body.data.store_code).to.equal('TST001');
+    expect(res.body.data.email).to.equal('teststore@example.com');
+    expect(res.body.data.phone).to.equal('+1234567890');
+  });
+  
+  test("Create store slug generation validation", function() {
     expect(res.body.data).to.have.property('slug');
     expect(res.body.data.slug).to.equal('test-store');
   });
   
-  test("Store data is complete", function() {
+  test("Create store organization and type validation", function() {
     expect(res.body.data.organization_id).to.equal(1);
     expect(res.body.data.store_type).to.equal('physical');
+  });
+  
+  test("Create store no sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
+    expect(res.body.data).to.not.have.property('secret_token');
   });
 }

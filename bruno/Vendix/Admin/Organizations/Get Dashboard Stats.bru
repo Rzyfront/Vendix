@@ -12,15 +12,33 @@ get {
 
 
 tests {
-  test("Get dashboard stats successful", function() {
+  test("Get organization dashboard stats successful", function() {
     expect(res.status).to.equal(200);
     expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Stats data structure is valid", function() {
     expect(res.body.data).to.have.property('total_organizations');
     expect(res.body.data).to.have.property('active_organizations');
+    expect(res.body.data).to.have.property('inactive_organizations');
   });
   
   test("Stats are numbers", function() {
     expect(res.body.data.total_organizations).to.be.a('number');
     expect(res.body.data.active_organizations).to.be.a('number');
+    expect(res.body.data.inactive_organizations).to.be.a('number');
+  });
+  
+  test("Stats consistency check", function() {
+    const total = res.body.data.total_organizations;
+    const active = res.body.data.active_organizations;
+    const inactive = res.body.data.inactive_organizations;
+    expect(total).to.equal(active + inactive);
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
   });
 }

@@ -1,6 +1,84 @@
 # Guía de Tests Bruno - Vendix
 
-## Estructura de Respuesta Estándar (ResponseService)
+## 🚀 Cómo Crear Tests Rápidamente con Templates
+
+### Paso 1: Copiar el Template Adecuado
+
+Ve a `TEMPLATES/` y copia el template que necesites:
+
+- **Crear entidad** → `Create Template.bru`
+- **Listar entidades** → `Get All Template.bru`
+- **Obtener por ID** → `Get By ID Template.bru`
+- **Actualizar entidad** → `Update Template.bru`
+- **Eliminar entidad** → `Delete Template.bru`
+- **Probar errores** → `Error Cases Template.bru`
+
+### Paso 2: Personalizar el Template
+
+Reemplaza los placeholders:
+
+- `[Entity]` → Nombre de tu entidad (User, Product, Order)
+- `[endpoint]` → Endpoint del API (/admin/users, /products)
+- `field1`, `field2` → Campos reales de tu entidad
+- `value1`, `value2` → Valores de prueba
+
+### Paso 3: Ajustar Variables
+
+Cambia las variables post-response:
+
+- `created_[entity]_id` → `created_user_id`, `created_product_id`
+- `[entity]_id` → `user_id`, `product_id`
+
+### Ejemplo Práctico: Crear Test de Productos
+
+1. **Copia** `Create Template.bru` → `Create Product.bru`
+2. **Edita** el contenido:
+
+```yaml
+meta {
+  name: Create Product
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Test Product",
+    "price": 99.99,
+    "description": "Test description"
+  }
+}
+
+vars:post-response {
+  created_product_id: res.body.data.id
+}
+
+tests {
+  test("Create product successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('Test Product');
+    expect(res.body.data.price).to.equal(99.99);
+  });
+
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}
+```
+
+## 📋 Estructura de Respuesta Estándar (ResponseService)
 
 Todas las respuestas de la API siguen este formato:
 
@@ -15,9 +93,9 @@ Todas las respuestas de la API siguen este formato:
 { success: false, error: "...", statusCode: 400 }
 ```
 
-## Templates Estándar
+## 📁 Templates Disponibles
 
-Se han creado templates en la carpeta `TEMPLATES/` para cada tipo de operación:
+Templates en la carpeta `TEMPLATES/` listos para usar:
 
 - `Create Template.bru` - Para operaciones POST (crear)
 - `Get All Template.bru` - Para operaciones GET con paginación
@@ -158,7 +236,7 @@ auth: inherit
 - ❌ **NUNCA** dejar tests sin validación de estructura
 - ❌ **NUNCA** hardcodear IDs en URLs (usar variables)
 
-## Flujo de Testing Típico
+## 🔄 Flujo de Testing Típico
 
 1. **Login** → Guardar token
 2. **Create** → Guardar ID creado
@@ -166,3 +244,27 @@ auth: inherit
 4. **Get By ID** → Usar ID guardado
 5. **Update** → Modificar datos
 6. **Delete** → Eliminar usando ID
+
+## 💡 Tips Adicionales
+
+### Variables Globales Útiles
+
+- `{{url}}` → URL base del API (definida en collection.bru)
+- `{{token}}` → Token de autenticación (se guarda automáticamente)
+- `{{organization_id}}` → ID de organización actual
+- `{{store_id}}` → ID de tienda actual
+
+### Errores Comunes a Evitar
+
+- ❌ Olvidar `auth: inherit` en endpoints protegidos
+- ❌ No validar `res.body.success` antes de otros tests
+- ❌ Hardcodear IDs en lugar de usar variables
+- ❌ Acceder `res.body.field` directamente (usar `res.body.data.field`)
+
+### Buenas Prácticas
+
+- ✅ Usar nombres descriptivos en los tests
+- ✅ Validar estructura básica primero (status, success)
+- ✅ Guardar IDs creados para usar en tests siguientes
+- ✅ Validar que no se expongan datos sensibles
+- ✅ Usar los templates como punto de partida

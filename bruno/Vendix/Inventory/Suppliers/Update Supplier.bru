@@ -5,7 +5,7 @@ meta {
 }
 
 patch {
-  url: {{baseUrl}}/api/suppliers/sup_123456789012345678
+  url: {{baseUrl}}/api/suppliers/{{supplierId}}
   body: json
   auth: bearer
 }
@@ -49,24 +49,32 @@ body:json {
 }
 
 tests {
+  test("Should validate success response", function() {
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Should validate data structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('object');
+  });
+
   test("Should update supplier successfully", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.be.an('object');
-    expect(res.body).to.have.property('id', 'sup_123456789012345678');
-    expect(res.body).to.have.property('name', 'Global Electronics International');
-    expect(res.body).to.have.property('email', 'updated@ globalelectronics.com');
-    expect(res.body).to.have.property('phone', '+1-555-9999');
-    expect(res.body).to.have.property('website', 'https://www.globalelectronics-intl.com');
-    expect(res.body).to.have.property('status', 'ACTIVE');
-    expect(res.body).to.have.property('paymentTerms', 'NET_45');
-    expect(res.body).to.have.property('currency', 'USD');
-    expect(res.body).to.have.property('notes');
-    expect(res.body).to.have.property('updatedAt');
+    expect(res.body.data).to.have.property('id', '{{supplierId}}');
+    expect(res.body.data).to.have.property('name', 'Global Electronics International');
+    expect(res.body.data).to.have.property('email', 'updated@ globalelectronics.com');
+    expect(res.body.data).to.have.property('phone', '+1-555-9999');
+    expect(res.body.data).to.have.property('website', 'https://www.globalelectronics-intl.com');
+    expect(res.body.data).to.have.property('status', 'ACTIVE');
+    expect(res.body.data).to.have.property('paymentTerms', 'NET_45');
+    expect(res.body.data).to.have.property('currency', 'USD');
+    expect(res.body.data).to.have.property('notes');
+    expect(res.body.data).to.have.property('updatedAt');
   });
 
   test("Should validate updated addresses", function() {
-    expect(res.body).to.have.property('addresses').that.is.an('array');
-    const billingAddress = res.body.addresses.find(addr => addr.type === 'BILLING');
+    expect(res.body.data).to.have.property('addresses').that.is.an('array');
+    const billingAddress = res.body.data.addresses.find(addr => addr.type === 'BILLING');
     expect(billingAddress).to.exist;
     expect(billingAddress).to.have.property('street', '789 Corporate Plaza');
     expect(billingAddress).to.have.property('city', 'San Francisco');
@@ -74,8 +82,8 @@ tests {
   });
 
   test("Should validate updated contacts", function() {
-    expect(res.body).to.have.property('contacts').that.is.an('array');
-    const primaryContact = res.body.contacts.find(contact => contact.isPrimary === true);
+    expect(res.body.data).to.have.property('contacts').that.is.an('array');
+    const primaryContact = res.body.data.contacts.find(contact => contact.isPrimary === true);
     expect(primaryContact).to.exist;
     expect(primaryContact).to.have.property('name', 'Michael Chen');
     expect(primaryContact).to.have.property('title', 'Senior Account Manager');
@@ -89,38 +97,43 @@ tests {
   });
 
   test("Should validate immutable fields", function() {
-    expect(res.body).to.have.property('code'); // Should remain unchanged
-    expect(res.body).to.have.property('taxId'); // Should remain unchanged
-    expect(res.body).to.have.property('type'); // Should remain unchanged
-    expect(res.body).to.have.property('createdAt'); // Should remain unchanged
+    expect(res.body.data).to.have.property('code'); // Should remain unchanged
+    expect(res.body.data).to.have.property('taxId'); // Should remain unchanged
+    expect(res.body.data).to.have.property('type'); // Should remain unchanged
+    expect(res.body.data).to.have.property('createdAt'); // Should remain unchanged
   });
 
   test("Should validate updated email format", function() {
-    expect(res.body.email).to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+    expect(res.body.data.email).to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
   });
 
   test("Should validate updated website format", function() {
-    expect(res.body.website).to.match(/^https?:\/\/.+/);
+    expect(res.body.data.website).to.match(/^https?:\/\/.+/);
   });
 
   test("Should validate updated phone format", function() {
-    expect(res.body.phone).to.match(/^\+?[\d\s\-\(\)]+$/);
+    expect(res.body.data.phone).to.match(/^\+?[\d\s\-\(\)]+$/);
   });
 
   test("Should validate payment terms update", function() {
     const validPaymentTerms = ['NET_15', 'NET_30', 'NET_45', 'NET_60', 'COD', 'PREPAID'];
-    expect(validPaymentTerms).to.include(res.body.paymentTerms);
+    expect(validPaymentTerms).to.include(res.body.data.paymentTerms);
   });
 
   test("Should validate currency format", function() {
-    expect(res.body.currency).to.match(/^[A-Z]{3}$/);
+    expect(res.body.data.currency).to.match(/^[A-Z]{3}$/);
+  });
+
+  test("Should validate sensitive data protection", function() {
+    expect(res.body.data.email).to.not.match(/@gmail\.com$|@yahoo\.com$|@hotmail\.com$/);
+    expect(res.body.data.taxId).to.not.be.empty;
   });
 
   test("Should validate audit trail", function() {
-    expect(res.body).to.have.property('auditTrail');
-    if (res.body.auditTrail) {
-      expect(res.body.auditTrail).to.be.an('array');
-      const updateEntry = res.body.auditTrail.find(entry => entry.action === 'UPDATED');
+    expect(res.body.data).to.have.property('auditTrail');
+    if (res.body.data.auditTrail) {
+      expect(res.body.data.auditTrail).to.be.an('array');
+      const updateEntry = res.body.data.auditTrail.find(entry => entry.action === 'UPDATED');
       expect(updateEntry).to.exist;
       expect(updateEntry).to.have.property('timestamp');
       expect(updateEntry).to.have.property('userId');
@@ -129,8 +142,8 @@ tests {
   });
 
   test("Should validate version increment", function() {
-    expect(res.body).to.have.property('version');
-    expect(res.body.version).to.be.a('number');
-    expect(res.body.version).to.be.at.least(1);
+    expect(res.body.data).to.have.property('version');
+    expect(res.body.data.version).to.be.a('number');
+    expect(res.body.data.version).to.be.at.least(1);
   });
 }

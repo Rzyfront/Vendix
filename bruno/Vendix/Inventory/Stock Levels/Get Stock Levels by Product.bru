@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/inventory/stock-levels/product/1
+  url: {{baseUrl}}/inventory/stock-levels/product/{{product_id}}
   body: none
   headers: {
     Authorization: Bearer {{authToken}}
@@ -14,12 +14,16 @@ get {
 }
 
 tests {
-  test("Should return stock levels for specific product", function() {
+  test("Get stock levels by product successful", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.be.an('array');
-    
-    if (res.body.length > 0) {
-      const stockLevel = res.body[0];
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Data is valid array", function() {
+    expect(res.body.data).to.be.an('array');
+    if (res.body.data.length > 0) {
+      const stockLevel = res.body.data[0];
       expect(stockLevel).to.have.property('id');
       expect(stockLevel).to.have.property('product_id');
       expect(stockLevel).to.have.property('location_id');
@@ -27,8 +31,8 @@ tests {
       expect(stockLevel).to.have.property('quantity_reserved');
       expect(stockLevel).to.have.property('quantity_available');
       expect(stockLevel).to.have.property('last_updated');
-      
-      expect(stockLevel.product_id).to.equal(1);
+
+      expect(stockLevel.product_id).to.equal(parseInt({{product_id}}));
       expect(stockLevel.id).to.be.a('number');
       expect(stockLevel.location_id).to.be.a('number');
       expect(stockLevel.quantity_on_hand).to.be.a('number');
@@ -36,12 +40,18 @@ tests {
       expect(stockLevel.quantity_available).to.be.a('number');
     }
   });
-  
+
   test("Should validate all entries belong to same product", function() {
-    if (res.body.length > 0) {
-      res.body.forEach(stockLevel => {
-        expect(stockLevel.product_id).to.equal(1);
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(stockLevel => {
+        expect(stockLevel.product_id).to.equal(parseInt({{product_id}}));
       });
+    }
+  });
+
+  test("No sensitive data in response", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.not.have.property('password');
     }
   });
 }

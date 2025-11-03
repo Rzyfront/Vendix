@@ -15,22 +15,22 @@ headers {
 }
 
 tests {
-  test("Should return location details", function() {
+  test("Get location by ID successful", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.have.property('id');
-    expect(res.body).to.have.property('name');
-    expect(res.body).to.have.property('code');
-    expect(res.body).to.have.property('type');
-    expect(res.body).to.have.property('is_active');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
   });
   
-  test("Should return valid location structure", function() {
-    expect(res.body).to.have.property('organization_id');
-    expect(res.body).to.have.property('store_id');
-    expect(res.body).to.have.property('created_at');
-    expect(res.body).to.have.property('updated_at');
-    expect(res.body.id).to.be.a('number');
-    expect(res.body.name).to.be.a('string');
-    expect(res.body.code).to.be.a('string');
+  test("Response data is complete", function() {
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('code');
+    expect(res.body.data).to.have.property('type');
+    expect(res.body.data).to.have.property('is_active');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
   });
 }

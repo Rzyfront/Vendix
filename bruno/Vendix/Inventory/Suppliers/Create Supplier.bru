@@ -66,29 +66,37 @@ body:json {
 }
 
 tests {
+  test("Should validate success response", function() {
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Should validate data structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('object');
+  });
+
   test("Should create supplier successfully", function() {
     expect(res.status).to.equal(201);
-    expect(res.body).to.be.an('object');
-    expect(res.body).to.have.property('id');
-    expect(res.body).to.have.property('name', 'Global Electronics Inc.');
-    expect(res.body).to.have.property('code', 'GEI-001');
-    expect(res.body).to.have.property('email', 'contact@ globalelectronics.com');
-    expect(res.body).to.have.property('phone', '+1-555-0123');
-    expect(res.body).to.have.property('website', 'https://www.globalelectronics.com');
-    expect(res.body).to.have.property('taxId', '12-3456789');
-    expect(res.body).to.have.property('type', 'MANUFACTURER');
-    expect(res.body).to.have.property('status', 'ACTIVE');
-    expect(res.body).to.have.property('paymentTerms', 'NET_30');
-    expect(res.body).to.have.property('currency', 'USD');
-    expect(res.body).to.have.property('createdAt');
-    expect(res.body).to.have.property('updatedAt');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name', 'Global Electronics Inc.');
+    expect(res.body.data).to.have.property('code', 'GEI-001');
+    expect(res.body.data).to.have.property('email', 'contact@ globalelectronics.com');
+    expect(res.body.data).to.have.property('phone', '+1-555-0123');
+    expect(res.body.data).to.have.property('website', 'https://www.globalelectronics.com');
+    expect(res.body.data).to.have.property('taxId', '12-3456789');
+    expect(res.body.data).to.have.property('type', 'MANUFACTURER');
+    expect(res.body.data).to.have.property('status', 'ACTIVE');
+    expect(res.body.data).to.have.property('paymentTerms', 'NET_30');
+    expect(res.body.data).to.have.property('currency', 'USD');
+    expect(res.body.data).to.have.property('createdAt');
+    expect(res.body.data).to.have.property('updatedAt');
   });
 
   test("Should validate addresses structure", function() {
-    expect(res.body).to.have.property('addresses').that.is.an('array').with.lengthOf(2);
-    const billingAddress = res.body.addresses.find(addr => addr.type === 'BILLING');
-    const shippingAddress = res.body.addresses.find(addr => addr.type === 'SHIPPING');
-    
+    expect(res.body.data).to.have.property('addresses').that.is.an('array').with.lengthOf(2);
+    const billingAddress = res.body.data.addresses.find(addr => addr.type === 'BILLING');
+    const shippingAddress = res.body.data.addresses.find(addr => addr.type === 'SHIPPING');
+
     expect(billingAddress).to.exist;
     expect(billingAddress).to.have.property('street', '123 Industrial Blvd');
     expect(billingAddress).to.have.property('city', 'San Francisco');
@@ -96,7 +104,7 @@ tests {
     expect(billingAddress).to.have.property('postalCode', '94105');
     expect(billingAddress).to.have.property('country', 'USA');
     expect(billingAddress).to.have.property('isPrimary', true);
-    
+
     expect(shippingAddress).to.exist;
     expect(shippingAddress).to.have.property('street', '456 Warehouse Ave');
     expect(shippingAddress).to.have.property('city', 'Oakland');
@@ -104,17 +112,17 @@ tests {
   });
 
   test("Should validate contacts structure", function() {
-    expect(res.body).to.have.property('contacts').that.is.an('array').with.lengthOf(2);
-    const primaryContact = res.body.contacts.find(contact => contact.isPrimary === true);
-    const secondaryContact = res.body.contacts.find(contact => contact.isPrimary === false);
-    
+    expect(res.body.data).to.have.property('contacts').that.is.an('array').with.lengthOf(2);
+    const primaryContact = res.body.data.contacts.find(contact => contact.isPrimary === true);
+    const secondaryContact = res.body.data.contacts.find(contact => contact.isPrimary === false);
+
     expect(primaryContact).to.exist;
     expect(primaryContact).to.have.property('name', 'John Smith');
     expect(primaryContact).to.have.property('title', 'Sales Manager');
     expect(primaryContact).to.have.property('email', 'john.smith@ globalelectronics.com');
     expect(primaryContact).to.have.property('phone', '+1-555-0124');
     expect(primaryContact).to.have.property('isPrimary', true);
-    
+
     expect(secondaryContact).to.exist;
     expect(secondaryContact).to.have.property('name', 'Sarah Johnson');
     expect(secondaryContact).to.have.property('title', 'Account Manager');
@@ -125,18 +133,27 @@ tests {
   });
 
   test("Should validate supplier code format", function() {
-    expect(res.body.code).to.match(/^[A-Z]{3}-\d{3}$/);
+    expect(res.body.data.code).to.match(/^[A-Z]{3}-\d{3}$/);
   });
 
   test("Should validate supplier type", function() {
-    expect(['MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'RETAILER', 'SERVICE_PROVIDER']).to.include(res.body.type);
+    expect(['MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'RETAILER', 'SERVICE_PROVIDER']).to.include(res.body.data.type);
   });
 
   test("Should validate payment terms", function() {
-    expect(['NET_15', 'NET_30', 'NET_45', 'NET_60', 'COD', 'PREPAID']).to.include(res.body.paymentTerms);
+    expect(['NET_15', 'NET_30', 'NET_45', 'NET_60', 'COD', 'PREPAID']).to.include(res.body.data.paymentTerms);
   });
 
   test("Should validate currency format", function() {
-    expect(res.body.currency).to.match(/^[A-Z]{3}$/);
+    expect(res.body.data.currency).to.match(/^[A-Z]{3}$/);
+  });
+
+  test("Should validate sensitive data protection", function() {
+    expect(res.body.data.taxId).to.not.be.empty;
+    expect(res.body.data.email).to.not.match(/@gmail\.com$|@yahoo\.com$|@hotmail\.com$/);
+  });
+
+  test("Set supplier ID variable", function() {
+    bru.setVar("supplierId", res.body.data.id);
   });
 }

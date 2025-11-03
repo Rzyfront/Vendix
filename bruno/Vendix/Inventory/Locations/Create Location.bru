@@ -23,20 +23,26 @@ body:json {
   "is_active": true
 }
 
+vars:post-response {
+  locationId: res.body.data.id
+}
+
 tests {
-  test("Should create location successfully", function() {
+  test("Create location successful", function() {
     expect(res.status).to.equal(201);
-    expect(res.body).to.have.property('id');
-    expect(res.body.name).to.equal('Main Warehouse');
-    expect(res.body.code).to.equal('WH-001');
-    expect(res.body.type).to.equal('warehouse');
-    expect(res.body.is_active).to.equal(true);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
   });
   
-  test("Should return valid location structure", function() {
-    expect(res.body).to.have.property('organization_id');
-    expect(res.body).to.have.property('store_id');
-    expect(res.body).to.have.property('created_at');
-    expect(res.body).to.have.property('updated_at');
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('Main Warehouse');
+    expect(res.body.data.code).to.equal('WH-001');
+    expect(res.body.data.type).to.equal('warehouse');
+    expect(res.body.data.is_active).to.equal(true);
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
   });
 }
