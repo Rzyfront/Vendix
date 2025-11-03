@@ -32,10 +32,7 @@ export class StockTransfersService {
           },
         });
 
-        if (
-          !stockLevel ||
-          stockLevel.quantity_available < item.quantity_requested
-        ) {
+        if (!stockLevel || stockLevel.quantity_available < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for product ${item.product_id} at source location`,
           );
@@ -51,7 +48,7 @@ export class StockTransfersService {
           ...createTransferDto,
           transfer_number: transferNumber,
           transfer_date: new Date(),
-          expected_completion_date: createTransferDto.expected_completion_date,
+          expected_date: createTransferDto.expected_date,
         },
         include: {
           from_location: true,

@@ -29,7 +29,7 @@ export class AdminRolesService {
       data: {
         name: createRoleDto.name,
         description: createRoleDto.description,
-        is_system_role: createRoleDto.is_system_role || false,
+        is_system_role: createRoleDto.system_role || false,
       },
       include: {
         role_permissions: {
@@ -285,7 +285,7 @@ export class AdminRolesService {
     const existingPermissions = await this.prisma.role_permissions.findMany({
       where: {
         role_id: roleId,
-        permission_id: { in: assignPermissionsDto.permissionIds },
+        permission_id: { in: assignPermissionsDto.permission_ids },
       },
     });
 
@@ -295,7 +295,7 @@ export class AdminRolesService {
       );
     }
 
-    const rolePermissions = assignPermissionsDto.permissionIds.map(
+    const rolePermissions = assignPermissionsDto.permission_ids.map(
       (permissionId) => ({
         role_id: roleId,
         permission_id: permissionId,
@@ -324,7 +324,7 @@ export class AdminRolesService {
     await this.prisma.role_permissions.deleteMany({
       where: {
         role_id: roleId,
-        permission_id: { in: removePermissionsDto.permissionIds },
+        permission_id: { in: removePermissionsDto.permission_ids },
       },
     });
 

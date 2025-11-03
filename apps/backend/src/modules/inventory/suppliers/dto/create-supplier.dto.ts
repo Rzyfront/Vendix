@@ -4,14 +4,25 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
+  IsNumber,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateSupplierDto {
+  @ApiProperty({ description: 'Organization ID' })
+  @IsNumber()
+  @IsNotEmpty()
+  organization_id: number;
+
   @ApiProperty({ description: 'Supplier name' })
   @IsString()
   @IsNotEmpty()
   name: string;
+
+  @ApiProperty({ description: 'Supplier code' })
+  @IsString()
+  @IsNotEmpty()
+  code: string;
 
   @ApiProperty({ description: 'Contact person name' })
   @IsString()
@@ -54,14 +65,9 @@ export class CreateSupplierDto {
   currency?: string;
 
   @ApiProperty({ description: 'Lead time in days' })
-  @IsString()
+  @IsNumber()
   @IsOptional()
-  lead_time?: string;
-
-  @ApiProperty({ description: 'Minimum order quantity' })
-  @IsString()
-  @IsOptional()
-  minimum_order_quantity?: string;
+  lead_time_days?: number;
 
   @ApiProperty({ description: 'Notes about the supplier' })
   @IsString()

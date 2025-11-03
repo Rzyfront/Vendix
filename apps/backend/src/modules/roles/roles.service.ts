@@ -43,7 +43,7 @@ export class RolesService {
       id: role.id,
       name: role.name,
       description: role.description,
-      is_system_role: role.is_system_role,
+      system_role: role.is_system_role,
       created_at: role.created_at,
       updated_at: role.updated_at,
       permissions:
@@ -58,7 +58,7 @@ export class RolesService {
   // ===== CRUD ROLES =====
 
   async create(createRoleDto: CreateRoleDto, userId: number) {
-    const { name, description, is_system_role } = createRoleDto;
+    const { name, description, system_role } = createRoleDto;
 
     // Verificar que el nombre no exista
     const existingRole = await this.prismaService.roles.findUnique({
@@ -74,7 +74,7 @@ export class RolesService {
       data: {
         name,
         description,
-        is_system_role: is_system_role || false,
+        is_system_role: system_role || false,
       },
       include: {
         role_permissions: {
@@ -103,7 +103,7 @@ export class RolesService {
       action: AuditAction.CREATE,
       resource: AuditResource.ROLES,
       resourceId: role.id,
-      newValues: { name, description, is_system_role },
+      newValues: { name, description, is_system_role: system_role },
       metadata: {
         action: 'create_role',
         role_name: name,
@@ -116,7 +116,7 @@ export class RolesService {
   async findAll(userId: number) {
     // Verificar si el usuario es super_admin
     const userRoles = await this.prismaService.user_roles.findMany({
-      where: { user_id: userId },
+      where: { userId: userId },
       include: {
         roles: true,
       },
@@ -197,7 +197,7 @@ export class RolesService {
     // Si se proporciona userId, verificar permisos de acceso
     if (userId) {
       const userRoles = await this.prismaService.user_roles.findMany({
-        where: { user_id: userId },
+        where: { userId: userId },
         include: {
           roles: true,
         },
@@ -232,7 +232,7 @@ export class RolesService {
     }
 
     // No permitir cambiar roles del sistema
-    if (role.is_system_role && (name || description)) {
+    if (role.system_role && (name || description)) {
       throw new BadRequestException('No se pueden modificar roles del sistema');
     }
 
@@ -278,7 +278,7 @@ export class RolesService {
     const role = await this.findOne(id);
 
     // No permitir eliminar roles del sistema
-    if (role.is_system_role) {
+    if (role.system_role) {
       throw new BadRequestException('No se pueden eliminar roles del sistema');
     }
 
@@ -313,30 +313,30 @@ export class RolesService {
   // ===== GESTIÓN DE PERMISOS =====
 
   async assignPermissions(
-    roleId: number,
+    role_id: number,
     assignPermissionsDto: AssignPermissionsDto,
     userId: number,
   ) {
-    const role = await this.findOne(roleId);
-    const { permissionIds } = assignPermissionsDto;
+    const role = await this.findOne(role_id);
+    const { permission_ids } = assignPermissionsDto;
 
     // Verificar que los permisos existan
     const permissions = await this.prismaService.permissions.findMany({
       where: {
-        id: { in: permissionIds },
+        id: { in: permission_ids },
         status: 'active',
       },
     });
 
-    if (permissions.length !== permissionIds.length) {
+    if (permissions.length !== permission_ids.length) {
       throw new BadRequestException(
         'Uno o más permisos no existen o están inactivos',
       );
     }
 
     // Crear las relaciones role_permissions
-    const rolePermissions = permissionIds.map((permissionId) => ({
-      role_id: roleId,
+    const rolePermissions = permission_ids.map((permissionId) => ({
+      role_id: role_id,
       permission_id: permissionId,
       granted: true,
     }));
@@ -348,7 +348,7 @@ export class RolesService {
 
     // Obtener el rol actualizado
     const updatedRole = await this.prismaService.roles.findUnique({
-      where: { id: roleId },
+      where: { id: role_id },
       include: {
         role_permissions: {
           include: {
@@ -363,12 +363,12 @@ export class RolesService {
       userId,
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.ROLES,
-      resourceId: roleId,
-      newValues: { assigned_permissions: permissionIds },
+      resourceId: role_id,
+      newValues: { assigned_permissions: permission_ids },
       metadata: {
         action: 'assign_permissions_to_role',
         role_name: role.name,
-        permissions_count: permissionIds.length,
+        permissions_count: permission_ids.length,
       },
     });
 
@@ -376,24 +376,24 @@ export class RolesService {
   }
 
   async removePermissions(
-    roleId: number,
+    role_id: number,
     removePermissionsDto: RemovePermissionsDto,
     userId: number,
   ) {
-    const role = await this.findOne(roleId);
-    const { permissionIds } = removePermissionsDto;
+    const role = await this.findOne(role_id);
+    const { permission_ids } = removePermissionsDto;
 
     // Eliminar las relaciones role_permissions
     const result = await this.prismaService.role_permissions.deleteMany({
       where: {
-        role_id: roleId,
-        permission_id: { in: permissionIds },
+        role_id: role_id,
+        permission_id: { in: permission_ids },
       },
     });
 
     // Obtener el rol actualizado
     const updatedRole = await this.prismaService.roles.findUnique({
-      where: { id: roleId },
+      where: { id: role_id },
       include: {
         role_permissions: {
           include: {
@@ -408,8 +408,8 @@ export class RolesService {
       userId,
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.ROLES,
-      resourceId: roleId,
-      oldValues: { removed_permissions: permissionIds },
+      resourceId: role_id,
+      oldValues: { removed_permissions: permission_ids },
       metadata: {
         action: 'remove_permissions_from_role',
         role_name: role.name,
@@ -420,10 +420,10 @@ export class RolesService {
     return this.transformRoleWithPermissionDescriptions(updatedRole);
   }
 
-  async getRolePermissions(roleId: number, userId?: number) {
+  async getRolePermissions(role_id: number, userId?: number) {
     // Verificar que el rol existe
     const role = await this.prismaService.roles.findUnique({
-      where: { id: roleId },
+      where: { id: role_id },
       select: { id: true, name: true },
     });
 
@@ -434,7 +434,7 @@ export class RolesService {
     // Si se proporciona userId, verificar permisos de acceso
     if (userId) {
       const userRoles = await this.prismaService.user_roles.findMany({
-        where: { user_id: userId },
+        where: { userId: userId },
         include: {
           roles: true,
         },
@@ -452,7 +452,7 @@ export class RolesService {
 
     // Obtener los IDs de los permisos del rol
     const rolePermissions = await this.prismaService.role_permissions.findMany({
-      where: { role_id: roleId },
+      where: { role_id: role_id },
       select: { permission_id: true },
       orderBy: { permission_id: 'asc' },
     });
@@ -461,7 +461,7 @@ export class RolesService {
     const permissionIds = rolePermissions.map((rp) => rp.permission_id);
 
     return {
-      role_id: roleId,
+      role_id: role_id,
       permission_ids: permissionIds,
       total_permissions: permissionIds.length,
     };
@@ -473,11 +473,11 @@ export class RolesService {
     assignRoleToUserDto: AssignRoleToUserDto,
     adminUserId: number,
   ) {
-    const { userId, roleId } = assignRoleToUserDto;
+    const { user_id, role_id } = assignRoleToUserDto;
 
     // Verificar que el usuario existe
     const user = await this.prismaService.users.findUnique({
-      where: { id: userId },
+      where: { id: user_id },
       select: { id: true, email: true, first_name: true, last_name: true },
     });
 
@@ -487,7 +487,7 @@ export class RolesService {
 
     // Verificar que el rol existe
     const role = await this.prismaService.roles.findUnique({
-      where: { id: roleId },
+      where: { id: role_id },
       select: { id: true, name: true },
     });
 
@@ -498,7 +498,7 @@ export class RolesService {
     // Verificar permisos para asignar el rol super_admin
     if (role.name === 'super_admin') {
       const adminUserRoles = await this.prismaService.user_roles.findMany({
-        where: { user_id: adminUserId },
+        where: { userId: adminUserId },
         include: {
           roles: true,
         },
@@ -544,8 +544,8 @@ export class RolesService {
     const existingUserRole = await this.prismaService.user_roles.findUnique({
       where: {
         user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
+          user_id: user_id,
+          role_id: role_id,
         },
       },
     });
@@ -557,8 +557,8 @@ export class RolesService {
     // Asignar el rol
     const userRole = await this.prismaService.user_roles.create({
       data: {
-        user_id: userId,
-        role_id: roleId,
+        user_id: user_id,
+        role_id: role_id,
       },
       include: {
         users: {
@@ -578,7 +578,7 @@ export class RolesService {
       userId: adminUserId,
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.USERS,
-      resourceId: userId,
+      resourceId: user_id,
       newValues: { assigned_role: role.name },
       metadata: {
         action: 'assign_role_to_user',
@@ -594,14 +594,14 @@ export class RolesService {
     removeRoleFromUserDto: RemoveRoleFromUserDto,
     adminUserId: number,
   ) {
-    const { userId, roleId } = removeRoleFromUserDto;
+    const { user_id, role_id } = removeRoleFromUserDto;
 
     // Verificar que la relación existe
     const userRole = await this.prismaService.user_roles.findUnique({
       where: {
         user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
+          user_id: user_id,
+          role_id: role_id,
         },
       },
       include: {
@@ -621,7 +621,7 @@ export class RolesService {
     // No permitir remover roles del sistema si es el último rol del usuario
     if (userRole.roles?.is_system_role) {
       const userRoleCount = await this.prismaService.user_roles.count({
-        where: { user_id: userId },
+        where: { user_id: user_id },
       });
 
       if (userRoleCount === 1) {
@@ -635,8 +635,8 @@ export class RolesService {
     await this.prismaService.user_roles.delete({
       where: {
         user_id_role_id: {
-          user_id: userId,
-          role_id: roleId,
+          user_id: user_id,
+          role_id: role_id,
         },
       },
     });
@@ -646,7 +646,7 @@ export class RolesService {
       userId: adminUserId,
       action: AuditAction.PERMISSION_CHANGE,
       resource: AuditResource.USERS,
-      resourceId: userId,
+      resourceId: user_id,
       oldValues: { removed_role: userRole.roles?.name },
       metadata: {
         action: 'remove_role_from_user',
@@ -662,7 +662,7 @@ export class RolesService {
 
   async getUserPermissions(userId: number) {
     const userRoles = await this.prismaService.user_roles.findMany({
-      where: { user_id: userId },
+      where: { userId: userId },
       include: {
         roles: {
           include: {
@@ -692,7 +692,7 @@ export class RolesService {
 
   async getUserRoles(userId: number) {
     return await this.prismaService.user_roles.findMany({
-      where: { user_id: userId },
+      where: { userId: userId },
       include: {
         roles: {
           include: {
@@ -712,7 +712,7 @@ export class RolesService {
   async getDashboardStats(userId: number): Promise<RoleDashboardStatsDto> {
     // Verificar si el usuario es super_admin
     const userRoles = await this.prismaService.user_roles.findMany({
-      where: { user_id: userId },
+      where: { userId: userId },
       include: {
         roles: true,
       },

@@ -156,7 +156,7 @@ export class AdminUsersService {
     }
 
     // Hash password if it's being updated
-    let updateData = { ...updateUserDto };
+    const updateData = { ...updateUserDto };
     if (updateUserDto.password) {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }

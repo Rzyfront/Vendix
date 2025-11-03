@@ -54,10 +54,15 @@ export class SalesOrderItemDto {
 }
 
 export class CreateSalesOrderDto {
+  @ApiProperty({ description: 'Organization ID' })
+  @IsNumber()
+  @IsNotEmpty()
+  organization_id: number;
+
   @ApiProperty({ description: 'Customer ID' })
   @IsNumber()
-  @IsOptional()
-  customer_id?: number;
+  @IsNotEmpty()
+  customer_id: number;
 
   @ApiProperty({ description: 'Customer email (for guest orders)' })
   @IsString()

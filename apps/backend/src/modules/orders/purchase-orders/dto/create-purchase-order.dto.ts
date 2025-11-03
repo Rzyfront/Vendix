@@ -54,6 +54,11 @@ export class PurchaseOrderItemDto {
 }
 
 export class CreatePurchaseOrderDto {
+  @ApiProperty({ description: 'Organization ID' })
+  @IsNumber()
+  @IsNotEmpty()
+  organization_id: number;
+
   @ApiProperty({ description: 'Supplier ID' })
   @IsNumber()
   @IsNotEmpty()
@@ -72,10 +77,15 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   status?: purchase_order_status_enum = purchase_order_status_enum.draft;
 
+  @ApiProperty({ description: 'Order date' })
+  @IsDateString()
+  @IsOptional()
+  order_date?: string;
+
   @ApiProperty({ description: 'Expected delivery date' })
   @IsDateString()
   @IsOptional()
-  expected_delivery_date?: string;
+  expected_date?: string;
 
   @ApiProperty({ description: 'Payment terms' })
   @IsString()
@@ -92,10 +102,20 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   shipping_cost?: number;
 
+  @ApiProperty({ description: 'Subtotal amount' })
+  @IsNumber()
+  @IsOptional()
+  subtotal_amount?: number;
+
   @ApiProperty({ description: 'Tax amount' })
   @IsNumber()
   @IsOptional()
   tax_amount?: number;
+
+  @ApiProperty({ description: 'Total amount' })
+  @IsNumber()
+  @IsOptional()
+  total_amount?: number;
 
   @ApiProperty({ description: 'Discount amount' })
   @IsNumber()
@@ -107,15 +127,15 @@ export class CreatePurchaseOrderDto {
   @IsOptional()
   notes?: string;
 
-  @ApiProperty({ description: 'Internal reference number' })
-  @IsString()
+  @ApiProperty({ description: 'Created by user ID' })
+  @IsNumber()
   @IsOptional()
-  internal_reference?: string;
+  created_by_user_id?: number;
 
-  @ApiProperty({ description: 'Supplier reference number' })
-  @IsString()
+  @ApiProperty({ description: 'Approved by user ID' })
+  @IsNumber()
   @IsOptional()
-  supplier_reference?: string;
+  approved_by_user_id?: number;
 
   @ApiProperty({
     description: 'Purchase order items',

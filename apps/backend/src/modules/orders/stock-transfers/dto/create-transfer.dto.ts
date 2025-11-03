@@ -20,7 +20,7 @@ export class CreateTransferItemDto {
 
   @IsNumber()
   @IsNotEmpty()
-  quantity_requested: number;
+  quantity: number;
 
   @IsOptional()
   @IsNumber()
@@ -34,6 +34,10 @@ export class CreateTransferItemDto {
 export class CreateTransferDto {
   @IsNumber()
   @IsNotEmpty()
+  organization_id: number;
+
+  @IsNumber()
+  @IsNotEmpty()
   from_location_id: number;
 
   @IsNumber()
@@ -43,15 +47,19 @@ export class CreateTransferDto {
   @IsOptional()
   @IsDate()
   @Type(() => Date)
-  expected_completion_date?: Date;
+  expected_date?: Date;
 
   @IsOptional()
   @IsString()
   notes?: string;
 
   @IsOptional()
-  @IsString()
-  internal_notes?: string;
+  @IsNumber()
+  created_by_user_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  approved_by_user_id?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

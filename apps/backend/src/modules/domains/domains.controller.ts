@@ -132,7 +132,7 @@ export class DomainsController {
       if (isNaN(orgId)) {
         throw new BadRequestException('Invalid organizationId parameter');
       }
-      filters.organizationId = orgId;
+      filters.organization_id = orgId;
     }
 
     if (storeId) {
@@ -140,7 +140,7 @@ export class DomainsController {
       if (isNaN(sId)) {
         throw new BadRequestException('Invalid storeId parameter');
       }
-      filters.storeId = sId;
+      filters.store_id = sId;
     }
 
     if (search) filters.search = search;
@@ -284,7 +284,7 @@ export class DomainsController {
       throw new BadRequestException('Invalid organization ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      organizationId: orgId,
+      organization_id: orgId,
     });
     return this.responseService.success(
       result.data,
@@ -305,7 +305,7 @@ export class DomainsController {
       throw new BadRequestException('Invalid store ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      storeId: sId,
+      store_id: sId,
     });
     return this.responseService.success(
       result.data,

@@ -369,20 +369,20 @@ export class DomainsService implements OnModuleInit {
    * Obtener todas las configuraciones con filtros
    */
   async getAllDomainSettings(filters: {
-    organizationId?: number;
-    storeId?: number;
+    organization_id?: number;
+    store_id?: number;
     search?: string;
     limit?: number;
     offset?: number;
   }): Promise<DomainListResponse> {
     const where: any = {};
 
-    if (filters?.organizationId) {
-      where.organization_id = filters.organizationId;
+    if (filters?.organization_id) {
+      where.organization_id = filters.organization_id;
     }
 
-    if (filters?.storeId) {
-      where.store_id = filters.storeId;
+    if (filters?.store_id) {
+      where.store_id = filters.store_id;
     }
 
     if (filters?.search) {
@@ -632,11 +632,11 @@ export class DomainsService implements OnModuleInit {
     if (domain.status === 'active' && !body.force) {
       return {
         hostname,
-        statusBefore,
-        statusAfter: domain.status,
-        sslStatus: domain.ssl_status,
+        status_before: statusBefore,
+        status_after: domain.status,
+        ssl_status: domain.ssl_status,
         verified: true,
-        nextAction: 'none',
+        next_action: 'none',
         checks: {},
         timestamp: new Date().toISOString(),
       };
@@ -756,15 +756,15 @@ export class DomainsService implements OnModuleInit {
 
     return {
       hostname,
-      statusBefore,
-      statusAfter,
-      sslStatus: updated.ssl_status,
+      status_before: statusBefore,
+      status_after: statusAfter,
+      ssl_status: updated.ssl_status,
       verified: allPassed,
-      nextAction,
+      next_action: nextAction,
       checks: results,
-      suggestedFixes: suggestedFixes.length ? suggestedFixes : undefined,
+      suggested_fixes: suggestedFixes.length ? suggestedFixes : undefined,
       timestamp: new Date().toISOString(),
-      errorCode: allPassed ? undefined : 'DNS_CHECK_FAILED',
+      error_code: allPassed ? undefined : 'DNS_CHECK_FAILED',
     };
   }
 

@@ -30,7 +30,7 @@ export class CreateProductDto {
 
   @IsOptional()
   @IsInt()
-  categoria_id?: number;
+  category_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -90,7 +90,7 @@ export class CreateProductDto {
 export class UpdateProductDto {
   @IsOptional()
   @IsInt()
-  categoria_id?: number;
+  category_id?: number;
 
   @IsOptional()
   @IsInt()
