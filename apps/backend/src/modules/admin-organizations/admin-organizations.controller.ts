@@ -18,12 +18,13 @@ import {
   OrganizationDashboardDto,
 } from '../organizations/dto';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('admin/organizations')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminOrganizationsController {
   constructor(

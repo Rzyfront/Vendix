@@ -1,0 +1,30 @@
+meta {
+  name: Get Role By ID
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/admin/roles/1
+  body: none
+  auth: inherit
+}
+
+
+tests {
+  test("Get role by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+  });
+  
+  test("Role has permissions data", function() {
+    expect(res.body.data).to.have.property('role_permissions');
+    expect(res.body.data.role_permissions).to.be.an('array');
+  });
+  
+  test("Role has user count", function() {
+    expect(res.body.data).to.have.property('_count');
+  });
+}

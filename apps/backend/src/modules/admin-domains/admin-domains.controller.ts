@@ -16,12 +16,13 @@ import {
 } from '../domains/dto/domain-settings.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('Admin Domains')
 @Controller('admin/domains')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminDomainsController {
   constructor(private readonly adminDomainsService: AdminDomainsService) {}

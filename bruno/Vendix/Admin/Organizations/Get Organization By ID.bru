@@ -1,0 +1,35 @@
+meta {
+  name: Get Organization By ID
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/admin/organizations/1
+  body: none
+  auth: inherit
+}
+
+
+tests {
+  test("Get organization by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+  });
+  
+  test("Organization has stores data", function() {
+    expect(res.body.data).to.have.property('stores');
+    expect(res.body.data.stores).to.be.an('array');
+  });
+  
+  test("Organization has users data", function() {
+    expect(res.body.data).to.have.property('users');
+    expect(res.body.data.users).to.be.an('array');
+  });
+  
+  test("Organization has counts", function() {
+    expect(res.body.data).to.have.property('_count');
+  });
+}

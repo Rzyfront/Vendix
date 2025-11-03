@@ -1,0 +1,37 @@
+meta {
+  name: Search Users
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/admin/users?page=1&limit=10&search=admin
+  body: none
+  auth: inherit
+}
+
+params:query {
+  page: 1
+  limit: 10
+  search: admin
+}
+
+tests {
+  test("Search users successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Search results contain query term", function() {
+    if (res.body.data.length > 0) {
+      const hasSearchTerm = res.body.data.some(user => 
+        user.first_name?.toLowerCase().includes('admin') ||
+        user.last_name?.toLowerCase().includes('admin') ||
+        user.email?.toLowerCase().includes('admin')
+      );
+      expect(hasSearchTerm).to.be.true;
+    }
+  });
+}

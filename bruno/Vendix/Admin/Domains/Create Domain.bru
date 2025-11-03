@@ -1,0 +1,39 @@
+meta {
+  name: Create Domain
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/admin/domains
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "domain": "testdomain.example.com",
+    "organization_id": 1,
+    "is_primary": false,
+    "is_active": true
+  }
+}
+
+vars:post-response {
+  created_domain_id: res.body.data.id
+}
+
+tests {
+  test("Create domain successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data.domain).to.equal('testdomain.example.com');
+  });
+  
+  test("Domain data is complete", function() {
+    expect(res.body.data.organization_id).to.equal(1);
+    expect(res.body.data.is_active).to.equal(true);
+  });
+}

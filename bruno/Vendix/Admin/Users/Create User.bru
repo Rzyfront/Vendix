@@ -1,0 +1,46 @@
+meta {
+  name: Create User
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/admin/users
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "testuser@example.com",
+    "password": "TestPass123!",
+    "first_name": "Test",
+    "last_name": "User",
+    "organization_id": 1,
+    "username": "testuser"
+  }
+}
+
+vars:post-response {
+  created_user_id: res.body.data.id
+}
+
+tests {
+  test("Create user successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data.email).to.equal('testuser@example.com');
+  });
+  
+  test("User data is complete", function() {
+    expect(res.body.data.first_name).to.equal('Test');
+    expect(res.body.data.last_name).to.equal('User');
+    expect(res.body.data.organization_id).to.equal(1);
+  });
+  
+  test("No password in response", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}

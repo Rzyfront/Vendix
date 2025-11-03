@@ -18,12 +18,13 @@ import {
 } from '../roles/dto/role.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @ApiTags('Admin Roles')
 @Controller('admin/roles')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminRolesController {
   constructor(private readonly adminRolesService: AdminRolesService) {}

@@ -1,0 +1,46 @@
+meta {
+  name: Create Store
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/admin/stores
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "name": "Test Store",
+    "organization_id": 1,
+    "store_type": "physical",
+    "store_code": "TST001",
+    "email": "teststore@example.com",
+    "phone": "+1234567890"
+  }
+}
+
+vars:post-response {
+  created_store_id: res.body.data.id
+}
+
+tests {
+  test("Create store successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data.name).to.equal('Test Store');
+  });
+  
+  test("Store has slug", function() {
+    expect(res.body.data).to.have.property('slug');
+    expect(res.body.data.slug).to.equal('test-store');
+  });
+  
+  test("Store data is complete", function() {
+    expect(res.body.data.organization_id).to.equal(1);
+    expect(res.body.data.store_type).to.equal('physical');
+  });
+}

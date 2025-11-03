@@ -1,0 +1,32 @@
+meta {
+  name: Update Organization
+  type: http
+  seq: 6
+}
+
+patch {
+  url: http://{{url}}/admin/organizations/{{created_org_id}}
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "name": "Updated Test Organization",
+    "phone": "+9876543210"
+  }
+}
+
+tests {
+  test("Update organization successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Organization data is updated", function() {
+    expect(res.body.data.name).to.equal('Updated Test Organization');
+    expect(res.body.data.phone).to.equal('+9876543210');
+  });
+}

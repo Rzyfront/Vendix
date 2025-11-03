@@ -13,13 +13,14 @@ import { AdminUsersService } from './admin-users.service';
 import { CreateUserDto, UpdateUserDto, UserQueryDto } from '../users/dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ResponseService } from '../../common/responses/response.service';
 
 @ApiTags('Admin Users')
 @Controller('admin/users')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class AdminUsersController {
   constructor(

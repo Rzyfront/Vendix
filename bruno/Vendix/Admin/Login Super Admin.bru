@@ -1,0 +1,41 @@
+meta {
+  name: Login Super Admin
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "organization_slug": "vendix-corp",
+    "email": "superadmin@vendix.com",
+    "password": "1125634q"
+  }
+}
+
+vars:post-response {
+  token: res.body.access_token
+  admin_user_id: res.body.user.id
+}
+
+tests {
+  test("Login super admin successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('access_token');
+    expect(res.body).to.have.property('user');
+  });
+  
+  test("User has super_admin role", function() {
+    expect(res.body.user.roles).to.include('super_admin');
+  });
+  
+  test("Token is valid", function() {
+    expect(res.body.access_token).to.be.a('string');
+    expect(res.body.access_token.length).to.be.greaterThan(0);
+  });
+}

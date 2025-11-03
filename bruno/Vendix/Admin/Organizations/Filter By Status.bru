@@ -1,0 +1,34 @@
+meta {
+  name: Filter By Status
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/admin/organizations?page=1&limit=10&is_active=true
+  body: none
+  auth: inherit
+}
+
+
+params:query {
+  page: 1
+  limit: 10
+  is_active: true
+}
+
+tests {
+  test("Filter by status successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("All organizations match filter", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(org => {
+        expect(org.state).to.equal('active');
+      });
+    }
+  });
+}
