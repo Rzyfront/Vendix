@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{url}}/domains/hostname/techsolutions.myapp.com/verify
+  url: {{url}}/domains/hostname/{{domainHostname}}/verify
   body: json
   auth: bearer
 }
@@ -15,8 +15,20 @@ auth:bearer {
 }
 
 tests {
-  test("Domain DNS verification initiated", function() {
+  test("Domain DNS verification initiated successfully", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.have.property('verification_status');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("DNS verification data is valid", function() {
+    expect(res.body.data).to.have.property('verification_status');
+    expect(res.body.data).to.have.property('hostname');
+    expect(res.body.data.hostname).to.equal('{{domainHostname}}');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

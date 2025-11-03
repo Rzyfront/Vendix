@@ -263,7 +263,7 @@ export class DomainsController {
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.duplicateDomainSetting(
       hostname,
-      duplicateData.newHostname,
+      duplicateData.new_hostname,
     );
     return this.responseService.created(
       result,

@@ -8,5 +8,5 @@ export class VerifyUserEmailAsSuperAdminDto {
   })
   @IsNumber()
   @IsNotEmpty()
-  userId: number;
+  user_id: number;
 }

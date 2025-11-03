@@ -16,17 +16,27 @@ auth:bearer {
 
 body:json {
   {
-    "organization_id": "ORG_ID_HERE",
-    "store_id": "STORE_ID_HERE",
-    "domain_id": "DOMAIN_ID_HERE"
+    "organization_id": "{{organizationId}}",
+    "store_id": "{{storeId}}",
+    "domain_id": "{{domainId}}"
   }
 }
 
 tests {
   test("Onboarding completed successfully", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.have.property('message');
-    expect(res.body).to.have.property('onboarding_completed');
-    expect(res.body.onboarding_completed).to.be.true;
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Onboarding completion data is valid", function() {
+    expect(res.body.data).to.have.property('message');
+    expect(res.body.data).to.have.property('onboarding_completed');
+    expect(res.body.data.onboarding_completed).to.be.true;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

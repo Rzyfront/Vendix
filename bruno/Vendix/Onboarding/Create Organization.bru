@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: http://{{url}}/auth/onboarding/create-organization
+  url: {{url}}/auth/onboarding/create-organization
   body: json
   auth: bearer
 }
@@ -20,15 +20,30 @@ body:json {
     "description": "Technology solutions provider",
     "industry": "Technology",
     "website": "https://techsolutions.com",
-    "phone": "+1234567890"
+    "phone": "{{testPhone}}"
   }
+}
+
+vars:post-response {
+  organizationId: res.body.data.id
 }
 
 tests {
   test("Organization created successfully", function() {
     expect(res.status).to.equal(201);
-    expect(res.body).to.have.property('id');
-    expect(res.body.name).to.equal('Tech Solutions Inc');
-    expect(res.body.description).to.equal('Technology solutions provider');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Organization data is correct", function() {
+    expect(res.body.data.name).to.equal('Tech Solutions Inc');
+    expect(res.body.data.description).to.equal('Technology solutions provider');
+    expect(res.body.data.industry).to.equal('Technology');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

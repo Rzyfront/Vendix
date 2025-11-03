@@ -10,7 +10,6 @@ import {
   UpdateOrganizationDto,
   AdminOrganizationQueryDto,
   OrganizationDashboardDto,
-  OrganizationsDashboardStatsDto,
   OrganizationState,
 } from '../organizations/dto';
 import { Prisma } from '@prisma/client';
@@ -60,7 +59,7 @@ export class AdminOrganizationsService {
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
-    const skip = (page - 1) * limit;
+    const skip = (page - 1) * Number(limit);
 
     const where: Prisma.organizationsWhereInput = {};
 
@@ -87,7 +86,7 @@ export class AdminOrganizationsService {
       this.prisma.organizations.findMany({
         where,
         skip,
-        take: limit,
+        take: Number(limit),
         orderBy: { [sort_by]: sort_order },
         include: {
           stores: {
@@ -108,9 +107,9 @@ export class AdminOrganizationsService {
       data,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
       },
     };
   }
@@ -124,7 +123,7 @@ export class AdminOrganizationsService {
             addresses: true,
             _count: {
               select: {
-                users: true,
+                store_users: true,
                 orders: true,
                 products: true,
               },
@@ -138,10 +137,10 @@ export class AdminOrganizationsService {
             first_name: true,
             last_name: true,
             email: true,
-            is_active: true,
-            roles: {
+            state: true,
+            user_roles: {
               include: {
-                role: true,
+                roles: true,
               },
             },
           },
@@ -277,8 +276,8 @@ export class AdminOrganizationsService {
       organizationsByStatus,
     ] = await Promise.all([
       this.prisma.organizations.count(),
-      this.prisma.organizations.count({ where: { is_active: true } }),
-      this.prisma.organizations.count({ where: { is_active: false } }),
+      this.prisma.organizations.count({ where: { state: 'active' } }),
+      this.prisma.organizations.count({ where: { state: 'inactive' } }),
       this.prisma.organizations.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
@@ -296,7 +295,7 @@ export class AdminOrganizationsService {
         },
       }),
       this.prisma.organizations.groupBy({
-        by: ['status'],
+        by: ['state'],
         _count: true,
       }),
     ]);
@@ -307,8 +306,8 @@ export class AdminOrganizationsService {
       inactiveOrganizations,
       recentOrganizations,
       organizationsByStatus: organizationsByStatus.reduce(
-        (acc, item) => {
-          acc[item.status] = item._count;
+        (acc: Record<string, number>, item: any) => {
+          acc[item.state] = item._count;
           return acc;
         },
         {} as Record<string, number>,
@@ -348,7 +347,7 @@ export class AdminOrganizationsService {
         where: { organization_id: id },
       }),
       this.prisma.users.count({
-        where: { organization_id: id, is_active: true },
+        where: { organization_id: id, state: 'active' },
       }),
       this.prisma.orders.count({
         where: { store: { organization_id: id }, ...dateFilter },
@@ -379,7 +378,7 @@ export class AdminOrganizationsService {
           _count: {
             select: {
               orders: true,
-              users: true,
+              store_users: true,
               products: true,
             },
           },

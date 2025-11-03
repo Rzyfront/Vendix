@@ -5,36 +5,52 @@ meta {
 }
 
 post {
-  url: http://{{url}}/auth/register-owner
+  url: {{url}}/auth/register-owner
   body: json
   auth: none
 }
 
 body:json {
   {
-    "email": "owner@company.com",
-    "password": "SecurePass123!",
-    "first_name": "John",
-    "last_name": "Smith",
+    "email": "{{ownerEmail}}",
+    "password": "{{ownerPassword}}",
+    "first_name": "{{testFirstName}}",
+    "last_name": "{{testLastName}}",
     "organization_name": "Tech Solutions Inc"
   }
+}
+
+vars:post-response {
+  userId: res.body.data.user.id
+  ownerToken: res.body.data.access_token
+  organizationId: res.body.data.organization.id
 }
 
 tests {
   test("Owner registration successful", function() {
     expect(res.status).to.equal(201);
-    expect(res.body).to.have.property('user');
-    expect(res.body).to.have.property('organization');
-    expect(res.body).to.have.property('access_token');
-    expect(res.body.user.email).to.equal('owner@company.com');
-    expect(res.body.organization.name).to.equal('Tech Solutions Inc');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Registration data is valid", function() {
+    expect(res.body.data).to.have.property('user');
+    expect(res.body.data).to.have.property('organization');
+    expect(res.body.data).to.have.property('access_token');
+    expect(res.body.data.user.email).to.equal('{{ownerEmail}}');
+    expect(res.body.data.organization.name).to.equal('Tech Solutions Inc');
   });
   
   test("User has owner role", function() {
-    expect(res.body.user.roles).to.include('owner');
+    expect(res.body.data.user.roles).to.include('owner');
   });
   
   test("Onboarding status is pending", function() {
-    expect(res.body.user.onboarding_completed).to.be.false;
+    expect(res.body.data.user.onboarding_completed).to.be.false;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data.user).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

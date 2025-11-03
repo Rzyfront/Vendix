@@ -32,10 +32,10 @@ export class AdminUsersService {
         password: hashedPassword,
       },
       include: {
-        organization: true,
+        organizations: true,
         user_roles: {
           include: {
-            role: true,
+            roles: true,
           },
         },
       },
@@ -48,7 +48,7 @@ export class AdminUsersService {
 
   async findAll(query: UserQueryDto) {
     const { page = 1, limit = 10, search, state, organization_id } = query;
-    const skip = (page - 1) * limit;
+    const skip = (page - 1) * Number(limit);
 
     const where: any = {};
 
@@ -72,12 +72,12 @@ export class AdminUsersService {
       this.prisma.users.findMany({
         where,
         skip,
-        take: limit,
+        take: Number(limit),
         include: {
-          organization: true,
+          organizations: true,
           user_roles: {
             include: {
-              role: true,
+              roles: true,
             },
           },
         },
@@ -89,7 +89,7 @@ export class AdminUsersService {
     ]);
 
     // Remove passwords from response
-    const usersWithoutPasswords = users.map((user) => {
+    const usersWithoutPasswords = users.map((user: any) => {
       const { password, ...userWithoutPassword } = user;
       return userWithoutPassword;
     });
@@ -98,9 +98,9 @@ export class AdminUsersService {
       data: usersWithoutPasswords,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
       },
     };
   }
@@ -109,14 +109,14 @@ export class AdminUsersService {
     const user = await this.prisma.users.findUnique({
       where: { id },
       include: {
-        organization: true,
+        organizations: true,
         user_roles: {
           include: {
-            role: {
+            roles: {
               include: {
                 role_permissions: {
                   include: {
-                    permission: true,
+                    permissions: true,
                   },
                 },
               },
@@ -165,10 +165,10 @@ export class AdminUsersService {
       where: { id },
       data: updateData,
       include: {
-        organization: true,
+        organizations: true,
         user_roles: {
           include: {
-            role: true,
+            roles: true,
           },
         },
       },
@@ -193,7 +193,7 @@ export class AdminUsersService {
 
     // Check if user is a super admin
     const hasSuperAdminRole = user.user_roles.some(
-      (userRole) => userRole.role?.name === 'super_admin',
+      (userRole: any) => userRole.roles?.name === 'super_admin',
     );
 
     if (hasSuperAdminRole) {
@@ -362,20 +362,20 @@ export class AdminUsersService {
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
-          organization: true,
+          organizations: true,
         },
       }),
     ]);
 
     // Get role details for usersByRole
-    const roleIds = usersByRole.map((item) => item.role_id);
+    const roleIds = usersByRole.map((item: any) => item.role_id);
     const roles = await this.prisma.roles.findMany({
       where: { id: { in: roleIds } },
       select: { id: true, name: true },
     });
 
-    const usersByRoleWithNames = usersByRole.map((item) => {
-      const role = roles.find((r) => r.id === item.role_id);
+    const usersByRoleWithNames = usersByRole.map((item: any) => {
+      const role = roles.find((r: any) => r.id === item.role_id);
       return {
         roleName: role?.name || 'Unknown',
         count: item._count,
@@ -383,7 +383,7 @@ export class AdminUsersService {
     });
 
     // Remove passwords from recent users
-    const recentUsersWithoutPasswords = recentUsers.map((user) => {
+    const recentUsersWithoutPasswords = recentUsers.map((user: any) => {
       const { password, ...userWithoutPassword } = user;
       return userWithoutPassword;
     });

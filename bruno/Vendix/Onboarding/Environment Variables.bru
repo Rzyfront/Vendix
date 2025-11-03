@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: http://{{url}}/health
+  url: {{url}}/health
   body: none
   auth: none
 }
@@ -40,12 +40,17 @@ vars:pre-request {
   currency: USD
   language: en
   
+  // Domain hostname
+  domainHostname: techsolutions.myapp.com
+  
   // IDs (to be replaced manually after each step)
   ownerToken: YOUR_JWT_TOKEN_HERE
   userId: USER_ID_HERE
   organizationId: ORG_ID_HERE
   storeId: STORE_ID_HERE
   domainId: DOMAIN_ID_HERE
+  organizationAddressId: ORG_ADDRESS_ID_HERE
+  storeAddressId: STORE_ADDRESS_ID_HERE
 }
 
 tests {

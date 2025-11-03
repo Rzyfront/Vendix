@@ -26,17 +26,17 @@ export class AdminDomainsService {
     return this.prisma.domain_settings.create({
       data: {
         hostname: createDomainSettingDto.hostname,
-        organization_id: createDomainSettingDto.organizationId,
-        store_id: createDomainSettingDto.storeId,
-        domain_type: createDomainSettingDto.domainType as any,
+        organization_id: createDomainSettingDto.organization_id,
+        store_id: createDomainSettingDto.store_id,
+        domain_type: createDomainSettingDto.domain_type as any,
         config: createDomainSettingDto.config,
-        is_primary: createDomainSettingDto.isPrimary,
+        is_primary: createDomainSettingDto.is_primary,
       },
       include: {
-        organizations: {
+        organization: {
           select: { id: true, name: true, slug: true },
         },
-        stores: {
+        store: {
           select: { id: true, name: true, slug: true },
         },
       },
@@ -62,6 +62,7 @@ export class AdminDomainsService {
       store_id,
     } = query;
     const skip = (page - 1) * limit;
+    const take = Number(limit);
 
     const where: Prisma.domain_settingsWhereInput = {};
 
@@ -85,12 +86,12 @@ export class AdminDomainsService {
       this.prisma.domain_settings.findMany({
         where,
         skip,
-        take: limit,
+        take,
         include: {
-          organizations: {
+          organization: {
             select: { id: true, name: true, slug: true },
           },
-          stores: {
+          store: {
             select: { id: true, name: true, slug: true },
           },
         },
@@ -114,8 +115,12 @@ export class AdminDomainsService {
     const domain = await this.prisma.domain_settings.findUnique({
       where: { id },
       include: {
-        organizations: true,
-        stores: true,
+        organization: {
+          select: { id: true, name: true, slug: true },
+        },
+        store: {
+          select: { id: true, name: true, slug: true },
+        },
       },
     });
 
@@ -139,16 +144,16 @@ export class AdminDomainsService {
       where: { id },
       data: {
         ...updateDomainSettingDto,
-        domain_type: updateDomainSettingDto.domainType as any,
+        domain_type: updateDomainSettingDto.domain_type as any,
         config: updateDomainSettingDto.config,
-        is_primary: updateDomainSettingDto.isPrimary,
+        is_primary: updateDomainSettingDto.is_primary,
         updated_at: new Date(),
       },
       include: {
-        organizations: {
+        organization: {
           select: { id: true, name: true, slug: true },
         },
-        stores: {
+        store: {
           select: { id: true, name: true, slug: true },
         },
       },
@@ -199,10 +204,10 @@ export class AdminDomainsService {
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
-          organizations: {
+          organization: {
             select: { name: true },
           },
-          stores: {
+          store: {
             select: { name: true },
           },
         },

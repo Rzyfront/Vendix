@@ -16,21 +16,41 @@ auth:bearer {
 
 body:json {
   {
-    "street_address": "456 Retail Street",
-    "city": "San Francisco",
-    "state": "CA",
-    "postal_code": "94102",
-    "country": "US",
+    "street_address": "{{storeStreet}}",
+    "city": "{{testCity}}",
+    "state": "{{testState}}",
+    "postal_code": "{{testPostalCode}}",
+    "country": "{{testCountry}}",
     "address_type": "store",
     "is_primary": true,
-    "store_id": "STORE_ID_HERE"
+    "store_id": "{{storeId}}"
   }
 }
 
+vars:post-response {
+  storeAddressId: res.body.data.id
+}
+
 tests {
-  test("Store address created", function() {
+  test("Store address created successfully", function() {
     expect(res.status).to.equal(201);
-    expect(res.body).to.have.property('id');
-    expect(res.body.street_address).to.equal('456 Retail Street');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Store address data is correct", function() {
+    expect(res.body.data.street_address).to.equal('{{storeStreet}}');
+    expect(res.body.data.city).to.equal('{{testCity}}');
+    expect(res.body.data.address_type).to.equal('store');
+  });
+  
+  test("Store address is marked as primary", function() {
+    expect(res.body.data.is_primary).to.be.true;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

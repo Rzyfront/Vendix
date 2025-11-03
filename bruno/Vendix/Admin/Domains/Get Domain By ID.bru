@@ -5,11 +5,10 @@ meta {
 }
 
 get {
-  url: http://{{url}}/admin/domains/{{domain_id}}
+  url: http://{{url}}/admin/domains/7
   body: none
   auth: inherit
 }
-
 
 tests {
   test("Get domain by ID successful", function() {

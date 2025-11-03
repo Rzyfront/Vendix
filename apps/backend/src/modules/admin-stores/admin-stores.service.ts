@@ -43,16 +43,16 @@ export class AdminStoresService {
         updated_at: new Date(),
       },
       include: {
-        organization: true,
+        organizations: true,
         addresses: true,
-        users: true,
+        store_users: true,
       },
     });
   }
 
   async findAll(query: AdminStoreQueryDto) {
     const { page = 1, limit = 10, search, organization_id, store_type } = query;
-    const skip = (page - 1) * limit;
+    const skip = (page - 1) * Number(limit);
 
     const where: Prisma.storesWhereInput = {};
 
@@ -75,14 +75,14 @@ export class AdminStoresService {
       this.prisma.stores.findMany({
         where,
         skip,
-        take: limit,
+        take: Number(limit),
         include: {
-          organization: {
+          organizations: {
             select: { id: true, name: true, slug: true },
           },
           _count: {
             select: {
-              users: true,
+              store_users: true,
               products: true,
               orders: true,
             },
@@ -96,9 +96,9 @@ export class AdminStoresService {
       data,
       meta: {
         total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
       },
     };
   }
@@ -107,24 +107,24 @@ export class AdminStoresService {
     const store = await this.prisma.stores.findUnique({
       where: { id },
       include: {
-        organization: true,
+        organizations: true,
         addresses: true,
-        users: {
+        store_users: {
           include: {
-            user: {
+            users: {
               select: {
                 id: true,
                 first_name: true,
                 last_name: true,
                 email: true,
-                is_active: true,
+                state: true,
               },
             },
           },
         },
         _count: {
           select: {
-            users: true,
+            store_users: true,
             products: true,
             orders: true,
           },
@@ -178,9 +178,9 @@ export class AdminStoresService {
         updated_at: new Date(),
       },
       include: {
-        organization: true,
+        organizations: true,
         addresses: true,
-        users: true,
+        store_users: true,
       },
     });
   }
@@ -191,7 +191,7 @@ export class AdminStoresService {
       include: {
         _count: {
           select: {
-            users: true,
+            store_users: true,
             products: true,
             orders: true,
           },
@@ -204,7 +204,7 @@ export class AdminStoresService {
     }
 
     if (
-      existingStore._count.users > 0 ||
+      existingStore._count.store_users > 0 ||
       existingStore._count.products > 0 ||
       existingStore._count.orders > 0
     ) {
@@ -240,12 +240,12 @@ export class AdminStoresService {
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
-          organization: {
+          organizations: {
             select: { name: true },
           },
           _count: {
             select: {
-              users: true,
+              store_users: true,
               products: true,
               orders: true,
             },

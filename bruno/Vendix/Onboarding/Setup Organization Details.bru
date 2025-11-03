@@ -5,7 +5,7 @@ meta {
 }
 
 post {
-  url: {{url}}/auth/onboarding/setup-organization/ORG_ID_HERE
+  url: {{url}}/auth/onboarding/setup-organization/{{organizationId}}
   body: json
   auth: bearer
 }
@@ -17,9 +17,9 @@ auth:bearer {
 body:json {
   {
     "settings": {
-      "timezone": "America/New_York",
-      "currency": "USD",
-      "language": "en",
+      "timezone": "{{timezone}}",
+      "currency": "{{currency}}",
+      "language": "{{language}}",
       "date_format": "MM/DD/YYYY"
     },
     "billing": {
@@ -30,10 +30,21 @@ body:json {
 }
 
 tests {
-  test("Organization details updated", function() {
+  test("Organization details updated successfully", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.have.property('settings');
-    expect(res.body).to.have.property('billing');
-    expect(res.body.settings.timezone).to.equal('America/New_York');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Organization settings are valid", function() {
+    expect(res.body.data).to.have.property('settings');
+    expect(res.body.data).to.have.property('billing');
+    expect(res.body.data.settings.timezone).to.equal('{{timezone}}');
+    expect(res.body.data.settings.currency).to.equal('{{currency}}');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }

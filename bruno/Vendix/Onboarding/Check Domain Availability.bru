@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{url}}/domains/check/techsolutions.myapp.com
+  url: {{url}}/domains/check/{{domainHostname}}
   body: none
   auth: bearer
 }
@@ -15,9 +15,20 @@ auth:bearer {
 }
 
 tests {
-  test("Domain availability checked", function() {
+  test("Domain availability check successful", function() {
     expect(res.status).to.equal(200);
-    expect(res.body).to.have.property('available');
-    expect(res.body).to.have.property('hostname');
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Domain availability data is valid", function() {
+    expect(res.body.data).to.have.property('available');
+    expect(res.body.data).to.have.property('hostname');
+    expect(res.body.data.hostname).to.equal('{{domainHostname}}');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
   });
 }
