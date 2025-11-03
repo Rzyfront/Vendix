@@ -1,0 +1,99 @@
+meta {
+  name: Approve Return Order
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/returns/ret_123456789012345678/approve
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "approvedItems": [
+    {
+      "itemId": "ritm_123456789012345678",
+      "approvedQuantity": 2,
+      "approvalNotes": "Items approved for return after inspection"
+    },
+    {
+      "itemId": "ritm_234567890123456789",
+      "approvedQuantity": 1,
+      "approvalNotes": "Wrong item confirmed, approved for return"
+    }
+  ],
+  "approvedRefundAmount": 275.00,
+  "refundType": "REFUND",
+  "approvalNotes": "Return approved with partial refund due to restocking fee",
+  "expectedRefundDate": "2024-01-15T00:00:00.000Z",
+  "restockingFee": 24.98
+}
+
+tests {
+  test("Should approve return order successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    expect(res.body).to.have.property('id', 'ret_123456789012345678');
+    expect(res.body).to.have.property('status', 'APPROVED');
+    expect(res.body).to.have.property('approvedRefundAmount', 275.00);
+    expect(res.body).to.have.property('refundType', 'REFUND');
+    expect(res.body).to.have.property('approvalNotes');
+    expect(res.body).to.have.property('expectedRefundDate');
+    expect(res.body).to.have.property('restockingFee', 24.98);
+    expect(res.body).to.have.property('approvedAt');
+    expect(res.body).to.have.property('approvedBy');
+  });
+
+  test("Should validate approved items", function() {
+    expect(res.body).to.have.property('items').that.is.an('array');
+    res.body.items.forEach(item => {
+      expect(item).to.have.property('approvedQuantity');
+      expect(item).to.have.property('approvalNotes');
+      expect(item.approvedQuantity).to.be.a('number');
+      expect(item.approvedQuantity).to.be.at.least(0);
+    });
+  });
+
+  test("Should validate refund calculation", function() {
+    const totalApprovedQuantity = res.body.items.reduce((sum, item) => sum + item.approvedQuantity, 0);
+    expect(totalApprovedQuantity).to.be.greaterThan(0);
+    expect(res.body.approvedRefundAmount).to.be.a('number');
+    expect(res.body.approvedRefundAmount).to.be.at.least(0);
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate approval workflow", function() {
+    expect(res.body).to.have.property('workflowHistory');
+    if (res.body.workflowHistory) {
+      expect(res.body.workflowHistory).to.be.an('array');
+      const approvalEntry = res.body.workflowHistory.find(entry => entry.action === 'APPROVED');
+      expect(approvalEntry).to.exist;
+      expect(approvalEntry).to.have.property('timestamp');
+      expect(approvalEntry).to.have.property('userId');
+    }
+  });
+
+  test("Should validate status transition", function() {
+    expect(res.body.status).to.equal('APPROVED');
+    expect(res.body).to.have.property('previousStatus');
+    expect(['REQUESTED', 'PENDING_APPROVAL']).to.include(res.body.previousStatus);
+  });
+
+  test("Should validate refund information", function() {
+    expect(res.body).to.have.property('refundInfo');
+    if (res.body.refundInfo) {
+      expect(res.body.refundInfo).to.have.property('refundAmount', 275.00);
+      expect(res.body.refundInfo).to.have.property('refundType', 'REFUND');
+      expect(res.body.refundInfo).to.have.property('expectedRefundDate');
+    }
+  });
+}

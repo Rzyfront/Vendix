@@ -1,0 +1,84 @@
+meta {
+  name: Create Return Order
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/returns
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "customerId": "cust_123456789012345678",
+  "salesOrderId": "so_123456789012345678",
+  "reason": "DEFECTIVE_PRODUCT",
+  "items": [
+    {
+      "productId": "prod_123456789012345678",
+      "variantId": "var_123456789012345678",
+      "quantity": 2,
+      "reason": "DEFECTIVE",
+      "condition": "DAMAGED"
+    },
+    {
+      "productId": "prod_234567890123456789",
+      "variantId": "var_234567890123456789",
+      "quantity": 1,
+      "reason": "WRONG_ITEM",
+      "condition": "NEW"
+    }
+  ],
+  "notes": "Customer reported defective items and wrong product delivered",
+  "requestedRefundType": "REFUND",
+  "requestedRefundAmount": 299.98
+}
+
+tests {
+  test("Should create return order successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.be.an('object');
+    expect(res.body).to.have.property('id');
+    expect(res.body).to.have.property('returnNumber');
+    expect(res.body).to.have.property('status', 'REQUESTED');
+    expect(res.body).to.have.property('customerId', 'cust_123456789012345678');
+    expect(res.body).to.have.property('salesOrderId', 'so_123456789012345678');
+    expect(res.body).to.have.property('reason', 'DEFECTIVE_PRODUCT');
+    expect(res.body).to.have.property('requestedRefundType', 'REFUND');
+    expect(res.body).to.have.property('requestedRefundAmount', 299.98);
+    expect(res.body).to.have.property('items').that.is.an('array').with.lengthOf(2);
+    expect(res.body.items[0]).to.have.property('productId', 'prod_123456789012345678');
+    expect(res.body.items[0]).to.have.property('quantity', 2);
+    expect(res.body.items[0]).to.have.property('reason', 'DEFECTIVE');
+    expect(res.body.items[0]).to.have.property('condition', 'DAMAGED');
+    expect(res.body).to.have.property('notes');
+    expect(res.body).to.have.property('createdAt');
+    expect(res.body).to.have.property('updatedAt');
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate return number format", function() {
+    expect(res.body.returnNumber).to.match(/^RET-\d{4}-\d{6}$/);
+  });
+
+  test("Should validate item structure", function() {
+    const item = res.body.items[0];
+    expect(item).to.have.property('id');
+    expect(item).to.have.property('productId');
+    expect(item).to.have.property('variantId');
+    expect(item).to.have.property('quantity');
+    expect(item).to.have.property('reason');
+    expect(item).to.have.property('condition');
+    expect(item).to.have.property('approvedQuantity');
+    expect(item).to.have.property('receivedQuantity');
+  });
+}

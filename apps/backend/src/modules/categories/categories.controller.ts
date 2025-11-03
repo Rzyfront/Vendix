@@ -16,53 +16,132 @@ import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('categories')
 @UseGuards(PermissionsGuard)
 export class CategoriesController {
-  constructor(private readonly categoriesService: CategoriesService) {}
+  constructor(
+    private readonly categoriesService: CategoriesService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Post()
   @Permissions('categories:create')
-  create(
+  async create(
     @Body() createCategoryDto: CreateCategoryDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
   ) {
-    return this.categoriesService.create(createCategoryDto, user);
+    try {
+      const result = await this.categoriesService.create(
+        createCategoryDto,
+        user,
+      );
+      return this.responseService.created(
+        result,
+        'Categoría creada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al crear la categoría',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Get()
   @Permissions('categories:read')
-  findAll(@Query() query: CategoryQueryDto) {
-    return this.categoriesService.findAll(query);
+  async findAll(@Query() query: CategoryQueryDto) {
+    try {
+      const result = await this.categoriesService.findAll(query);
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Categorías obtenidas exitosamente',
+        );
+      }
+      return this.responseService.success(
+        result,
+        'Categorías obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las categorías',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Get(':id')
   @Permissions('categories:read')
-  findOne(
+  async findOne(
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    return this.categoriesService.findOne(id, {
-      includeInactive: includeInactive === 'true',
-    });
+    try {
+      const result = await this.categoriesService.findOne(id, {
+        includeInactive: includeInactive === 'true',
+      });
+      return this.responseService.success(
+        result,
+        'Categoría obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la categoría',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Patch(':id')
   @Permissions('categories:update')
-  update(
+  async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
   ) {
-    return this.categoriesService.update(id, updateCategoryDto, user);
+    try {
+      const result = await this.categoriesService.update(
+        id,
+        updateCategoryDto,
+        user,
+      );
+      return this.responseService.updated(
+        result,
+        'Categoría actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar la categoría',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 
   @Delete(':id')
   @Permissions('categories:delete')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: any) {
-    return this.categoriesService.remove(id, user);
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @RequestContext() user: any,
+  ) {
+    try {
+      await this.categoriesService.remove(id, user);
+      return this.responseService.deleted('Categoría eliminada exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al eliminar la categoría',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
   }
 }

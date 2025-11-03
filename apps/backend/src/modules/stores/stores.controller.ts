@@ -21,6 +21,7 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 
 @Controller('stores')
 @UseGuards(PermissionsGuard)
@@ -32,7 +33,10 @@ export class StoresController {
 
   @Post()
   @Permissions('stores:create')
-  async create(@Body() createStoreDto: CreateStoreDto) {
+  async create(
+    @Body() createStoreDto: CreateStoreDto,
+    @RequestContext() user: any,
+  ) {
     try {
       const store = await this.storesService.create(createStoreDto);
       return this.responseService.created(store, 'Tienda creada exitosamente');
@@ -58,7 +62,7 @@ export class StoresController {
 
   @Get()
   @Permissions('stores:read')
-  async findAll(@Query() query: StoreQueryDto) {
+  async findAll(@Query() query: StoreQueryDto, @RequestContext() user: any) {
     try {
       const result = await this.storesService.findAll(query);
       return this.responseService.paginated(

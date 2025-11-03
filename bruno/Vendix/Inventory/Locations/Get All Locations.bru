@@ -1,0 +1,42 @@
+meta {
+  name: Get All Locations
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/inventory/locations?page=1&limit=10
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Should return locations list", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.data).to.be.an('array');
+  });
+  
+  test("Should return valid pagination structure", function() {
+    expect(res.body.pagination).to.have.property('page');
+    expect(res.body.pagination).to.have.property('limit');
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('totalPages');
+  });
+  
+  test("Should return valid location objects", function() {
+    if (res.body.data.length > 0) {
+      const location = res.body.data[0];
+      expect(location).to.have.property('id');
+      expect(location).to.have.property('name');
+      expect(location).to.have.property('code');
+      expect(location).to.have.property('type');
+      expect(location).to.have.property('is_active');
+    }
+  });
+}

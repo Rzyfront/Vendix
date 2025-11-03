@@ -17,7 +17,7 @@ import { AddressesService } from './addresses.service';
 import { CreateAddressDto, UpdateAddressDto, AddressQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('addresses')
@@ -32,12 +32,12 @@ export class AddressesController {
   @Permissions('addresses:create')
   async create(
     @Body() createAddressDto: CreateAddressDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
       const result = await this.addressesService.create(createAddressDto, user);
-      return this.responseService.success(
+      return this.responseService.created(
         result,
         'Dirección creada exitosamente',
       );
@@ -53,16 +53,26 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findAll(
     @Query() query: AddressQueryDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
       const result = await this.addressesService.findAll(query, user);
-      return this.responseService.success(
-        result,
-        'Direcciones obtenidas exitosamente',
-        req.url,
-      );
+
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Direcciones obtenidas exitosamente',
+        );
+      } else {
+        return this.responseService.success(
+          result,
+          'Direcciones obtenidas exitosamente',
+        );
+      }
     } catch (error) {
       return this.responseService.error(
         'Error al obtener las direcciones',
@@ -75,16 +85,26 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findByStore(
     @Param('storeId', ParseIntPipe) storeId: number,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
       const result = await this.addressesService.findByStore(storeId, user);
-      return this.responseService.success(
-        result,
-        'Direcciones obtenidas exitosamente',
-        req.url,
-      );
+
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Direcciones de la tienda obtenidas exitosamente',
+        );
+      } else {
+        return this.responseService.success(
+          result,
+          'Direcciones de la tienda obtenidas exitosamente',
+        );
+      }
     } catch (error) {
       return this.responseService.error(
         'Error al obtener las direcciones',
@@ -97,7 +117,7 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
@@ -105,7 +125,6 @@ export class AddressesController {
       return this.responseService.success(
         result,
         'Dirección obtenida exitosamente',
-        req.url,
       );
     } catch (error) {
       return this.responseService.error(
@@ -120,7 +139,7 @@ export class AddressesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAddressDto: UpdateAddressDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
@@ -129,10 +148,9 @@ export class AddressesController {
         updateAddressDto,
         user,
       );
-      return this.responseService.success(
+      return this.responseService.updated(
         result,
         'Dirección actualizada exitosamente',
-        req.url,
       );
     } catch (error) {
       return this.responseService.error(
@@ -147,15 +165,12 @@ export class AddressesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Request() req,
   ) {
     try {
-      const result = await this.addressesService.remove(id, user);
-      return this.responseService.success(
-        null,
-        'Dirección eliminada exitosamente',
-      );
+      await this.addressesService.remove(id, user);
+      return this.responseService.deleted('Dirección eliminada exitosamente');
     } catch (error) {
       return this.responseService.error(
         'Error al eliminar la dirección',

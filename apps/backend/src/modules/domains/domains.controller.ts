@@ -17,7 +17,7 @@ import {
 import { Public } from '../auth/decorators/public.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 import {
   ResponseService,
   SuccessResponse,
@@ -102,7 +102,7 @@ export class DomainsController {
   @HttpCode(HttpStatus.CREATED)
   async createDomainSetting(
     @Body() createDomainSettingDto: CreateDomainSettingDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.createDomainSetting(
       createDomainSettingDto,

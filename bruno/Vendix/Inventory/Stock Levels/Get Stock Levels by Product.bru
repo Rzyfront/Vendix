@@ -1,0 +1,47 @@
+meta {
+  name: Get Stock Levels by Product
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/inventory/stock-levels/product/1
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return stock levels for specific product", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('array');
+    
+    if (res.body.length > 0) {
+      const stockLevel = res.body[0];
+      expect(stockLevel).to.have.property('id');
+      expect(stockLevel).to.have.property('product_id');
+      expect(stockLevel).to.have.property('location_id');
+      expect(stockLevel).to.have.property('quantity_on_hand');
+      expect(stockLevel).to.have.property('quantity_reserved');
+      expect(stockLevel).to.have.property('quantity_available');
+      expect(stockLevel).to.have.property('last_updated');
+      
+      expect(stockLevel.product_id).to.equal(1);
+      expect(stockLevel.id).to.be.a('number');
+      expect(stockLevel.location_id).to.be.a('number');
+      expect(stockLevel.quantity_on_hand).to.be.a('number');
+      expect(stockLevel.quantity_reserved).to.be.a('number');
+      expect(stockLevel.quantity_available).to.be.a('number');
+    }
+  });
+  
+  test("Should validate all entries belong to same product", function() {
+    if (res.body.length > 0) {
+      res.body.forEach(stockLevel => {
+        expect(stockLevel.product_id).to.equal(1);
+      });
+    }
+  });
+}

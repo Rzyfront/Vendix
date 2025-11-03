@@ -54,22 +54,24 @@ export class AuditService {
     if (query.limit) params = params.set('limit', query.limit.toString());
     if (query.offset) params = params.set('offset', query.offset.toString());
 
-    return this.http.get<any>(`${this.apiUrl}/audit/logs`, { params }).pipe(
-      map((response) => {
-        // Mapear la respuesta de la API a la estructura esperada por el frontend
-        return {
-          logs: response.data || [],
-          total: response.meta?.total || 0,
-          limit: response.meta?.limit || 20,
-          offset: response.meta?.offset || 0,
-        } as AuditLogsResponse;
-      }),
-      finalize(() => this.isLoading$.next(false)),
-      catchError((error) => {
-        console.error('Error loading audit logs:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<any>(`${this.apiUrl}/admin/audit/logs`, { params })
+      .pipe(
+        map((response) => {
+          // Mapear la respuesta de la API a la estructura esperada por el frontend
+          return {
+            logs: response.data || [],
+            total: response.meta?.total || 0,
+            limit: response.meta?.limit || 20,
+            offset: response.meta?.offset || 0,
+          } as AuditLogsResponse;
+        }),
+        finalize(() => this.isLoading$.next(false)),
+        catchError((error) => {
+          console.error('Error loading audit logs:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -82,27 +84,31 @@ export class AuditService {
     if (fromDate) params = params.set('fromDate', fromDate);
     if (toDate) params = params.set('toDate', toDate);
 
-    return this.http.get<any>(`${this.apiUrl}/audit/stats`, { params }).pipe(
-      map((response) => {
-        return response.data as AuditStats;
-      }),
-      finalize(() => this.isLoadingStats$.next(false)),
-      catchError((error) => {
-        console.error('Error loading audit stats:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<any>(`${this.apiUrl}/admin/audit/dashboard`, { params })
+      .pipe(
+        map((response) => {
+          return response.data as AuditStats;
+        }),
+        finalize(() => this.isLoadingStats$.next(false)),
+        catchError((error) => {
+          console.error('Error loading audit stats:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
    * Obtener log de auditoría por ID
    */
   getAuditLogById(id: string): Observable<AuditLog> {
-    return this.http.get<AuditLog>(`${this.apiUrl}/audit/logs/${id}`).pipe(
-      catchError((error) => {
-        console.error('Error getting audit log:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<AuditLog>(`${this.apiUrl}/admin/audit/logs/${id}`)
+      .pipe(
+        catchError((error) => {
+          console.error('Error getting audit log:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 }

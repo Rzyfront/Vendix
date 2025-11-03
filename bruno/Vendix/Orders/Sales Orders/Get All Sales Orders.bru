@@ -1,0 +1,127 @@
+meta {
+  name: Get All Sales Orders
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/sales-orders
+  body: none
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+vars:pre-request {
+  // Test pagination parameters
+  page: 1
+  limit: 10
+}
+
+tests {
+  test("Should return paginated sales orders list", function() {
+    expect(res.getStatus()).to.equal(200);
+    
+    const body = res.getBody();
+    expect(body).to.be.an('object');
+    expect(body).to.have.property('data');
+    expect(body).to.have.property('meta');
+    
+    // Validate meta structure
+    const meta = body.meta;
+    expect(meta).to.have.property('total');
+    expect(meta).to.have.property('page');
+    expect(meta).to.have.property('limit');
+    expect(meta).to.have.property('totalPages');
+    expect(meta.page).to.equal(vars.page);
+    expect(meta.limit).to.equal(vars.limit);
+    
+    // Validate data array
+    const data = body.data;
+    expect(data).to.be.an('array');
+    
+    if (data.length > 0) {
+      const salesOrder = data[0];
+      expect(salesOrder).to.have.property('id');
+      expect(salesOrder).to.have.property('orderNumber');
+      expect(salesOrder).to.have.property('customerId');
+      expect(salesOrder).to.have.property('storeId');
+      expect(salesOrder).to.have.property('status');
+      expect(salesOrder).to.have.property('subtotal');
+      expect(salesOrder).to.have.property('taxAmount');
+      expect(salesOrder).to.have.property('totalAmount');
+      expect(salesOrder).to.have.property('createdAt');
+      expect(salesOrder).to.have.property('updatedAt');
+      
+      // Validate status enum
+      const validStatuses = ['PENDING', 'CONFIRMED', 'SHIPPED', 'INVOICED', 'CANCELLED'];
+      expect(validStatuses).to.include(salesOrder.status);
+      
+      // Validate monetary values
+      expect(salesOrder.subtotal).to.be.a('number');
+      expect(salesOrder.taxAmount).to.be.a('number');
+      expect(salesOrder.totalAmount).to.be.a('number');
+      expect(salesOrder.totalAmount).to.equal(salesOrder.subtotal + salesOrder.taxAmount);
+      
+      // Validate nested objects
+      expect(salesOrder).to.have.property('customer');
+      expect(salesOrder).to.have.property('store');
+      expect(salesOrder).to.have.property('items');
+      
+      // Validate customer structure
+      const customer = salesOrder.customer;
+      expect(customer).to.have.property('id');
+      expect(customer).to.have.property('name');
+      expect(customer).to.have.property('email');
+      
+      // Validate store structure
+      const store = salesOrder.store;
+      expect(store).to.have.property('id');
+      expect(store).to.have.property('name');
+      
+      // Validate items array
+      const items = salesOrder.items;
+      expect(items).to.be.an('array');
+      
+      if (items.length > 0) {
+        const item = items[0];
+        expect(item).to.have.property('id');
+        expect(item).to.have.property('productId');
+        expect(item).to.have.property('quantity');
+        expect(item).to.have.property('unitPrice');
+        expect(item).to.have.property('totalPrice');
+        expect(item).to.have.property('product');
+        
+        // Validate product structure
+        const product = item.product;
+        expect(product).to.have.property('id');
+        expect(product).to.have.property('name');
+        expect(product).to.have.property('sku');
+        
+        // Validate item calculations
+        expect(item.totalPrice).to.equal(item.quantity * item.unitPrice);
+      }
+    }
+    
+    // Validate pagination consistency
+    expect(meta.total).to.be.at.least(0);
+    expect(meta.totalPages).to.be.at.least(1);
+    expect(data.length).to.be.at.most(meta.limit);
+  });
+  
+  test("Should handle empty results gracefully", function() {
+    const body = res.getBody();
+    
+    if (body.meta.total === 0) {
+      expect(body.data).to.be.an('array');
+      expect(body.data).to.have.length(0);
+    }
+  });
+  
+  test("Should validate response time", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}

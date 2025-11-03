@@ -24,7 +24,7 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
 } from './dto/password.dto';
-import { CurrentUser } from './decorators/current-user.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
@@ -115,7 +115,7 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
   ) {
     try {
       const result = await this.authService.registerStaff(
@@ -190,7 +190,7 @@ export class AuthController {
   }
 
   @Get('profile')
-  async getProfile(@CurrentUser() user: any) {
+  async getProfile(@RequestContext() user: any) {
     try {
       const profile = await this.authService.getProfile(user.id);
       return this.responseService.success(
@@ -209,7 +209,7 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Body() body?: { refresh_token?: string; all_sessions?: boolean },
   ) {
     try {
@@ -229,7 +229,7 @@ export class AuthController {
   }
 
   @Get('me')
-  async getCurrentUser(@CurrentUser() user: any) {
+  async getCurrentUser(@RequestContext() user: any) {
     try {
       return this.responseService.success(
         user,
@@ -323,7 +323,7 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   async changePassword(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Body() changeDto: ChangePasswordDto,
   ) {
     try {
@@ -343,7 +343,7 @@ export class AuthController {
   }
 
   @Get('sessions')
-  async getUserSessions(@CurrentUser() user: any) {
+  async getUserSessions(@RequestContext() user: any) {
     try {
       const sessions = await this.authService.getUserSessions(user.id);
       return this.responseService.success(
@@ -362,7 +362,7 @@ export class AuthController {
   @Delete('sessions/:sessionId')
   @HttpCode(HttpStatus.OK)
   async revokeSession(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Param('session_id') session_id: string,
   ) {
     try {
@@ -383,7 +383,7 @@ export class AuthController {
   // ===== RUTAS DE ONBOARDING =====
 
   @Get('onboarding/status')
-  async getOnboardingStatus(@CurrentUser() user: any) {
+  async getOnboardingStatus(@RequestContext() user: any) {
     try {
       // Verificar que el usuario sea owner
       const userWithRoles = await this.authService.validateUser(user.id);
@@ -415,7 +415,7 @@ export class AuthController {
   @Post('onboarding/create-organization')
   @HttpCode(HttpStatus.CREATED)
   async createOrganizationOnboarding(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Body() organizationData: any,
   ) {
     try {
@@ -449,7 +449,7 @@ export class AuthController {
   @Post('onboarding/setup-organization/:organizationId')
   @HttpCode(HttpStatus.OK)
   async setupOrganization(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Param('organization_id') organization_id: string,
     @Body() setup_data: any,
   ) {
@@ -486,7 +486,7 @@ export class AuthController {
   @Post('onboarding/create-store/:organizationId')
   @HttpCode(HttpStatus.CREATED)
   async createStoreOnboarding(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Param('organization_id') organization_id: string,
     @Body() store_data: any,
   ) {
@@ -522,7 +522,7 @@ export class AuthController {
   @Post('onboarding/setup-store/:storeId')
   @HttpCode(HttpStatus.OK)
   async setupStore(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Param('store_id') store_id: string,
     @Body() setup_data: any,
   ) {
@@ -628,7 +628,7 @@ export class AuthController {
       },
     },
   })
-  async completeOnboarding(@CurrentUser() user: any) {
+  async completeOnboarding(@RequestContext() user: any) {
     try {
       const result = await this.authService.completeOnboarding(user.id);
       return this.responseService.success(result.data, result.message);
@@ -671,7 +671,7 @@ export class AuthController {
   })
   async verifyUserEmailAsSuperAdmin(
     @Param('userId', ParseIntPipe) userId: number,
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
   ) {
     try {
       const result = await this.authService.verifyUserEmailAsSuperAdmin(

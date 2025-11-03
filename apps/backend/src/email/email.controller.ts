@@ -1,13 +1,13 @@
 import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { EmailService } from './email.service';
-import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
+import { RequestContext } from '../common/decorators/request-context.decorator';
 
 @Controller('email')
 export class EmailController {
   constructor(private readonly emailService: EmailService) {}
 
   @Get('config')
-  async getEmailConfig(@CurrentUser() user: any) {
+  async getEmailConfig(@RequestContext() user: any) {
     // Solo admins pueden ver la configuración
     if (!user.roles?.includes('admin')) {
       return { message: 'Access denied' };
@@ -24,7 +24,7 @@ export class EmailController {
   }
 
   @Post('test')
-  async testEmailService(@CurrentUser() user: any) {
+  async testEmailService(@RequestContext() user: any) {
     // Solo admins pueden testear el servicio
     if (!user.roles?.includes('admin')) {
       return { message: 'Access denied' };
@@ -40,7 +40,7 @@ export class EmailController {
 
   @Post('test-template')
   async testEmailTemplate(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Body()
     body: {
       type: 'verification' | 'password-reset' | 'welcome' | 'onboarding';
@@ -97,7 +97,7 @@ export class EmailController {
 
   @Post('switch-provider')
   async switchProvider(
-    @CurrentUser() user: any,
+    @RequestContext() user: any,
     @Body()
     body: {
       provider: 'resend' | 'sendgrid' | 'console';

@@ -1,0 +1,42 @@
+meta {
+  name: Create Location
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/inventory/locations
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "name": "Main Warehouse",
+  "code": "WH-001",
+  "type": "warehouse",
+  "address_id": 1,
+  "is_active": true
+}
+
+tests {
+  test("Should create location successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('id');
+    expect(res.body.name).to.equal('Main Warehouse');
+    expect(res.body.code).to.equal('WH-001');
+    expect(res.body.type).to.equal('warehouse');
+    expect(res.body.is_active).to.equal(true);
+  });
+  
+  test("Should return valid location structure", function() {
+    expect(res.body).to.have.property('organization_id');
+    expect(res.body).to.have.property('store_id');
+    expect(res.body).to.have.property('created_at');
+    expect(res.body).to.have.property('updated_at');
+  });
+}

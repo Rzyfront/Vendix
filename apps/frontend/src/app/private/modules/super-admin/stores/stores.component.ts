@@ -397,7 +397,17 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       next: (response) => {
         console.log('Store stats response:', response);
         if (response.success && response.data) {
-          this.stats = response.data;
+          // Map backend response to component stats format
+          this.stats = {
+            total_stores: response.data.totalStores || 0,
+            active_stores: response.data.activeStores || 0,
+            inactive_stores: response.data.storesByState?.['false'] || 0,
+            suspended_stores: 0, // Backend doesn't track suspended separately
+            draft_stores: 0, // Backend doesn't track draft separately
+            total_revenue: 0, // Not provided by backend dashboard
+            total_orders: 0, // Not provided by backend dashboard
+            total_products: 0, // Not provided by backend dashboard
+          };
         } else {
           console.warn('Invalid stats response structure:', response);
           // Fallback to calculating stats from loaded data

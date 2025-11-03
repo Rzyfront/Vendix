@@ -83,7 +83,7 @@ export class RolesService {
     if (query.is_system_role !== undefined)
       params = params.set('is_system_role', query.is_system_role.toString());
 
-    return this.http.get<any>(`${this.apiUrl}/roles`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/admin/roles`, { params }).pipe(
       map((response) => {
         // Mapear los datos para asegurar que tengan la estructura correcta
         const mappedData = (response.data || []).map((role: any) => ({
@@ -113,7 +113,7 @@ export class RolesService {
    * Obtener rol por ID
    */
   getRoleById(id: number): Observable<Role> {
-    return this.http.get<Role>(`${this.apiUrl}/roles/${id}`).pipe(
+    return this.http.get<Role>(`${this.apiUrl}/admin/roles/${id}`).pipe(
       catchError((error) => {
         console.error('Error getting role:', error);
         return throwError(() => error);
@@ -127,7 +127,7 @@ export class RolesService {
   createRole(roleData: CreateRoleDto): Observable<Role> {
     this.isCreatingRole$.next(true);
 
-    return this.http.post<Role>(`${this.apiUrl}/roles`, roleData).pipe(
+    return this.http.post<Role>(`${this.apiUrl}/admin/roles`, roleData).pipe(
       finalize(() => this.isCreatingRole$.next(false)),
       catchError((error) => {
         console.error('Error creating role:', error);
@@ -142,13 +142,15 @@ export class RolesService {
   updateRole(id: number, roleData: UpdateRoleDto): Observable<Role> {
     this.isUpdatingRole$.next(true);
 
-    return this.http.patch<Role>(`${this.apiUrl}/roles/${id}`, roleData).pipe(
-      finalize(() => this.isUpdatingRole$.next(false)),
-      catchError((error) => {
-        console.error('Error updating role:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .patch<Role>(`${this.apiUrl}/admin/roles/${id}`, roleData)
+      .pipe(
+        finalize(() => this.isUpdatingRole$.next(false)),
+        catchError((error) => {
+          console.error('Error updating role:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -157,7 +159,7 @@ export class RolesService {
   deleteRole(id: number): Observable<void> {
     this.isDeletingRole$.next(true);
 
-    return this.http.delete<void>(`${this.apiUrl}/roles/${id}`).pipe(
+    return this.http.delete<void>(`${this.apiUrl}/admin/roles/${id}`).pipe(
       finalize(() => this.isDeletingRole$.next(false)),
       catchError((error) => {
         console.error('Error deleting role:', error);
@@ -174,7 +176,10 @@ export class RolesService {
     permissionData: AssignPermissionsDto,
   ): Observable<void> {
     return this.http
-      .post<void>(`${this.apiUrl}/roles/${roleId}/permissions`, permissionData)
+      .post<void>(
+        `${this.apiUrl}/admin/roles/${roleId}/permissions`,
+        permissionData,
+      )
       .pipe(
         catchError((error) => {
           console.error('Error assigning permissions to role:', error);
@@ -191,7 +196,7 @@ export class RolesService {
     permissionData: AssignPermissionsDto,
   ): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/roles/${roleId}/permissions`, {
+      .delete<void>(`${this.apiUrl}/admin/roles/${roleId}/permissions`, {
         body: permissionData,
       })
       .pipe(
@@ -207,7 +212,7 @@ export class RolesService {
    */
   getRolePermissions(roleId: number): Observable<number[]> {
     return this.http
-      .get<any>(`${this.apiUrl}/roles/${roleId}/permissions`)
+      .get<any>(`${this.apiUrl}/admin/roles/${roleId}/permissions`)
       .pipe(
         map((response) => response.data?.permission_ids || []),
         catchError((error) => {
@@ -222,7 +227,7 @@ export class RolesService {
    */
   assignRoleToUser(roleData: AssignRoleToUserDto): Observable<void> {
     return this.http
-      .post<void>(`${this.apiUrl}/roles/assign-to-user`, roleData)
+      .post<void>(`${this.apiUrl}/admin/roles/assign-to-user`, roleData)
       .pipe(
         catchError((error) => {
           console.error('Error assigning role to user:', error);
@@ -236,7 +241,7 @@ export class RolesService {
    */
   removeRoleFromUser(roleData: RemoveRoleFromUserDto): Observable<void> {
     return this.http
-      .post<void>(`${this.apiUrl}/roles/remove-from-user`, roleData)
+      .post<void>(`${this.apiUrl}/admin/roles/remove-from-user`, roleData)
       .pipe(
         catchError((error) => {
           console.error('Error removing role from user:', error);
@@ -249,13 +254,15 @@ export class RolesService {
    * Obtener roles de un usuario
    */
   getUserRoles(userId: number): Observable<Role[]> {
-    return this.http.get<any>(`${this.apiUrl}/roles/user/${userId}/roles`).pipe(
-      map((response) => response.data || []),
-      catchError((error) => {
-        console.error('Error getting user roles:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<any>(`${this.apiUrl}/admin/roles/user/${userId}/roles`)
+      .pipe(
+        map((response) => response.data || []),
+        catchError((error) => {
+          console.error('Error getting user roles:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -263,7 +270,7 @@ export class RolesService {
    */
   getUserPermissions(userId: number): Observable<Permission[]> {
     return this.http
-      .get<any>(`${this.apiUrl}/roles/user/${userId}/permissions`)
+      .get<any>(`${this.apiUrl}/admin/roles/user/${userId}/permissions`)
       .pipe(
         map((response) => response.data || []),
         catchError((error) => {
@@ -290,36 +297,40 @@ export class RolesService {
     if (query.method) params = params.set('method', query.method);
     if (query.status) params = params.set('status', query.status);
 
-    return this.http.get<any>(`${this.apiUrl}/permissions`, { params }).pipe(
-      map((response) => {
-        return {
-          data: response.data,
-          pagination: {
-            page: response.meta?.page || 1,
-            limit: response.meta?.limit || 10,
-            total: response.meta?.total || 0,
-            total_pages: response.meta?.totalPages || 0,
-          },
-        } as PaginatedPermissionsResponse;
-      }),
-      finalize(() => this.isLoading$.next(false)),
-      catchError((error) => {
-        console.error('Error loading permissions:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<any>(`${this.apiUrl}/admin/permissions`, { params })
+      .pipe(
+        map((response) => {
+          return {
+            data: response.data,
+            pagination: {
+              page: response.meta?.page || 1,
+              limit: response.meta?.limit || 10,
+              total: response.meta?.total || 0,
+              total_pages: response.meta?.totalPages || 0,
+            },
+          } as PaginatedPermissionsResponse;
+        }),
+        finalize(() => this.isLoading$.next(false)),
+        catchError((error) => {
+          console.error('Error loading permissions:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
    * Obtener permiso por ID
    */
   getPermissionById(id: number): Observable<Permission> {
-    return this.http.get<Permission>(`${this.apiUrl}/permissions/${id}`).pipe(
-      catchError((error) => {
-        console.error('Error getting permission:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<Permission>(`${this.apiUrl}/admin/permissions/${id}`)
+      .pipe(
+        catchError((error) => {
+          console.error('Error getting permission:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -331,7 +342,7 @@ export class RolesService {
     this.isCreatingPermission$.next(true);
 
     return this.http
-      .post<Permission>(`${this.apiUrl}/permissions`, permissionData)
+      .post<Permission>(`${this.apiUrl}/admin/permissions`, permissionData)
       .pipe(
         finalize(() => this.isCreatingPermission$.next(false)),
         catchError((error) => {
@@ -351,7 +362,10 @@ export class RolesService {
     this.isUpdatingPermission$.next(true);
 
     return this.http
-      .patch<Permission>(`${this.apiUrl}/permissions/${id}`, permissionData)
+      .patch<Permission>(
+        `${this.apiUrl}/admin/permissions/${id}`,
+        permissionData,
+      )
       .pipe(
         finalize(() => this.isUpdatingPermission$.next(false)),
         catchError((error) => {
@@ -367,13 +381,15 @@ export class RolesService {
   deletePermission(id: number): Observable<void> {
     this.isDeletingPermission$.next(true);
 
-    return this.http.delete<void>(`${this.apiUrl}/permissions/${id}`).pipe(
-      finalize(() => this.isDeletingPermission$.next(false)),
-      catchError((error) => {
-        console.error('Error deleting permission:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .delete<void>(`${this.apiUrl}/admin/permissions/${id}`)
+      .pipe(
+        finalize(() => this.isDeletingPermission$.next(false)),
+        catchError((error) => {
+          console.error('Error deleting permission:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -381,7 +397,9 @@ export class RolesService {
    */
   searchPermissionByName(name: string): Observable<Permission> {
     return this.http
-      .get<Permission>(`${this.apiUrl}/permissions/search/by-name/${name}`)
+      .get<Permission>(
+        `${this.apiUrl}/admin/permissions/search/by-name/${name}`,
+      )
       .pipe(
         catchError((error) => {
           console.error('Error searching permission by name:', error);
@@ -402,9 +420,12 @@ export class RolesService {
     params = params.set('method', method);
 
     return this.http
-      .get<Permission>(`${this.apiUrl}/permissions/search/by-path-method`, {
-        params,
-      })
+      .get<Permission>(
+        `${this.apiUrl}/admin/permissions/search/by-path-method`,
+        {
+          params,
+        },
+      )
       .pipe(
         catchError((error) => {
           console.error(
@@ -422,7 +443,7 @@ export class RolesService {
    * Obtener estadísticas de roles y permisos
    */
   getRolesStats(): Observable<RoleStats> {
-    return this.http.get<any>(`${this.apiUrl}/roles/stats`).pipe(
+    return this.http.get<any>(`${this.apiUrl}/admin/roles/dashboard`).pipe(
       map(
         (response) =>
           response.data || {

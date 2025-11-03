@@ -99,7 +99,6 @@ export class OrdersService {
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
-      ...(store_id && { store_id }),
       ...(date_from &&
         date_to && {
           created_at: {

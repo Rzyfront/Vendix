@@ -7,6 +7,7 @@ import {
 } from '@nestjs/swagger';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
 import { ResponseService } from '../../common/responses/response.service';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 
 @ApiTags('Audit')
 @Controller('audit')
@@ -27,6 +28,7 @@ export class AuditController {
     description: 'Logs obtenidos exitosamente',
   })
   async getAuditLogs(
+    @RequestContext() user: any,
     @Query('userId') userId?: string,
     @Query('storeId') storeId?: string,
     @Query('action') action?: AuditAction,
@@ -68,6 +70,7 @@ export class AuditController {
     description: 'Estadísticas obtenidas exitosamente',
   })
   async getAuditStats(
+    @RequestContext() user: any,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
   ) {

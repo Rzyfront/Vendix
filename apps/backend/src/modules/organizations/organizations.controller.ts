@@ -22,6 +22,7 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { RequestContext } from '../../common/decorators/request-context.decorator';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('organizations')
@@ -34,7 +35,10 @@ export class OrganizationsController {
 
   @Post()
   @Permissions('organizations:create')
-  async create(@Body() createOrganizationDto: CreateOrganizationDto) {
+  async create(
+    @Body() createOrganizationDto: CreateOrganizationDto,
+    @RequestContext() user: any,
+  ) {
     try {
       const result = await this.organizationsService.create(
         createOrganizationDto,
@@ -53,7 +57,10 @@ export class OrganizationsController {
 
   @Get()
   @Permissions('organizations:read')
-  async findAll(@Query() query: OrganizationQueryDto) {
+  async findAll(
+    @Query() query: OrganizationQueryDto,
+    @RequestContext() user: any,
+  ) {
     try {
       const result = await this.organizationsService.findAll(query);
       return this.responseService.success(

@@ -1,0 +1,53 @@
+meta {
+  name: Get Purchase Order by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/orders/purchase-orders/1
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return single purchase order", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    
+    expect(res.body).to.have.property('id');
+    expect(res.body).to.have.property('supplier_id');
+    expect(res.body).to.have.property('location_id');
+    expect(res.body).to.have.property('status');
+    expect(res.body).to.have.property('total_amount');
+    expect(res.body).to.have.property('order_date');
+    expect(res.body).to.have.property('items');
+    
+    expect(res.body.id).to.be.a('number');
+    expect(res.body.supplier_id).to.be.a('number');
+    expect(res.body.location_id).to.be.a('number');
+    expect(res.body.status).to.be.a('string');
+    expect(res.body.total_amount).to.be.a('number');
+    expect(res.body.order_date).to.be.a('string');
+    expect(res.body.items).to.be.an('array');
+    
+    expect(res.body.status).to.be.oneOf(['draft', 'approved', 'pending', 'received', 'cancelled']);
+  });
+  
+  test("Should validate item calculations", function() {
+    if (res.body.items && res.body.items.length > 0) {
+      res.body.items.forEach(item => {
+        expect(item).to.have.property('product_id');
+        expect(item).to.have.property('quantity');
+        expect(item).to.have.property('unit_price');
+        expect(item).to.have.property('total_price');
+        
+        const expectedTotal = item.quantity * item.unit_price;
+        expect(item.total_price).to.equal(expectedTotal);
+      });
+    }
+  });
+}

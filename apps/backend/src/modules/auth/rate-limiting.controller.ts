@@ -14,12 +14,13 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { ResponseService } from '../../common/responses/response.service';
 
 @ApiTags('Rate Limiting')
 @Controller('rate-limiting')
 @ApiBearerAuth()
 export class RateLimitingController {
-  constructor() {}
+  constructor(private readonly responseService: ResponseService) {}
 
   @Get('status')
   @ApiOperation({
@@ -63,31 +64,43 @@ export class RateLimitingController {
     },
   })
   async getRateLimitStatus() {
-    // This would return the current rate limiting status
-    // For now, return static configuration
-    return {
-      endpoints: [
-        {
-          path: 'POST /auth/login',
-          limit: 1000,
-          window: '15 minutes',
-          status: 'active',
-        },
-        {
-          path: 'POST /auth/refresh',
-          limit: 10,
-          window: '5 minutes',
-          status: 'active',
-        },
-        {
-          path: 'POST /auth/register-*',
-          limit: 5,
-          window: '15 minutes',
-          status: 'active',
-        },
-      ],
-      blockedIPs: [],
-    };
+    try {
+      // This would return the current rate limiting status
+      // For now, return static configuration
+      const status = {
+        endpoints: [
+          {
+            path: 'POST /auth/login',
+            limit: 1000,
+            window: '15 minutes',
+            status: 'active',
+          },
+          {
+            path: 'POST /auth/refresh',
+            limit: 10,
+            window: '5 minutes',
+            status: 'active',
+          },
+          {
+            path: 'POST /auth/register-*',
+            limit: 5,
+            window: '15 minutes',
+            status: 'active',
+          },
+        ],
+        blockedIPs: [],
+      };
+
+      return this.responseService.success(
+        status,
+        'Estado de rate limiting obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener estado de rate limiting',
+        error.message,
+      );
+    }
   }
 
   @Get('attempts')
@@ -101,14 +114,26 @@ export class RateLimitingController {
     description: 'Intentos obtenidos exitosamente',
   })
   async getIPAttempts(@Query('ip') ip: string) {
-    // This would return attempts for a specific IP
-    return {
-      ip,
-      attempts: 0,
-      maxAttempts: 5,
-      resetTime: new Date(Date.now() + 15 * 60 * 1000),
-      isBlocked: false,
-    };
+    try {
+      // This would return attempts for a specific IP
+      const attempts = {
+        ip,
+        attempts: 0,
+        maxAttempts: 5,
+        resetTime: new Date(Date.now() + 15 * 60 * 1000),
+        isBlocked: false,
+      };
+
+      return this.responseService.success(
+        attempts,
+        'Intentos de IP obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener intentos de IP',
+        error.message,
+      );
+    }
   }
 
   @Post('reset')
@@ -122,11 +147,23 @@ export class RateLimitingController {
     description: 'Contador reseteado exitosamente',
   })
   async resetIPAttempts(@Query('ip') ip: string) {
-    // This would reset the attempts for a specific IP
-    return {
-      message: `Rate limiting reset for IP: ${ip}`,
-      resetAt: new Date(),
-    };
+    try {
+      // This would reset the attempts for a specific IP
+      const result = {
+        message: `Rate limiting reset for IP: ${ip}`,
+        resetAt: new Date(),
+      };
+
+      return this.responseService.success(
+        result,
+        'Contador de rate limiting reseteado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al resetear contador de rate limiting',
+        error.message,
+      );
+    }
   }
 
   @Put('config')
@@ -139,11 +176,23 @@ export class RateLimitingController {
     description: 'Configuración actualizada exitosamente',
   })
   async updateRateLimitConfig(@Body() config: any) {
-    // This would update rate limiting configuration
-    return {
-      message: 'Rate limiting configuration updated',
-      newConfig: config,
-    };
+    try {
+      // This would update rate limiting configuration
+      const result = {
+        message: 'Rate limiting configuration updated',
+        newConfig: config,
+      };
+
+      return this.responseService.updated(
+        result,
+        'Configuración de rate limiting actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al actualizar configuración de rate limiting',
+        error.message,
+      );
+    }
   }
 
   @Delete('blocked')
@@ -157,10 +206,22 @@ export class RateLimitingController {
     description: 'IP desbloqueada exitosamente',
   })
   async unblockIP(@Query('ip') ip: string) {
-    // This would unblock a specific IP
-    return {
-      message: `IP ${ip} has been unblocked`,
-      unblockedAt: new Date(),
-    };
+    try {
+      // This would unblock a specific IP
+      const result = {
+        message: `IP ${ip} has been unblocked`,
+        unblockedAt: new Date(),
+      };
+
+      return this.responseService.success(
+        result,
+        'IP desbloqueada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al desbloquear IP',
+        error.message,
+      );
+    }
   }
 }

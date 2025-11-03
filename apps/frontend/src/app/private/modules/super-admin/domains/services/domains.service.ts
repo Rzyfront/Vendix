@@ -56,7 +56,7 @@ export class DomainsService {
       params = params.set('organization_id', query.organization_id.toString());
 
     return this.http.get<PaginatedResponse<DomainListItem[]>>(
-      `${this.apiUrl}/domains`,
+      `${this.apiUrl}/admin/domains`,
       { params },
     );
   }
@@ -65,14 +65,19 @@ export class DomainsService {
    * Get domain by ID
    */
   getDomainById(id: number): Observable<ApiResponse<Domain>> {
-    return this.http.get<ApiResponse<Domain>>(`${this.apiUrl}/domains/${id}`);
+    return this.http.get<ApiResponse<Domain>>(
+      `${this.apiUrl}/admin/domains/${id}`,
+    );
   }
 
   /**
    * Create a new domain
    */
   createDomain(data: CreateDomainDto): Observable<ApiResponse<Domain>> {
-    return this.http.post<ApiResponse<Domain>>(`${this.apiUrl}/domains`, data);
+    return this.http.post<ApiResponse<Domain>>(
+      `${this.apiUrl}/admin/domains`,
+      data,
+    );
   }
 
   /**
@@ -83,7 +88,7 @@ export class DomainsService {
     data: UpdateDomainDto,
   ): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/domains/${id}`,
+      `${this.apiUrl}/admin/domains/${id}`,
       data,
     );
   }
@@ -92,14 +97,16 @@ export class DomainsService {
    * Delete a domain
    */
   deleteDomain(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/domains/${id}`);
+    return this.http.delete<ApiResponse<void>>(
+      `${this.apiUrl}/admin/domains/${id}`,
+    );
   }
 
   /**
    * Get domain statistics (simplified version for dashboard)
    */
   getDomainStatsList(): Observable<ApiResponse<DomainStats>> {
-    return this.http.get<any>(`${this.apiUrl}/domains/stats`).pipe(
+    return this.http.get<any>(`${this.apiUrl}/admin/domains/dashboard`).pipe(
       map((response: any) => {
         if (response.success && response.data) {
           // Map backend response to frontend interface
@@ -132,7 +139,7 @@ export class DomainsService {
    */
   verifyDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.post<ApiResponse<Domain>>(
-      `${this.apiUrl}/domains/${id}/verify`,
+      `${this.apiUrl}/admin/domains/${id}/verify`,
       {},
     );
   }
@@ -142,7 +149,7 @@ export class DomainsService {
    */
   activateDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/domains/${id}/activate`,
+      `${this.apiUrl}/admin/domains/${id}/activate`,
       {},
     );
   }
@@ -152,7 +159,7 @@ export class DomainsService {
    */
   deactivateDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/domains/${id}/deactivate`,
+      `${this.apiUrl}/admin/domains/${id}/deactivate`,
       {},
     );
   }

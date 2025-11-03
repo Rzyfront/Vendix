@@ -41,6 +41,15 @@ export class PrismaService implements OnModuleInit {
               'stores',
               'domain_settings',
               'addresses',
+              'inventory_locations',
+              'inventory_movements',
+              'inventory_adjustments',
+              'stock_reservations',
+              'purchase_orders',
+              'sales_orders',
+              'stock_transfers',
+              'return_orders',
+              'suppliers',
             ];
             const storeScopedModels = [
               'store_users',
@@ -273,6 +282,54 @@ export class PrismaService implements OnModuleInit {
   }
   get role_permissions() {
     return this.client.role_permissions;
+  }
+  get inventory_locations() {
+    return this.client.inventory_locations;
+  }
+  get stock_levels() {
+    return this.client.stock_levels;
+  }
+  get inventory_batches() {
+    return this.client.inventory_batches;
+  }
+  get inventory_serial_numbers() {
+    return this.client.inventory_serial_numbers;
+  }
+  get suppliers() {
+    return this.client.suppliers;
+  }
+  get supplier_products() {
+    return this.client.supplier_products;
+  }
+  get inventory_adjustments() {
+    return this.client.inventory_adjustments;
+  }
+  get stock_reservations() {
+    return this.client.stock_reservations;
+  }
+  get purchase_orders() {
+    return this.client.purchase_orders;
+  }
+  get purchase_order_items() {
+    return this.client.purchase_order_items;
+  }
+  get sales_orders() {
+    return this.client.sales_orders;
+  }
+  get sales_order_items() {
+    return this.client.sales_order_items;
+  }
+  get stock_transfers() {
+    return this.client.stock_transfers;
+  }
+  get stock_transfer_items() {
+    return this.client.stock_transfer_items;
+  }
+  get return_orders() {
+    return this.client.return_orders;
+  }
+  get return_order_items() {
+    return this.client.return_order_items;
   }
 
   // Delegate special methods

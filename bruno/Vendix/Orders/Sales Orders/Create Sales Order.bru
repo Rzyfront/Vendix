@@ -1,0 +1,65 @@
+meta {
+  name: Create Sales Order
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/orders/sales-orders
+  body: {
+    "customer_id": 1,
+    "location_id": 1,
+    "expected_date": "2024-12-31T23:59:59.000Z",
+    "notes": "Test sales order",
+    "items": [
+      {
+        "product_id": 1,
+        "quantity": 5,
+        "unit_price": 99.99
+      }
+    ]
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should create sales order", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.be.an('object');
+    
+    expect(res.body).to.have.property('id');
+    expect(res.body).to.have.property('customer_id');
+    expect(res.body).to.have.property('location_id');
+    expect(res.body).to.have.property('status');
+    expect(res.body).to.have.property('total_amount');
+    expect(res.body).to.have.property('items');
+    
+    expect(res.body.id).to.be.a('number');
+    expect(res.body.customer_id).to.equal(1);
+    expect(res.body.location_id).to.equal(1);
+    expect(res.body.status).to.equal('draft');
+    expect(res.body.total_amount).to.be.a('number');
+    expect(res.body.items).to.be.an('array');
+    
+    if (res.body.items.length > 0) {
+      const item = res.body.items[0];
+      expect(item).to.have.property('product_id');
+      expect(item).to.have.property('quantity');
+      expect(item).to.have.property('unit_price');
+      expect(item).to.have.property('total_price');
+      
+      expect(item.product_id).to.equal(1);
+      expect(item.quantity).to.equal(5);
+      expect(item.unit_price).to.equal(99.99);
+      expect(item.total_price).to.equal(499.95);
+    }
+  });
+  
+  test("Should calculate total amount correctly", function() {
+    const expectedTotal = res.body.items.reduce((sum, item) => sum + item.total_price, 0);
+    expect(res.body.total_amount).to.equal(expectedTotal);
+  });
+}

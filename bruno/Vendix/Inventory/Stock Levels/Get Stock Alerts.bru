@@ -1,0 +1,55 @@
+meta {
+  name: Get Stock Alerts
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/inventory/stock-levels/alerts
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return stock alerts", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('array');
+    
+    if (res.body.length > 0) {
+      const alert = res.body[0];
+      expect(alert).to.have.property('product_id');
+      expect(alert).to.have.property('product_name');
+      expect(alert).to.have.property('location_id');
+      expect(alert).to.have.property('location_name');
+      expect(alert).to.have.property('current_stock');
+      expect(alert).to.have.property('reorder_point');
+      expect(alert).to.have.property('status');
+      
+      expect(alert.product_id).to.be.a('number');
+      expect(alert.product_name).to.be.a('string');
+      expect(alert.location_id).to.be.a('number');
+      expect(alert.location_name).to.be.a('string');
+      expect(alert.current_stock).to.be.a('number');
+      expect(alert.reorder_point).to.be.a('number');
+      expect(alert.status).to.be.oneOf(['low_stock', 'out_of_stock', 'optimal']);
+    }
+  });
+  
+  test("Should validate alert logic", function() {
+    if (res.body.length > 0) {
+      res.body.forEach(alert => {
+        if (alert.status === 'out_of_stock') {
+          expect(alert.current_stock).to.equal(0);
+        } else if (alert.status === 'low_stock') {
+          expect(alert.current_stock).to.be.greaterThan(0);
+          expect(alert.current_stock).to.be.lessThanOrEqual(alert.reorder_point);
+        } else if (alert.status === 'optimal') {
+          expect(alert.current_stock).to.be.greaterThan(alert.reorder_point);
+        }
+      });
+    }
+  });
+}

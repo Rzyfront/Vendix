@@ -59,7 +59,7 @@ export class StoresService {
     if (query?.organization_id)
       params = params.set('organization_id', query.organization_id.toString());
 
-    const url = `${this.apiUrl}/stores`;
+    const url = `${this.apiUrl}/admin/stores`;
     console.log(
       'Fetching stores from:',
       url,
@@ -74,7 +74,9 @@ export class StoresService {
    * Get store by ID
    */
   getStoreById(id: number): Observable<ApiResponse<Store>> {
-    return this.http.get<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`);
+    return this.http.get<ApiResponse<Store>>(
+      `${this.apiUrl}/admin/stores/${id}`,
+    );
   }
 
   /**
@@ -90,7 +92,10 @@ export class StoresService {
    * Create a new store
    */
   createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
-    return this.http.post<ApiResponse<Store>>(`${this.apiUrl}/stores`, data);
+    return this.http.post<ApiResponse<Store>>(
+      `${this.apiUrl}/admin/stores`,
+      data,
+    );
   }
 
   /**
@@ -101,7 +106,7 @@ export class StoresService {
     data: UpdateStoreDto,
   ): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}`,
+      `${this.apiUrl}/admin/stores/${id}`,
       data,
     );
   }
@@ -110,7 +115,9 @@ export class StoresService {
    * Delete a store
    */
   deleteStore(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/stores/${id}`);
+    return this.http.delete<ApiResponse<void>>(
+      `${this.apiUrl}/admin/stores/${id}`,
+    );
   }
 
   /**
@@ -134,11 +141,19 @@ export class StoresService {
   }
 
   /**
-   * Get store statistics (simplified version for dashboard)
+   * Get dashboard statistics for stores
    */
-  getStoreStatsList(): Observable<ApiResponse<StoreStats>> {
-    return this.http.get<ApiResponse<StoreStats>>(
-      `${this.apiUrl}/stores/stats`,
+  getStoreStatsList(): Observable<
+    ApiResponse<{
+      totalStores: number;
+      activeStores: number;
+      storesByType: Record<string, number>;
+      storesByState: Record<string, number>;
+      recentStores: any[];
+    }>
+  > {
+    return this.http.get<ApiResponse<any>>(
+      `${this.apiUrl}/admin/stores/dashboard`,
     );
   }
 

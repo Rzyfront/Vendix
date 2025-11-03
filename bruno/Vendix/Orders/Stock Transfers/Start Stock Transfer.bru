@@ -1,0 +1,151 @@
+meta {
+  name: Start Stock Transfer
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/stock-transfers/{{stockTransferId}}/start
+  body: json {
+    "notes": "Transfer started - items picked up from warehouse"
+  }
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Should start stock transfer successfully", function() {
+    expect(res.getStatus()).to.equal(200);
+    
+    const body = res.getBody();
+    expect(body).to.be.an('object');
+    
+    // Validate basic structure
+    expect(body).to.have.property('id');
+    expect(body).to.have.property('transferNumber');
+    expect(body).to.have.property('fromLocationId');
+    expect(body).to.have.property('toLocationId');
+    expect(body).to.have.property('status');
+    expect(body).to.have.property('expectedDate');
+    expect(body).to.have.property('notes');
+    expect(body).to.have.property('createdAt');
+    expect(body).to.have.property('updatedAt');
+    
+    // Validate status changed to IN_TRANSIT
+    expect(body.status).to.equal('IN_TRANSIT');
+    
+    // Validate data types
+    expect(body.transferNumber).to.be.a('string');
+    expect(body.fromLocationId).to.be.a('string');
+    expect(body.toLocationId).to.be.a('string');
+    expect(body.status).to.be.a('string');
+    expect(body.expectedDate).to.be.a('string');
+    expect(body.notes).to.be.a('string');
+    
+    // Validate transfer number format
+    expect(body.transferNumber).to.match(/^TRF-\d{4}-\d{3}$/);
+    
+    // Validate date format
+    expect(new Date(body.expectedDate)).to.be.a('date');
+    
+    // Validate nested objects
+    expect(body).to.have.property('fromLocation');
+    expect(body).to.have.property('toLocation');
+    expect(body).to.have.property('items');
+    
+    // Validate from location structure
+    const fromLocation = body.fromLocation;
+    expect(fromLocation).to.have.property('id');
+    expect(fromLocation).to.have.property('name');
+    expect(fromLocation).to.have.property('type');
+    expect(fromLocation).to.have.property('address');
+    expect(fromLocation).to.have.property('isActive');
+    
+    // Validate to location structure
+    const toLocation = body.toLocation;
+    expect(toLocation).to.have.property('id');
+    expect(toLocation).to.have.property('name');
+    expect(toLocation).to.have.property('type');
+    expect(toLocation).to.have.property('address');
+    expect(toLocation).to.have.property('isActive');
+    
+    // Validate items array
+    const items = body.items;
+    expect(items).to.be.an('array');
+    expect(items.length).to.be.at.least(1);
+    
+    items.forEach(item => {
+      expect(item).to.have.property('id');
+      expect(item).to.have.property('stockTransferId');
+      expect(item).to.have.property('productId');
+      expect(item).to.have.property('quantity');
+      expect(item).to.have.property('notes');
+      expect(item).to.have.property('product');
+      
+      // Validate product structure
+      const product = item.product;
+      expect(product).to.have.property('id');
+      expect(product).to.have.property('name');
+      expect(product).to.have.property('sku');
+      expect(product).to.have.property('description');
+      expect(product).to.have.property('price');
+      expect(product).to.have.property('cost');
+      expect(product).to.have.property('categoryId');
+      expect(product).to.have.property('brandId');
+      
+      // Validate item data types
+      expect(item.quantity).to.be.a('number');
+      expect(item.quantity).to.be.at.least(1);
+      expect(item.notes).to.be.a('string');
+    });
+    
+    // Validate timestamps
+    expect(new Date(body.createdAt)).to.be.a('date');
+    expect(new Date(body.updatedAt)).to.be.a('date');
+    expect(new Date(body.updatedAt)).to.be.at.least(new Date(body.createdAt));
+    
+    // Validate workflow progression
+    // After starting, transfer should be in transit
+    expect(['IN_TRANSIT']).to.include(body.status);
+    
+    // Validate location IDs are different
+    expect(body.fromLocationId).to.not.equal(body.toLocationId);
+  });
+  
+  test("Should validate request data structure", function() {
+    const requestBody = JSON.parse(req.getBody());
+    
+    // Validate optional fields
+    if (requestBody.notes) {
+      expect(requestBody.notes).to.be.a('string');
+    }
+  });
+  
+  test("Should handle invalid transfer status", function() {
+    // This test would be run with a transfer that's already completed/cancelled
+    // Expected behavior: 400 status with appropriate error message
+    if (res.getStatus() === 400) {
+      const body = res.getBody();
+      expect(body).to.have.property('message');
+      expect(body.message).to.include('status');
+    }
+  });
+  
+  test("Should handle non-existent stock transfer", function() {
+    // This test would be run with a non-existent ID
+    // Expected behavior: 404 status with appropriate error message
+    if (res.getStatus() === 404) {
+      const body = res.getBody();
+      expect(body).to.have.property('message');
+      expect(body.message).to.include('not found');
+    }
+  });
+  
+  test("Should validate response time", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}

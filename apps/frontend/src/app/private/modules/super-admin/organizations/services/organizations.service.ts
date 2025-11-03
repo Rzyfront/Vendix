@@ -90,7 +90,7 @@ export class OrganizationsService {
     if (query?.state) params = params.set('state', query.state);
 
     return this.http.get<PaginatedResponse<Organization[]>>(
-      `${this.apiUrl}/organizations`,
+      `${this.apiUrl}/admin/organizations`,
       { params },
     );
   }
@@ -100,7 +100,7 @@ export class OrganizationsService {
    */
   getOrganizationById(id: number): Observable<ApiResponse<Organization>> {
     return this.http.get<ApiResponse<Organization>>(
-      `${this.apiUrl}/organizations/${id}`,
+      `${this.apiUrl}/admin/organizations/${id}`,
     );
   }
 
@@ -120,7 +120,7 @@ export class OrganizationsService {
     data: CreateOrganizationDto,
   ): Observable<ApiResponse<Organization>> {
     return this.http.post<ApiResponse<Organization>>(
-      `${this.apiUrl}/organizations`,
+      `${this.apiUrl}/admin/organizations`,
       data,
     );
   }
@@ -133,7 +133,7 @@ export class OrganizationsService {
     data: UpdateOrganizationDto,
   ): Observable<ApiResponse<Organization>> {
     return this.http.patch<ApiResponse<Organization>>(
-      `${this.apiUrl}/organizations/${id}`,
+      `${this.apiUrl}/admin/organizations/${id}`,
       data,
     );
   }
@@ -143,7 +143,7 @@ export class OrganizationsService {
    */
   deleteOrganization(id: number): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(
-      `${this.apiUrl}/organizations/${id}`,
+      `${this.apiUrl}/admin/organizations/${id}`,
     );
   }
 
@@ -168,18 +168,21 @@ export class OrganizationsService {
   }
 
   /**
-   * Get organization statistics (simplified version for dashboard)
+   * Get dashboard statistics for organizations
    */
   getOrganizationStatsList(): Observable<
     ApiResponse<{
-      total_organizations: number;
-      active: number;
-      inactive: number;
-      suspended: number;
+      totalOrganizations: number;
+      activeOrganizations: number;
+      inactiveOrganizations: number;
+      suspendedOrganizations: number;
+      totalStores: number;
+      totalUsers: number;
+      recentOrganizations: any[];
     }>
   > {
     return this.http.get<ApiResponse<any>>(
-      `${this.apiUrl}/organizations/stats`,
+      `${this.apiUrl}/admin/organizations/dashboard`,
     );
   }
 }

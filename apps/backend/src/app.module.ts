@@ -1,4 +1,3 @@
-import { JonathanModule } from './modules/jonathan/jonathan.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
@@ -23,6 +22,11 @@ import { DomainsModule } from './modules/domains/domains.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { BypassEmailModule } from './modules/bypass-email/bypass-email.module';
+import { AdminOrganizationsModule } from './modules/admin-organizations/admin-organizations.module';
+import { AdminStoresModule } from './modules/admin-stores/admin-stores.module';
+import { AdminDomainsModule } from './modules/admin-domains/admin-domains.module';
+import { AdminRolesModule } from './modules/admin-roles/admin-roles.module';
+import { AdminUsersModule } from './modules/admin-users/admin-users.module';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { RequestContextService } from './common/context/request-context.service';
@@ -54,6 +58,12 @@ import { RequestContextInterceptor } from './common/interceptors/request-context
     RolesModule, // Módulo de roles y permisos
     PermissionsModule, // Módulo de permisos
     BypassEmailModule, // Módulo de bypass de email (solo desarrollo)
+    // Admin modules for SuperAdmin functionality
+    AdminOrganizationsModule,
+    AdminStoresModule,
+    AdminDomainsModule,
+    AdminRolesModule,
+    AdminUsersModule,
   ],
   controllers: [AppController],
   providers: [
