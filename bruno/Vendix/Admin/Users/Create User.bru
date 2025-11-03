@@ -29,18 +29,19 @@ tests {
   test("Create user successful", function() {
     expect(res.status).to.equal(201);
     expect(res.body).to.have.property('success', true);
-    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
     expect(res.body.data).to.have.property('id');
-    expect(res.body.data.email).to.equal('testuser@example.com');
   });
   
-  test("User data is complete", function() {
+  test("Response data is correct", function() {
+    expect(res.body.data.email).to.equal('testuser@example.com');
     expect(res.body.data.first_name).to.equal('Test');
     expect(res.body.data.last_name).to.equal('User');
     expect(res.body.data.organization_id).to.equal(1);
+    expect(res.body.data.username).to.equal('testuser');
   });
   
-  test("No password in response", function() {
+  test("No sensitive data exposed", function() {
     expect(res.body.data).to.not.have.property('password');
   });
 }
