@@ -8,8 +8,9 @@ export class UsersDashboardDto {
   organization_id?: number;
 
   @IsOptional()
-  @IsString()
-  store_id?: string;
+  @Transform(({ value }) => (value ? parseInt(value, 10) : undefined))
+  @IsInt()
+  store_id?: number;
 
   @IsOptional()
   @IsString()
@@ -32,6 +33,7 @@ export class UsersDashboardDto {
   limit?: number = 10;
 
   @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   include_inactive?: boolean = false;
 }

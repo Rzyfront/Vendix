@@ -10,6 +10,7 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AdminOrganizationsService } from './admin-organizations.service';
 import {
   CreateOrganizationDto,
@@ -23,6 +24,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../auth/enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
 
+@ApiTags('Admin Organizations')
 @Controller('admin/organizations')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
@@ -33,145 +35,136 @@ export class AdminOrganizationsController {
   ) {}
 
   @Post()
+  @ApiOperation({ summary: 'Create a new organization' })
+  @ApiResponse({
+    status: 201,
+    description: 'Organization created successfully',
+  })
   async create(@Body() createOrganizationDto: CreateOrganizationDto) {
-    try {
-      const result = await this.adminOrganizationsService.create(
-        createOrganizationDto,
-      );
-      return this.responseService.success(
-        result,
-        'Organización creada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al crear la organización',
-        error.message,
-      );
-    }
+    const result = await this.adminOrganizationsService.create(
+      createOrganizationDto,
+    );
+    return this.responseService.created(
+      result,
+      'Organization created successfully',
+    );
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'Get all organizations with pagination and filtering',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Organizations retrieved successfully',
+  })
   async findAll(@Query() query: AdminOrganizationQueryDto) {
-    try {
-      const result = await this.adminOrganizationsService.findAll(query);
-      return this.responseService.success(
-        result.data,
-        'Organizaciones obtenidas exitosamente',
-        result.meta,
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las organizaciones',
-        error.message,
-      );
-    }
+    const result = await this.adminOrganizationsService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Organizations retrieved successfully',
+    );
   }
 
-  @Get('stats')
-  async getStats() {
-    try {
-      const result = await this.adminOrganizationsService.getDashboardStats();
-      return this.responseService.success(
-        result,
-        'Estadísticas de organizaciones obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas de organizaciones',
-        error.message,
-      );
-    }
+  @Get('dashboard')
+  @ApiOperation({ summary: 'Get dashboard statistics for organizations' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dashboard statistics retrieved successfully',
+  })
+  async getDashboardStats() {
+    const stats = await this.adminOrganizationsService.getDashboardStats();
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved successfully',
+    );
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get an organization by ID' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.adminOrganizationsService.findOne(id);
-      return this.responseService.success(
-        result,
-        'Organización obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener la organización',
-        error.message,
-      );
-    }
+    const organization = await this.adminOrganizationsService.findOne(id);
+    return this.responseService.success(
+      organization,
+      'Organization retrieved successfully',
+    );
   }
 
   @Get('slug/:slug')
+  @ApiOperation({ summary: 'Get an organization by slug' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   async findBySlug(@Param('slug') slug: string) {
-    try {
-      const result = await this.adminOrganizationsService.findBySlug(slug);
-      return this.responseService.success(
-        result,
-        'Organización obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener la organización',
-        error.message,
-      );
-    }
+    const organization = await this.adminOrganizationsService.findBySlug(slug);
+    return this.responseService.success(
+      organization,
+      'Organization retrieved successfully',
+    );
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update an organization' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization updated successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateOrganizationDto: UpdateOrganizationDto,
   ) {
-    try {
-      const result = await this.adminOrganizationsService.update(
-        id,
-        updateOrganizationDto,
-      );
-      return this.responseService.success(
-        result,
-        'Organización actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al actualizar la organización',
-        error.message,
-      );
-    }
+    const organization = await this.adminOrganizationsService.update(
+      id,
+      updateOrganizationDto,
+    );
+    return this.responseService.updated(
+      organization,
+      'Organization updated successfully',
+    );
   }
 
   @Delete(':id')
+  @ApiOperation({ summary: 'Delete an organization' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization deleted successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
+  @ApiResponse({
+    status: 409,
+    description: 'Cannot delete organization with existing data',
+  })
   async remove(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.adminOrganizationsService.remove(id);
-      return this.responseService.success(
-        result,
-        'Organización eliminada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al eliminar la organización',
-        error.message,
-      );
-    }
+    await this.adminOrganizationsService.remove(id);
+    return this.responseService.deleted('Organization deleted successfully');
   }
 
   @Get(':id/stats')
+  @ApiOperation({ summary: 'Get organization statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Organization statistics retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Organization not found' })
   async getOrganizationStats(
     @Param('id', ParseIntPipe) id: number,
     @Query() query: OrganizationDashboardDto,
   ) {
-    try {
-      const result = await this.adminOrganizationsService.getDashboard(
-        id,
-        query,
-      );
-      return this.responseService.success(
-        result,
-        'Estadísticas organizacionales obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas organizacionales',
-        error.message,
-      );
-    }
+    const stats = await this.adminOrganizationsService.getDashboard(id, query);
+    return this.responseService.success(
+      stats,
+      'Organization statistics retrieved successfully',
+    );
   }
 }

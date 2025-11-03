@@ -33,47 +33,22 @@ export class AdminUsersController {
   @ApiResponse({ status: 201, description: 'User created successfully' })
   @ApiResponse({ status: 409, description: 'Email already exists' })
   async create(@Body() createUserDto: CreateUserDto) {
-    try {
-      const result = await this.adminUsersService.create(createUserDto);
-      return this.responseService.created(
-        result,
-        'Usuario creado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.create(createUserDto);
+    return this.responseService.created(result, 'User created successfully');
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all users with pagination and filtering' })
   @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
   async findAll(@Query() query: UserQueryDto) {
-    try {
-      const result = await this.adminUsersService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Usuarios obtenidos exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
-        'Usuarios obtenidos exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener los usuarios',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Users retrieved successfully',
+    );
   }
 
   @Get('dashboard')
@@ -83,19 +58,11 @@ export class AdminUsersController {
     description: 'Dashboard statistics retrieved successfully',
   })
   async getDashboardStats() {
-    try {
-      const result = await this.adminUsersService.getDashboardStats();
-      return this.responseService.success(
-        result,
-        'Estadísticas del dashboard obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las estadísticas del dashboard',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const stats = await this.adminUsersService.getDashboardStats();
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved successfully',
+    );
   }
 
   @Get(':id')
@@ -103,19 +70,8 @@ export class AdminUsersController {
   @ApiResponse({ status: 200, description: 'User retrieved successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async findOne(@Param('id') id: string) {
-    try {
-      const result = await this.adminUsersService.findOne(+id);
-      return this.responseService.success(
-        result,
-        'Usuario obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const user = await this.adminUsersService.findOne(+id);
+    return this.responseService.success(user, 'User retrieved successfully');
   }
 
   @Patch(':id')
@@ -124,19 +80,8 @@ export class AdminUsersController {
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiResponse({ status: 409, description: 'Email already exists' })
   async update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    try {
-      const result = await this.adminUsersService.update(+id, updateUserDto);
-      return this.responseService.updated(
-        result,
-        'Usuario actualizado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const user = await this.adminUsersService.update(+id, updateUserDto);
+    return this.responseService.updated(user, 'User updated successfully');
   }
 
   @Delete(':id')
@@ -148,16 +93,8 @@ export class AdminUsersController {
     description: 'Cannot delete super admin users',
   })
   async remove(@Param('id') id: string) {
-    try {
-      await this.adminUsersService.remove(+id);
-      return this.responseService.deleted('Usuario eliminado exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.adminUsersService.remove(+id);
+    return this.responseService.deleted('User deleted successfully');
   }
 
   @Post(':id/activate')
@@ -165,19 +102,8 @@ export class AdminUsersController {
   @ApiResponse({ status: 200, description: 'User activated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async activate(@Param('id') id: string) {
-    try {
-      const result = await this.adminUsersService.activateUser(+id);
-      return this.responseService.success(
-        result,
-        'Usuario activado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al activar el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.activateUser(+id);
+    return this.responseService.success(result, 'User activated successfully');
   }
 
   @Post(':id/deactivate')
@@ -185,19 +111,11 @@ export class AdminUsersController {
   @ApiResponse({ status: 200, description: 'User deactivated successfully' })
   @ApiResponse({ status: 404, description: 'User not found' })
   async deactivate(@Param('id') id: string) {
-    try {
-      const result = await this.adminUsersService.deactivateUser(+id);
-      return this.responseService.success(
-        result,
-        'Usuario desactivado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al desactivar el usuario',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.deactivateUser(+id);
+    return this.responseService.success(
+      result,
+      'User deactivated successfully',
+    );
   }
 
   @Post(':userId/roles/:roleId')
@@ -209,16 +127,8 @@ export class AdminUsersController {
     @Param('userId') userId: string,
     @Param('roleId') roleId: string,
   ) {
-    try {
-      const result = await this.adminUsersService.assignRole(+userId, +roleId);
-      return this.responseService.success(result, 'Rol asignado exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al asignar el rol',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.assignRole(+userId, +roleId);
+    return this.responseService.success(result, 'Role assigned successfully');
   }
 
   @Delete(':userId/roles/:roleId')
@@ -236,15 +146,7 @@ export class AdminUsersController {
     @Param('userId') userId: string,
     @Param('roleId') roleId: string,
   ) {
-    try {
-      const result = await this.adminUsersService.removeRole(+userId, +roleId);
-      return this.responseService.success(result, 'Rol removido exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al remover el rol',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminUsersService.removeRole(+userId, +roleId);
+    return this.responseService.success(result, 'Role removed successfully');
   }
 }

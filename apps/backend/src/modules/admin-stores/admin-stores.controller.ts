@@ -36,44 +36,22 @@ export class AdminStoresController {
   @ApiOperation({ summary: 'Create a new store' })
   @ApiResponse({ status: 201, description: 'Store created successfully' })
   async create(@Body() createStoreDto: CreateStoreDto) {
-    try {
-      const result = await this.adminStoresService.create(createStoreDto);
-      return this.responseService.created(result, 'Tienda creada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear la tienda',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminStoresService.create(createStoreDto);
+    return this.responseService.created(result, 'Store created successfully');
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all stores with pagination and filtering' })
   @ApiResponse({ status: 200, description: 'Stores retrieved successfully' })
   async findAll(@Query() query: AdminStoreQueryDto) {
-    try {
-      const result = await this.adminStoresService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Tiendas obtenidas exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
-        'Tiendas obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las tiendas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.adminStoresService.findAll(query);
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Stores retrieved successfully',
+    );
   }
 
   @Get('dashboard')
@@ -83,19 +61,11 @@ export class AdminStoresController {
     description: 'Dashboard statistics retrieved successfully',
   })
   async getDashboardStats() {
-    try {
-      const result = await this.adminStoresService.getDashboardStats();
-      return this.responseService.success(
-        result,
-        'Estadísticas del dashboard obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las estadísticas del dashboard',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const stats = await this.adminStoresService.getDashboardStats();
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved successfully',
+    );
   }
 
   @Get(':id')
@@ -103,19 +73,8 @@ export class AdminStoresController {
   @ApiResponse({ status: 200, description: 'Store retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Store not found' })
   async findOne(@Param('id') id: string) {
-    try {
-      const result = await this.adminStoresService.findOne(+id);
-      return this.responseService.success(
-        result,
-        'Tienda obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la tienda',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const store = await this.adminStoresService.findOne(+id);
+    return this.responseService.success(store, 'Store retrieved successfully');
   }
 
   @Patch(':id')
@@ -126,19 +85,8 @@ export class AdminStoresController {
     @Param('id') id: string,
     @Body() updateStoreDto: UpdateStoreDto,
   ) {
-    try {
-      const result = await this.adminStoresService.update(+id, updateStoreDto);
-      return this.responseService.updated(
-        result,
-        'Tienda actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la tienda',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const store = await this.adminStoresService.update(+id, updateStoreDto);
+    return this.responseService.updated(store, 'Store updated successfully');
   }
 
   @Delete(':id')
@@ -150,15 +98,7 @@ export class AdminStoresController {
     description: 'Cannot delete store with existing data',
   })
   async remove(@Param('id') id: string) {
-    try {
-      await this.adminStoresService.remove(+id);
-      return this.responseService.deleted('Tienda eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la tienda',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.adminStoresService.remove(+id);
+    return this.responseService.deleted('Store deleted successfully');
   }
 }

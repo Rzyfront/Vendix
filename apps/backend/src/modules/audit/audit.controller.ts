@@ -8,9 +8,15 @@ import {
 import { AuditService, AuditAction, AuditResource } from './audit.service';
 import { ResponseService } from '../../common/responses/response.service';
 import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { UserRole } from '../auth/enums/user-role.enum';
 
-@ApiTags('Audit')
-@Controller('audit')
+@ApiTags('Admin Audit')
+@Controller('admin/audit')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.SUPER_ADMIN)
 @ApiBearerAuth()
 export class AuditController {
   constructor(
@@ -20,15 +26,14 @@ export class AuditController {
 
   @Get('logs')
   @ApiOperation({
-    summary: 'Obtener logs de auditoría',
-    description: 'Consulta los logs de auditoría con filtros opcionales',
+    summary: 'Get audit logs',
+    description: 'Retrieve audit logs with optional filters',
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Logs obtenidos exitosamente',
+    description: 'Audit logs retrieved successfully',
   })
   async getAuditLogs(
-    @RequestContext() user: any,
     @Query('userId') userId?: string,
     @Query('storeId') storeId?: string,
     @Query('action') action?: AuditAction,
@@ -62,15 +67,14 @@ export class AuditController {
 
   @Get('stats')
   @ApiOperation({
-    summary: 'Obtener estadísticas de auditoría',
-    description: 'Obtiene estadísticas generales de los logs de auditoría',
+    summary: 'Get audit statistics',
+    description: 'Retrieve general statistics from audit logs',
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Estadísticas obtenidas exitosamente',
+    description: 'Audit statistics retrieved successfully',
   })
   async getAuditStats(
-    @RequestContext() user: any,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
   ) {
