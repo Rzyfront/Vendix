@@ -20,7 +20,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('taxes')
@@ -35,10 +36,13 @@ export class TaxesController {
   @Permissions('taxes:create')
   async create(
     @Body() createTaxCategoryDto: CreateTaxCategoryDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const tax = await this.taxesService.create(createTaxCategoryDto, user);
+      const tax = await this.taxesService.create(
+        createTaxCategoryDto,
+        req.user,
+      );
       return this.responseService.created(
         tax,
         'Categoría de impuesto creada exitosamente',
@@ -83,10 +87,10 @@ export class TaxesController {
   @Permissions('taxes:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const tax = await this.taxesService.findOne(id, user);
+      const tax = await this.taxesService.findOne(id, req.user);
       return this.responseService.success(
         tax,
         'Categoría de impuesto obtenida exitosamente',
@@ -104,13 +108,13 @@ export class TaxesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateTaxCategoryDto: UpdateTaxCategoryDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const tax = await this.taxesService.update(
         id,
         updateTaxCategoryDto,
-        user,
+        req.user,
       );
       return this.responseService.updated(
         tax,
@@ -128,10 +132,10 @@ export class TaxesController {
   @Permissions('taxes:delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      await this.taxesService.remove(id, user);
+      await this.taxesService.remove(id, req.user);
       return this.responseService.deleted(
         'Categoría de impuesto eliminada exitosamente',
       );

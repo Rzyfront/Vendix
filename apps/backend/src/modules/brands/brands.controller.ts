@@ -16,7 +16,8 @@ import { BrandsService } from './brands.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('brands')
@@ -31,10 +32,10 @@ export class BrandsController {
   @Permissions('brands:create')
   async create(
     @Body() createBrandDto: CreateBrandDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const brand = await this.brandsService.create(createBrandDto, user);
+      const brand = await this.brandsService.create(createBrandDto, req.user);
       return this.responseService.created(brand, 'Marca creada exitosamente');
     } catch (error) {
       return this.responseService.error('Error al crear marca', error.message);
@@ -147,10 +148,14 @@ export class BrandsController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateBrandDto: UpdateBrandDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const brand = await this.brandsService.update(id, updateBrandDto, user);
+      const brand = await this.brandsService.update(
+        id,
+        updateBrandDto,
+        req.user,
+      );
       return this.responseService.updated(
         brand,
         'Marca actualizada exitosamente',
@@ -167,10 +172,10 @@ export class BrandsController {
   @Permissions('brands:update')
   async activate(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const brand = await this.brandsService.activate(id, user);
+      const brand = await this.brandsService.activate(id, req.user);
       return this.responseService.updated(brand, 'Marca activada exitosamente');
     } catch (error) {
       return this.responseService.error(
@@ -184,10 +189,10 @@ export class BrandsController {
   @Permissions('brands:delete')
   async deactivate(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      await this.brandsService.deactivate(id, user);
+      await this.brandsService.deactivate(id, req.user);
       return this.responseService.deleted('Marca desactivada exitosamente');
     } catch (error) {
       return this.responseService.error(
@@ -201,10 +206,10 @@ export class BrandsController {
   @Permissions('brands:admin_delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      await this.brandsService.remove(id, user);
+      await this.brandsService.remove(id, req.user);
       return this.responseService.deleted('Marca eliminada exitosamente');
     } catch (error) {
       return this.responseService.error(

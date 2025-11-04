@@ -17,7 +17,8 @@ import { AddressesService } from './addresses.service';
 import { CreateAddressDto, UpdateAddressDto, AddressQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('addresses')
@@ -32,11 +33,13 @@ export class AddressesController {
   @Permissions('addresses:create')
   async create(
     @Body() createAddressDto: CreateAddressDto,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const result = await this.addressesService.create(createAddressDto, user);
+      const result = await this.addressesService.create(
+        createAddressDto,
+        req.user,
+      );
       return this.responseService.created(
         result,
         'Dirección creada exitosamente',
@@ -53,11 +56,10 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findAll(
     @Query() query: AddressQueryDto,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const result = await this.addressesService.findAll(query, user);
+      const result = await this.addressesService.findAll(query, req.user);
 
       if (result.data && result.meta) {
         return this.responseService.paginated(
@@ -85,11 +87,10 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findByStore(
     @Param('storeId', ParseIntPipe) storeId: number,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const result = await this.addressesService.findByStore(storeId, user);
+      const result = await this.addressesService.findByStore(storeId, req.user);
 
       if (result.data && result.meta) {
         return this.responseService.paginated(
@@ -117,11 +118,10 @@ export class AddressesController {
   @Permissions('addresses:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const result = await this.addressesService.findOne(id, user);
+      const result = await this.addressesService.findOne(id, req.user);
       return this.responseService.success(
         result,
         'Dirección obtenida exitosamente',
@@ -139,14 +139,13 @@ export class AddressesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAddressDto: UpdateAddressDto,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.addressesService.update(
         id,
         updateAddressDto,
-        user,
+        req.user,
       );
       return this.responseService.updated(
         result,
@@ -165,11 +164,10 @@ export class AddressesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      await this.addressesService.remove(id, user);
+      await this.addressesService.remove(id, req.user);
       return this.responseService.deleted('Dirección eliminada exitosamente');
     } catch (error) {
       return this.responseService.error(

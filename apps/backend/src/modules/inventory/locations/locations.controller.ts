@@ -12,7 +12,8 @@ import { LocationsService } from './locations.service';
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { LocationQueryDto } from './dto/location-query.dto';
-import { RequestContext } from '../../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../../common/responses/response.service';
 
 @Controller('inventory/locations')
@@ -25,7 +26,7 @@ export class LocationsController {
   @Post()
   async create(
     @Body() createLocationDto: CreateLocationDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.locationsService.create(createLocationDto);
@@ -43,7 +44,10 @@ export class LocationsController {
   }
 
   @Get()
-  async findAll(@Query() query: LocationQueryDto, @RequestContext() user: any) {
+  async findAll(
+    @Query() query: LocationQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const result = await this.locationsService.findAll(query);
       if (result.data && result.meta) {
@@ -69,7 +73,7 @@ export class LocationsController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @RequestContext() user: any) {
+  async findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     try {
       const result = await this.locationsService.findOne(+id);
       return this.responseService.success(
@@ -89,7 +93,7 @@ export class LocationsController {
   async update(
     @Param('id') id: string,
     @Body() updateLocationDto: UpdateLocationDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.locationsService.update(+id, updateLocationDto);
@@ -107,7 +111,7 @@ export class LocationsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @RequestContext() user: any) {
+  async remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     try {
       await this.locationsService.remove(+id);
       return this.responseService.deleted('Ubicación eliminada exitosamente');

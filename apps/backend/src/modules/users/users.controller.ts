@@ -23,7 +23,7 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('users')
@@ -38,7 +38,7 @@ export class UsersController {
   @Permissions('users:create')
   async create(
     @Body() createUserDto: CreateUserDto,
-    @RequestContext() currentUser: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const user = await this.usersService.create(createUserDto);
@@ -54,7 +54,10 @@ export class UsersController {
 
   @Get()
   @Permissions('users:read')
-  async findAll(@Query() query: UserQueryDto, @RequestContext() user: any) {
+  async findAll(
+    @Query() query: UserQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const result = await this.usersService.findAll(query);
       if (result.data && result.meta) {

@@ -16,7 +16,8 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('orders')
@@ -31,10 +32,10 @@ export class OrdersController {
   @Permissions('orders:create')
   async create(
     @Body() createOrderDto: CreateOrderDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      const result = await this.ordersService.create(createOrderDto, user);
+      const result = await this.ordersService.create(createOrderDto, req.user);
       return this.responseService.created(result, 'Orden creada exitosamente');
     } catch (error) {
       return this.responseService.error(

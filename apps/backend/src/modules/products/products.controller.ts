@@ -23,7 +23,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('products')
@@ -37,7 +38,7 @@ export class ProductsController {
   @Permissions('products:create')
   async create(
     @Body() createProductDto: CreateProductDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.productsService.create(createProductDto);
@@ -56,7 +57,10 @@ export class ProductsController {
 
   @Get()
   @Permissions('products:read')
-  async findAll(@Query() query: ProductQueryDto, @RequestContext() user: any) {
+  async findAll(
+    @Query() query: ProductQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const result = await this.productsService.findAll(query);
       if (result.data && result.meta) {

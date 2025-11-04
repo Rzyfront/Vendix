@@ -7,7 +7,8 @@ import {
 } from '@nestjs/swagger';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
 import { ResponseService } from '../../common/responses/response.service';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';

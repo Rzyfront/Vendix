@@ -21,7 +21,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @Controller('stores')
 @UseGuards(PermissionsGuard)
@@ -35,7 +36,7 @@ export class StoresController {
   @Permissions('stores:create')
   async create(
     @Body() createStoreDto: CreateStoreDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const store = await this.storesService.create(createStoreDto);
@@ -62,7 +63,10 @@ export class StoresController {
 
   @Get()
   @Permissions('stores:read')
-  async findAll(@Query() query: StoreQueryDto, @RequestContext() user: any) {
+  async findAll(
+    @Query() query: StoreQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const result = await this.storesService.findAll(query);
       return this.responseService.paginated(

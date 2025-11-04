@@ -16,7 +16,8 @@ import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('categories')
@@ -31,12 +32,12 @@ export class CategoriesController {
   @Permissions('categories:create')
   async create(
     @Body() createCategoryDto: CreateCategoryDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.categoriesService.create(
         createCategoryDto,
-        user,
+        req.user,
       );
       return this.responseService.created(
         result,
@@ -106,13 +107,13 @@ export class CategoriesController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.categoriesService.update(
         id,
         updateCategoryDto,
-        user,
+        req.user,
       );
       return this.responseService.updated(
         result,
@@ -131,10 +132,10 @@ export class CategoriesController {
   @Permissions('categories:delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
-      await this.categoriesService.remove(id, user);
+      await this.categoriesService.remove(id, req.user);
       return this.responseService.deleted('Categoría eliminada exitosamente');
     } catch (error) {
       return this.responseService.error(

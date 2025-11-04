@@ -22,7 +22,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('organizations')
@@ -37,7 +38,7 @@ export class OrganizationsController {
   @Permissions('organizations:create')
   async create(
     @Body() createOrganizationDto: CreateOrganizationDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.organizationsService.create(
@@ -59,7 +60,7 @@ export class OrganizationsController {
   @Permissions('organizations:read')
   async findAll(
     @Query() query: OrganizationQueryDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.organizationsService.findAll(query);

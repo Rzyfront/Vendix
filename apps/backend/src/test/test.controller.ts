@@ -3,7 +3,8 @@ import { RolesGuard } from '../modules/auth/guards/roles.guard';
 import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
 import { Roles } from '../modules/auth/decorators/roles.decorator';
 import { RequirePermissions } from '../modules/auth/decorators/permissions.decorator';
-import { RequestContext } from '../common/decorators/request-context.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { Public } from '../modules/auth/decorators/public.decorator';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -125,13 +126,13 @@ export class TestController {
   }
 
   @Get('protected')
-  getProtectedData(@RequestContext() user: any) {
+  getProtectedData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Este endpoint requiere autenticación',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -139,13 +140,13 @@ export class TestController {
   @Get('admin-only')
   @UseGuards(RolesGuard)
   @Roles('admin')
-  getAdminData(@RequestContext() user: any) {
+  getAdminData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Solo administradores pueden ver esto',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -153,13 +154,13 @@ export class TestController {
   @Get('users-permission')
   @UseGuards(PermissionsGuard)
   @RequirePermissions('users.read')
-  getUsersData(@RequestContext() user: any) {
+  getUsersData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Requiere permiso específico: users.read',
       user: {
-        id: user.id,
-        email: user.email,
-        permissions: user.permissions,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -167,13 +168,13 @@ export class TestController {
   @Get('manager-or-admin')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  getManagerData(@RequestContext() user: any) {
+  getManagerData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Accesible por administradores y gerentes',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
