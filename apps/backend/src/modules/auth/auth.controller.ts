@@ -584,7 +584,7 @@ export class AuthController {
                 email: { type: 'string', example: 'usuario@email.com' },
                 first_name: { type: 'string', example: 'Juan' },
                 last_name: { type: 'string', example: 'Pérez' },
-                onboarding_completed: { type: 'boolean', example: true },
+                // onboarding_completed: { type: 'boolean', example: true }, // Moved to organization level
                 state: { type: 'string', example: 'active' },
               },
             },

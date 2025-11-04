@@ -60,7 +60,9 @@ export class AuthService {
     const existingUser = await this.prismaService.users.findFirst({
       where: {
         email,
-        onboarding_completed: false,
+        organizations: {
+          onboarding: false,
+        },
         user_roles: {
           some: {
             roles: {
@@ -171,7 +173,6 @@ export class AuthService {
           username: await this.generateUniqueUsername(email),
           email_verified: false,
           organization_id: organization.id,
-          onboarding_completed: false,
         },
       });
       // Crear user_settings para el owner con config app ORG_ADMIN
@@ -1984,19 +1985,21 @@ export class AuthService {
       );
     }
 
-    // Actualizar el estado del usuario como onboarding completado
-    const updatedUser = await this.prismaService.users.update({
+    // Obtener el usuario para obtener el organization_id
+    const user = await this.prismaService.users.findUnique({
       where: { id: user_id },
-      data: {
-        onboarding_completed: true,
-        updated_at: new Date(),
-      },
+      select: { organization_id: true },
     });
 
-    // Cambiar el estado de la organización de draft a active
+    if (!user) {
+      throw new BadRequestException('Usuario no encontrado');
+    }
+
+    // Marcar el onboarding de la organización como completado
     await this.prismaService.organizations.update({
-      where: { id: updatedUser.organization_id },
+      where: { id: user.organization_id },
       data: {
+        onboarding: true,
         state: 'active',
         updated_at: new Date(),
       },
@@ -2005,14 +2008,10 @@ export class AuthService {
     // Registrar auditoría
     await this.auditService.logUpdate(
       user_id,
-      AuditResource.USERS,
-      user_id,
-      { onboarding_completed: false },
-      { onboarding_completed: true },
-      {
-        action: 'complete_onboarding',
-        completed_at: new Date().toISOString(),
-      },
+      AuditResource.ORGANIZATIONS,
+      user.organization_id,
+      { onboarding: false },
+      { onboarding: true },
     );
 
     return {
@@ -2057,8 +2056,8 @@ export class AuthService {
       return { isValid: false, missingFields };
     }
 
-    // 0. Validar que el usuario NO haya completado ya el onboarding
-    if (user.onboarding_completed) {
+    // 0. Validar que la organización NO haya completado ya el onboarding
+    if (user.organizations?.onboarding) {
       missingFields.push('onboarding ya completado');
       return { isValid: false, missingFields };
     }
