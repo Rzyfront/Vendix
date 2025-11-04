@@ -9,6 +9,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { EmailModule } from '../../email/email.module';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { AuditModule } from '../audit/audit.module';
+import { OnboardingModule } from '../onboarding/onboarding.module';
 import { ResponseModule } from '../../common/responses/response.module';
 import {
   RateLimitMiddleware,
@@ -24,6 +25,7 @@ import {
     EmailModule,
     OrganizationsModule,
     AuditModule,
+    OnboardingModule,
     ResponseModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

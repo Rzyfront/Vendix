@@ -24,12 +24,12 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
 } from './dto/password.dto';
-import { RequestContext } from '../../common/decorators/request-context.decorator';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { UserRole } from './enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @Controller('auth')
 export class AuthController {
@@ -115,12 +115,12 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
-    @RequestContext() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.authService.registerStaff(
         registerStaffDto,
-        user.id,
+        req.user.id,
       );
       return this.responseService.success(result.user, result.message);
     } catch (error) {
@@ -190,9 +190,9 @@ export class AuthController {
   }
 
   @Get('profile')
-  async getProfile(@RequestContext() user: any) {
+  async getProfile(@Req() req: AuthenticatedRequest) {
     try {
-      const profile = await this.authService.getProfile(user.id);
+      const profile = await this.authService.getProfile(req.user.id);
       return this.responseService.success(
         profile,
         'Perfil obtenido exitosamente',

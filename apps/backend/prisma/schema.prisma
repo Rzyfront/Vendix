@@ -23,7 +23,7 @@ model users {
   updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
   first_name                String                      @db.VarChar(100)
   last_name                 String                      @db.VarChar(100)
-  onboarding_completed      Boolean                     @default(false)
+
   organization_id           Int
   addresses                 addresses[]                 @relation("user_addresses")
   api_keys                  api_keys[]
@@ -50,7 +50,7 @@ model users {
   stock_transfers stock_transfers[] @relation("stock_transfers_created_by")
   stock_transfers1 stock_transfers[] @relation("stock_transfers_approved_by")
 
-  @@index([onboarding_completed])
+
   @@index([email_verified])
   @@index([state])
 }
@@ -224,8 +224,11 @@ model organizations {
   website               String?                 @db.VarChar(255)
   description           String?
   state                 organization_state_enum @default(draft)
+  onboarding            Boolean                 @default(false)
   created_at            DateTime?               @default(now()) @db.Timestamp(6)
   updated_at            DateTime?               @default(now()) @db.Timestamp(6)
+
+  @@index([onboarding])
   addresses             addresses[]
   audit_logs            audit_logs[]
   domain_settings       domain_settings[]
@@ -264,6 +267,7 @@ model stores {
   store_code      String?           @unique @db.VarChar(20)
   store_type      store_type_enum   @default(physical)
   timezone        String?           @db.VarChar(50)
+  onboarding      Boolean           @default(false)
   addresses       addresses[]
   audit_logs      audit_logs[]
   categories      categories[]
@@ -280,6 +284,7 @@ model stores {
   inventory_locations inventory_locations[]
 
   @@unique([organization_id, slug])
+  @@index([onboarding])
 }
 
 model store_settings {

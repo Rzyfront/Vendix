@@ -20,6 +20,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../audit/audit.service';
+import { OnboardingService } from '../onboarding/onboarding.service';
 
 @Injectable()
 export class AuthService {
@@ -29,6 +30,7 @@ export class AuthService {
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
+    private readonly onboardingService: OnboardingService,
   ) {}
 
   async registerOwner(
@@ -1616,23 +1618,9 @@ export class AuthService {
   // ===== FUNCIONES DE ORGANIZACIÓN DESPUÉS DEL REGISTRO =====
 
   async canCreateOrganization(user_id: number): Promise<boolean> {
-    const user = await this.prismaService.users.findUnique({
-      where: { id: user_id },
-      include: {
-        user_roles: { include: { roles: true } },
-      },
-    });
-
-    if (!user || !user.email_verified) {
-      return false;
-    }
-
-    // Verificar si ya es propietario de alguna organización mediante user_roles
-    const isOwner = (user.user_roles || []).some(
-      (ur) => ur.roles?.name === 'owner',
-    );
-
-    return !isOwner;
+    const status =
+      await this.onboardingService.getUserOnboardingStatus(user_id);
+    return status.can_create_organization;
   }
 
   async getOnboardingStatus(user_id: number): Promise<{
@@ -1642,55 +1630,7 @@ export class AuthService {
     organization_id?: number;
     next_step: string;
   }> {
-    const user = await this.prismaService.users.findUnique({
-      where: { id: user_id },
-      include: {
-        user_roles: { include: { roles: true } },
-      },
-    });
-
-    if (!user) {
-      throw new NotFoundException('Usuario no encontrado');
-    }
-
-    const email_verified = user.email_verified;
-    const has_organization = !!user.organization_id;
-    const can_create_organization = await this.canCreateOrganization(user_id);
-
-    let next_step = '';
-    if (!email_verified) {
-      next_step = 'verify_email';
-    } else if (!has_organization) {
-      next_step = 'create_organization';
-    } else {
-      next_step = 'complete_setup';
-    }
-
-    return {
-      email_verified,
-      can_create_organization,
-      has_organization,
-      organization_id: user.organization_id,
-      next_step,
-    };
-  }
-
-  // ===== FUNCIONES DE ONBOARDING COMPLETO =====
-
-  async startOnboarding(user_id: number): Promise<{
-    status: string;
-    current_step: string;
-    message: string;
-    data?: any;
-  }> {
-    const onboardingStatus = await this.getOnboardingStatus(user_id);
-
-    return {
-      status: 'success',
-      current_step: onboardingStatus.next_step,
-      message: 'Estado de onboarding obtenido',
-      data: onboardingStatus,
-    };
+    return this.onboardingService.getUserOnboardingStatus(user_id);
   }
 
   async createOrganizationDuringOnboarding(

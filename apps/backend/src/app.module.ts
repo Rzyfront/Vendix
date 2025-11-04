@@ -19,6 +19,7 @@ import { RefundsModule } from './modules/refunds/refunds.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { DomainsModule } from './modules/domains/domains.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { BypassEmailModule } from './modules/bypass-email/bypass-email.module';
@@ -64,6 +65,7 @@ import { RequestContextInterceptor } from './common/interceptors/request-context
     AdminDomainsModule,
     AdminRolesModule,
     AdminUsersModule,
+    OnboardingModule,
   ],
   controllers: [AppController],
   providers: [
