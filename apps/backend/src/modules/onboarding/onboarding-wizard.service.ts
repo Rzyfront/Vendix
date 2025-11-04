@@ -115,7 +115,7 @@ export class OnboardingWizardService {
       const existingAddress = await this.prismaService.addresses.findFirst({
         where: {
           user_id: userId,
-          type: 'personal',
+          type: 'home',
         },
       });
 
@@ -143,7 +143,7 @@ export class OnboardingWizardService {
             state_province: setupUserDto.state_province,
             postal_code: setupUserDto.postal_code,
             country_code: setupUserDto.country_code || 'MX',
-            type: 'personal',
+            type: 'home',
             is_primary: true,
           },
         });
@@ -188,7 +188,7 @@ export class OnboardingWizardService {
       const existingAddress = await this.prismaService.addresses.findFirst({
         where: {
           organization_id: user.organization_id,
-          type: 'headquarters',
+          type: 'billing',
         },
       });
 
@@ -216,7 +216,7 @@ export class OnboardingWizardService {
             state_province: setupOrgDto.state_province,
             postal_code: setupOrgDto.postal_code,
             country_code: setupOrgDto.country_code || 'MX',
-            type: 'headquarters',
+            type: 'billing',
             is_primary: true,
           },
         });
@@ -247,7 +247,6 @@ export class OnboardingWizardService {
       data: {
         name: setupStoreDto.name,
         slug: slug,
-        description: setupStoreDto.description,
         store_type: setupStoreDto.store_type || 'physical',
         timezone: setupStoreDto.timezone || 'America/Mexico_City',
         organization_id: user.organization_id,

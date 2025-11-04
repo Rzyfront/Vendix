@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
+import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { EmailVerificationStepComponent } from './steps/email-verification-step.component';
 import { UserSetupStepComponent } from './steps/user-setup-step.component';
 import { OrganizationSetupStepComponent } from './steps/organization-setup-step.component';
@@ -101,7 +101,7 @@ export class OnboardingWizardComponent implements OnInit, OnDestroy {
     // Subscribe to current step changes
     this.wizardService.currentStep$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((step) => {
+      .subscribe((step: number) => {
         this.currentStep = step;
       });
 
@@ -117,7 +117,7 @@ export class OnboardingWizardComponent implements OnInit, OnDestroy {
   loadWizardStatus(): void {
     this.isLoading = true;
     this.wizardService.getWizardStatus().subscribe({
-      next: (response) => {
+      next: (response: any) => {
         this.isLoading = false;
         if (response.success && response.data) {
           // If already completed, redirect to dashboard
@@ -126,7 +126,7 @@ export class OnboardingWizardComponent implements OnInit, OnDestroy {
           }
         }
       },
-      error: (error) => {
+      error: (error: any) => {
         this.isLoading = false;
         console.error('Error loading wizard status:', error);
       },

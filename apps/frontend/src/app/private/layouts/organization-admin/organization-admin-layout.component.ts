@@ -7,21 +7,15 @@ import {
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { OnboardingService } from '../../../shared/components/onboarding/services/onboarding.service';
-import { OnboardingModalComponent } from '../../../shared/components/onboarding/onboarding-modal.component';
+import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
+
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-organization-admin-layout',
   standalone: true,
-  imports: [
-    CommonModule,
-    RouterModule,
-    SidebarComponent,
-    HeaderComponent,
-    OnboardingModalComponent,
-  ],
+  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -57,14 +51,6 @@ import { takeUntil } from 'rxjs/operators';
           </div>
         </main>
       </div>
-
-      <!-- Onboarding Modal -->
-      <app-onboarding-modal
-        *ngIf="showOnboardingModal"
-        [isOpen]="showOnboardingModal"
-        (isOpenChange)="onOnboardingModalChange($event)"
-        (completed)="onOnboardingCompleted($event)"
-      ></app-onboarding-modal>
     </div>
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
@@ -85,7 +71,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   constructor(
     private authFacade: AuthFacade,
-    private onboardingService: OnboardingService,
+    private onboardingWizardService: OnboardingWizardService,
   ) {
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
@@ -95,18 +81,11 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     // Check onboarding status when component initializes
     this.authFacade.needsOnboarding$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding) => {
+      .subscribe((needsOnboarding: any) => {
         if (needsOnboarding) {
-          this.showOnboardingModal = true;
-          this.onboardingService.openOnboarding();
+          // Redirect to wizard instead of showing modal
+          window.location.href = '/onboarding-wizard';
         }
-      });
-
-    // Escuchar estado del onboarding
-    this.onboardingService.onboardingState$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((state) => {
-        this.showOnboardingModal = state.isOpen;
       });
   }
 
@@ -228,17 +207,10 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     this.sidebarCollapsed = !this.sidebarCollapsed;
   }
 
-  onOnboardingModalChange(isOpen: boolean): void {
-    if (!isOpen) {
-      this.onboardingService.closeOnboarding();
-    }
-  }
-
   onOnboardingCompleted(event: any): void {
     console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
-    this.onboardingService.setCompleted(true);
     // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
   }
