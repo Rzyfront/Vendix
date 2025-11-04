@@ -7,7 +7,7 @@ import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class RouteManagerService implements OnDestroy {
   private router = inject(Router);
@@ -18,11 +18,13 @@ export class RouteManagerService implements OnDestroy {
   public routesConfigured$ = this.routesConfigured.asObservable();
 
   constructor() {
-    this.actions$.pipe(
-      ofType(ConfigActions.initializeAppSuccess),
-      tap(({ config }) => this.configureDynamicRoutes(config)),
-      takeUntil(this.destroy$)
-    ).subscribe();
+    this.actions$
+      .pipe(
+        ofType(ConfigActions.initializeAppSuccess),
+        tap(({ config }) => this.configureDynamicRoutes(config)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe();
   }
 
   private configureDynamicRoutes(appConfig: AppConfig): void {
@@ -35,7 +37,10 @@ export class RouteManagerService implements OnDestroy {
 
     const finalRoutes = this.buildFinalRoutes(appConfig);
     this.router.resetConfig(finalRoutes);
-    console.log('[RouteManager] Dynamic routes configured.', this.router.config);
+    console.log(
+      '[RouteManager] Dynamic routes configured.',
+      this.router.config,
+    );
 
     // Notificar que las rutas están listas
     this.routesConfigured.next(true);
@@ -48,7 +53,13 @@ export class RouteManagerService implements OnDestroy {
     return [
       ...staticAuthRoutes,
       ...dynamicAppRoutes,
-      { path: '**', loadComponent: () => import('../../shared/components/development-placeholder/development-placeholder.component').then(c => c.DevelopmentPlaceholderComponent) }
+      {
+        path: '**',
+        loadComponent: () =>
+          import(
+            '../../shared/components/development-placeholder/development-placeholder.component'
+          ).then((c) => c.DevelopmentPlaceholderComponent),
+      },
     ];
   }
 
@@ -57,20 +68,64 @@ export class RouteManagerService implements OnDestroy {
       {
         path: 'auth',
         children: [
-          { path: 'login', loadComponent: () => import('../../public/auth/components/contextual-login/contextual-login.component').then(c => c.ContextualLoginComponent) },
-          { path: 'register', loadComponent: () => import('../../public/auth/components/register-owner/register-owner.component').then(c => c.RegisterOwnerComponent) },
-          { path: 'forgot-owner-password', loadComponent: () => import('../../public/auth/components/forgot-owner-password/forgot-owner-password').then(c => c.ForgotOwnerPasswordComponent) },
-          { path: 'reset-owner-password', loadComponent: () => import('../../public/auth/components/reset-owner-password/reset-owner-password').then(c => c.ResetOwnerPasswordComponent) },
-          { path: 'verify-email', loadComponent: () => import('../../public/auth/components/email-verification/email-verification.component').then(c => c.EmailVerificationComponent) }
-        ]
-      }
+          {
+            path: 'login',
+            loadComponent: () =>
+              import(
+                '../../public/auth/components/contextual-login/contextual-login.component'
+              ).then((c) => c.ContextualLoginComponent),
+          },
+          {
+            path: 'register',
+            loadComponent: () =>
+              import(
+                '../../public/auth/components/register-owner/register-owner.component'
+              ).then((c) => c.RegisterOwnerComponent),
+          },
+          {
+            path: 'forgot-owner-password',
+            loadComponent: () =>
+              import(
+                '../../public/auth/components/forgot-owner-password/forgot-owner-password'
+              ).then((c) => c.ForgotOwnerPasswordComponent),
+          },
+          {
+            path: 'reset-owner-password',
+            loadComponent: () =>
+              import(
+                '../../public/auth/components/reset-owner-password/reset-owner-password'
+              ).then((c) => c.ResetOwnerPasswordComponent),
+          },
+          {
+            path: 'verify-email',
+            loadComponent: () =>
+              import(
+                '../../public/auth/components/email-verification/email-verification.component'
+              ).then((c) => c.EmailVerificationComponent),
+          },
+        ],
+      },
+      {
+        path: 'onboarding-wizard',
+        loadComponent: () =>
+          import(
+            '../../private/modules/onboarding-wizard/onboarding-wizard.component'
+          ).then((c) => c.OnboardingWizardComponent),
+      },
     ];
   }
 
   private getFallbackRoutes(): Routes {
     return [
-      { path: '', loadComponent: () => import('../../public/auth/components/contextual-login/contextual-login.component').then(c => c.ContextualLoginComponent), pathMatch: 'full' },
-      { path: '**', redirectTo: '' }
+      {
+        path: '',
+        loadComponent: () =>
+          import(
+            '../../public/auth/components/contextual-login/contextual-login.component'
+          ).then((c) => c.ContextualLoginComponent),
+        pathMatch: 'full',
+      },
+      { path: '**', redirectTo: '' },
     ];
   }
 

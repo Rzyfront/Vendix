@@ -4,6 +4,12 @@ import { Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
+import { EmailVerificationStepComponent } from './steps/email-verification-step.component';
+import { UserSetupStepComponent } from './steps/user-setup-step.component';
+import { OrganizationSetupStepComponent } from './steps/organization-setup-step.component';
+import { StoreSetupStepComponent } from './steps/store-setup-step.component';
+import { AppConfigStepComponent } from './steps/app-config-step.component';
+import { CompletionStepComponent } from './steps/completion-step.component';
 
 interface WizardStep {
   id: number;
@@ -16,7 +22,15 @@ interface WizardStep {
 @Component({
   selector: 'app-onboarding-wizard',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    EmailVerificationStepComponent,
+    UserSetupStepComponent,
+    OrganizationSetupStepComponent,
+    StoreSetupStepComponent,
+    AppConfigStepComponent,
+    CompletionStepComponent,
+  ],
   templateUrl: './onboarding-wizard.component.html',
   styleUrls: ['./onboarding-wizard.component.scss'],
 })
@@ -25,7 +39,7 @@ export class OnboardingWizardComponent implements OnInit, OnDestroy {
 
   currentStep = 1;
   isLoading = false;
-  
+
   steps: WizardStep[] = [
     {
       id: 1,
