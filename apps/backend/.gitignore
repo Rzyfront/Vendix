@@ -54,3 +54,31 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# =========================
+# 🔒 Certificados locales
+# =========================
+certs/
+
+# =========================
+# 🔒 Certificados SSL - NO compartir
+# =========================
+ssl/ca/ca-key.pem
+ssl/ca/ca-cert.srl
+ssl/private/**
+ssl/certs/vendix-key.pem
+ssl/certs/*.pfx
+ssl/certs/*.key
+
+# =========================
+# ✅ Archivos permitidos (seguros)
+# =========================
+!ssl/
+!ssl/ca/
+!ssl/certs/
+!ssl/ca/ca-cert.pem
+!ssl/certs/vendix_com.crt
+!ssl/certs/vendix_com.key
+!ssl/README-INSTALLATION.md
+!ssl/generate-certificates.sh
+!ssl/docker-setup.sh
