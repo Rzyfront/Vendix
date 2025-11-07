@@ -438,7 +438,7 @@ export class OnboardingWizardService {
 
     return {
       onboarding_completed: true,
-      redirect_to: '/dashboard',
+      redirect_to: '/admin/dashboard',
     };
   }
 
@@ -529,7 +529,7 @@ export class OnboardingWizardService {
    * Generate panel UI configuration based on app type
    */
   private generatePanelUI(appType: string): Record<string, boolean> {
-    if (appType === 'ORGANIZATIONAL') {
+    if (appType === 'ORG_ADMIN') {
       return {
         stores: true,
         users: true,

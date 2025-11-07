@@ -8,6 +8,7 @@ import {
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
+import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -15,7 +16,7 @@ import { takeUntil } from 'rxjs/operators';
 @Component({
   selector: 'app-organization-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
+  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent, OnboardingModalComponent],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -52,6 +53,12 @@ import { takeUntil } from 'rxjs/operators';
         </main>
       </div>
     </div>
+
+    <!-- Onboarding Modal -->
+    <app-onboarding-modal
+      [(isOpen)]="showOnboardingModal"
+      (completed)="onOnboardingCompleted()"
+    ></app-onboarding-modal>
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
@@ -65,7 +72,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   organizationName$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
 
-  // Onboarding
+  // Onboarding Modal
   showOnboardingModal = false;
   private destroy$ = new Subject<void>();
 
@@ -79,14 +86,26 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // Check onboarding status when component initializes
+    this.authFacade.checkOnboardingStatus();
+
+    // Subscribe to onboarding needs and show modal instead of redirecting
     this.authFacade.needsOnboarding$
       .pipe(takeUntil(this.destroy$))
       .subscribe((needsOnboarding: any) => {
         if (needsOnboarding) {
-          // Redirect to wizard instead of showing modal
-          window.location.href = '/onboarding-wizard';
+          // Show onboarding modal instead of redirecting
+          this.showOnboardingModal = true;
+        } else {
+          // Close modal if it's open
+          this.showOnboardingModal = false;
         }
       });
+  }
+
+  onOnboardingCompleted(): void {
+    // Update user onboarding status when completed
+    this.authFacade.setOnboardingCompleted(true);
+    this.showOnboardingModal = false;
   }
 
   ngOnDestroy(): void {

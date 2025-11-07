@@ -10,13 +10,13 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum AppType {
-  ORGANIZATIONAL = 'ORGANIZATIONAL',
-  SINGLE_STORE = 'SINGLE_STORE',
+  ORG_ADMIN = 'ORG_ADMIN',
+  STORE_ADMIN = 'STORE_ADMIN',
 }
 
 export class SetupAppConfigWizardDto {
   @ApiProperty({
-    example: 'ORGANIZATIONAL',
+    example: 'ORG_ADMIN',
     enum: AppType,
     description: 'Type of application',
   })

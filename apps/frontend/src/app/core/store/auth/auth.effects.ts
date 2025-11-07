@@ -5,6 +5,7 @@ import { map, mergeMap, catchError, tap } from 'rxjs/operators';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthService } from '../../services/auth.service';
+import { OnboardingWizardService } from '../../services/onboarding-wizard.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage, normalizeApiPayload } from '../../utils/api-error-handler';
 import { NavigationService } from '../../services/navigation.service';
@@ -24,6 +25,7 @@ export class AuthEffects {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private appConfigService = inject(AppConfigService);
+  private onboardingWizardService = inject(OnboardingWizardService);
   private store = inject(Store);
 
   login$ = createEffect(() =>
@@ -85,7 +87,29 @@ export class AuthEffects {
     { dispatch: false }
   );
 
-  // ... (resto de los effects)
+  // Check onboarding status after successful login
+  checkOnboardingAfterLogin$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.loginSuccess),
+      mergeMap(({ user }) => {
+        // Check if organization has onboarding flag set to true
+        const organizationOnboarding = user.organizations?.onboarding;
+        const emailVerified = user.email_verified;
+        const hasCompleteProfile = user.first_name && user.last_name;
+        const hasOrganization = user.organizations && user.organizations.name;
+
+        // Consider onboarding completed if organization.onboarding is true
+        const onboardingCompleted = organizationOnboarding && emailVerified && hasCompleteProfile && hasOrganization;
+
+        return of(AuthActions.checkOnboardingStatusSuccess({
+          onboardingCompleted,
+          currentStep: onboardingCompleted ? 'completed' : 'organization',
+          completedSteps: onboardingCompleted ? ['email', 'user', 'organization', 'store', 'app_config'] : []
+        }));
+      })
+    )
+  );
+
   logout$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.logout), mergeMap(() => this.authService.logout().pipe(map(() => AuthActions.logoutSuccess()), catchError(() => of(AuthActions.logoutSuccess()))))));
   logoutSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.logoutSuccess), tap(() => { if (typeof localStorage !== 'undefined') { localStorage.clear(); } this.router.navigateByUrl('/auth/login'); })), { dispatch: false });
   refreshToken$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.refreshToken), mergeMap(() => this.authService.refreshToken().pipe(map(response => { const accessToken = response.data?.access_token || response.access_token; const refreshToken = response.data?.refresh_token || response.refresh_token; if (!accessToken) throw new Error('Invalid token response'); return AuthActions.refreshTokenSuccess({ tokens: { accessToken, refreshToken: refreshToken || this.authFacade.getTokens()?.refreshToken || '' } }); }), catchError(error => of(AuthActions.refreshTokenFailure({ error: normalizeApiPayload(error) })))))));
@@ -95,6 +119,29 @@ export class AuthEffects {
   resetOwnerPassword$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.resetOwnerPassword), mergeMap(({ token, new_password }) => this.authService.resetOwnerPassword(token, new_password).pipe(map(() => AuthActions.resetOwnerPasswordSuccess()), catchError(error => of(AuthActions.resetOwnerPasswordFailure({ error: normalizeApiPayload(error) })))))));
   verifyEmail$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.verifyEmail), mergeMap(({ token }) => this.authService.verifyEmail(token).pipe(map(() => AuthActions.verifyEmailSuccess()), catchError(error => of(AuthActions.verifyEmailFailure({ error: normalizeApiPayload(error) })))))));
   resendVerificationEmail$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.resendVerificationEmail), mergeMap(({ email }) => this.authService.resendVerification(email).pipe(map(() => AuthActions.resendVerificationEmailSuccess()), catchError(error => of(AuthActions.resendVerificationEmailFailure({ error: normalizeApiPayload(error) })))))));
+
+  checkOnboardingStatus$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.checkOnboardingStatus),
+      mergeMap(() => {
+        // Use onboarding wizard service to check status
+        return this.onboardingWizardService.getWizardStatus().pipe(
+          map(response => {
+            if (response.success && response.data) {
+              return AuthActions.checkOnboardingStatusSuccess({
+                onboardingCompleted: response.data.onboarding_completed,
+                currentStep: response.data.current_step,
+                completedSteps: response.data.completed_steps || []
+              });
+            } else {
+              return AuthActions.checkOnboardingStatusFailure({ error: 'Invalid response' });
+            }
+          }),
+          catchError(error => of(AuthActions.checkOnboardingStatusFailure({ error: normalizeApiPayload(error) })))
+        );
+      })
+    )
+  );
   resetOwnerPasswordSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.resetOwnerPasswordSuccess), tap(() => { this.toast.success('Contraseña restablecida con éxito.'); this.router.navigateByUrl('/auth/login'); })), { dispatch: false });
   failureToast$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.loginFailure, AuthActions.forgotOwnerPasswordFailure, AuthActions.resetOwnerPasswordFailure, AuthActions.verifyEmailFailure, AuthActions.resendVerificationEmailFailure), tap(({ error }) => { const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error); this.toast.error(errorMessage, 'Error'); })), { dispatch: false });
 }

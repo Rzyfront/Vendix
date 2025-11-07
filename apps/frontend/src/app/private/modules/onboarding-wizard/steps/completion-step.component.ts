@@ -133,7 +133,7 @@ export class CompletionStepComponent {
           // Show success message
           setTimeout(() => {
             // Redirect to dashboard or specified location
-            const redirectTo = response.data.redirect_to || '/dashboard';
+            const redirectTo = response.data.redirect_to || '/admin/dashboard';
             window.location.href = redirectTo; // Full reload to refresh user state
           }, 1000);
         }

@@ -21,8 +21,8 @@ import { OnboardingWizardService } from '../../../../core/services/onboarding-wi
           <div class="grid grid-cols-2 gap-6">
             <button
               type="button"
-              (click)="selectAppType('ORGANIZATIONAL')"
-              [class]="getAppTypeClass('ORGANIZATIONAL')"
+              (click)="selectAppType('ORG_ADMIN')"
+              [class]="getAppTypeClass('ORG_ADMIN')"
             >
               <div class="text-3xl mb-3">🏢</div>
               <h4 class="font-semibold text-lg mb-2">Aplicación Organizacional</h4>
@@ -36,8 +36,8 @@ import { OnboardingWizardService } from '../../../../core/services/onboarding-wi
 
             <button
               type="button"
-              (click)="selectAppType('SINGLE_STORE')"
-              [class]="getAppTypeClass('SINGLE_STORE')"
+              (click)="selectAppType('STORE_ADMIN')"
+              [class]="getAppTypeClass('STORE_ADMIN')"
             >
               <div class="text-3xl mb-3">🏪</div>
               <h4 class="font-semibold text-lg mb-2">Gestión de Tienda Única</h4>
@@ -184,7 +184,7 @@ export class AppConfigStepComponent {
     private wizardService: OnboardingWizardService,
   ) {
     this.configForm = this.fb.group({
-      app_type: ['ORGANIZATIONAL', Validators.required],
+      app_type: ['ORG_ADMIN', Validators.required],
       primary_color: ['#3B82F6', Validators.required],
       secondary_color: ['#10B981', Validators.required],
       use_custom_domain: [false],

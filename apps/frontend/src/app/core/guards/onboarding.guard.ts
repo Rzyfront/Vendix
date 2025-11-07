@@ -26,25 +26,8 @@ export class OnboardingGuard implements CanActivate {
           return of(false);
         }
 
-        // Si está autenticado, verificar estado del onboarding
-        return this.onboardingWizardService.getWizardStatus().pipe(
-          map((response: any) => {
-            if (response.success && response.data?.onboarding_completed) {
-              // Si el onboarding está completado, permitir acceso
-              return true;
-            } else {
-              // Si el onboarding no está completado, redirigir al wizard
-              this.router.navigate(['/onboarding-wizard']);
-              return false;
-            }
-          }),
-          catchError((error) => {
-            console.error('Error checking onboarding status:', error);
-            // En caso de error, redirigir al wizard
-            this.router.navigate(['/onboarding-wizard']);
-            return of(false);
-          }),
-        );
+        // Si está autenticado, permitir acceso (el modal se encargará del onboarding)
+        return of(true);
       }),
       catchError((error) => {
         console.error('Error in onboarding guard:', error);

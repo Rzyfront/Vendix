@@ -122,7 +122,7 @@ export class OnboardingWizardComponent implements OnInit, OnDestroy {
         if (response.success && response.data) {
           // If already completed, redirect to dashboard
           if (response.data.onboarding_completed) {
-            this.router.navigate(['/dashboard']);
+            this.router.navigate(['/admin/dashboard']);
           }
         }
       },

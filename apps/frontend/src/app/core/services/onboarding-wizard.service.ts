@@ -65,7 +65,7 @@ export interface SetupStoreData {
 }
 
 export interface SetupAppConfigData {
-  app_type: 'ORGANIZATIONAL' | 'SINGLE_STORE';
+  app_type: 'ORG_ADMIN' | 'STORE_ADMIN';
   primary_color: string;
   secondary_color: string;
   use_custom_domain: boolean;

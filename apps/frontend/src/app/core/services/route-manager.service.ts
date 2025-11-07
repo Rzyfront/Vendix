@@ -105,13 +105,14 @@ export class RouteManagerService implements OnDestroy {
           },
         ],
       },
-      {
-        path: 'onboarding-wizard',
-        loadComponent: () =>
-          import(
-            '../../private/modules/onboarding-wizard/onboarding-wizard.component'
-          ).then((c) => c.OnboardingWizardComponent),
-      },
+      // Onboarding wizard route removed - now handled by modal
+      // {
+      //   path: 'onboarding-wizard',
+      //   loadComponent: () =>
+      //     import(
+      //       '../../private/modules/onboarding-wizard/onboarding-wizard.component'
+      //     ).then((c) => c.OnboardingWizardComponent),
+      // },
     ];
   }
 
