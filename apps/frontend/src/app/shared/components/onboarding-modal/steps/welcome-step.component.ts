@@ -1,9 +1,10 @@
-import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, IconComponent } from '../../index';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
 import { ConfigFacade } from '../../../../core/store/config/config.facade';
+import { AppConfig } from '../../../../core/services/app-config.service';
 import { takeUntil } from 'rxjs';
 import { Subject } from 'rxjs';
 
@@ -39,13 +40,13 @@ import { Subject } from 'rxjs';
     .welcome-icon-bg {
       width: 120px;
       height: 120px;
-      background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%);
+      background: linear-gradient(135deg, var(--color-primary, #7ed7a5) 0%, var(--color-secondary, #2f6f4e) 100%);
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto;
-      box-shadow: 0 12px 40px rgba(59, 130, 246, 0.32);
+      box-shadow: 0 12px 40px rgba(126, 215, 165, 0.32);
       animation: welcomePop 0.8s ease-out;
     }
 
@@ -147,8 +148,8 @@ import { Subject } from 'rxjs';
     }
 
     .business-type-option {
-      background: white;
-      border: 2px solid #E5E7EB;
+      background: var(--color-surface, #ffffff);
+      border: 2px solid var(--color-border, #e6edf3);
       border-radius: 1rem;
       padding: 2rem;
       cursor: pointer;
@@ -164,45 +165,46 @@ import { Subject } from 'rxjs';
       left: 0;
       right: 0;
       height: 4px;
-      background: #E5E7EB;
+      background: var(--color-border, #e6edf3);
       transition: all 0.3s ease;
     }
 
     .business-type-option:hover {
-      border-color: #3B82F6;
+      border-color: var(--color-primary, #7ed7a5);
       transform: translateY(-4px);
-      box-shadow: 0 12px 24px rgba(59, 130, 246, 0.15);
+      box-shadow: 0 12px 24px rgba(126, 215, 165, 0.15);
     }
 
     .business-type-option:hover::before {
-      background: #3B82F6;
+      background: var(--color-primary, #7ed7a5);
     }
 
     .business-type-icon {
       width: 80px;
       height: 80px;
-      background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
+      background: linear-gradient(135deg, rgba(126, 215, 165, 0.1) 0%, rgba(47, 111, 78, 0.2) 100%);
       border-radius: 1rem;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 1.5rem;
+      border: 1px solid var(--color-primary, #7ed7a5);
     }
 
     .type-icon-element {
-      color: #3B82F6;
+      color: var(--color-primary, #7ed7a5);
     }
 
     .business-type-title {
       font-size: 1.5rem;
       font-weight: 700;
-      color: #1F2937;
+      color: var(--color-text-primary, #0f172a);
       margin-bottom: 0.75rem;
     }
 
     .business-type-description {
       font-size: 1rem;
-      color: #6B7280;
+      color: var(--color-text-secondary, #94a3b8);
       line-height: 1.6;
       margin-bottom: 1rem;
     }
@@ -219,11 +221,11 @@ import { Subject } from 'rxjs';
       align-items: center;
       gap: 0.5rem;
       font-size: 0.875rem;
-      color: #374151;
+      color: var(--color-text-primary, #0f172a);
     }
 
     .feature-icon {
-      color: #22C55E;
+      color: var(--color-primary, #7ed7a5);
       flex-shrink: 0;
     }
 
@@ -239,13 +241,14 @@ import { Subject } from 'rxjs';
     .welcome-footer {
       margin-top: 2rem;
       padding: 1rem;
-      background: #F9FAFB;
+      background: var(--color-background, #f8fafc);
       border-radius: 0.75rem;
+      border: 1px solid var(--color-border, #e6edf3);
     }
 
     .footer-text {
       font-size: 0.875rem;
-      color: #6B7280;
+      color: var(--color-text-secondary, #94a3b8);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -253,7 +256,7 @@ import { Subject } from 'rxjs';
     }
 
     .footer-icon {
-      color: #9CA3AF;
+      color: var(--color-primary, #7ed7a5);
     }
 
     @media (max-width: 640px) {
@@ -295,7 +298,7 @@ import { Subject } from 'rxjs';
         <div class="welcome-header">
           <div class="welcome-icon-wrapper">
             <div class="welcome-icon-bg">
-              <app-icon name="sparkles" size="64" class="welcome-icon"></app-icon>
+              <app-icon name="sparkles" size="64" class="welcome-icon" [color]="'#ffffff'"></app-icon>
             </div>
           </div>
 
@@ -315,7 +318,7 @@ import { Subject } from 'rxjs';
         <div class="welcome-context">
           <div class="context-header">
             <div class="context-icon">
-              <app-icon name="info" size="20" class="context-icon-element"></app-icon>
+              <app-icon name="info" size="20" class="context-icon-element" [color]="primaryColor"></app-icon>
             </div>
             <h3 class="context-title">¿Qué estás haciendo?</h3>
           </div>
@@ -333,7 +336,7 @@ import { Subject } from 'rxjs';
             (click)="selectBusinessType('STORE')"
           >
             <div class="business-type-icon">
-              <app-icon name="store" size="40" class="type-icon-element"></app-icon>
+              <app-icon name="store" size="40" class="type-icon-element" [color]="primaryColor"></app-icon>
             </div>
 
             <h3 class="business-type-title">Gestionar una tienda</h3>
@@ -344,15 +347,15 @@ import { Subject } from 'rxjs';
 
             <div class="business-type-features">
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="primaryColor"></app-icon>
                 <span>Configuración rápida y sencilla</span>
               </div>
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="primaryColor"></app-icon>
                 <span>Todo en 3 pasos básicos</span>
               </div>
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="primaryColor"></app-icon>
                 <span>Funcionalidad completa de tienda</span>
               </div>
             </div>
@@ -364,7 +367,7 @@ import { Subject } from 'rxjs';
             (click)="selectBusinessType('ORGANIZATION')"
           >
             <div class="business-type-icon">
-              <app-icon name="building" size="40" class="type-icon-element"></app-icon>
+              <app-icon name="building" size="40" class="type-icon-element" [color]="secondaryColor"></app-icon>
             </div>
 
             <h3 class="business-type-title">Enfoque organizacional</h3>
@@ -375,15 +378,15 @@ import { Subject } from 'rxjs';
 
             <div class="business-type-features">
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="secondaryColor"></app-icon>
                 <span>Múltiples tiendas y sucursales</span>
               </div>
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="secondaryColor"></app-icon>
                 <span>Manejo de usuarios y roles</span>
               </div>
               <div class="feature-item">
-                <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
+                <app-icon name="check-circle" size="16" class="feature-icon" [color]="secondaryColor"></app-icon>
                 <span>Reportes consolidados</span>
               </div>
             </div>
@@ -406,7 +409,7 @@ import { Subject } from 'rxjs';
         <!-- Footer -->
         <div class="welcome-footer">
           <p class="footer-text">
-            <app-icon name="shield-check" size="16" class="footer-icon"></app-icon>
+            <app-icon name="shield-check" size="16" class="footer-icon" [color]="primaryColor"></app-icon>
             Tus datos están seguros y puedes cambiar tu configuración en cualquier momento
           </p>
         </div>
@@ -443,11 +446,12 @@ export class WelcomeStepComponent implements OnInit {
 
   private loadThemeColors(): void {
     // Suscribirse a los colores del tema de la app
-    this.configFacade.config$.pipe(takeUntil(this.destroy$)).subscribe(config => {
-      if (config?.branding) {
+    this.configFacade.appConfig$.pipe(takeUntil(this.destroy$)).subscribe((config: AppConfig | null) => {
+      if (config?.branding?.colors) {
         // Usar colores del branding dinámico si existen, sino usar los de Vendix
-        this.primaryColor = config.branding.primary_color || '#7ed7a5';
-        this.secondaryColor = config.branding.secondary_color || '#2f6f4e';
+        this.primaryColor = config.branding.colors.primary || '#7ed7a5';
+        this.secondaryColor = config.branding.colors.secondary || '#2f6f4e';
+        this.accentColor = config.branding.colors.accent || '#06b6d4';
       }
     });
   }
