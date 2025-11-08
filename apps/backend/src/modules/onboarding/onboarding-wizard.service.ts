@@ -288,8 +288,8 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
-    // Generate slug from name
-    const slug = this.generateSlug(setupStoreDto.name);
+    // Generate unique slug from name
+    const slug = await this.generateUniqueStoreSlug(setupStoreDto.name, user.organization_id);
 
     // Create store
     const store = await this.prismaService.stores.create({
@@ -315,7 +315,7 @@ export class OnboardingWizardService {
           state_province: setupStoreDto.state_province,
           postal_code: setupStoreDto.postal_code,
           country_code: setupStoreDto.country_code || 'MX',
-          type: 'store',
+          type: 'store_physical',
           is_primary: true,
         },
       });
@@ -497,29 +497,47 @@ export class OnboardingWizardService {
    * Determine current wizard step
    */
   private determineCurrentStep(user: any): number {
+    // Use the actual status fields instead of relying only on user_settings
     const userConfig = user.user_settings?.config as any || {};
     const selectedAppType = userConfig.selected_app_type;
 
-    // New 7-step flow
+    // New 7-step flow - Use actual status
     if (!selectedAppType) return 1; // App type selection
-    if (!user.email_verified) return 2; // Email verification
-    if (!user.first_name || !user.last_name) return 3; // User setup with address
 
-    // Conditional flow based on app type
-    if (selectedAppType === 'STORE_ADMIN') {
-      // Store first flow
-      if (!user.organizations?.stores?.length) return 4; // Store setup
-      if (!user.organizations?.name) return 5; // Auto-generated organization
-      if (!user.organizations?.domain_settings?.length) return 6; // App config
-      if (!user.organizations?.onboarding) return 7; // Completion
-    } else if (selectedAppType === 'ORG_ADMIN') {
-      // Organization first flow
-      if (!user.organizations?.name) return 4; // Organization setup
-      if (!user.organizations?.stores?.length) return 5; // Store setup (preloaded)
-      if (!user.organizations?.domain_settings?.length) return 6; // App config
-      if (!user.organizations?.onboarding) return 7; // Completion
+    if (!user.email_verified) return 2; // Email verification
+
+    // Check user data completeness (includes address)
+    if (!user.has_user_data) return 3; // User setup with address
+
+    // If we have all the data but no app type selected, we need to determine app type
+    // based on existing data structure
+    let appType = selectedAppType;
+
+    // Try to infer app type from existing data if not explicitly set
+    if (!appType && user.has_organization && user.has_store) {
+      // If both organization and store exist, we can determine the flow
+      // Store-first vs Organization-first depends on the data structure
+      appType = 'STORE_ADMIN'; // Default assumption
     }
 
+    if (!appType) return 1; // Still can't determine app type, go to step 1
+
+    // Conditional flow based on app type - use actual status
+    if (appType === 'STORE_ADMIN') {
+      // Store first flow
+      if (!user.has_store) return 4; // Store setup
+      if (!user.has_organization) return 5; // Auto-generated organization
+      if (!user.has_app_config) return 6; // App config
+      if (!user.onboarding_completed) return 7; // Completion
+    } else if (appType === 'ORG_ADMIN') {
+      // Organization first flow
+      if (!user.has_organization) return 4; // Organization setup
+      if (!user.has_store) return 5; // Store setup (preloaded)
+      if (!user.has_app_config) return 6; // App config
+      if (!user.onboarding_completed) return 7; // Completion
+    }
+
+    // All steps completed
     return 8; // Done
   }
 
@@ -665,6 +683,43 @@ export class OnboardingWizardService {
     // Fallback to timestamp-based generation
     const timestamp = Date.now().toString(36);
     return `${baseName}-${timestamp}.${suffix}`;
+  }
+
+  /**
+   * Generate a unique slug for stores within an organization
+   */
+  private async generateUniqueStoreSlug(storeName: string, organizationId: number): Promise<string> {
+    const baseName = this.generateSlug(storeName);
+    const maxAttempts = 10;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let slug: string;
+
+      if (attempt === 1) {
+        // First attempt: direct slug
+        slug = baseName;
+      } else {
+        // Subsequent attempts: append random string
+        const randomString = this.generateRandomString(4);
+        slug = `${baseName}-${randomString}`;
+      }
+
+      // Check if slug is available within this organization
+      const existing = await this.prismaService.stores.findFirst({
+        where: {
+          organization_id: organizationId,
+          slug: slug
+        },
+      });
+
+      if (!existing) {
+        return slug;
+      }
+    }
+
+    // Fallback to timestamp-based generation
+    const timestamp = Date.now().toString(36);
+    return `${baseName}-${timestamp}`;
   }
 
   /**

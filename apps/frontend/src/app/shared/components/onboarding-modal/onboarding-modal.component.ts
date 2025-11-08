@@ -189,7 +189,7 @@ interface WizardStep {
           </app-button>
 
           <app-button
-            *ngIf="canSkip && currentStep !== 6"
+            *ngIf="canSkip && currentStep < 6"
             variant="ghost"
             size="sm"
             (clicked)="skipStep()"
@@ -201,7 +201,7 @@ interface WizardStep {
 
         <div class="flex space-x-3">
           <app-button
-            *ngIf="currentStep !== 6"
+            *ngIf="currentStep !== 7"
             variant="secondary"
             size="sm"
             (clicked)="close()"
@@ -211,13 +211,15 @@ interface WizardStep {
           </app-button>
 
           <app-button
-            *ngIf="currentStep !== 6"
+            *ngIf="currentStep !== 7"
             variant="primary"
             size="sm"
             (clicked)="nextStep()"
+            [disabled]="isSubmitting"
           >
-            Siguiente
-            <app-icon name="arrow-right" size="16" slot="icon"></app-icon>
+            {{ isSubmitting ? 'Procesando...' : (currentStep === 6 ? 'Finalizar configuración' : 'Siguiente') }}
+            <app-icon name="arrow-right" size="16" slot="icon" *ngIf="!isSubmitting"></app-icon>
+            <app-icon name="loader-2" size="16" slot="icon" [spin]="true" *ngIf="isSubmitting"></app-icon>
           </app-button>
         </div>
       </div>

@@ -106,86 +106,6 @@ import { ButtonComponent, IconComponent } from '../../index';
       margin: 0;
     }
 
-    /* App Type Selector */
-    .app-type-selector {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .app-type-option {
-      display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      padding: 1.5rem;
-      border: 2px solid #E5E7EB;
-      border-radius: 0.75rem;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      background: white;
-      text-align: left;
-    }
-
-    .app-type-option:hover {
-      border-color: #8B5CF6;
-      background: #FAF5FF;
-    }
-
-    .app-type-option.active {
-      border-color: #8B5CF6;
-      background: #FAF5FF;
-      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
-    }
-
-    .app-type-icon {
-      width: 64px;
-      height: 64px;
-      background: #F3E8FF;
-      border-radius: 0.75rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .type-icon-element {
-      color: #8B5CF6;
-    }
-
-    .app-type-content {
-      flex: 1;
-    }
-
-    .app-type-title {
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: #1F2937;
-      margin-bottom: 0.5rem;
-    }
-
-    .app-type-description {
-      color: #6B7280;
-      font-size: 0.875rem;
-      line-height: 1.5;
-      margin-bottom: 0.75rem;
-    }
-
-    .app-type-feature {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .feature-icon {
-      color: #8B5CF6;
-    }
-
-    .app-type-feature span {
-      color: #6B7280;
-      font-size: 0.875rem;
-      font-weight: 500;
-    }
-
     /* Color Selector */
     .color-selector {
       space-y: 1.5rem;
@@ -468,12 +388,7 @@ import { ButtonComponent, IconComponent } from '../../index';
         gap: 1rem;
       }
 
-      .app-type-option {
-        flex-direction: column;
-        text-align: center;
-        gap: 0.75rem;
-      }
-
+      
       .domain-card {
         flex-direction: column;
         text-align: center;
@@ -505,60 +420,6 @@ import { ButtonComponent, IconComponent } from '../../index';
 
         <!-- App Configuration Form -->
         <div class="config-form">
-          <!-- App Type Selection -->
-          <div class="form-section">
-            <div class="section-header">
-              <div class="section-icon">
-                <app-icon name="layout" size="20" class="section-icon-element"></app-icon>
-              </div>
-              <h3 class="section-title">Tipo de aplicación</h3>
-            </div>
-
-            <div class="app-type-selector">
-              <button
-                type="button"
-                class="app-type-option"
-                [class.active]="formGroup.get('app_type')?.value === 'ORGANIZATIONAL'"
-                (click)="selectAppType('ORGANIZATIONAL')"
-              >
-                <div class="app-type-icon">
-                  <app-icon name="building" size="32" class="type-icon-element"></app-icon>
-                </div>
-                <div class="app-type-content">
-                  <h4 class="app-type-title">Aplicación Organizacional</h4>
-                  <p class="app-type-description">
-                    Gestiona múltiples tiendas, usuarios y sucursales desde un panel central
-                  </p>
-                  <div class="app-type-feature">
-                    <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
-                    <span>Ideal para empresas con varias ubicaciones</span>
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                class="app-type-option"
-                [class.active]="formGroup.get('app_type')?.value === 'SINGLE_STORE'"
-                (click)="selectAppType('SINGLE_STORE')"
-              >
-                <div class="app-type-icon">
-                  <app-icon name="store" size="32" class="type-icon-element"></app-icon>
-                </div>
-                <div class="app-type-content">
-                  <h4 class="app-type-title">Tienda Individual</h4>
-                  <p class="app-type-description">
-                    Enfocado en la operación de una sola tienda con herramientas especializadas
-                  </p>
-                  <div class="app-type-feature">
-                    <app-icon name="check-circle" size="16" class="feature-icon"></app-icon>
-                    <span>Perfecto para negocios individuales</span>
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
-
           <!-- Color Palette Section -->
           <div class="form-section">
             <div class="section-header">
@@ -709,12 +570,6 @@ export class AppConfigStepComponent {
 
   constructor() {
     this.generateColorPalette();
-  }
-
-  selectAppType(type: string): void {
-    if (this.formGroup?.get('app_type')) {
-      this.formGroup.get('app_type').setValue(type);
-    }
   }
 
   onPrimaryColorChange(event: any): void {
