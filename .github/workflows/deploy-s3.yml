@@ -1,4 +1,4 @@
-name: Build and Deploy to S3
+name: Build and Deploy to AWS
 
 on:
   push:
@@ -7,9 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-deploy:
+  deploy-frontend:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -28,6 +27,8 @@ jobs:
 
     - name: Build frontend
       run: npm run build:prod -w apps/frontend
+      env:
+        API_URL: https://api.vendix.online
 
     - name: Deploy to S3
       env:
@@ -35,7 +36,7 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: us-east-2
       run: |
-        aws s3 sync apps/frontend/dist/vendix/browser/ s3://quickss-vendix-col/ --delete
+        aws s3 sync apps/frontend/dist/vendix/ s3://vendix-online-frontend/ --delete
 
     - name: Invalidate CloudFront
       env:
@@ -43,4 +44,4 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: us-east-1
       run: |
-        aws cloudfront create-invalidation --distribution-id E9BE4CJT64Q5T --paths "/*"
+        aws cloudfront create-invalidation --distribution-id E1I27OYFJX7VYJ --paths "/*"

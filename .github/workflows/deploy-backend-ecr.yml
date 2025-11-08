@@ -1,0 +1,61 @@
+name: Deploy Backend to App Runner via ECR
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'apps/backend/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build, tag, and push Docker image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: vendix-backend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        cd apps/backend
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    - name: Update App Runner service
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: vendix-backend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Update App Runner service to use new image
+        aws apprunner update-service \
+          --service-arn $(aws apprunner list-services --query 'ServiceSummaryList[?ServiceName==`vendix-backend`].ServiceArn' --output text) \
+          --source-configuration ImageRepository="{
+            ImageIdentifier=\"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\",
+            ImageRepositoryType=\"ECR\",
+            ImageConfiguration={
+              Port=3000
+            }
+          }"
