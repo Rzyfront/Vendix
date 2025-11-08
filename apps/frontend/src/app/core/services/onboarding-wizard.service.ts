@@ -147,6 +147,13 @@ export class OnboardingWizardService {
   }
 
   /**
+   * Resend verification email
+   */
+  resendVerificationEmail(): Observable<any> {
+    return this.http.post(`${environment.apiUrl}/auth/resend-verification`, {});
+  }
+
+  /**
    * Setup user profile and address
    */
   setupUser(data: SetupUserData): Observable<any> {

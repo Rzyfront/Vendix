@@ -313,11 +313,11 @@ import { Subject, takeUntil, interval } from 'rxjs';
               variant="outline"
               size="lg"
               (clicked)="resendVerification()"
-              [disabled]="isResending"
+              [disabled]="isResendingEmail"
               class="action-button"
             >
-              <app-icon name="refresh-cw" [size]="18" [spin]="isResending" slot="icon"></app-icon>
-              {{ isResending ? 'Enviando...' : 'Reenviar correo' }}
+              <app-icon name="refresh-cw" [size]="18" [spin]="isResendingEmail" slot="icon"></app-icon>
+              {{ isResendingEmail ? 'Enviando...' : 'Reenviar correo' }}
             </app-button>
 
             <app-button
@@ -343,25 +343,120 @@ import { Subject, takeUntil, interval } from 'rxjs';
     </div>
   `,
 })
-export class EmailVerificationStepComponent {
+export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   @Input() userEmail: string = '';
   @Output() nextStep = new EventEmitter<void>();
   @Output() skipStep = new EventEmitter<void>();
 
-  isResending = false;
+  private destroy$ = new Subject<void>();
 
-  constructor(private wizardService: OnboardingWizardService) {}
+  // State
+  isEmailVerified = false;
+  isCheckingStatus = true;
+  isResendingEmail = false;
+  verificationStatus: 'pending' | 'verified' | 'error' = 'pending';
+  resendCooldown = 0;
+  lastResendTime: number | null = null;
+
+  // Colors for Vendix branding
+  primaryColor = '#7ed7a5';
+  secondaryColor = '#2f6f4e';
+
+  constructor(
+    private wizardService: OnboardingWizardService,
+    private authFacade: AuthFacade,
+  ) {}
+
+  ngOnInit(): void {
+    this.loadUserEmail();
+    this.checkEmailVerification();
+
+    // Set up periodic check for email verification
+    interval(5000) // Check every 5 seconds
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        if (!this.isEmailVerified && this.verificationStatus !== 'error') {
+          this.checkEmailVerification();
+        }
+      });
+
+    // Set up resend cooldown timer
+    interval(1000) // Update cooldown every second
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.updateResendCooldown();
+      });
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  private loadUserEmail(): void {
+    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe(user => {
+      if (user?.email) {
+        this.userEmail = user.email;
+      }
+    });
+  }
+
+  private checkEmailVerification(): void {
+    this.isCheckingStatus = true;
+    this.wizardService.checkEmailVerification().subscribe({
+      next: (response) => {
+        this.isCheckingStatus = false;
+        if (response.data?.verified) {
+          this.isEmailVerified = true;
+          this.verificationStatus = 'verified';
+        } else {
+          this.verificationStatus = response.data?.state || 'pending';
+        }
+      },
+      error: (error) => {
+        this.isCheckingStatus = false;
+        this.verificationStatus = 'error';
+        console.error('Error checking email verification:', error);
+      }
+    });
+  }
+
+  private updateResendCooldown(): void {
+    if (this.lastResendTime) {
+      const elapsed = Date.now() - this.lastResendTime;
+      const remaining = Math.max(0, 60 - Math.floor(elapsed / 1000)); // 60 second cooldown
+      this.resendCooldown = remaining;
+    }
+  }
 
   resendVerification(): void {
-    this.isResending = true;
-    // Implementation would call the service to resend verification
-    setTimeout(() => {
-      this.isResending = false;
-    }, 2000);
+    if (this.resendCooldown > 0) {
+      return; // Still in cooldown
+    }
+
+    this.isResendingEmail = true;
+    this.lastResendTime = Date.now();
+
+    this.wizardService.resendVerificationEmail().subscribe({
+      next: (response) => {
+        this.isResendingEmail = false;
+        if (response.success) {
+          console.log('Verification email resent successfully');
+          // Optionally show success message
+        }
+      },
+      error: (error) => {
+        this.isResendingEmail = false;
+        this.lastResendTime = null; // Reset cooldown on error
+        console.error('Error resending verification email:', error);
+        // Optionally show error message
+      }
+    });
   }
 
   checkVerification(): void {
-    // Implementation would check email verification status
-    this.nextStep.emit();
+    if (this.isEmailVerified) {
+      this.nextStep.emit();
+    }
   }
 }

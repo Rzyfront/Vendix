@@ -355,8 +355,8 @@ export class OnboardingWizardService {
     // Generate subdomain if not provided
     const subdomain =
       setupAppConfigDto.subdomain ||
-      this.generateSubdomain(
-        user.organizations?.name || 'org',
+      await this.generateUniqueSubdomain(
+        user.organizations?.slug || 'org',
         setupAppConfigDto.app_type,
       );
 
@@ -624,7 +624,63 @@ export class OnboardingWizardService {
   }
 
   /**
-   * Generate subdomain from organization name and app type
+   * Generate unique subdomain with availability check
+   */
+  private async generateUniqueSubdomain(
+    orgSlug: string,
+    appType?: string,
+    customSuffix?: string
+  ): Promise<string> {
+    const baseName = orgSlug
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    const suffix = customSuffix || 'vendix';
+    const maxAttempts = 10;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let subdomain: string;
+
+      if (attempt === 1) {
+        // First attempt: direct slug
+        subdomain = `${baseName}.${suffix}`;
+      } else {
+        // Subsequent attempts: append random string
+        const randomString = this.generateRandomString(4);
+        subdomain = `${baseName}-${randomString}.${suffix}`;
+      }
+
+      // Check if subdomain is available
+      const existing = await this.prismaService.domain_settings.findFirst({
+        where: { hostname: subdomain },
+      });
+
+      if (!existing) {
+        return subdomain;
+      }
+    }
+
+    // Fallback to timestamp-based generation
+    const timestamp = Date.now().toString(36);
+    return `${baseName}-${timestamp}.${suffix}`;
+  }
+
+  /**
+   * Generate random string for subdomain uniqueness
+   */
+  private generateRandomString(length: number): string {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  }
+
+  /**
+   * Legacy method for backward compatibility
    */
   private generateSubdomain(orgName: string, appType: string): string {
     const cleanName = orgName
