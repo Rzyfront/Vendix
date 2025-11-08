@@ -37,10 +37,10 @@ jobs:
       run: |
         aws s3 sync apps/frontend/dist/vendix/browser/ s3://quickss-vendix-col/ --delete
 
-    - name: Invalidate CloudFront (optional)
+    - name: Invalidate CloudFront
       env:
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_DEFAULT_REGION: us-east-2
+        AWS_DEFAULT_REGION: us-east-1
       run: |
-        echo "CloudFront distribution not configured. Add if needed."
+        aws cloudfront create-invalidation --distribution-id E9BE4CJT64Q5T --paths "/*"
