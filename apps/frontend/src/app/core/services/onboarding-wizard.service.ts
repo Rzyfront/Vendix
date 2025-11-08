@@ -24,6 +24,17 @@ export interface EmailVerificationStatus {
   email: string;
 }
 
+export interface SelectAppTypeData {
+  app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  notes?: string;
+}
+
+export interface SelectAppTypeResponse {
+  success: boolean;
+  app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  message: string;
+}
+
 export interface SetupUserData {
   first_name?: string;
   last_name?: string;
@@ -116,6 +127,23 @@ export class OnboardingWizardService {
    */
   checkEmailVerification(): Observable<any> {
     return this.http.post(`${this.apiUrl}/verify-email-status`, {});
+  }
+
+  /**
+   * Select application type for the user
+   */
+  selectAppType(data: SelectAppTypeData): Observable<SelectAppTypeResponse> {
+    return this.http.post<SelectAppTypeResponse>(`${this.apiUrl}/select-app-type`, data).pipe(
+      tap((response: SelectAppTypeResponse) => {
+        if (response.success) {
+          // Update local wizard data
+          this.updateWizardData('app_type', {
+            selected_app_type: response.app_type,
+            selected_at: new Date().toISOString()
+          });
+        }
+      })
+    );
   }
 
   /**

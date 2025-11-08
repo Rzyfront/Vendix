@@ -19,6 +19,7 @@ import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
 import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
+import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { ResponseService } from '../../common/responses/response.service';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -81,6 +82,38 @@ export class OnboardingWizardController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error checking email verification',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('select-app-type')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Select application type',
+    description: 'Select the type of application for the user (STORE_ADMIN or ORG_ADMIN)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Application type selected successfully',
+  })
+  async selectAppType(
+    @Req() req: AuthenticatedRequest,
+    @Body() selectAppTypeDto: SelectAppTypeDto,
+  ) {
+    try {
+      const result = await this.wizardService.selectAppType(
+        req.user.id,
+        selectAppTypeDto,
+      );
+      return this.responseService.success(
+        result,
+        'Application type selected successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error selecting application type',
         error.response?.message || error.message,
         error.status || 400,
       );

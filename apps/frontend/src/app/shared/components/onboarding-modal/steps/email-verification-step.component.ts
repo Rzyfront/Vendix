@@ -1,7 +1,9 @@
-import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, IconComponent } from '../../index';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { Subject, takeUntil, interval } from 'rxjs';
 
 @Component({
   selector: 'app-email-verification-step',

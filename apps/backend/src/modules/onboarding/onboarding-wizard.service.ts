@@ -4,6 +4,7 @@ import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
 import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
+import { SelectAppTypeDto } from './dto/select-app-type.dto';
 
 interface ColorPalette {
   primary: string;
@@ -46,6 +47,7 @@ export class OnboardingWizardService {
           },
         },
         addresses: true,
+        user_settings: true,
       },
     });
 
@@ -92,6 +94,53 @@ export class OnboardingWizardService {
       verified: user.email_verified || false,
       state: user.state || 'pending',
       email: user.email,
+    };
+  }
+
+  /**
+   * Select application type for the user
+   */
+  async selectAppType(userId: number, selectAppTypeDto: SelectAppTypeDto) {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: { user_settings: true },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    // Update or create user_settings with selected app type
+    const config = {
+      selected_app_type: selectAppTypeDto.app_type,
+      selection_notes: selectAppTypeDto.notes,
+      selected_at: new Date().toISOString(),
+    };
+
+    if (user.user_settings) {
+      await this.prismaService.user_settings.update({
+        where: { user_id: userId },
+        data: {
+          config: {
+            ...user.user_settings.config as any,
+            ...config,
+          },
+          updated_at: new Date(),
+        },
+      });
+    } else {
+      await this.prismaService.user_settings.create({
+        data: {
+          user_id: userId,
+          config,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      app_type: selectAppTypeDto.app_type,
+      message: 'Application type selected successfully',
     };
   }
 
@@ -448,13 +497,30 @@ export class OnboardingWizardService {
    * Determine current wizard step
    */
   private determineCurrentStep(user: any): number {
-    if (!user.email_verified) return 1; // Email verification
-    if (!user.first_name || !user.last_name) return 2; // User setup
-    if (!user.organizations?.name) return 3; // Organization setup
-    if (!user.organizations?.stores?.length) return 4; // Store setup
-    if (!user.organizations?.domain_settings?.length) return 5; // App config
-    if (!user.organizations?.onboarding) return 6; // Completion
-    return 7; // Done
+    const userConfig = user.user_settings?.config as any || {};
+    const selectedAppType = userConfig.selected_app_type;
+
+    // New 7-step flow
+    if (!selectedAppType) return 1; // App type selection
+    if (!user.email_verified) return 2; // Email verification
+    if (!user.first_name || !user.last_name) return 3; // User setup with address
+
+    // Conditional flow based on app type
+    if (selectedAppType === 'STORE_ADMIN') {
+      // Store first flow
+      if (!user.organizations?.stores?.length) return 4; // Store setup
+      if (!user.organizations?.name) return 5; // Auto-generated organization
+      if (!user.organizations?.domain_settings?.length) return 6; // App config
+      if (!user.organizations?.onboarding) return 7; // Completion
+    } else if (selectedAppType === 'ORG_ADMIN') {
+      // Organization first flow
+      if (!user.organizations?.name) return 4; // Organization setup
+      if (!user.organizations?.stores?.length) return 5; // Store setup (preloaded)
+      if (!user.organizations?.domain_settings?.length) return 6; // App config
+      if (!user.organizations?.onboarding) return 7; // Completion
+    }
+
+    return 8; // Done
   }
 
   /**
