@@ -73,7 +73,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   storeSlug$: Observable<string | null>;
 
   // Onboarding
-  showOnboardingModal = false;
+  showOnboardingModal = false; // Will be set in ngOnInit based on actual status
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -87,6 +87,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     // Check onboarding status when component initializes
     this.authFacade.checkOnboardingStatus();
+
+    // Set initial state immediately based on current needs
+    this.showOnboardingModal = this.authFacade.needsOnboarding();
 
     // Subscribe to onboarding needs and show modal instead of redirecting
     this.authFacade.needsOnboarding$

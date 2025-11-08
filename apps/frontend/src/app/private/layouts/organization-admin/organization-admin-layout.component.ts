@@ -88,6 +88,9 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     // Check onboarding status when component initializes
     this.authFacade.checkOnboardingStatus();
 
+    // Set initial state immediately based on current needs
+    this.showOnboardingModal = this.authFacade.needsOnboarding();
+
     // Subscribe to onboarding needs and show modal instead of redirecting
     this.authFacade.needsOnboarding$
       .pipe(takeUntil(this.destroy$))
