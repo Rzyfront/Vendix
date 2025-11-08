@@ -56,7 +56,7 @@ import { takeUntil } from 'rxjs/operators';
     <!-- Onboarding Modal -->
     <app-onboarding-modal
       [(isOpen)]="showOnboardingModal"
-      (completed)="onOnboardingCompleted()"
+      (completed)="onOnboardingCompleted($event)"
     ></app-onboarding-modal>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
@@ -102,12 +102,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
   }
 
-  onOnboardingCompleted(): void {
-    // Update user onboarding status when completed
-    this.authFacade.setOnboardingCompleted(true);
-    this.showOnboardingModal = false;
-  }
-
+  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();

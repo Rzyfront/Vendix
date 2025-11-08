@@ -74,7 +74,7 @@ export class AuthEffects {
 
           // 4. Calcular la ruta de destino usando la NUEVA configuración
           const targetRoute = this.navigationService.redirectAfterLogin(roles || [], newConfig.domainConfig);
-          
+
           // 5. Navegar
           await this.router.navigateByUrl(targetRoute, { replaceUrl: true });
 

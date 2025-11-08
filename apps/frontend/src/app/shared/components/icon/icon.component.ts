@@ -19,8 +19,15 @@ import { ICON_REGISTRY, IconName } from './icons.registry';
       [size]="size"
       [color]="color"
       [class]="cls"
+      [style.animation]="spin ? 'spin 1s linear infinite' : 'none'"
     ></i-lucide>
   `,
+  styles: [`
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IconComponent {
@@ -28,6 +35,7 @@ export class IconComponent {
   @Input() size: number | string = 16;
   @Input() color?: string;
   @Input('class') cls = '';
+  @Input() spin: boolean = false;
 
   get iconData() {
     return ICON_REGISTRY[this.name] || ICON_REGISTRY['default'];

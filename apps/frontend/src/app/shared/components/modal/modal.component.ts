@@ -120,6 +120,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   @Input() customClasses = '';
 
   @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() opened = new EventEmitter<void>();
 
@@ -179,6 +180,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   open(): void {
     this.isOpen = true;
     this.openChange.emit(true);
+    this.isOpenChange.emit(true);
     this.opened.emit();
     document.body.style.overflow = 'hidden';
   }
@@ -186,6 +188,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   close(): void {
     this.isOpen = false;
     this.openChange.emit(false);
+    this.isOpenChange.emit(false);
     this.closed.emit();
     document.body.style.overflow = '';
   }
