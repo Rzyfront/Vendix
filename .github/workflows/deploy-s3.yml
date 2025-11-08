@@ -36,7 +36,7 @@ jobs:
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         AWS_DEFAULT_REGION: us-east-2
       run: |
-        aws s3 sync apps/frontend/dist/vendix/ s3://vendix-online-frontend/ --delete
+        aws s3 sync apps/frontend/dist/vendix/browser/ s3://vendix-online-frontend/ --delete
 
     - name: Invalidate CloudFront
       env:
