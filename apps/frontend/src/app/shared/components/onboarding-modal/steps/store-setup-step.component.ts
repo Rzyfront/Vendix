@@ -1,12 +1,12 @@
 import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { ButtonComponent, IconComponent } from '../../index';
+import { IconComponent } from '../../index';
 
 @Component({
   selector: 'app-store-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .store-step {

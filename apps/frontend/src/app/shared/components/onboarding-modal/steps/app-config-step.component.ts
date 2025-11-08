@@ -6,7 +6,7 @@ import { ButtonComponent, IconComponent } from '../../index';
 @Component({
   selector: 'app-app-config-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .app-config-step {
