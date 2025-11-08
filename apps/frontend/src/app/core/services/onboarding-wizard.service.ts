@@ -50,6 +50,7 @@ export interface SetupUserData {
 export interface SetupOrganizationData {
   name: string;
   description?: string;
+  legal_name?: string;
   email?: string;
   phone?: string;
   website?: string;

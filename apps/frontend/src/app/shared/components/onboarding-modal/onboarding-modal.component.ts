@@ -385,8 +385,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.updateAppConfigForm();
         this.updateFormBasedOnBusinessType();
 
-        // Move to next step after successful selection
-        this.currentStep = 2;
+        // Refresh wizard status to get the correct next step from backend
+        this.wizardService.getWizardStatus().subscribe({
+          next: (statusResponse) => {
+            console.log('Wizard status refreshed:', statusResponse);
+          },
+          error: (error) => {
+            console.error('Error refreshing wizard status:', error);
+          }
+        });
       },
       error: (error) => {
         console.error('Error selecting app type:', error);
@@ -542,7 +549,24 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.currentStep = step;
     });
 
-    this.wizardService.getWizardData();
+    // Load wizard status from backend to sync current step
+    this.wizardService.getWizardStatus().subscribe({
+      next: (response) => {
+        console.log('Wizard status loaded:', response);
+        if (response.success && response.data) {
+          // Set business type based on selected app type
+          if (response.data.selected_app_type) {
+            this.businessType = response.data.selected_app_type === 'STORE_ADMIN' ? 'STORE' : 'ORGANIZATION';
+            this.steps = this.businessType === 'STORE' ? this.storeSteps : this.organizationSteps;
+            this.updateAppConfigForm();
+            this.updateFormBasedOnBusinessType();
+          }
+        }
+      },
+      error: (error) => {
+        console.error('Error loading wizard status:', error);
+      }
+    });
   }
 
   get currentStepInfo(): WizardStep | undefined {
@@ -632,7 +656,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         if (response.success) {
           this.wizardData.user = userData;
-          this.wizardService.nextStep();
+          // Refresh wizard status to get the correct next step from backend
+          this.wizardService.getWizardStatus().subscribe({
+            next: (statusResponse) => {
+              console.log('Wizard status after user setup:', statusResponse);
+            },
+            error: (error) => {
+              console.error('Error refreshing wizard status after user setup:', error);
+            }
+          });
         }
       },
       error: (error) => {
@@ -659,7 +691,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         if (response.success) {
           this.wizardData.store = storeData;
-          this.wizardService.nextStep();
+          // Refresh wizard status to get the correct next step from backend
+          this.wizardService.getWizardStatus().subscribe({
+            next: (statusResponse) => {
+              console.log('Wizard status after store setup:', statusResponse);
+            },
+            error: (error) => {
+              console.error('Error refreshing wizard status after store setup:', error);
+            }
+          });
         }
       },
       error: (error) => {
@@ -685,7 +725,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         if (response.success) {
           this.wizardData.organization = organizationData;
-          this.wizardService.nextStep();
+          // Refresh wizard status to get the correct next step from backend
+          this.wizardService.getWizardStatus().subscribe({
+            next: (statusResponse) => {
+              console.log('Wizard status after organization setup:', statusResponse);
+            },
+            error: (error) => {
+              console.error('Error refreshing wizard status after organization setup:', error);
+            }
+          });
         }
       },
       error: (error) => {
@@ -711,7 +759,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         if (response.success) {
           this.wizardData.appConfig = appConfigData;
-          this.wizardService.nextStep();
+          // Refresh wizard status to get the correct next step from backend
+          this.wizardService.getWizardStatus().subscribe({
+            next: (statusResponse) => {
+              console.log('Wizard status after app config:', statusResponse);
+            },
+            error: (error) => {
+              console.error('Error refreshing wizard status after app config:', error);
+            }
+          });
         }
       },
       error: (error) => {

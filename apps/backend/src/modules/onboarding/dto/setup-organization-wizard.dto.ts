@@ -27,6 +27,15 @@ export class SetupOrganizationWizardDto {
   description?: string;
 
   @ApiPropertyOptional({
+    example: 'Mi Empresa S.A. de C.V.',
+    description: 'Legal entity name',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legal_name?: string;
+
+  @ApiPropertyOptional({
     example: 'contacto@empresa.com',
     description: 'Organization email',
   })
