@@ -375,55 +375,105 @@ App Runner falló porque mi aplicación necesita environment variables para inic
 
 ---
 
-## 🌐 Paso 8: CloudFront - El Cerebro de la Arquitectura
+## 🌐 Paso 8: CloudFront + S3 - La Batalla Épica contra el Host Header
 
-### **Mi objetivo:**
-- Servir frontend desde S3
-- Enrutar /api/* a App Runner
-- Soportar todos los subdominios (*.vendix.online)
+### **Mi objetivo inicial:**
+- Servir frontend Angular SPA desde S3
+- Soportar todos los subdominios (*.vendix.online) para multi-tenancy
 - SSL con mi certificado wildcard
+- Que mi aplicación lea el dominio desde el navegador para resolver el tenant
 
-### **Configuración compleja de CloudFront:**
+### **El Gran Desafío: Multi-tenant con subdominios dinámicos**
+
+Mi aplicación Angular tiene una lógica especial: cuando un usuario accede a `tenant1.vendix.online`, el JavaScript en el navegador lee `window.location.hostname` y hace un request al backend para resolver qué tenant es y configurar la UI.
+
+Esto creó un reto único con CloudFront y S3.
+
+---
+
+### **Primera Estrategia (FALLIDA): S3 Origin Config con OAC**
+
+**Lo que intenté:**
 ```json
 {
-  "DefaultRootObject": "index.html",
   "Origins": {
-    "Quantity": 2,
     "Items": [
       {
         "Id": "S3-vendix-online-frontend",
         "DomainName": "vendix-online-frontend.s3.us-east-1.amazonaws.com",
         "S3OriginConfig": {
-          "OriginAccessIdentity": "origin-access-identity/cloudfront/ERMIGYFICMCW4"
-        }
-      },
-      {
-        "Id": "AppRunner-backend",
-        "DomainName": "nzapw3bdie.us-east-1.awsapprunner.com",
-        "CustomOriginConfig": {
-          "OriginProtocolPolicy": "https-only"
-        }
+          "OriginAccessIdentity": ""
+        },
+        "OriginAccessControlId": "E3SZ0M6PDD6W7J"
       }
     ]
-  },
-  "DefaultCacheBehavior": {
-    "TargetOriginId": "S3-vendix-online-frontend",
-    "ViewerProtocolPolicy": "redirect-to-https",
-    "ForwardedValues": {
-      "Headers": {
-        "Items": ["Host"]
+  }
+}
+```
+
+**Configuré OAC (Origin Access Control):**
+```bash
+aws cloudfront create-origin-access-control \
+  --origin-access-control-config '{
+    "Name": "vendix-frontend-oac",
+    "SigningProtocol": "sigv4",
+    "SigningBehavior": "always",
+    "OriginAccessControlOriginType": "s3"
+  }'
+```
+
+**Política del bucket para OAC:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowCloudFrontOAC",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "cloudfront.amazonaws.com"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::vendix-online-frontend/*",
+      "Condition": {
+        "StringEquals": {
+          "AWS:SourceArn": "arn:aws:cloudfront::637423209959:distribution/E1I27OYFJX7VYJ"
+        }
       }
     }
-  },
-  "CacheBehaviors": {
+  ]
+}
+```
+
+**EL PROBLEMA:**
+```
+HTTP/2 404 
+x-amz-error-code: NoSuchBucket
+x-amz-error-message: The specified bucket does not exist
+x-amz-error-detail-bucketname: vendix.online
+```
+
+¿Por qué buscaba un bucket llamado `vendix.online` si mi bucket es `vendix-online-frontend`?
+
+**La revelación:** CloudFront estaba pasando el header `Host: vendix.online` a S3, pero S3 en modo bucket directo (no website hosting) interpreta ese header como el nombre del bucket. ¡S3 estaba buscando literalmente un bucket llamado "vendix.online"!
+
+---
+
+### **Segunda Estrategia (FALLIDA): Custom Origin Config sin Website Hosting**
+
+**Lo que intenté:**
+```json
+{
+  "Origins": {
     "Items": [
       {
-        "PathPattern": "/api/*",
-        "TargetOriginId": "AppRunner-backend",
-        "ForwardedValues": {
-          "Headers": {
-            "Items": ["Host", "Authorization", "Content-Type", "X-Tenant-Name"]
-          }
+        "Id": "S3-vendix-online-frontend-website",
+        "DomainName": "vendix-online-frontend.s3-website-us-east-1.amazonaws.com",
+        "CustomOriginConfig": {
+          "HTTPPort": 80,
+          "HTTPSPort": 443,
+          "OriginProtocolPolicy": "http-only",
+          "OriginReadTimeout": 60
         }
       }
     ]
@@ -431,15 +481,261 @@ App Runner falló porque mi aplicación necesita environment variables para inic
 }
 ```
 
-### **Errores de parámetros que encontré:**
-- **OriginReadTimeout**: No soportado en S3 origins
-- **OriginKeepaliveTimeout**: Formato incorrecto
-- **ViewerCertificate**: Necesita ACM certificate ARN, no solo ID
+Desactivé el S3 Website Hosting pensando que con CustomOriginConfig era suficiente.
+
+**EL PROBLEMA:**
+```bash
+aws s3api delete-bucket-website --bucket vendix-online-frontend
+# Ahora S3 ya NO sirve archivos vía HTTP
+```
+
+Resultado: 404 en todos los requests porque S3 sin website hosting NO responde a requests HTTP normales cuando usas el endpoint `.s3-website-us-east-1.amazonaws.com`.
+
+---
+
+### **Tercera Estrategia (FALLIDA): Intentar forzar el Host header**
+
+**Lo que intenté:**
+Agregar CustomHeaders al origen para forzar el Host correcto:
+
+```json
+{
+  "Origins": {
+    "Items": [
+      {
+        "CustomHeaders": {
+          "Quantity": 1,
+          "Items": [
+            {
+              "HeaderName": "Host",
+              "HeaderValue": "vendix-online-frontend.s3-website-us-east-1.amazonaws.com"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
+
+**EL PROBLEMA:** 
+¡No puedes sobrescribir el header `Host` con CustomHeaders! AWS CloudFront lo ignora por razones de seguridad. El Host header es especial y está protegido.
+
+---
+
+### **La Solución Final (EXITOSA): S3 Website Hosting + Custom Origin + Sin Forward Host**
+
+**La epifanía:**
+1. Mi app Angular **NO necesita** que el servidor le diga el dominio
+2. El JavaScript **lee el dominio del navegador**: `window.location.hostname`
+3. CloudFront solo necesita **servir los archivos estáticos**
+4. S3 Website Hosting **no necesita recibir el Host header del cliente**
+
+**Configuración final que funciona:**
+
+**Paso 1: Habilitar S3 Website Hosting**
+```bash
+aws s3 website s3://vendix-online-frontend/ \
+  --index-document index.html \
+  --error-document index.html
+```
+
+**Paso 2: Bucket Policy público (para website hosting)**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublicReadGetObject",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::vendix-online-frontend/*"
+    }
+  ]
+}
+```
+
+**Paso 3: CloudFront con CustomOriginConfig**
+```json
+{
+  "DefaultRootObject": "index.html",
+  "Origins": {
+    "Quantity": 1,
+    "Items": [
+      {
+        "Id": "S3-vendix-online-frontend-website",
+        "DomainName": "vendix-online-frontend.s3-website-us-east-1.amazonaws.com",
+        "OriginPath": "",
+        "CustomHeaders": {
+          "Quantity": 0
+        },
+        "CustomOriginConfig": {
+          "HTTPPort": 80,
+          "HTTPSPort": 443,
+          "OriginProtocolPolicy": "http-only",
+          "OriginSslProtocols": {
+            "Quantity": 1,
+            "Items": ["TLSv1.2"]
+          },
+          "OriginReadTimeout": 60,
+          "OriginKeepaliveTimeout": 5
+        }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "S3-vendix-online-frontend-website",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "ForwardedValues": {
+      "QueryString": false,
+      "Cookies": {
+        "Forward": "none"
+      },
+      "Headers": {
+        "Quantity": 0
+      }
+    }
+  },
+  "CustomErrorResponses": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "ErrorCode": 403,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": "200",
+        "ErrorCachingMinTTL": 300
+      },
+      {
+        "ErrorCode": 404,
+        "ResponsePagePath": "/index.html",
+        "ResponseCode": "200",
+        "ErrorCachingMinTTL": 300
+      }
+    ]
+  }
+}
+```
+
+**Paso 4: NO forward headers al origen**
+```json
+{
+  "ForwardedValues": {
+    "Headers": {
+      "Quantity": 0  // ¡CLAVE! No enviar Host header a S3
+    }
+  }
+}
+```
+
+**Por qué funciona:**
+1. Usuario accede: `https://tenant1.vendix.online`
+2. CloudFront intercepta, verifica SSL con certificado wildcard ✅
+3. CloudFront solicita `index.html` a S3 website endpoint usando **el hostname del origen**, no el del cliente
+4. S3 responde con el archivo porque recibe `Host: vendix-online-frontend.s3-website-us-east-1.amazonaws.com` ✅
+5. CloudFront sirve el HTML al navegador
+6. JavaScript en el navegador ejecuta: `const domain = window.location.hostname` → "tenant1.vendix.online" ✅
+7. La app hace request: `fetch('https://api.vendix.online/tenant/resolve?domain=tenant1.vendix.online')` ✅
+
+---
+
+### **Lecciones críticas sobre CloudFront + S3:**
+
+1. **S3 tiene DOS modos muy diferentes:**
+   - **Bucket directo** (bucket.s3.region.amazonaws.com): Necesita OAC, seguro, pero interpreta Host header como nombre de bucket
+   - **Website hosting** (bucket.s3-website-region.amazonaws.com): Público, sirve SPAs correctamente, ignora Host header del request
+
+2. **El Host header es especial:**
+   - No puedes sobrescribirlo con CustomHeaders
+   - CloudFront lo usa para routing de aliases
+   - S3 lo interpreta de formas diferentes según el modo
+
+3. **Multi-tenant SPA no necesita pasar Host al servidor:**
+   - El dominio se lee del **navegador** (window.location.hostname)
+   - Los archivos estáticos son **los mismos** para todos los tenants
+   - Solo el **backend API** necesita saber el tenant
+
+4. **CustomOriginConfig vs S3OriginConfig:**
+   - **S3OriginConfig**: Para S3 bucket directo con OAC/OAI (más seguro)
+   - **CustomOriginConfig**: Para S3 website hosting o cualquier HTTP endpoint (más flexible)
+
+5. **Custom Error Responses son cruciales para SPAs:**
+   ```json
+   {
+     "ErrorCode": 404,
+     "ResponsePagePath": "/index.html",
+     "ResponseCode": "200"
+   }
+   ```
+   Sin esto, las rutas de Angular (como `/products`, `/login`) retornarían 404.
+
+---
+
+### **Errores comunes que encontré:**
+
+**Error 1: NoSuchBucket con OAC**
+```
+x-amz-error-detail-bucketname: vendix.online
+```
+**Solución:** Usar S3 Website Hosting con CustomOriginConfig
+
+**Error 2: 404 después de eliminar website hosting**
+```
+The resource you requested does not exist
+```
+**Solución:** Siempre mantener website hosting activo para SPAs
+
+**Error 3: Caché de CloudFront sirviendo errores viejos**
+```
+x-cache: Error from cloudfront
+```
+**Solución:** Invalidar caché después de cada cambio:
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id E1I27OYFJX7VYJ \
+  --paths "/*"
+```
+
+**Error 4: CloudFront "InProgress" durante horas**
+```
+Status: InProgress
+```
+**Solución:** Esperar pacientemente. Deployment puede tomar 5-15 minutos. No hacer más cambios mientras está deploying.
+
+---
+
+### **La arquitectura final exitosa:**
+
+```
+Usuario → tenant1.vendix.online
+    ↓
+Route 53 (wildcard *.vendix.online → CloudFront)
+    ↓
+CloudFront Distribution E1I27OYFJX7VYJ
+    - Alias: vendix.online, *.vendix.online
+    - SSL Certificate: *.vendix.online (ACM)
+    - Default Behavior → S3 Website Origin
+    ↓
+S3 Website Hosting: vendix-online-frontend
+    - Endpoint: vendix-online-frontend.s3-website-us-east-1.amazonaws.com
+    - Index: index.html
+    - Error: index.html (para SPA routing)
+    ↓
+Navegador recibe index.html y archivos estáticos
+    ↓
+JavaScript lee: window.location.hostname = "tenant1.vendix.online"
+    ↓
+App Angular hace request a: api.vendix.online/tenant/resolve?domain=tenant1.vendix.online
+```
+
+---
 
 ### **Lo que aprendí sobre CloudFront:**
-- **Path patterns son regex-like**: `/api/*` coincide con todo lo que empieza con /api/
-- **Headers forwarding es crítico**: Para tenant detection necesito el Host header
-- **Alias records en Route 53**: Necesitan HostedZoneId específico para CloudFront
+- **Distribution deployment es lento**: 5-15 minutos por cambio
+- **Invalidaciones no son instantáneas**: Puede tomar 5-10 minutos
+- **Path patterns son poderosos**: `/api/*` permite rutear a diferentes orígenes
+- **Headers forwarding es un arte**: Demasiados = sin caché, muy pocos = app rota
+- **Alias records necesitan HostedZoneId específico**: `Z2FDTNDATAQYW2` para CloudFront
 
 ---
 
