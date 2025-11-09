@@ -1,16 +1,14 @@
 export const environment = {
-  production: false,
-  // apiUrl is forced to the production API endpoint. This ensures the frontend
-  // always calls the correct backend when served in Docker/nginx.
-  apiUrl: 'https://api.vendix.com/api',
-  vendixDomain: 'vendix.com',
+  production: true,
+  apiUrl: 'https://2bd2zjyqme.us-east-1.awsapprunner.com/api',
+  vendixDomain: 'vendix.online',
 
-  // Configuración para desarrollo
-  debugDomainDetection: true,
-  debugThemeApplication: true,
-  debugAuthFlow: true,
+  // Configuración para producción
+  debugDomainDetection: false,
+  debugThemeApplication: false,
+  debugAuthFlow: false,
 
-  // Nota: Los mapeos de dominios ahora se obtienen dinámicamente del backend
+  // Nota: Los dominios soportados ahora se obtienen dinámicamente del backend
   // El servicio DomainDetectorService consulta /api/public/config/frontend
   // para obtener la configuración específica del dominio
 };
