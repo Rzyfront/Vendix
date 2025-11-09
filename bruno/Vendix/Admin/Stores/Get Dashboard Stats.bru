@@ -1,0 +1,43 @@
+meta {
+  name: Get Dashboard Stats
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/admin/stores/dashboard/stats
+  body: none
+  auth: inherit
+}
+
+
+tests {
+  test("Get dashboard stats successful - validates success response structure", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Get dashboard stats total stores validation", function() {
+    expect(res.body.data).to.have.property('total_stores');
+    expect(res.body.data.total_stores).to.be.a('number');
+    expect(res.body.data.total_stores).to.be.at.least(0);
+  });
+  
+  test("Get dashboard stats breakdown validation", function() {
+    expect(res.body.data).to.have.property('by_type');
+    expect(res.body.data.by_type).to.be.an('object');
+    if (Object.keys(res.body.data.by_type).length > 0) {
+      Object.values(res.body.data.by_type).forEach(count => {
+        expect(count).to.be.a('number');
+        expect(count).to.be.at.least(0);
+      });
+    }
+  });
+  
+  test("Get dashboard stats no sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
+    expect(res.body.data).to.not.have.property('secret_token');
+  });
+}

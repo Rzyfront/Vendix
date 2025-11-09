@@ -16,3 +16,5 @@ logs/
 certs/
 # OS
 Thumbs.db
+# Documentation
+docs/

@@ -1,0 +1,121 @@
+meta {
+  name: Receive Return Order
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{baseUrl}}/api/returns/ret_123456789012345678/receive
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "receivedItems": [
+    {
+      "itemId": "ritm_123456789012345678",
+      "receivedQuantity": 2,
+      "receivedCondition": "DAMAGED",
+      "qualityNotes": "Items have minor scratches but functional",
+      "locationId": "loc_123456789012345678"
+    },
+    {
+      "itemId": "ritm_234567890123456789",
+      "receivedQuantity": 1,
+      "receivedCondition": "NEW",
+      "qualityNotes": "Item in perfect condition, wrong product",
+      "locationId": "loc_123456789012345678"
+    }
+  ],
+  "receiverName": "John Smith",
+  "receiverNotes": "All items received and inspected. Ready for refund processing.",
+  "receivedDate": "2024-01-10T14:30:00.000Z",
+  "totalReceivedValue": 275.00
+}
+
+tests {
+  test("Should receive return order successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    expect(res.body).to.have.property('id', 'ret_123456789012345678');
+    expect(res.body).to.have.property('status', 'RECEIVED');
+    expect(res.body).to.have.property('receivedDate');
+    expect(res.body).to.have.property('receiverName', 'John Smith');
+    expect(res.body).to.have.property('receiverNotes');
+    expect(res.body).to.have.property('totalReceivedValue', 275.00);
+    expect(res.body).to.have.property('receivedAt');
+    expect(res.body).to.have.property('receivedBy');
+  });
+
+  test("Should validate received items", function() {
+    expect(res.body).to.have.property('items').that.is.an('array');
+    res.body.items.forEach(item => {
+      expect(item).to.have.property('receivedQuantity');
+      expect(item).to.have.property('receivedCondition');
+      expect(item).to.have.property('qualityNotes');
+      expect(item).to.have.property('locationId');
+      expect(item.receivedQuantity).to.be.a('number');
+      expect(item.receivedQuantity).to.be.at.least(0);
+      expect(['NEW', 'LIKE_NEW', 'GOOD', 'FAIR', 'DAMAGED', 'DEFECTIVE']).to.include(item.receivedCondition);
+    });
+  });
+
+  test("Should validate inventory integration", function() {
+    expect(res.body).to.have.property('inventoryUpdates');
+    if (res.body.inventoryUpdates) {
+      expect(res.body.inventoryUpdates).to.be.an('array');
+      res.body.inventoryUpdates.forEach(update => {
+        expect(update).to.have.property('productId');
+        expect(update).to.have.property('locationId');
+        expect(update).to.have.property('quantityChange');
+        expect(update).to.have.property('movementType');
+        expect(update.movementType).to.equal('RETURN_IN');
+      });
+    }
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate receiving workflow", function() {
+    expect(res.body).to.have.property('workflowHistory');
+    if (res.body.workflowHistory) {
+      expect(res.body.workflowHistory).to.be.an('array');
+      const receivingEntry = res.body.workflowHistory.find(entry => entry.action === 'RECEIVED');
+      expect(receivingEntry).to.exist;
+      expect(receivingEntry).to.have.property('timestamp');
+      expect(receivingEntry).to.have.property('userId');
+      expect(receivingEntry).to.have.property('notes');
+    }
+  });
+
+  test("Should validate status transition", function() {
+    expect(res.body.status).to.equal('RECEIVED');
+    expect(res.body).to.have.property('previousStatus');
+    expect(['APPROVED', 'PROCESSING']).to.include(res.body.previousStatus);
+  });
+
+  test("Should validate quality assessment", function() {
+    res.body.items.forEach(item => {
+      expect(item).to.have.property('qualityAssessment');
+      if (item.qualityAssessment) {
+        expect(item.qualityAssessment).to.have.property('conditionGrade');
+        expect(item.qualityAssessment).to.have.property('resaleValue');
+        expect(item.qualityAssessment).to.have.property('recommendedAction');
+      }
+    });
+  });
+
+  test("Should validate location assignment", function() {
+    res.body.items.forEach(item => {
+      expect(item.locationId).to.be.a('string');
+      expect(item.locationId).to.have.lengthOf(18); // UUID length
+    });
+  });
+}

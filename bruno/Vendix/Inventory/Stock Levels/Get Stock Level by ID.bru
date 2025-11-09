@@ -1,0 +1,50 @@
+meta {
+  name: Get Stock Level by ID
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/inventory/stock-levels/{{stock_level_id}}
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Get stock level by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Data is valid object", function() {
+    expect(res.body.data).to.be.an('object');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('product_id');
+    expect(res.body.data).to.have.property('location_id');
+    expect(res.body.data).to.have.property('quantity_on_hand');
+    expect(res.body.data).to.have.property('quantity_reserved');
+    expect(res.body.data).to.have.property('quantity_available');
+    expect(res.body.data).to.have.property('last_updated');
+
+    expect(res.body.data.id).to.be.a('number');
+    expect(res.body.data.product_id).to.be.a('number');
+    expect(res.body.data.location_id).to.be.a('number');
+    expect(res.body.data.quantity_on_hand).to.be.a('number');
+    expect(res.body.data.quantity_reserved).to.be.a('number');
+    expect(res.body.data.quantity_available).to.be.a('number');
+    expect(res.body.data.last_updated).to.be.a('string');
+  });
+
+  test("Should validate stock calculations", function() {
+    const calculatedAvailable = res.body.data.quantity_on_hand - res.body.data.quantity_reserved;
+    expect(res.body.data.quantity_available).to.equal(calculatedAvailable);
+  });
+
+  test("No sensitive data in response", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}

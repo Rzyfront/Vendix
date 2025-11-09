@@ -6,12 +6,16 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { AuditService, AuditAction } from '../audit/audit.service';
+import { ResponseService } from '../../common/responses/response.service';
 
 @ApiTags('Security Logs')
 @Controller('security-logs')
 @ApiBearerAuth()
 export class SecurityLogsController {
-  constructor(private readonly auditService: AuditService) {}
+  constructor(
+    private readonly auditService: AuditService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Get('failed-logins')
   @ApiOperation({
@@ -28,15 +32,26 @@ export class SecurityLogsController {
     @Query('toDate') toDate?: string,
     @Query('limit') limit?: string,
   ) {
-    const filters: any = {
-      action: AuditAction.LOGIN_FAILED,
-      limit: limit ? parseInt(limit) : 50,
-    };
+    try {
+      const filters: any = {
+        action: AuditAction.LOGIN_FAILED,
+        limit: limit ? parseInt(limit) : 50,
+      };
 
-    if (fromDate) filters.fromDate = new Date(fromDate);
-    if (toDate) filters.toDate = new Date(toDate);
+      if (fromDate) filters.fromDate = new Date(fromDate);
+      if (toDate) filters.toDate = new Date(toDate);
 
-    return await this.auditService.getAuditLogs(filters);
+      const logs = await this.auditService.getAuditLogs(filters);
+      return this.responseService.success(
+        logs,
+        'Logs de login fallidos obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener logs de login fallidos',
+        error.message,
+      );
+    }
   }
 
   @Get('account-locks')
@@ -53,14 +68,25 @@ export class SecurityLogsController {
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
   ) {
-    const filters: any = {
-      action: AuditAction.ACCOUNT_LOCKED,
-    };
+    try {
+      const filters: any = {
+        action: AuditAction.ACCOUNT_LOCKED,
+      };
 
-    if (fromDate) filters.fromDate = new Date(fromDate);
-    if (toDate) filters.toDate = new Date(toDate);
+      if (fromDate) filters.fromDate = new Date(fromDate);
+      if (toDate) filters.toDate = new Date(toDate);
 
-    return await this.auditService.getAuditLogs(filters);
+      const logs = await this.auditService.getAuditLogs(filters);
+      return this.responseService.success(
+        logs,
+        'Logs de bloqueo de cuentas obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener logs de bloqueo de cuentas',
+        error.message,
+      );
+    }
   }
 
   @Get('password-changes')
@@ -76,14 +102,25 @@ export class SecurityLogsController {
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
   ) {
-    const filters: any = {
-      action: AuditAction.PASSWORD_CHANGE,
-    };
+    try {
+      const filters: any = {
+        action: AuditAction.PASSWORD_CHANGE,
+      };
 
-    if (fromDate) filters.fromDate = new Date(fromDate);
-    if (toDate) filters.toDate = new Date(toDate);
+      if (fromDate) filters.fromDate = new Date(fromDate);
+      if (toDate) filters.toDate = new Date(toDate);
 
-    return await this.auditService.getAuditLogs(filters);
+      const logs = await this.auditService.getAuditLogs(filters);
+      return this.responseService.success(
+        logs,
+        'Logs de cambios de contraseña obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener logs de cambios de contraseña',
+        error.message,
+      );
+    }
   }
 
   @Get('suspicious-activity')
@@ -99,14 +136,25 @@ export class SecurityLogsController {
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
   ) {
-    const filters: any = {
-      action: AuditAction.SUSPICIOUS_ACTIVITY,
-    };
+    try {
+      const filters: any = {
+        action: AuditAction.SUSPICIOUS_ACTIVITY,
+      };
 
-    if (fromDate) filters.fromDate = new Date(fromDate);
-    if (toDate) filters.toDate = new Date(toDate);
+      if (fromDate) filters.fromDate = new Date(fromDate);
+      if (toDate) filters.toDate = new Date(toDate);
 
-    return await this.auditService.getAuditLogs(filters);
+      const logs = await this.auditService.getAuditLogs(filters);
+      return this.responseService.success(
+        logs,
+        'Logs de actividad sospechosa obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener logs de actividad sospechosa',
+        error.message,
+      );
+    }
   }
 
   @Get('security-summary')
@@ -125,36 +173,48 @@ export class SecurityLogsController {
     const from = fromDate ? new Date(fromDate) : undefined;
     const to = toDate ? new Date(toDate) : undefined;
 
-    const [failedLogins, accountLocks, passwordChanges] = await Promise.all([
-      this.auditService.getAuditLogs({
-        action: AuditAction.LOGIN_FAILED,
-        fromDate: from,
-        toDate: to,
-      }),
-      this.auditService.getAuditLogs({
-        action: AuditAction.ACCOUNT_LOCKED,
-        fromDate: from,
-        toDate: to,
-      }),
-      this.auditService.getAuditLogs({
-        action: AuditAction.PASSWORD_CHANGE,
-        fromDate: from,
-        toDate: to,
-      }),
-    ]);
+    try {
+      const [failedLogins, accountLocks, passwordChanges] = await Promise.all([
+        this.auditService.getAuditLogs({
+          action: AuditAction.LOGIN_FAILED,
+          fromDate: from,
+          toDate: to,
+        }),
+        this.auditService.getAuditLogs({
+          action: AuditAction.ACCOUNT_LOCKED,
+          fromDate: from,
+          toDate: to,
+        }),
+        this.auditService.getAuditLogs({
+          action: AuditAction.PASSWORD_CHANGE,
+          fromDate: from,
+          toDate: to,
+        }),
+      ]);
 
-    return {
-      summary: {
-        failedLogins: failedLogins.length,
-        accountLocks: accountLocks.length,
-        passwordChanges: passwordChanges.length,
-        totalSecurityEvents:
-          failedLogins.length + accountLocks.length + passwordChanges.length,
-      },
-      period: {
-        from: from || 'All time',
-        to: to || 'Now',
-      },
-    };
+      const summary = {
+        summary: {
+          failedLogins: failedLogins.length,
+          accountLocks: accountLocks.length,
+          passwordChanges: passwordChanges.length,
+          totalSecurityEvents:
+            failedLogins.length + accountLocks.length + passwordChanges.length,
+        },
+        period: {
+          from: from || 'All time',
+          to: to || 'Now',
+        },
+      };
+
+      return this.responseService.success(
+        summary,
+        'Resumen de seguridad obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener resumen de seguridad',
+        error.message,
+      );
+    }
   }
 }

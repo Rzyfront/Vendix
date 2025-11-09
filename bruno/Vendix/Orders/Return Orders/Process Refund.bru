@@ -1,0 +1,125 @@
+meta {
+  name: Process Refund
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/api/returns/ret_123456789012345678/refund
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "refundMethod": "CREDIT_CARD",
+  "refundAmount": 275.00,
+  "refundReference": "REF-2024-001234",
+  "transactionId": "txn_123456789012345678",
+  "refundDate": "2024-01-12T10:00:00.000Z",
+  "processorResponse": "Refund processed successfully",
+  "notes": "Refund processed to original payment method"
+}
+
+tests {
+  test("Should process refund successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    expect(res.body).to.have.property('id', 'ret_123456789012345678');
+    expect(res.body).to.have.property('status', 'REFUNDED');
+    expect(res.body).to.have.property('actualRefundAmount', 275.00);
+    expect(res.body).to.have.property('refundMethod', 'CREDIT_CARD');
+    expect(res.body).to.have.property('refundReference', 'REF-2024-001234');
+    expect(res.body).to.have.property('transactionId', 'txn_123456789012345678');
+    expect(res.body).to.have.property('refundDate');
+    expect(res.body).to.have.property('processorResponse');
+    expect(res.body).to.have.property('refundedAt');
+    expect(res.body).to.have.property('refundedBy');
+  });
+
+  test("Should validate refund information", function() {
+    expect(res.body).to.have.property('refundInfo');
+    expect(res.body.refundInfo).to.be.an('object');
+    expect(res.body.refundInfo).to.have.property('refundId');
+    expect(res.body.refundInfo).to.have.property('refundAmount', 275.00);
+    expect(res.body.refundInfo).to.have.property('refundMethod', 'CREDIT_CARD');
+    expect(res.body.refundInfo).to.have.property('refundReference', 'REF-2024-001234');
+    expect(res.body.refundInfo).to.have.property('transactionId', 'txn_123456789012345678');
+    expect(res.body.refundInfo).to.have.property('refundDate');
+    expect(res.body.refundInfo).to.have.property('processorResponse');
+    expect(res.body.refundInfo).to.have.property('status', 'COMPLETED');
+  });
+
+  test("Should validate payment processor integration", function() {
+    expect(res.body.refundInfo).to.have.property('processorDetails');
+    if (res.body.refundInfo.processorDetails) {
+      expect(res.body.refundInfo.processorDetails).to.be.an('object');
+      expect(res.body.refundInfo.processorDetails).to.have.property('processor');
+      expect(res.body.refundInfo.processorDetails).to.have.property('processorTransactionId');
+      expect(res.body.refundInfo.processorDetails).to.have.property('processorFee');
+      expect(res.body.refundInfo.processorDetails).to.have.property('settlementDate');
+    }
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(3000); // Refunds may take longer due to payment processor
+  });
+
+  test("Should validate refund workflow", function() {
+    expect(res.body).to.have.property('workflowHistory');
+    if (res.body.workflowHistory) {
+      expect(res.body.workflowHistory).to.be.an('array');
+      const refundEntry = res.body.workflowHistory.find(entry => entry.action === 'REFUNDED');
+      expect(refundEntry).to.exist;
+      expect(refundEntry).to.have.property('timestamp');
+      expect(refundEntry).to.have.property('userId');
+      expect(refundEntry).to.have.property('notes');
+    }
+  });
+
+  test("Should validate status transition", function() {
+    expect(res.body.status).to.equal('REFUNDED');
+    expect(res.body).to.have.property('previousStatus');
+    expect(['RECEIVED', 'PROCESSING']).to.include(res.body.previousStatus);
+  });
+
+  test("Should validate customer notification", function() {
+    expect(res.body).to.have.property('customerNotification');
+    if (res.body.customerNotification) {
+      expect(res.body.customerNotification).to.be.an('object');
+      expect(res.body.customerNotification).to.have.property('notificationId');
+      expect(res.body.customerNotification).to.have.property('notificationType', 'REFUND_PROCESSED');
+      expect(res.body.customerNotification).to.have.property('sentAt');
+      expect(res.body.customerNotification).to.have.property('email');
+      expect(res.body.customerNotification).to.have.property('status');
+    }
+  });
+
+  test("Should validate financial reconciliation", function() {
+    expect(res.body).to.have.property('financialSummary');
+    if (res.body.financialSummary) {
+      expect(res.body.financialSummary).to.be.an('object');
+      expect(res.body.financialSummary).to.have.property('originalOrderAmount');
+      expect(res.body.financialSummary).to.have.property('refundAmount', 275.00);
+      expect(res.body.financialSummary).to.have.property('restockingFee');
+      expect(res.body.financialSummary).to.have.property('netRefundAmount');
+      expect(res.body.financialSummary).to.have.property('currency');
+    }
+  });
+
+  test("Should validate audit trail", function() {
+    expect(res.body).to.have.property('auditTrail');
+    if (res.body.auditTrail) {
+      expect(res.body.auditTrail).to.be.an('array');
+      const refundAudit = res.body.auditTrail.find(entry => entry.action === 'REFUND_PROCESSED');
+      expect(refundAudit).to.exist;
+      expect(refundAudit).to.have.property('timestamp');
+      expect(refundAudit).to.have.property('userId');
+      expect(refundAudit).to.have.property('details');
+    }
+  });
+}

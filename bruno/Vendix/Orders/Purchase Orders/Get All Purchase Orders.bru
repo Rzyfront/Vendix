@@ -1,0 +1,57 @@
+meta {
+  name: Get All Purchase Orders
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/orders/purchase-orders
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return purchase orders list", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('array');
+    
+    if (res.body.length > 0) {
+      const order = res.body[0];
+      expect(order).to.have.property('id');
+      expect(order).to.have.property('supplier_id');
+      expect(order).to.have.property('location_id');
+      expect(order).to.have.property('status');
+      expect(order).to.have.property('total_amount');
+      expect(order).to.have.property('order_date');
+      expect(order).to.have.property('items');
+      
+      expect(order.id).to.be.a('number');
+      expect(order.supplier_id).to.be.a('number');
+      expect(order.location_id).to.be.a('number');
+      expect(order.status).to.be.a('string');
+      expect(order.total_amount).to.be.a('number');
+      expect(order.items).to.be.an('array');
+      
+      expect(order.status).to.be.oneOf(['draft', 'approved', 'pending', 'received', 'cancelled']);
+    }
+  });
+  
+  test("Should validate order structure", function() {
+    if (res.body.length > 0) {
+      res.body.forEach(order => {
+        expect(order.order_date).to.be.a('string');
+        if (order.items && order.items.length > 0) {
+          order.items.forEach(item => {
+            expect(item).to.have.property('product_id');
+            expect(item).to.have.property('quantity');
+            expect(item).to.have.property('unit_price');
+            expect(item).to.have.property('total_price');
+          });
+        }
+      });
+    }
+  });
+}

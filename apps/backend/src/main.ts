@@ -26,14 +26,22 @@ async function bootstrap() {
     origin: process.env.CORS_ORIGIN?.split(',') || [
       'http://localhost:4200',
       'http://localhost',
-      'http://app.vendix.com',
-      'http://api.vendix.com',
-      // Add HTTPS production origins so browser requests from vendix.com are allowed
-      'https://vendix.com',
-      'https://www.vendix.com',
-      'https://api.vendix.com',
+      // Production origins for vendix.online
+      'https://vendix.online',
+      'https://www.vendix.online',
+      'https://api.vendix.online',
+      // CloudFront distributions
+      'https://d10fsx06e3z6rc.cloudfront.net',
+      'https://d1y0m1duatgngc.cloudfront.net',
+      // Allow any subdomain for multi-tenant
+      /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.online$/,
+      // Allow any CloudFront distribution
+      /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
     ],
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    exposedHeaders: ['Authorization'],
   });
 
   // Swagger configuration

@@ -1,0 +1,67 @@
+meta {
+  name: Create Domain
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{url}}/domains
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "hostname": "{{domainHostname}}",
+    "domain_type": "primary",
+    "is_active": true,
+    "ssl_enabled": false,
+    "organization_id": "{{organizationId}}",
+    "store_id": "{{storeId}}",
+    "settings": {
+      "branding": {
+        "primary_color": "{{primaryColor}}",
+        "secondary_color": "{{secondaryColor}}",
+        "logo_url": "https://example.com/logo.png"
+      },
+      "features": {
+        "ecommerce": true,
+        "inventory": true,
+        "analytics": true
+      }
+    }
+  }
+}
+
+vars:post-response {
+  domainId: res.body.data.id
+}
+
+tests {
+  test("Domain created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Domain data is correct", function() {
+    expect(res.body.data.hostname).to.equal('{{domainHostname}}');
+    expect(res.body.data.domain_type).to.equal('primary');
+    expect(res.body.data.is_active).to.be.true;
+  });
+  
+  test("Domain settings are valid", function() {
+    expect(res.body.data.settings.branding.primary_color).to.equal('{{primaryColor}}');
+    expect(res.body.data.settings.features.ecommerce).to.be.true;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

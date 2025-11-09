@@ -24,12 +24,12 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
 } from './dto/password.dto';
-import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
 import { UserRole } from './enums/user-role.enum';
 import { ResponseService } from '../../common/responses/response.service';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @Controller('auth')
 export class AuthController {
@@ -115,12 +115,12 @@ export class AuthController {
   @HttpCode(HttpStatus.CREATED)
   async registerStaff(
     @Body() registerStaffDto: RegisterStaffDto,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.authService.registerStaff(
         registerStaffDto,
-        user.id,
+        req.user.id,
       );
       return this.responseService.success(result.user, result.message);
     } catch (error) {
@@ -190,9 +190,9 @@ export class AuthController {
   }
 
   @Get('profile')
-  async getProfile(@CurrentUser() user: any) {
+  async getProfile(@Req() req: AuthenticatedRequest) {
     try {
-      const profile = await this.authService.getProfile(user.id);
+      const profile = await this.authService.getProfile(req.user.id);
       return this.responseService.success(
         profile,
         'Perfil obtenido exitosamente',
@@ -209,12 +209,12 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   async logout(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Body() body?: { refresh_token?: string; all_sessions?: boolean },
   ) {
     try {
       const result = await this.authService.logout(
-        user.id,
+        req.user.id,
         body?.refresh_token,
         body?.all_sessions,
       );
@@ -229,10 +229,10 @@ export class AuthController {
   }
 
   @Get('me')
-  async getCurrentUser(@CurrentUser() user: any) {
+  async getCurrentUser(@Req() req: AuthenticatedRequest) {
     try {
       return this.responseService.success(
-        user,
+        req.user,
         'Usuario actual obtenido exitosamente',
       );
     } catch (error) {
@@ -323,12 +323,12 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(HttpStatus.OK)
   async changePassword(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Body() changeDto: ChangePasswordDto,
   ) {
     try {
       const result = await this.authService.changePassword(
-        user.id,
+        req.user.id,
         changeDto.current_password,
         changeDto.new_password,
       );
@@ -343,9 +343,9 @@ export class AuthController {
   }
 
   @Get('sessions')
-  async getUserSessions(@CurrentUser() user: any) {
+  async getUserSessions(@Req() req: AuthenticatedRequest) {
     try {
-      const sessions = await this.authService.getUserSessions(user.id);
+      const sessions = await this.authService.getUserSessions(req.user.id);
       return this.responseService.success(
         sessions,
         'Sesiones obtenidas exitosamente',
@@ -362,12 +362,12 @@ export class AuthController {
   @Delete('sessions/:sessionId')
   @HttpCode(HttpStatus.OK)
   async revokeSession(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Param('session_id') session_id: string,
   ) {
     try {
       const result = await this.authService.revokeUserSession(
-        user.id,
+        req.user.id,
         parseInt(session_id),
       );
       return this.responseService.success(result.data, result.message);
@@ -383,10 +383,10 @@ export class AuthController {
   // ===== RUTAS DE ONBOARDING =====
 
   @Get('onboarding/status')
-  async getOnboardingStatus(@CurrentUser() user: any) {
+  async getOnboardingStatus(@Req() req: AuthenticatedRequest) {
     try {
       // Verificar que el usuario sea owner
-      const userWithRoles = await this.authService.validateUser(user.id);
+      const userWithRoles = await this.authService.validateUser(req.user.id);
       const isOwner = userWithRoles?.user_roles?.some(
         (ur) => ur.roles?.name === 'owner',
       );
@@ -398,7 +398,7 @@ export class AuthController {
         );
       }
 
-      const status = await this.authService.getOnboardingStatus(user.id);
+      const status = await this.authService.getOnboardingStatus(req.user.id);
       return this.responseService.success(
         status,
         'Estado de onboarding obtenido exitosamente',
@@ -415,12 +415,12 @@ export class AuthController {
   @Post('onboarding/create-organization')
   @HttpCode(HttpStatus.CREATED)
   async createOrganizationOnboarding(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Body() organizationData: any,
   ) {
     try {
       // Verificar que el usuario sea owner
-      const userWithRoles = await this.authService.validateUser(user.id);
+      const userWithRoles = await this.authService.validateUser(req.user.id);
       const isOwner = userWithRoles?.user_roles?.some(
         (ur) => ur.roles?.name === 'owner',
       );
@@ -433,7 +433,7 @@ export class AuthController {
       }
 
       const result = await this.authService.createOrganizationDuringOnboarding(
-        user.id,
+        req.user.id,
         organizationData,
       );
       return this.responseService.success(result, result.message);
@@ -449,13 +449,13 @@ export class AuthController {
   @Post('onboarding/setup-organization/:organizationId')
   @HttpCode(HttpStatus.OK)
   async setupOrganization(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Param('organization_id') organization_id: string,
     @Body() setup_data: any,
   ) {
     try {
       // Verificar que el usuario sea owner
-      const userWithRoles = await this.authService.validateUser(user.id);
+      const userWithRoles = await this.authService.validateUser(req.user.id);
       const isOwner = userWithRoles?.user_roles?.some(
         (ur) => ur.roles?.name === 'owner',
       );
@@ -468,7 +468,7 @@ export class AuthController {
       }
 
       const result = await this.authService.setupOrganization(
-        user.id,
+        req.user.id,
         parseInt(organization_id),
         setup_data,
       );
@@ -486,13 +486,13 @@ export class AuthController {
   @Post('onboarding/create-store/:organizationId')
   @HttpCode(HttpStatus.CREATED)
   async createStoreOnboarding(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Param('organization_id') organization_id: string,
     @Body() store_data: any,
   ) {
     try {
       // Verificar que el usuario sea owner
-      const userWithRoles = await this.authService.validateUser(user.id);
+      const userWithRoles = await this.authService.validateUser(req.user.id);
       const isOwner = userWithRoles?.user_roles?.some(
         (ur) => ur.roles?.name === 'owner',
       );
@@ -505,7 +505,7 @@ export class AuthController {
       }
 
       const result = await this.authService.createStoreDuringOnboarding(
-        user.id,
+        req.user.id,
         parseInt(organization_id),
         store_data,
       );
@@ -522,13 +522,13 @@ export class AuthController {
   @Post('onboarding/setup-store/:storeId')
   @HttpCode(HttpStatus.OK)
   async setupStore(
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
     @Param('store_id') store_id: string,
     @Body() setup_data: any,
   ) {
     try {
       // Verificar que el usuario sea owner
-      const userWithRoles = await this.authService.validateUser(user.id);
+      const userWithRoles = await this.authService.validateUser(req.user.id);
       const isOwner = userWithRoles?.user_roles?.some(
         (ur) => ur.roles?.name === 'owner',
       );
@@ -541,7 +541,7 @@ export class AuthController {
       }
 
       const result = await this.authService.setupStore(
-        user.id,
+        req.user.id,
         parseInt(store_id),
         setup_data,
       );
@@ -584,7 +584,7 @@ export class AuthController {
                 email: { type: 'string', example: 'usuario@email.com' },
                 first_name: { type: 'string', example: 'Juan' },
                 last_name: { type: 'string', example: 'Pérez' },
-                onboarding_completed: { type: 'boolean', example: true },
+                // onboarding_completed: { type: 'boolean', example: true }, // Moved to organization level
                 state: { type: 'string', example: 'active' },
               },
             },
@@ -628,9 +628,9 @@ export class AuthController {
       },
     },
   })
-  async completeOnboarding(@CurrentUser() user: any) {
+  async completeOnboarding(@Req() req: AuthenticatedRequest) {
     try {
-      const result = await this.authService.completeOnboarding(user.id);
+      const result = await this.authService.completeOnboarding(req.user.id);
       return this.responseService.success(result.data, result.message);
     } catch (error) {
       return this.responseService.error(
@@ -671,12 +671,12 @@ export class AuthController {
   })
   async verifyUserEmailAsSuperAdmin(
     @Param('userId', ParseIntPipe) userId: number,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
     try {
       const result = await this.authService.verifyUserEmailAsSuperAdmin(
         userId,
-        user.id,
+        req.user.id,
       );
       return this.responseService.success(result.user, result.message);
     } catch (error) {

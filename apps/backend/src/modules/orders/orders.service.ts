@@ -37,16 +37,16 @@ export class OrdersService {
           customer_id: createOrderDto.customer_id, // This should be user_id
           store_id: createOrderDto.store_id,
           order_number: createOrderDto.order_number,
-          state: createOrderDto.status || order_state_enum.created,
+          state: createOrderDto.state || order_state_enum.created,
           subtotal_amount: createOrderDto.subtotal,
           tax_amount: createOrderDto.tax_amount || 0,
-          shipping_cost: createOrderDto.shipping_amount || 0,
+          shipping_cost: createOrderDto.shipping_cost || 0,
           discount_amount: createOrderDto.discount_amount || 0,
           grand_total: createOrderDto.total_amount,
-          currency: createOrderDto.currency_code || 'USD',
+          currency: createOrderDto.currency || 'USD',
           billing_address_id: createOrderDto.billing_address_id,
           shipping_address_id: createOrderDto.shipping_address_id,
-          internal_notes: createOrderDto.notes,
+          internal_notes: createOrderDto.internal_notes,
           updated_at: new Date(),
           order_items: {
             create: createOrderDto.items.map((item) => ({
@@ -99,7 +99,6 @@ export class OrdersService {
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
-      ...(store_id && { store_id }),
       ...(date_from &&
         date_to && {
           created_at: {

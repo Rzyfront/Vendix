@@ -14,6 +14,15 @@ export { InputsearchComponent } from './inputsearch/inputsearch.component';
 export { TableComponent } from './table/table.component';
 export { TooltipComponent } from './tooltip/tooltip.component';
 export { SelectorComponent } from './selector/selector.component';
+export {
+  OnboardingModalComponent,
+  EmailVerificationStepComponent,
+  UserSetupStepComponent,
+  OrganizationSetupStepComponent,
+  StoreSetupStepComponent,
+  AppConfigStepComponent,
+  CompletionStepComponent
+} from './onboarding-modal';
 
 // Types
 export type { ButtonVariant, ButtonSize } from './button/button.component';

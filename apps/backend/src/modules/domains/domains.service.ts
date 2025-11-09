@@ -269,27 +269,27 @@ export class DomainsService implements OnModuleInit {
 
     // Verificar que la organización existe
     const organization = await this.prisma.organizations.findUnique({
-      where: { id: data.organizationId },
+      where: { id: data.organization_id },
     });
 
     if (!organization) {
       throw new NotFoundException(
-        `Organization with ID ${data.organizationId} not found`,
+        `Organization with ID ${data.organization_id} not found`,
       );
     }
 
-    // Si se especifica storeId, verificar que la tienda existe y pertenece a la organización
-    if (data.storeId) {
+    // Si se especifica store_id, verificar que la tienda existe y pertenece a la organización
+    if (data.store_id) {
       const store = await this.prisma.stores.findFirst({
         where: {
-          id: data.storeId,
-          organization_id: data.organizationId,
+          id: data.store_id,
+          organization_id: data.organization_id,
         },
       });
 
       if (!store) {
         throw new NotFoundException(
-          `Store with ID ${data.storeId} not found in organization ${data.organizationId}`,
+          `Store with ID ${data.store_id} not found in organization ${data.organization_id}`,
         );
       }
     }
@@ -297,8 +297,8 @@ export class DomainsService implements OnModuleInit {
     // Inferir domain_type si no se pasa
     const inferredType = this.inferDomainType(
       data.hostname,
-      !!data.storeId,
-      data.domainType,
+      !!data.store_id,
+      data.domain_type,
     );
 
     // Inferir ownership si no se pasa
@@ -308,28 +308,28 @@ export class DomainsService implements OnModuleInit {
     // Estado inicial
     const status =
       data.status || (inferredType === 'store' ? 'pending_dns' : 'active');
-    const sslStatus = data.sslStatus || 'none';
+    const ssl_status = data.ssl_status || 'none';
 
     // Verificación: un dominio primario por (org, store?) y tipo base organizacional/tienda
-    let isPrimary = data.isPrimary || false;
-    if (isPrimary) {
+    let is_primary = data.is_primary || false;
+    if (is_primary) {
       await this.clearExistingPrimary(
-        data.organizationId,
-        data.storeId,
+        data.organization_id,
+        data.store_id,
         inferredType,
       );
     } else {
       // Si no hay primario existente para el scope, este se marca automático
       const existingPrimary = await this.prisma.domain_settings.findFirst({
         where: {
-          organization_id: data.organizationId,
-          store_id: data.storeId || null,
+          organization_id: data.organization_id,
+          store_id: data.store_id || null,
           is_primary: true,
           domain_type: inferredType as any,
         },
       });
       if (!existingPrimary) {
-        isPrimary = true;
+        is_primary = true;
       }
     }
 
@@ -340,13 +340,13 @@ export class DomainsService implements OnModuleInit {
     const domainSetting = await this.prisma.domain_settings.create({
       data: {
         hostname: data.hostname,
-        organization_id: data.organizationId,
-        store_id: data.storeId,
+        organization_id: data.organization_id,
+        store_id: data.store_id,
         config: data.config as any,
         domain_type: inferredType as any,
         status: status as any,
-        ssl_status: sslStatus as any,
-        is_primary: isPrimary,
+        ssl_status: ssl_status as any,
+        is_primary: is_primary,
         ownership: inferredOwnership as any,
         verification_token: verificationToken,
       },
@@ -369,20 +369,20 @@ export class DomainsService implements OnModuleInit {
    * Obtener todas las configuraciones con filtros
    */
   async getAllDomainSettings(filters: {
-    organizationId?: number;
-    storeId?: number;
+    organization_id?: number;
+    store_id?: number;
     search?: string;
     limit?: number;
     offset?: number;
   }): Promise<DomainListResponse> {
     const where: any = {};
 
-    if (filters?.organizationId) {
-      where.organization_id = filters.organizationId;
+    if (filters?.organization_id) {
+      where.organization_id = filters.organization_id;
     }
 
-    if (filters?.storeId) {
-      where.store_id = filters.storeId;
+    if (filters?.store_id) {
+      where.store_id = filters.store_id;
     }
 
     if (filters?.search) {
@@ -524,19 +524,19 @@ export class DomainsService implements OnModuleInit {
 
     const updates: any = { updated_at: new Date() };
     if (data.config) updates.config = data.config as any;
-    if (data.domainType) updates.domain_type = data.domainType as any;
+    if (data.domain_type) updates.domain_type = data.domain_type as any;
     if (data.status) updates.status = data.status as any;
-    if (data.sslStatus) updates.ssl_status = data.sslStatus as any;
+    if (data.ssl_status) updates.ssl_status = data.ssl_status as any;
 
-    if (typeof data.isPrimary === 'boolean') {
-      if (data.isPrimary) {
+    if (typeof data.is_primary === 'boolean') {
+      if (data.is_primary) {
         await this.clearExistingPrimary(
           existingRecord.organization_id,
           existingRecord.store_id || undefined,
           existingRecord.domain_type,
         );
       }
-      updates.is_primary = data.isPrimary;
+      updates.is_primary = data.is_primary;
     }
 
     const domainSetting = await this.prisma.domain_settings.update({
@@ -582,10 +582,10 @@ export class DomainsService implements OnModuleInit {
    */
   async duplicateDomainSetting(
     hostname: string,
-    newHostname: string,
+    new_hostname: string,
   ): Promise<DomainSettingResponse> {
     this.logger.log(
-      `Duplicating domain setting from ${hostname} to ${newHostname}`,
+      `Duplicating domain setting from ${hostname} to ${new_hostname}`,
     );
 
     // Obtener configuración origen
@@ -593,9 +593,9 @@ export class DomainsService implements OnModuleInit {
 
     // Crear nueva configuración
     return this.createDomainSetting({
-      hostname: newHostname,
-      organizationId: source.organization_id,
-      storeId: source.store_id,
+      hostname: new_hostname,
+      organization_id: source.organization_id,
+      store_id: source.store_id,
       config: source.config,
     });
   }
@@ -632,11 +632,11 @@ export class DomainsService implements OnModuleInit {
     if (domain.status === 'active' && !body.force) {
       return {
         hostname,
-        statusBefore,
-        statusAfter: domain.status,
-        sslStatus: domain.ssl_status,
+        status_before: statusBefore,
+        status_after: domain.status,
+        ssl_status: domain.ssl_status,
         verified: true,
-        nextAction: 'none',
+        next_action: 'none',
         checks: {},
         timestamp: new Date().toISOString(),
       };
@@ -756,15 +756,15 @@ export class DomainsService implements OnModuleInit {
 
     return {
       hostname,
-      statusBefore,
-      statusAfter,
-      sslStatus: updated.ssl_status,
+      status_before: statusBefore,
+      status_after: statusAfter,
+      ssl_status: updated.ssl_status,
       verified: allPassed,
-      nextAction,
+      next_action: nextAction,
       checks: results,
-      suggestedFixes: suggestedFixes.length ? suggestedFixes : undefined,
+      suggested_fixes: suggestedFixes.length ? suggestedFixes : undefined,
       timestamp: new Date().toISOString(),
-      errorCode: allPassed ? undefined : 'DNS_CHECK_FAILED',
+      error_code: allPassed ? undefined : 'DNS_CHECK_FAILED',
     };
   }
 

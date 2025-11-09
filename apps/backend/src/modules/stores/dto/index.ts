@@ -225,3 +225,33 @@ export class StoreDashboardDto {
   @Type(() => Date)
   end_date?: Date;
 }
+
+export class AdminStoreQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(StoreType)
+  store_type?: StoreType;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_active?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  organization_id?: number;
+}

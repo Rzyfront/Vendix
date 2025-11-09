@@ -17,7 +17,8 @@ import {
 import { Public } from '../auth/decorators/public.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import {
   ResponseService,
   SuccessResponse,
@@ -102,7 +103,7 @@ export class DomainsController {
   @HttpCode(HttpStatus.CREATED)
   async createDomainSetting(
     @Body() createDomainSettingDto: CreateDomainSettingDto,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.createDomainSetting(
       createDomainSettingDto,
@@ -132,7 +133,7 @@ export class DomainsController {
       if (isNaN(orgId)) {
         throw new BadRequestException('Invalid organizationId parameter');
       }
-      filters.organizationId = orgId;
+      filters.organization_id = orgId;
     }
 
     if (storeId) {
@@ -140,7 +141,7 @@ export class DomainsController {
       if (isNaN(sId)) {
         throw new BadRequestException('Invalid storeId parameter');
       }
-      filters.storeId = sId;
+      filters.store_id = sId;
     }
 
     if (search) filters.search = search;
@@ -263,7 +264,7 @@ export class DomainsController {
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.duplicateDomainSetting(
       hostname,
-      duplicateData.newHostname,
+      duplicateData.new_hostname,
     );
     return this.responseService.created(
       result,
@@ -284,7 +285,7 @@ export class DomainsController {
       throw new BadRequestException('Invalid organization ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      organizationId: orgId,
+      organization_id: orgId,
     });
     return this.responseService.success(
       result.data,
@@ -305,7 +306,7 @@ export class DomainsController {
       throw new BadRequestException('Invalid store ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      storeId: sId,
+      store_id: sId,
     });
     return this.responseService.success(
       result.data,

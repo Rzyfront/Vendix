@@ -1,0 +1,49 @@
+meta {
+  name: Create Store
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{url}}/auth/onboarding/create-store/{{organizationId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "name": "Main Store",
+    "description": "Primary retail location",
+    "store_type": "retail",
+    "phone": "{{testPhone}}",
+    "email": "store@company.com"
+  }
+}
+
+vars:post-response {
+  storeId: res.body.data.id
+}
+
+tests {
+  test("Store created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Store data is correct", function() {
+    expect(res.body.data.name).to.equal('Main Store');
+    expect(res.body.data.store_type).to.equal('retail');
+    expect(res.body.data.description).to.equal('Primary retail location');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

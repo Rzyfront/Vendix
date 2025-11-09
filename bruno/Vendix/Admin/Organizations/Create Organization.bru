@@ -1,0 +1,54 @@
+meta {
+  name: Create Organization
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/admin/organizations
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "name": "Test Organization",
+    "tax_id": "123456789",
+    "email": "contact@testorg.com",
+    "phone": "+1234567890",
+    "website": "https://testorg.com"
+  }
+}
+
+vars:post-response {
+  created_org_id: res.body.data.id
+}
+
+tests {
+  test("Create organization successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('Test Organization');
+    expect(res.body.data.tax_id).to.equal('123456789');
+    expect(res.body.data.email).to.equal('contact@testorg.com');
+    expect(res.body.data.phone).to.equal('+1234567890');
+    expect(res.body.data.website).to.equal('https://testorg.com');
+  });
+  
+  test("Organization has slug", function() {
+    expect(res.body.data).to.have.property('slug');
+    expect(res.body.data.slug).to.equal('test-organization');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
+    expect(res.body.data).to.not.have.property('secret_token');
+  });
+}

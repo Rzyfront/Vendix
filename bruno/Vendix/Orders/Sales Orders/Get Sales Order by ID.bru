@@ -1,0 +1,143 @@
+meta {
+  name: Get Sales Order by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/sales-orders/{{salesOrderId}}
+  body: none
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Should return sales order details", function() {
+    expect(res.getStatus()).to.equal(200);
+    
+    const body = res.getBody();
+    expect(body).to.be.an('object');
+    
+    // Validate basic structure
+    expect(body).to.have.property('id');
+    expect(body).to.have.property('orderNumber');
+    expect(body).to.have.property('customerId');
+    expect(body).to.have.property('storeId');
+    expect(body).to.have.property('status');
+    expect(body).to.have.property('subtotal');
+    expect(body).to.have.property('taxAmount');
+    expect(body).to.have.property('totalAmount');
+    expect(body).to.have.property('notes');
+    expect(body).to.have.property('createdAt');
+    expect(body).to.have.property('updatedAt');
+    
+    // Validate status enum
+    const validStatuses = ['PENDING', 'CONFIRMED', 'SHIPPED', 'INVOICED', 'CANCELLED'];
+    expect(validStatuses).to.include(body.status);
+    
+    // Validate monetary values
+    expect(body.subtotal).to.be.a('number');
+    expect(body.taxAmount).to.be.a('number');
+    expect(body.totalAmount).to.be.a('number');
+    expect(body.totalAmount).to.equal(body.subtotal + body.taxAmount);
+    
+    // Validate nested objects
+    expect(body).to.have.property('customer');
+    expect(body).to.have.property('store');
+    expect(body).to.have.property('items');
+    
+    // Validate customer structure
+    const customer = body.customer;
+    expect(customer).to.have.property('id');
+    expect(customer).to.have.property('name');
+    expect(customer).to.have.property('email');
+    expect(customer).to.have.property('phone');
+    expect(customer).to.have.property('createdAt');
+    expect(customer).to.have.property('updatedAt');
+    
+    // Validate store structure
+    const store = body.store;
+    expect(store).to.have.property('id');
+    expect(store).to.have.property('name');
+    expect(store).to.have.property('address');
+    expect(store).to.have.property('phone');
+    expect(store).to.have.property('email');
+    
+    // Validate address structure if present
+    if (store.address) {
+      const address = store.address;
+      expect(address).to.have.property('street');
+      expect(address).to.have.property('city');
+      expect(address).to.have.property('state');
+      expect(address).to.have.property('postalCode');
+      expect(address).to.have.property('country');
+    }
+    
+    // Validate items array
+    const items = body.items;
+    expect(items).to.be.an('array');
+    expect(items.length).to.be.at.least(1);
+    
+    let calculatedSubtotal = 0;
+    items.forEach(item => {
+      expect(item).to.have.property('id');
+      expect(item).to.have.property('productId');
+      expect(item).to.have.property('salesOrderId');
+      expect(item).to.have.property('quantity');
+      expect(item).to.have.property('unitPrice');
+      expect(item).to.have.property('totalPrice');
+      expect(item).to.have.property('product');
+      
+      // Validate product structure
+      const product = item.product;
+      expect(product).to.have.property('id');
+      expect(product).to.have.property('name');
+      expect(product).to.have.property('sku');
+      expect(product).to.have.property('description');
+      expect(product).to.have.property('price');
+      expect(product).to.have.property('cost');
+      expect(product).to.have.property('categoryId');
+      expect(product).to.have.property('brandId');
+      expect(product).to.have.property('createdAt');
+      expect(product).to.have.property('updatedAt');
+      
+      // Validate item calculations
+      expect(item.totalPrice).to.equal(item.quantity * item.unitPrice);
+      calculatedSubtotal += item.totalPrice;
+      
+      // Validate data types
+      expect(item.quantity).to.be.a('number');
+      expect(item.unitPrice).to.be.a('number');
+      expect(item.totalPrice).to.be.a('number');
+      expect(item.quantity).to.be.at.least(1);
+      expect(item.unitPrice).to.be.at.least(0);
+      expect(item.totalPrice).to.be.at.least(0);
+    });
+    
+    // Validate subtotal calculation
+    expect(Math.abs(body.subtotal - calculatedSubtotal)).to.be.below(0.01);
+    
+    // Validate timestamps
+    expect(new Date(body.createdAt)).to.be.a('date');
+    expect(new Date(body.updatedAt)).to.be.a('date');
+    expect(new Date(body.updatedAt)).to.be.at.least(new Date(body.createdAt));
+  });
+  
+  test("Should handle non-existent sales order", function() {
+    // This test would be run with a non-existent ID
+    // Expected behavior: 404 status with appropriate error message
+    if (res.getStatus() === 404) {
+      const body = res.getBody();
+      expect(body).to.have.property('message');
+      expect(body.message).to.include('not found');
+    }
+  });
+  
+  test("Should validate response time", function() {
+    expect(res.getResponseTime()).to.be.below(1000);
+  });
+}

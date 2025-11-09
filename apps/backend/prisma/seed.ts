@@ -1726,13 +1726,49 @@ async function main() {
   // 8. Configurar dominios
   console.log('🌐 Configurando dominios...');
   const domainSettings = [
-    // Dominio principal de Vendix
+    // Dominio principal de Vendix (.online - PRODUCCIÓN DEFAULT)
+    {
+      hostname: 'vendix.online',
+      organization_id: vendixOrg.id,
+      store_id: null,
+      domain_type: 'vendix_core',
+      is_primary: true,
+      status: 'active',
+      ssl_status: 'issued',
+      config: {
+        branding: {
+          name: 'Vendix',
+          primary_color: '#7ED7A5',
+          secondary_color: '#2F6F4E',
+          background_color: '#F4F4F4',
+          accent_color: '#FFFFFF',
+          border_color: '#B0B0B0',
+          text_color: '#222222',
+          theme: 'light',
+          logo_url: null,
+          favicon_url: null,
+        },
+        security: {
+          cors_origins: [
+            'http://vendix.online',
+            'https://vendix.online',
+            'http://api.vendix.online',
+            'https://api.vendix.online',
+          ],
+          session_timeout: 3600000,
+          max_login_attempts: 5,
+        },
+        app: 'VENDIX_LANDING',
+      },
+    },
+
+    // Dominio de Vendix (.com)
     {
       hostname: 'vendix.com',
       organization_id: vendixOrg.id,
       store_id: null,
       domain_type: 'vendix_core',
-      is_primary: true,
+      is_primary: false,
       status: 'active',
       ssl_status: 'issued',
       config: {
@@ -1872,12 +1908,12 @@ async function main() {
   for (const domain of domainSettings) {
     // Inferir ownership basado en el hostname
     let ownership = 'custom_domain'; // default
-    if (domain.hostname.endsWith('.vendix.com')) {
+    if (domain.hostname.endsWith('.vendix.com') || domain.hostname.endsWith('.vendix.online')) {
       const parts = domain.hostname.split('.');
       if (parts.length === 2) {
-        ownership = 'vendix_core'; // vendix.com
+        ownership = 'vendix_core'; // vendix.com o vendix.online
       } else {
-        ownership = 'vendix_subdomain'; // subdominio.vendix.com
+        ownership = 'vendix_subdomain'; // subdominio.vendix.com o subdominio.vendix.online
       }
     } else {
       const parts = domain.hostname.split('.');
@@ -2163,7 +2199,8 @@ async function main() {
   console.log('Customer: cliente1@example.com / 1125634q');
   console.log('');
   console.log('🌐 URLS DE PRUEBA:');
-  console.log('Vendix: vendix.com');
+  console.log('Vendix PRODUCCIÓN: vendix.online (DEFAULT)');
+  console.log('Vendix DEV: vendix.com');
   console.log('Tech Solutions: techsolutions.co');
   console.log('Fashion Retail: fashionretail.com');
   console.log('Tienda Online Tech: tienda.techsolutions.co');

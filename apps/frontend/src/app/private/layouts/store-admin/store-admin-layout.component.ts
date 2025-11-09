@@ -7,21 +7,15 @@ import {
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { OnboardingService } from '../../../shared/components/onboarding/services/onboarding.service';
-import { OnboardingModalComponent } from '../../../shared/components/onboarding/onboarding-modal.component';
+import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
+import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
   standalone: true,
-  imports: [
-    CommonModule,
-    RouterModule,
-    SidebarComponent,
-    HeaderComponent,
-    OnboardingModalComponent,
-  ],
+  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent, OnboardingModalComponent],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -57,15 +51,13 @@ import { takeUntil } from 'rxjs/operators';
           </div>
         </main>
       </div>
-
-      <!-- Onboarding Modal -->
-      <app-onboarding-modal
-        *ngIf="showOnboardingModal"
-        [isOpen]="showOnboardingModal"
-        (isOpenChange)="onOnboardingModalChange($event)"
-        (completed)="onOnboardingCompleted($event)"
-      ></app-onboarding-modal>
     </div>
+
+    <!-- Onboarding Modal -->
+    <app-onboarding-modal
+      [(isOpen)]="showOnboardingModal"
+      (completed)="onOnboardingCompleted($event)"
+    ></app-onboarding-modal>
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -81,12 +73,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   storeSlug$: Observable<string | null>;
 
   // Onboarding
-  showOnboardingModal = false;
+  showOnboardingModal = false; // Will be set in ngOnInit based on actual status
   private destroy$ = new Subject<void>();
 
   constructor(
     private authFacade: AuthFacade,
-    private onboardingService: OnboardingService,
+    private onboardingWizardService: OnboardingWizardService,
   ) {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
@@ -94,23 +86,26 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     // Check onboarding status when component initializes
+    this.authFacade.checkOnboardingStatus();
+
+    // Set initial state immediately based on current needs
+    this.showOnboardingModal = this.authFacade.needsOnboarding();
+
+    // Subscribe to onboarding needs and show modal instead of redirecting
     this.authFacade.needsOnboarding$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding) => {
+      .subscribe((needsOnboarding: any) => {
         if (needsOnboarding) {
+          // Show onboarding modal instead of redirecting
           this.showOnboardingModal = true;
-          this.onboardingService.openOnboarding();
+        } else {
+          // Close modal if it's open
+          this.showOnboardingModal = false;
         }
-      });
-
-    // Escuchar estado del onboarding
-    this.onboardingService.onboardingState$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((state) => {
-        this.showOnboardingModal = state.isOpen;
       });
   }
 
+  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -240,17 +235,10 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.sidebarCollapsed = !this.sidebarCollapsed;
   }
 
-  onOnboardingModalChange(isOpen: boolean): void {
-    if (!isOpen) {
-      this.onboardingService.closeOnboarding();
-    }
-  }
-
   onOnboardingCompleted(event: any): void {
     console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
-    this.onboardingService.setCompleted(true);
     // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
   }

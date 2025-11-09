@@ -1,0 +1,59 @@
+meta {
+  name: Create Store
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/admin/stores
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "name": "Test Store",
+    "organization_id": 1,
+    "store_type": "physical",
+    "store_code": "TST001",
+    "email": "teststore@example.com",
+    "phone": "+1234567890"
+  }
+}
+
+vars:post-response {
+  created_store_id: res.body.data.id
+}
+
+tests {
+  test("Create store successful - validates success response structure", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Create store response data validation", function() {
+    expect(res.body.data.name).to.equal('Test Store');
+    expect(res.body.data.store_code).to.equal('TST001');
+    expect(res.body.data.email).to.equal('teststore@example.com');
+    expect(res.body.data.phone).to.equal('+1234567890');
+  });
+  
+  test("Create store slug generation validation", function() {
+    expect(res.body.data).to.have.property('slug');
+    expect(res.body.data.slug).to.equal('test-store');
+  });
+  
+  test("Create store organization and type validation", function() {
+    expect(res.body.data.organization_id).to.equal(1);
+    expect(res.body.data.store_type).to.equal('physical');
+  });
+  
+  test("Create store no sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('api_key');
+    expect(res.body.data).to.not.have.property('secret_token');
+  });
+}

@@ -1,0 +1,151 @@
+meta {
+  name: Get All Stock Transfers
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/stock-transfers?page=1&limit=10
+  body: none
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+vars:pre-request {
+  // Test pagination parameters
+  page: 1
+  limit: 10
+}
+
+tests {
+  test("Should return paginated stock transfers list", function() {
+    expect(res.getStatus()).to.equal(200);
+    
+    const body = res.getBody();
+    expect(body).to.be.an('object');
+    expect(body).to.have.property('data');
+    expect(body).to.have.property('meta');
+    
+    // Validate meta structure
+    const meta = body.meta;
+    expect(meta).to.have.property('total');
+    expect(meta).to.have.property('page');
+    expect(meta).to.have.property('limit');
+    expect(meta).to.have.property('totalPages');
+    expect(meta.page).to.equal(vars.page);
+    expect(meta.limit).to.equal(vars.limit);
+    
+    // Validate data array
+    const data = body.data;
+    expect(data).to.be.an('array');
+    
+    if (data.length > 0) {
+      const stockTransfer = data[0];
+      expect(stockTransfer).to.have.property('id');
+      expect(stockTransfer).to.have.property('transferNumber');
+      expect(stockTransfer).to.have.property('fromLocationId');
+      expect(stockTransfer).to.have.property('toLocationId');
+      expect(stockTransfer).to.have.property('status');
+      expect(stockTransfer).to.have.property('expectedDate');
+      expect(stockTransfer).to.have.property('notes');
+      expect(stockTransfer).to.have.property('createdAt');
+      expect(stockTransfer).to.have.property('updatedAt');
+      
+      // Validate status enum
+      const validStatuses = ['PENDING', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED'];
+      expect(validStatuses).to.include(stockTransfer.status);
+      
+      // Validate data types
+      expect(stockTransfer.transferNumber).to.be.a('string');
+      expect(stockTransfer.fromLocationId).to.be.a('string');
+      expect(stockTransfer.toLocationId).to.be.a('string');
+      expect(stockTransfer.status).to.be.a('string');
+      expect(stockTransfer.expectedDate).to.be.a('string');
+      expect(stockTransfer.notes).to.be.a('string');
+      
+      // Validate transfer number format
+      expect(stockTransfer.transferNumber).to.match(/^TRF-\d{4}-\d{3}$/);
+      
+      // Validate date format
+      expect(new Date(stockTransfer.expectedDate)).to.be.a('date');
+      
+      // Validate nested objects
+      expect(stockTransfer).to.have.property('fromLocation');
+      expect(stockTransfer).to.have.property('toLocation');
+      expect(stockTransfer).to.have.property('items');
+      
+      // Validate from location structure
+      const fromLocation = stockTransfer.fromLocation;
+      expect(fromLocation).to.have.property('id');
+      expect(fromLocation).to.have.property('name');
+      expect(fromLocation).to.have.property('type');
+      expect(fromLocation).to.have.property('address');
+      expect(fromLocation).to.have.property('isActive');
+      
+      // Validate to location structure
+      const toLocation = stockTransfer.toLocation;
+      expect(toLocation).to.have.property('id');
+      expect(toLocation).to.have.property('name');
+      expect(toLocation).to.have.property('type');
+      expect(toLocation).to.have.property('address');
+      expect(toLocation).to.have.property('isActive');
+      
+      // Validate items array
+      const items = stockTransfer.items;
+      expect(items).to.be.an('array');
+      
+      if (items.length > 0) {
+        const item = items[0];
+        expect(item).to.have.property('id');
+        expect(item).to.have.property('stockTransferId');
+        expect(item).to.have.property('productId');
+        expect(item).to.have.property('quantity');
+        expect(item).to.have.property('notes');
+        expect(item).to.have.property('product');
+        
+        // Validate product structure
+        const product = item.product;
+        expect(product).to.have.property('id');
+        expect(product).to.have.property('name');
+        expect(product).to.have.property('sku');
+        expect(product).to.have.property('description');
+        expect(product).to.have.property('price');
+        expect(product).to.have.property('cost');
+        expect(product).to.have.property('categoryId');
+        expect(product).to.have.property('brandId');
+        
+        // Validate item data types
+        expect(item.quantity).to.be.a('number');
+        expect(item.quantity).to.be.at.least(1);
+        expect(item.notes).to.be.a('string');
+      }
+      
+      // Validate timestamps
+      expect(new Date(stockTransfer.createdAt)).to.be.a('date');
+      expect(new Date(stockTransfer.updatedAt)).to.be.a('date');
+      expect(new Date(stockTransfer.updatedAt)).to.be.at.least(new Date(stockTransfer.createdAt));
+    }
+    
+    // Validate pagination consistency
+    expect(meta.total).to.be.at.least(0);
+    expect(meta.totalPages).to.be.at.least(1);
+    expect(data.length).to.be.at.most(meta.limit);
+  });
+  
+  test("Should handle empty results gracefully", function() {
+    const body = res.getBody();
+    
+    if (body.meta.total === 0) {
+      expect(body.data).to.be.an('array');
+      expect(body.data).to.have.length(0);
+    }
+  });
+  
+  test("Should validate response time", function() {
+    expect(res.getResponseTime()).to.be.below(2000);
+  });
+}

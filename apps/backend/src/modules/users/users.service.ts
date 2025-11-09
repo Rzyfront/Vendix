@@ -140,7 +140,6 @@ export class UsersService {
         ],
       }),
       ...(state && { state }),
-      ...(organization_id && { organization_id }),
     };
 
     const [users, total] = await Promise.all([

@@ -407,10 +407,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     const sub = this.organizationsService.getOrganizationStatsList().subscribe({
       next: (response) => {
         if (response.success) {
-          this.stats.total = response.data.total_organizations;
-          this.stats.active = response.data.active;
-          this.stats.inactive = response.data.inactive;
-          this.stats.suspended = response.data.suspended;
+          this.stats.total = response.data.totalOrganizations;
+          this.stats.active = response.data.activeOrganizations;
+          this.stats.inactive = response.data.inactiveOrganizations;
+          this.stats.suspended = response.data.suspendedOrganizations;
         }
       },
       error: (error) => {

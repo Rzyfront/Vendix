@@ -21,6 +21,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 
 @Controller('stores')
 @UseGuards(PermissionsGuard)
@@ -32,7 +34,10 @@ export class StoresController {
 
   @Post()
   @Permissions('stores:create')
-  async create(@Body() createStoreDto: CreateStoreDto) {
+  async create(
+    @Body() createStoreDto: CreateStoreDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const store = await this.storesService.create(createStoreDto);
       return this.responseService.created(store, 'Tienda creada exitosamente');
@@ -58,7 +63,10 @@ export class StoresController {
 
   @Get()
   @Permissions('stores:read')
-  async findAll(@Query() query: StoreQueryDto) {
+  async findAll(
+    @Query() query: StoreQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
     try {
       const result = await this.storesService.findAll(query);
       return this.responseService.paginated(

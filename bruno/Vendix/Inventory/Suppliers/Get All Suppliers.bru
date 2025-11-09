@@ -1,0 +1,135 @@
+meta {
+  name: Get All Suppliers
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/suppliers?page=1&limit=10&status=ACTIVE&type=MANUFACTURER
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Should validate success response", function() {
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Should validate data and meta structure", function() {
+    expect(res.body).to.have.property('data').that.is.an('array');
+    expect(res.body).to.have.property('meta');
+    expect(res.body.meta).to.have.property('pagination');
+    expect(res.body.meta.pagination).to.have.property('page', 1);
+    expect(res.body.meta.pagination).to.have.property('limit', 10);
+    expect(res.body.meta.pagination).to.have.property('total');
+    expect(res.body.meta.pagination).to.have.property('totalPages');
+    expect(res.body.meta.pagination).to.have.property('hasNext');
+    expect(res.body.meta.pagination).to.have.property('hasPrev');
+  });
+
+  test("Should get suppliers successfully", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Should validate supplier structure", function() {
+    if (res.body.data.length > 0) {
+      const supplier = res.body.data[0];
+      expect(supplier).to.have.property('id');
+      expect(supplier).to.have.property('name');
+      expect(supplier).to.have.property('code');
+      expect(supplier).to.have.property('email');
+      expect(supplier).to.have.property('phone');
+      expect(supplier).to.have.property('type');
+      expect(supplier).to.have.property('status');
+      expect(supplier).to.have.property('paymentTerms');
+      expect(supplier).to.have.property('currency');
+      expect(supplier).to.have.property('addresses').that.is.an('array');
+      expect(supplier).to.have.property('contacts').that.is.an('array');
+      expect(supplier).to.have.property('createdAt');
+      expect(supplier).to.have.property('updatedAt');
+    }
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate meta pagination structure", function() {
+    expect(res.body.meta.pagination).to.have.property('page').that.is.a('number');
+    expect(res.body.meta.pagination).to.have.property('limit').that.is.a('number');
+    expect(res.body.meta.pagination).to.have.property('total').that.is.a('number');
+    expect(res.body.meta.pagination).to.have.property('totalPages').that.is.a('number');
+    expect(res.body.meta.pagination).to.have.property('hasNext').that.is.a('boolean');
+    expect(res.body.meta.pagination).to.have.property('hasPrev').that.is.a('boolean');
+  });
+
+  test("Should validate filter parameters", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        expect(supplier.status).to.equal('ACTIVE');
+        expect(supplier.type).to.equal('MANUFACTURER');
+      });
+    }
+  });
+
+  test("Should validate sensitive data protection", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        if (supplier.email) {
+          expect(supplier.email).to.not.match(/@gmail\.com$|@yahoo\.com$|@hotmail\.com$/);
+        }
+        if (supplier.taxId) {
+          expect(supplier.taxId).to.not.be.empty;
+        }
+      });
+    }
+  });
+
+  test("Should validate supplier codes are unique", function() {
+    const codes = res.body.data.map(supplier => supplier.code);
+    const uniqueCodes = [...new Set(codes)];
+    expect(codes.length).to.equal(uniqueCodes.length);
+  });
+
+  test("Should validate email formats", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        if (supplier.email) {
+          expect(supplier.email).to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+        }
+      });
+    }
+  });
+
+  test("Should validate phone number formats", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        if (supplier.phone) {
+          expect(supplier.phone).to.match(/^\+?[\d\s\-\(\)]+$/);
+        }
+      });
+    }
+  });
+
+  test("Should validate supplier types", function() {
+    const validTypes = ['MANUFACTURER', 'DISTRIBUTOR', 'WHOLESALER', 'RETAILER', 'SERVICE_PROVIDER'];
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        expect(validTypes).to.include(supplier.type);
+      });
+    }
+  });
+
+  test("Should validate supplier statuses", function() {
+    const validStatuses = ['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'];
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(supplier => {
+        expect(validStatuses).to.include(supplier.status);
+      });
+    }
+  });
+}

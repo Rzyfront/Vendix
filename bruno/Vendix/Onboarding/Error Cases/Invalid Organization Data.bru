@@ -1,0 +1,32 @@
+meta {
+  name: Invalid Organization Data
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{url}}/auth/onboarding/create-organization
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "name": "",
+    "description": "",
+    "industry": "Invalid Industry",
+    "website": "not-a-url",
+    "phone": "invalid-phone"
+  }
+}
+
+tests {
+  test("Invalid organization data fails", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('errors');
+  });
+}

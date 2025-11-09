@@ -1,0 +1,56 @@
+meta {
+  name: Create Organization Address
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{url}}/addresses
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "street_address": "{{businessStreet}}",
+    "city": "{{testCity}}",
+    "state": "{{testState}}",
+    "postal_code": "{{testPostalCode}}",
+    "country": "{{testCountry}}",
+    "address_type": "business",
+    "is_primary": true,
+    "organization_id": "{{organizationId}}"
+  }
+}
+
+vars:post-response {
+  organizationAddressId: res.body.data.id
+}
+
+tests {
+  test("Organization address created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Address data is correct", function() {
+    expect(res.body.data.street_address).to.equal('{{businessStreet}}');
+    expect(res.body.data.city).to.equal('{{testCity}}');
+    expect(res.body.data.address_type).to.equal('business');
+  });
+  
+  test("Address is marked as primary", function() {
+    expect(res.body.data.is_primary).to.be.true;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

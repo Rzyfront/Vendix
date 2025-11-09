@@ -2,9 +2,21 @@ import { Module } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
+import { ResponseModule } from '../../common/responses/response.module';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { SalesOrdersModule } from './sales-orders/sales-orders.module';
+import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
+import { ReturnOrdersModule } from './return-orders/return-orders.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    PurchaseOrdersModule,
+    SalesOrdersModule,
+    StockTransfersModule,
+    ReturnOrdersModule,
+  ],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],

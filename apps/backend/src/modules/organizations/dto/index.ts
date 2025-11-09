@@ -199,6 +199,38 @@ export class UsersDashboardDto {
   include_inactive?: boolean = false;
 }
 
+export class AdminOrganizationQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  limit?: number = 10;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(OrganizationState)
+  status?: OrganizationState;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  sort_by?: string = 'created_at';
+
+  @IsOptional()
+  @IsEnum(['asc', 'desc'])
+  sort_order?: 'asc' | 'desc' = 'desc';
+}
+
 export class OrganizationsDashboardStatsDto {
   total_organizations: number;
   active: number;

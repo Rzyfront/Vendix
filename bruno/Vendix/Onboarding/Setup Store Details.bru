@@ -1,0 +1,56 @@
+meta {
+  name: Setup Store Details
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{url}}/auth/onboarding/setup-store/{{storeId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{ownerToken}}
+}
+
+body:json {
+  {
+    "settings": {
+      "timezone": "{{timezone}}",
+      "currency": "{{currency}}",
+      "language": "{{language}}",
+      "inventory_tracking": true,
+      "tax_calculation": true
+    },
+    "business_hours": {
+      "monday": { "open": "09:00", "close": "18:00" },
+      "tuesday": { "open": "09:00", "close": "18:00" },
+      "wednesday": { "open": "09:00", "close": "18:00" },
+      "thursday": { "open": "09:00", "close": "18:00" },
+      "friday": { "open": "09:00", "close": "18:00" },
+      "saturday": { "open": "10:00", "close": "16:00" },
+      "sunday": { "closed": true }
+    }
+  }
+}
+
+tests {
+  test("Store details updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Store settings are valid", function() {
+    expect(res.body.data).to.have.property('settings');
+    expect(res.body.data).to.have.property('business_hours');
+    expect(res.body.data.settings.timezone).to.equal('{{timezone}}');
+    expect(res.body.data.settings.inventory_tracking).to.be.true;
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

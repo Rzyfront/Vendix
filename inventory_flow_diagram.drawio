@@ -1,0 +1,168 @@
+<mxfile host="65bd71144e">
+    <diagram name="Inventory Flow" id="inventory-flow-diagram">
+        <mxGraphModel dx="2876" dy="1576" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="Modulo de Inventario - Flujo de Funcionamiento" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontFamily=Arial;" parent="1" vertex="1">
+                    <mxGeometry x="400" y="-120" width="400" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="core-section" value="Entidades Principales" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="-140" y="-60" width="470" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="products" value="Products&#xa;&#xa;• name, sku, base_price&#xa;• stock_quantity&#xa;• state (active/inactive)&#xa;• store_id, brand_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="core-section" vertex="1">
+                    <mxGeometry x="30" y="40" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="variants" value="Product Variants&#xa;&#xa;• sku, price_override&#xa;• stock_quantity&#xa;• product_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" parent="core-section" vertex="1">
+                    <mxGeometry x="265" y="40" width="185" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="locations" value="Inventory Locations&#xa;&#xa;• name, code, type&#xa;• organization_id, store_id&#xa;• is_active" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="core-section" vertex="1">
+                    <mxGeometry x="30" y="160" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="stock-levels" value="Stock Levels&#xa;&#xa;• quantity_on_hand&#xa;• quantity_reserved&#xa;• quantity_available&#xa;• reorder_point" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="core-section" vertex="1">
+                    <mxGeometry x="260" y="160" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="movement-section" value="Seguimiento de Movimientos" style="swimlane;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="360" y="-60" width="450" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="movements" value="Inventory Movements&#xa;&#xa;• movement_type&#xa;• from_location_id&#xa;• to_location_id&#xa;• quantity, reason" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="movement-section" vertex="1">
+                    <mxGeometry x="20" y="40" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="transactions" value="Inventory Transactions&#xa;&#xa;• type (stock_in/sale/return)&#xa;• quantity_change&#xa;• product_id, user_id" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="movement-section" vertex="1">
+                    <mxGeometry x="250" y="40" width="180" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="reservations" value="Stock Reservations&#xa;&#xa;• quantity&#xa;• reserved_for_type&#xa;• expires_at, status" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="movement-section" vertex="1">
+                    <mxGeometry x="20" y="160" width="190" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="adjustments" value="Inventory Adjustments&#xa;&#xa;• adjustment_type&#xa;• quantity_before/after&#xa;• reason, approval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" parent="movement-section" vertex="1">
+                    <mxGeometry x="250" y="160" width="180" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="advanced-section" value="Caracteristicas Avanzadas" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="840" y="-60" width="460" height="280" as="geometry"/>
+                </mxCell>
+                <mxCell id="batches" value="Inventory Batches&#xa;&#xa;• batch_number&#xa;• manufacturing_date&#xa;• expiration_date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;" parent="advanced-section" vertex="1">
+                    <mxGeometry x="30" y="40" width="180" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="serials" value="Serial Numbers&#xa;&#xa;• serial_number&#xa;• status, cost&#xa;• warranty_expiry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;" parent="advanced-section" vertex="1">
+                    <mxGeometry x="250" y="40" width="180" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="suppliers" value="Suppliers&#xa;&#xa;• name, code, email&#xa;• lead_time_days&#xa;• payment_terms" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;" parent="advanced-section" vertex="1">
+                    <mxGeometry x="30" y="160" width="180" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="supplier-products" value="Supplier Products&#xa;&#xa;• supplier_sku&#xa;• cost_per_unit&#xa;• min_order_qty" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e6d0de;strokeColor=#996185;" parent="advanced-section" vertex="1">
+                    <mxGeometry x="250" y="160" width="180" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="orders-section" value="Gestion de Pedidos" style="swimlane;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="310" width="1040" height="230" as="geometry"/>
+                </mxCell>
+                <mxCell id="purchase-orders" value="Purchase Orders&#xa;&#xa;• order_number&#xa;• supplier_id, location_id&#xa;• status (draft/approved/received)&#xa;• total_amount" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;" parent="orders-section" vertex="1">
+                    <mxGeometry x="10" y="53.5" width="190" height="146.5" as="geometry"/>
+                </mxCell>
+                <mxCell id="sales-orders" value="Sales Orders&#xa;&#xa;• order_number&#xa;• customer_id&#xa;• status (draft/confirmed/shipped)&#xa;• shipping_address" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;" parent="orders-section" vertex="1">
+                    <mxGeometry x="210" y="53" width="200" height="147" as="geometry"/>
+                </mxCell>
+                <mxCell id="stock-transfers" value="Stock Transfers&#xa;&#xa;• transfer_number&#xa;• from_location_id&#xa;• to_location_id&#xa;• status (draft/in_transit/completed)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;" parent="orders-section" vertex="1">
+                    <mxGeometry x="420" y="53" width="190" height="147" as="geometry"/>
+                </mxCell>
+                <mxCell id="return-orders" value="Return Orders&#xa;&#xa;• type (purchase/sales return)&#xa;• related_order_id&#xa;• partner_type (customer/supplier)&#xa;• status (draft/processed)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cdeb8b;strokeColor=#36393d;" parent="orders-section" vertex="1">
+                    <mxGeometry x="620" y="53" width="200" height="147" as="geometry"/>
+                </mxCell>
+                <mxCell id="order-items" value="Order Items&#xa;(Purchase/Sales/Transfer/Return)&#xa;&#xa;• product_id, quantity&#xa;• unit_price, total_price&#xa;• notes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="orders-section" vertex="1">
+                    <mxGeometry x="830" y="53" width="190" height="147" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-section" value="Flujo de Operaciones" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f0f0f0;strokeColor=#666666;fontStyle=1;" parent="1" vertex="1">
+                    <mxGeometry x="20" y="560" width="1040" height="360" as="geometry">
+                        <mxRectangle x="40" y="500" width="150" height="30" as="alternateBounds"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="step1" value="1. Recepcion de Mercancia&#xa;(Purchase Order)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="80" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step2" value="2. Registro en Inventario&#xa;(Stock In)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="220" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step3" value="3. Almacenamiento&#xa;(Location Assignment)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="370" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step4" value="4. Gestion de Stock&#xa;(Stock Levels)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="520" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step5" value="5. Venta/Transferencia&#xa;(Sales/Transfer)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="670" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="step6" value="6. Despacho&#xa;(Stock Out)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d4e1f5;strokeColor=#5d7f99;" parent="flow-section" vertex="1">
+                    <mxGeometry x="820" y="50" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow1" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#4285F4;" parent="flow-section" source="step1" target="step2" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="200" y="80" as="sourcePoint"/>
+                        <mxPoint x="250" y="30" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow2" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#4285F4;" parent="flow-section" source="step2" target="step3" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="350" y="80" as="sourcePoint"/>
+                        <mxPoint x="400" y="30" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow3" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#4285F4;" parent="flow-section" source="step3" target="step4" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="500" y="80" as="sourcePoint"/>
+                        <mxPoint x="550" y="30" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow4" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#4285F4;" parent="flow-section" source="step4" target="step5" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="650" y="80" as="sourcePoint"/>
+                        <mxPoint x="700" y="30" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow5" value="" style="endArrow=classic;html=1;rounded=0;strokeWidth=2;strokeColor=#4285F4;" parent="flow-section" source="step5" target="step6" edge="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="800" y="80" as="sourcePoint"/>
+                        <mxPoint x="850" y="30" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="process1" value="Ajustes de Inventario&#xa;(Adjustments)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="flow-section" vertex="1">
+                    <mxGeometry x="225" y="150" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="process2" value="Reservas de Stock&#xa;(Reservations)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="flow-section" vertex="1">
+                    <mxGeometry x="375" y="150" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="process3" value="Devoluciones&#xa;(Returns)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="flow-section" vertex="1">
+                    <mxGeometry x="525" y="150" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="process4" value="Control de Lotes&#xa;(Batch Control)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="flow-section" vertex="1">
+                    <mxGeometry x="675" y="150" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="integration-title" value="Puntos de Integracion" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontFamily=Arial;" parent="flow-section" vertex="1">
+                    <mxGeometry x="60" y="220" width="200" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="integration1" value="• Sistema de Compras&#xa;• Sistema de Ventas&#xa;• Sistema de Logistica&#xa;• Sistema Financiero" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="20" y="257" width="130" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="integration2" value="• Gestion de Proveedores&#xa;• Control de Calidad&#xa;• Reportes y Analitica&#xa;• Notificaciones Automaticas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="170" y="257" width="130" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="features-title" value="Caracteristicas Clave" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontFamily=Arial;" parent="flow-section" vertex="1">
+                    <mxGeometry x="410" y="220" width="200" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="features1" value="• Multi-tenant&#xa;• Multi-location&#xa;• Real-time tracking&#xa;• Batch/Serial tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="350" y="257" width="140" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="features2" value="• Automated alerts&#xa;• Role-based access&#xa;• Audit trail&#xa;• Reporting and Analytics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="520" y="257" width="140" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend-title" value="Leyenda" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;fontFamily=Arial;" parent="flow-section" vertex="1">
+                    <mxGeometry x="800" y="220" width="100" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend1" value="• Entidades&#xa;• Procesos&#xa;• Flujo&#xa;• Integraciones" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="710" y="257" width="130" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="legend2" value="• Caracteristicas&#xa;• Optimizaciones&#xa;• Metricas&#xa;• Seguridad" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" parent="flow-section" vertex="1">
+                    <mxGeometry x="860" y="257" width="150" height="70" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

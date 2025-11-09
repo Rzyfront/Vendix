@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DevelopmentOnlyGuard } from '../../common/guards/development-only.guard';
 import { Public } from '../../common/decorators/public.decorator';
+import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('bypass-email')
 @UseGuards(DevelopmentOnlyGuard)
@@ -19,6 +20,7 @@ export class BypassEmailController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly responseService: ResponseService,
   ) {}
 
   @Post('verify')
@@ -27,7 +29,10 @@ export class BypassEmailController {
     const { user_id } = body;
 
     if (!user_id) {
-      throw new ForbiddenException('User ID is required');
+      return this.responseService.error(
+        'User ID is required',
+        'Falta el ID del usuario',
+      );
     }
 
     try {
@@ -48,16 +53,21 @@ export class BypassEmailController {
         },
       });
 
-      return {
-        success: true,
-        message: 'Email verificado exitosamente (bypass desarrollo)',
-        user: updatedUser,
-      };
+      return this.responseService.success(
+        updatedUser,
+        'Email verificado exitosamente (bypass desarrollo)',
+      );
     } catch (error) {
       if (error.code === 'P2025') {
-        throw new ForbiddenException('Usuario no encontrado');
+        return this.responseService.error(
+          'Usuario no encontrado',
+          'El usuario especificado no existe',
+        );
       }
-      throw error;
+      return this.responseService.error(
+        'Error al verificar email',
+        error.message,
+      );
     }
   }
 }

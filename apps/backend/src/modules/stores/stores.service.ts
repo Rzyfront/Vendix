@@ -72,7 +72,6 @@ export class StoresService {
       }),
       ...(store_type && { store_type }),
       ...(is_active !== undefined && { is_active }),
-      ...(organization_id && { organization_id }),
     };
 
     const [stores, total] = await Promise.all([

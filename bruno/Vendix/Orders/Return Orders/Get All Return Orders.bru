@@ -1,0 +1,70 @@
+meta {
+  name: Get All Return Orders
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/returns?page=1&limit=10&status=REQUESTED&customerId=cust_123456789012345678
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Should get return orders successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    expect(res.body).to.have.property('data').that.is.an('array');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.pagination).to.have.property('page', 1);
+    expect(res.body.pagination).to.have.property('limit', 10);
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('totalPages');
+    expect(res.body.pagination).to.have.property('hasNext');
+    expect(res.body.pagination).to.have.property('hasPrev');
+  });
+
+  test("Should validate return order structure", function() {
+    if (res.body.data.length > 0) {
+      const returnOrder = res.body.data[0];
+      expect(returnOrder).to.have.property('id');
+      expect(returnOrder).to.have.property('returnNumber');
+      expect(returnOrder).to.have.property('status');
+      expect(returnOrder).to.have.property('customerId');
+      expect(returnOrder).to.have.property('salesOrderId');
+      expect(returnOrder).to.have.property('reason');
+      expect(returnOrder).to.have.property('requestedRefundType');
+      expect(returnOrder).to.have.property('requestedRefundAmount');
+      expect(returnOrder).to.have.property('actualRefundAmount');
+      expect(returnOrder).to.have.property('items').that.is.an('array');
+      expect(returnOrder).to.have.property('createdAt');
+      expect(returnOrder).to.have.property('updatedAt');
+    }
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate pagination structure", function() {
+    expect(res.body.pagination).to.have.property('page').that.is.a('number');
+    expect(res.body.pagination).to.have.property('limit').that.is.a('number');
+    expect(res.body.pagination).to.have.property('total').that.is.a('number');
+    expect(res.body.pagination).to.have.property('totalPages').that.is.a('number');
+    expect(res.body.pagination).to.have.property('hasNext').that.is.a('boolean');
+    expect(res.body.pagination).to.have.property('hasPrev').that.is.a('boolean');
+  });
+
+  test("Should validate filter parameters", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(returnOrder => {
+        expect(returnOrder.status).to.equal('REQUESTED');
+        expect(returnOrder.customerId).to.equal('cust_123456789012345678');
+      });
+    }
+  });
+}

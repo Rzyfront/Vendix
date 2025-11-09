@@ -1,0 +1,42 @@
+meta {
+  name: Update Role
+  type: http
+  seq: 4
+}
+
+patch {
+  url: http://{{url}}/admin/roles/{{created_role_id}}
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "description": "Updated Test Role Description"
+  }
+}
+
+tests {
+  test("Update role successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data.description).to.equal('Updated Test Role Description');
+  });
+  
+  test("Role has required structure", function() {
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('updated_at');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

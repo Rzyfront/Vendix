@@ -19,12 +19,12 @@ export enum OnboardingStep {
 
 export class OnboardingStatusDto {
   email_verified: boolean;
-  canCreateOrganization: boolean;
-  hasOrganization: boolean;
-  organizationId?: number;
-  currentStep: OnboardingStep;
-  completedSteps: OnboardingStep[];
-  nextStepUrl?: string;
+  can_create_organization: boolean;
+  has_organization: boolean;
+  organization_id?: number;
+  current_step: OnboardingStep;
+  completed_steps: OnboardingStep[];
+  next_step_url?: string;
 }
 
 export class CreateOrganizationOnboardingDto {

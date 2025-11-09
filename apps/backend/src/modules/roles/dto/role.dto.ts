@@ -36,7 +36,7 @@ export class CreateRoleDto {
   })
   @IsOptional()
   @IsBoolean()
-  is_system_role?: boolean;
+  system_role?: boolean;
 }
 
 export class UpdateRoleDto {
@@ -67,7 +67,7 @@ export class AssignPermissionsDto {
   })
   @IsArray()
   @IsInt({ each: true })
-  permissionIds: number[];
+  permission_ids: number[];
 }
 
 export class RemovePermissionsDto {
@@ -78,7 +78,7 @@ export class RemovePermissionsDto {
   })
   @IsArray()
   @IsInt({ each: true })
-  permissionIds: number[];
+  permission_ids: number[];
 }
 
 export class AssignRoleToUserDto {
@@ -87,14 +87,14 @@ export class AssignRoleToUserDto {
     example: 123,
   })
   @IsInt()
-  userId: number;
+  user_id: number;
 
   @ApiProperty({
     description: 'ID del rol a asignar',
     example: 5,
   })
   @IsInt()
-  roleId: number;
+  role_id: number;
 }
 
 export class RemoveRoleFromUserDto {
@@ -103,14 +103,14 @@ export class RemoveRoleFromUserDto {
     example: 123,
   })
   @IsInt()
-  userId: number;
+  user_id: number;
 
   @ApiProperty({
     description: 'ID del rol a remover',
     example: 5,
   })
   @IsInt()
-  roleId: number;
+  role_id: number;
 }
 
 export class RoleDashboardStatsDto {
@@ -162,7 +162,7 @@ export class RoleWithPermissionDescriptionsDto {
     description: 'Indica si es un rol del sistema',
     example: false,
   })
-  is_system_role: boolean;
+  system_role: boolean;
 
   @ApiProperty({
     description: 'Fecha de creación',

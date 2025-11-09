@@ -1,0 +1,53 @@
+meta {
+  name: Get All Permissions
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/admin/roles/permissions
+  body: none
+  auth: inherit
+}
+
+
+tests {
+  test("Get all permissions successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
+  });
+  
+  test("Pagination meta is valid", function() {
+    expect(res.body.meta).to.have.property('total');
+    expect(res.body.meta).to.have.property('page');
+    expect(res.body.meta).to.have.property('limit');
+    expect(res.body.meta).to.have.property('totalPages');
+  });
+  
+  test("Data is valid array", function() {
+    expect(res.body.data).to.be.an('array');
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.have.property('id');
+    }
+  });
+  
+  test("Permissions have required fields", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(permission => {
+        expect(permission).to.have.property('id');
+        expect(permission).to.have.property('path');
+        expect(permission).to.have.property('method');
+        expect(permission).to.have.property('description');
+      });
+    }
+  });
+  
+  test("No sensitive data in response", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.not.have.property('password');
+      expect(res.body.data[0]).to.not.have.property('token');
+    }
+  });
+}

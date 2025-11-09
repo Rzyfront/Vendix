@@ -1,0 +1,36 @@
+meta {
+  name: Get Location by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/inventory/locations/{{locationId}}
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+tests {
+  test("Get location by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is complete", function() {
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('code');
+    expect(res.body.data).to.have.property('type');
+    expect(res.body.data).to.have.property('is_active');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}

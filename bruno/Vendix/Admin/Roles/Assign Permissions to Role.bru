@@ -1,0 +1,45 @@
+meta {
+  name: Assign Permissions to Role
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/admin/roles/{{created_role_id}}/permissions
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "permission_ids": [1, 2, 3]
+  }
+}
+
+tests {
+  test("Assign permissions to role successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Response data structure is valid", function() {
+    expect(res.body.data).to.have.property('role_permissions');
+    expect(res.body.data.role_permissions).to.be.an('array');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Permissions are properly assigned", function() {
+    expect(res.body.data.role_permissions.length).to.be.greaterThan(0);
+    res.body.data.role_permissions.forEach(permission => {
+      expect(permission).to.have.property('id');
+      expect(permission).to.have.property('permission_id');
+    });
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

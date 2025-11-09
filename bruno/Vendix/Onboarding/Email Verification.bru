@@ -1,0 +1,48 @@
+meta {
+  name: Email Verification
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/bypass-email/verify
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "user_id": "{{userId}}"
+  }
+}
+
+vars:pre-request {
+  // This should be replaced after Owner Registration
+  userId: USER_ID_HERE
+}
+
+tests {
+  test("Email bypass verification successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("User verification data is valid", function() {
+    expect(res.body.data).to.have.property('user');
+    expect(res.body.data.user.email_verified).to.be.true;
+    expect(res.body.data.user.state).to.equal('active');
+  });
+  
+  test("User data returned correctly", function() {
+    expect(res.body.data.user).to.have.property('id');
+    expect(res.body.data.user).to.have.property('email');
+    expect(res.body.data.user).to.have.property('first_name');
+    expect(res.body.data.user).to.have.property('last_name');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data.user).to.not.have.property('password');
+    expect(res.body.data.user).to.not.have.property('token');
+  });
+}

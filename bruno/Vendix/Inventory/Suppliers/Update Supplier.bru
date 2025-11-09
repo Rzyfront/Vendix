@@ -1,0 +1,149 @@
+meta {
+  name: Update Supplier
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/api/suppliers/{{supplierId}}
+  body: json
+  auth: bearer
+}
+
+headers {
+  Content-Type: application/json
+  Authorization: Bearer {{authToken}}
+}
+
+body:json {
+  "name": "Global Electronics International",
+  "email": "updated@ globalelectronics.com",
+  "phone": "+1-555-9999",
+  "website": "https://www.globalelectronics-intl.com",
+  "status": "ACTIVE",
+  "paymentTerms": "NET_45",
+  "currency": "USD",
+  "notes": "Updated supplier information - expanded to international operations",
+  "addresses": [
+    {
+      "id": "addr_123456789012345678",
+      "type": "BILLING",
+      "street": "789 Corporate Plaza",
+      "city": "San Francisco",
+      "state": "CA",
+      "postalCode": "94105",
+      "country": "USA",
+      "isPrimary": true
+    }
+  ],
+  "contacts": [
+    {
+      "id": "contact_123456789012345678",
+      "name": "Michael Chen",
+      "title": "Senior Account Manager",
+      "email": "michael.chen@ globalelectronics.com",
+      "phone": "+1-555-0130",
+      "isPrimary": true
+    }
+  ]
+}
+
+tests {
+  test("Should validate success response", function() {
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Should validate data structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('object');
+  });
+
+  test("Should update supplier successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.data).to.have.property('id', '{{supplierId}}');
+    expect(res.body.data).to.have.property('name', 'Global Electronics International');
+    expect(res.body.data).to.have.property('email', 'updated@ globalelectronics.com');
+    expect(res.body.data).to.have.property('phone', '+1-555-9999');
+    expect(res.body.data).to.have.property('website', 'https://www.globalelectronics-intl.com');
+    expect(res.body.data).to.have.property('status', 'ACTIVE');
+    expect(res.body.data).to.have.property('paymentTerms', 'NET_45');
+    expect(res.body.data).to.have.property('currency', 'USD');
+    expect(res.body.data).to.have.property('notes');
+    expect(res.body.data).to.have.property('updatedAt');
+  });
+
+  test("Should validate updated addresses", function() {
+    expect(res.body.data).to.have.property('addresses').that.is.an('array');
+    const billingAddress = res.body.data.addresses.find(addr => addr.type === 'BILLING');
+    expect(billingAddress).to.exist;
+    expect(billingAddress).to.have.property('street', '789 Corporate Plaza');
+    expect(billingAddress).to.have.property('city', 'San Francisco');
+    expect(billingAddress).to.have.property('isPrimary', true);
+  });
+
+  test("Should validate updated contacts", function() {
+    expect(res.body.data).to.have.property('contacts').that.is.an('array');
+    const primaryContact = res.body.data.contacts.find(contact => contact.isPrimary === true);
+    expect(primaryContact).to.exist;
+    expect(primaryContact).to.have.property('name', 'Michael Chen');
+    expect(primaryContact).to.have.property('title', 'Senior Account Manager');
+    expect(primaryContact).to.have.property('email', 'michael.chen@ globalelectronics.com');
+    expect(primaryContact).to.have.property('phone', '+1-555-0130');
+    expect(primaryContact).to.have.property('isPrimary', true);
+  });
+
+  test("Should validate response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+
+  test("Should validate immutable fields", function() {
+    expect(res.body.data).to.have.property('code'); // Should remain unchanged
+    expect(res.body.data).to.have.property('taxId'); // Should remain unchanged
+    expect(res.body.data).to.have.property('type'); // Should remain unchanged
+    expect(res.body.data).to.have.property('createdAt'); // Should remain unchanged
+  });
+
+  test("Should validate updated email format", function() {
+    expect(res.body.data.email).to.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
+  });
+
+  test("Should validate updated website format", function() {
+    expect(res.body.data.website).to.match(/^https?:\/\/.+/);
+  });
+
+  test("Should validate updated phone format", function() {
+    expect(res.body.data.phone).to.match(/^\+?[\d\s\-\(\)]+$/);
+  });
+
+  test("Should validate payment terms update", function() {
+    const validPaymentTerms = ['NET_15', 'NET_30', 'NET_45', 'NET_60', 'COD', 'PREPAID'];
+    expect(validPaymentTerms).to.include(res.body.data.paymentTerms);
+  });
+
+  test("Should validate currency format", function() {
+    expect(res.body.data.currency).to.match(/^[A-Z]{3}$/);
+  });
+
+  test("Should validate sensitive data protection", function() {
+    expect(res.body.data.email).to.not.match(/@gmail\.com$|@yahoo\.com$|@hotmail\.com$/);
+    expect(res.body.data.taxId).to.not.be.empty;
+  });
+
+  test("Should validate audit trail", function() {
+    expect(res.body.data).to.have.property('auditTrail');
+    if (res.body.data.auditTrail) {
+      expect(res.body.data.auditTrail).to.be.an('array');
+      const updateEntry = res.body.data.auditTrail.find(entry => entry.action === 'UPDATED');
+      expect(updateEntry).to.exist;
+      expect(updateEntry).to.have.property('timestamp');
+      expect(updateEntry).to.have.property('userId');
+      expect(updateEntry).to.have.property('changes');
+    }
+  });
+
+  test("Should validate version increment", function() {
+    expect(res.body.data).to.have.property('version');
+    expect(res.body.data.version).to.be.a('number');
+    expect(res.body.data.version).to.be.at.least(1);
+  });
+}

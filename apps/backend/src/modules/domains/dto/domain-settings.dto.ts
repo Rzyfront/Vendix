@@ -22,7 +22,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsString()
-  companyName?: string;
+  company_name?: string;
 
   @ApiPropertyOptional({
     example: 'Mi Tienda',
@@ -30,7 +30,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsString()
-  storeName?: string;
+  store_name?: string;
 
   @ApiPropertyOptional({
     example: 'https://ejemplo.com/logo.png',
@@ -38,7 +38,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsUrl()
-  logoUrl?: string;
+  logo_url?: string;
 
   @ApiPropertyOptional({
     example: 'https://ejemplo.com/favicon.ico',
@@ -54,7 +54,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsString()
-  primaryColor?: string;
+  primary_color?: string;
 
   @ApiPropertyOptional({
     example: '#ffffff',
@@ -62,7 +62,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsString()
-  secondaryColor?: string;
+  secondary_color?: string;
 
   @ApiPropertyOptional({
     example: '#ff0000',
@@ -70,7 +70,7 @@ export class BrandingConfigDto {
   })
   @IsOptional()
   @IsString()
-  accentColor?: string;
+  accent_color?: string;
 }
 
 export class SeoConfigDto {
@@ -105,7 +105,7 @@ export class SeoConfigDto {
   })
   @IsOptional()
   @IsUrl()
-  ogImage?: string;
+  og_image?: string;
 
   @ApiPropertyOptional({
     example: 'website',
@@ -113,7 +113,7 @@ export class SeoConfigDto {
   })
   @IsOptional()
   @IsString()
-  ogType?: string;
+  og_type?: string;
 
   @ApiPropertyOptional({
     example: 'index,follow',
@@ -129,19 +129,19 @@ export class SeoConfigDto {
   })
   @IsOptional()
   @IsUrl()
-  canonicalUrl?: string;
+  canonical_url?: string;
 }
 
 export class FeaturesConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  multiStore?: boolean;
+  multi_store?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  userManagement?: boolean;
+  user_management?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
@@ -151,7 +151,7 @@ export class FeaturesConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  customDomain?: boolean;
+  custom_domain?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
@@ -176,7 +176,7 @@ export class FeaturesConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  guestCheckout?: boolean;
+  guest_checkout?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
@@ -206,7 +206,7 @@ export class FeaturesConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  apiAccess?: boolean;
+  api_access?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
@@ -216,12 +216,12 @@ export class FeaturesConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  customThemes?: boolean;
+  custom_themes?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  advancedAnalytics?: boolean;
+  advanced_analytics?: boolean;
 }
 
 export class ThemeConfigDto {
@@ -233,27 +233,27 @@ export class ThemeConfigDto {
   @ApiPropertyOptional({ example: 'expanded' })
   @IsOptional()
   @IsIn(['expanded', 'collapsed', 'overlay'])
-  sidebarMode?: 'expanded' | 'collapsed' | 'overlay';
+  sidebar_mode?: 'expanded' | 'collapsed' | 'overlay';
 
   @ApiPropertyOptional({ example: 'light' })
   @IsOptional()
   @IsIn(['light', 'dark', 'auto'])
-  colorScheme?: 'light' | 'dark' | 'auto';
+  color_scheme?: 'light' | 'dark' | 'auto';
 
   @ApiPropertyOptional({ example: '8px' })
   @IsOptional()
   @IsString()
-  borderRadius?: string;
+  border_radius?: string;
 
   @ApiPropertyOptional({ example: 'Inter, sans-serif' })
   @IsOptional()
   @IsString()
-  fontFamily?: string;
+  font_family?: string;
 
   @ApiPropertyOptional({ example: '.custom { color: red; }' })
   @IsOptional()
   @IsString()
-  customCss?: string;
+  custom_css?: string;
 }
 
 export class EcommerceConfigDto {
@@ -275,39 +275,39 @@ export class EcommerceConfigDto {
   @ApiPropertyOptional({ example: 'manual' })
   @IsOptional()
   @IsIn(['manual', 'automatic', 'disabled'])
-  taxCalculation?: 'manual' | 'automatic' | 'disabled';
+  tax_calculation?: 'manual' | 'automatic' | 'disabled';
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  shippingEnabled?: boolean;
+  shipping_enabled?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  digitalProductsEnabled?: boolean;
+  digital_products_enabled?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  subscriptionsEnabled?: boolean;
+  subscriptions_enabled?: boolean;
 }
 
 export class IntegrationsConfigDto {
   @ApiPropertyOptional({ example: 'UA-123456' })
   @IsOptional()
   @IsString()
-  googleAnalytics?: string;
+  google_analytics?: string;
 
   @ApiPropertyOptional({ example: 'GTM-ABC123' })
   @IsOptional()
   @IsString()
-  googleTagManager?: string;
+  google_tag_manager?: string;
 
   @ApiPropertyOptional({ example: 'FB-PIXEL-123' })
   @IsOptional()
   @IsString()
-  facebookPixel?: string;
+  facebook_pixel?: string;
 
   @ApiPropertyOptional({ example: '123456' })
   @IsOptional()
@@ -329,7 +329,7 @@ export class SecurityConfigDto {
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  forceHttps?: boolean;
+  force_https?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
@@ -339,13 +339,13 @@ export class SecurityConfigDto {
   @ApiPropertyOptional({ example: 'default-src https:' })
   @IsOptional()
   @IsString()
-  contentSecurityPolicy?: string;
+  content_security_policy?: string;
 
   @ApiPropertyOptional({ example: ['https://ejemplo.com'] })
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  allowedOrigins?: string[];
+  allowed_origins?: string[];
 }
 
 export class PerformanceConfigDto {
@@ -354,22 +354,22 @@ export class PerformanceConfigDto {
   @IsNumber()
   @Min(0)
   @Max(86400)
-  cacheTtl?: number;
+  cache_ttl?: number;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  cdnEnabled?: boolean;
+  cdn_enabled?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  compressionEnabled?: boolean;
+  compression_enabled?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  imageLazyLoading?: boolean;
+  image_lazy_loading?: boolean;
 }
 
 export class CreateDomainConfigDto {
@@ -431,7 +431,7 @@ export class CreateDomainSettingDto {
   @ApiPropertyOptional({ example: 'ecommerce' })
   @IsOptional()
   @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
-  domainType?: string;
+  domain_type?: string;
 
   @ApiPropertyOptional({ example: 'pending_dns' })
   @IsOptional()
@@ -441,12 +441,12 @@ export class CreateDomainSettingDto {
   @ApiPropertyOptional({ example: 'none' })
   @IsOptional()
   @IsIn(['none', 'pending', 'issued', 'error', 'revoked'])
-  sslStatus?: string;
+  ssl_status?: string;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
   @IsBoolean()
-  isPrimary?: boolean;
+  is_primary?: boolean;
 
   @ApiPropertyOptional({ example: 'vendix_subdomain' })
   @IsOptional()
@@ -462,12 +462,12 @@ export class CreateDomainSettingDto {
   @ApiProperty({ example: 1 })
   @IsNumber()
   @IsNotEmpty()
-  organizationId: number;
+  organization_id: number;
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
   @IsNumber()
-  storeId?: number;
+  store_id?: number;
 
   @ApiProperty({ type: () => CreateDomainConfigDto })
   @IsObject()
@@ -487,7 +487,7 @@ export class UpdateDomainSettingDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
-  domainType?: string;
+  domain_type?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -497,12 +497,12 @@ export class UpdateDomainSettingDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsIn(['none', 'pending', 'issued', 'error', 'revoked'])
-  sslStatus?: string;
+  ssl_status?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
-  isPrimary?: boolean;
+  is_primary?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -527,7 +527,7 @@ export class DuplicateDomainDto {
   @ApiProperty({ example: 'nueva-tienda.ejemplo.com' })
   @IsString()
   @IsNotEmpty()
-  newHostname: string;
+  new_hostname: string;
 }
 
 export class VerifyDomainDto {
@@ -561,13 +561,13 @@ export class VerifyDomainDto {
 
 export interface VerifyDomainResult {
   hostname: string;
-  statusBefore: string;
-  statusAfter: string;
-  sslStatus: string;
+  status_before: string;
+  status_after: string;
+  ssl_status: string;
   verified: boolean;
-  nextAction?: string;
+  next_action?: string;
   checks: Record<string, any>;
-  suggestedFixes?: string[];
+  suggested_fixes?: string[];
   timestamp: string;
-  errorCode?: string;
+  error_code?: string;
 }

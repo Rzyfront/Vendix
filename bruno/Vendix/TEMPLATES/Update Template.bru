@@ -1,0 +1,36 @@
+meta {
+  name: Update [Entity]
+  type: http
+  seq: 1
+}
+
+patch {
+  url: http://{{url}}/[endpoint]/{{[entity]_id}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "field1": "updated_value1",
+    "field2": "updated_value2"
+  }
+}
+
+tests {
+  test("Update [entity] successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Data was updated correctly", function() {
+    expect(res.body.data.field1).to.equal('updated_value1');
+    expect(res.body.data.field2).to.equal('updated_value2');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}

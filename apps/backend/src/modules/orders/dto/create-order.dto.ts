@@ -71,7 +71,7 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsEnum(order_state_enum)
-  status?: order_state_enum;
+  state?: order_state_enum;
 
   @IsOptional()
   @IsEnum(payments_state_enum)
@@ -89,7 +89,7 @@ export class CreateOrderDto {
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @IsDecimal({ decimal_digits: '0,2' })
-  shipping_amount?: number;
+  shipping_cost?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
@@ -102,7 +102,7 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  currency_code?: string;
+  currency?: string;
 
   @IsOptional()
   @IsInt()
@@ -116,7 +116,7 @@ export class CreateOrderDto {
 
   @IsOptional()
   @IsString()
-  notes?: string;
+  internal_notes?: string;
 
   @IsOptional()
   @IsDateString()

@@ -1,0 +1,48 @@
+meta {
+  name: Create Role
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/admin/roles
+  body: json
+  auth: inherit
+}
+
+
+body:json {
+  {
+    "name": "test_role",
+    "description": "Test Role for API Testing"
+  }
+}
+
+vars:post-response {
+  created_role_id: res.body.data.id
+}
+
+tests {
+  test("Create role successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('test_role');
+    expect(res.body.data.description).to.equal('Test Role for API Testing');
+  });
+  
+  test("Role has required structure", function() {
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('created_at');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

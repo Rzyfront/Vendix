@@ -16,26 +16,58 @@ import { BrandsService } from './brands.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
+import { ResponseService } from '../../common/responses/response.service';
 
 @Controller('brands')
 @UseGuards(PermissionsGuard)
 export class BrandsController {
-  constructor(private readonly brandsService: BrandsService) {}
+  constructor(
+    private readonly brandsService: BrandsService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Post()
   @Permissions('brands:create')
   async create(
     @Body() createBrandDto: CreateBrandDto,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.brandsService.create(createBrandDto, user);
+    try {
+      const brand = await this.brandsService.create(createBrandDto, req.user);
+      return this.responseService.created(brand, 'Marca creada exitosamente');
+    } catch (error) {
+      return this.responseService.error('Error al crear marca', error.message);
+    }
   }
 
   @Get()
   @Permissions('brands:read')
   async findAll(@Query() query: BrandQueryDto) {
-    return this.brandsService.findAll(query);
+    try {
+      const result = await this.brandsService.findAll(query);
+
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Marcas obtenidas exitosamente',
+        );
+      } else {
+        return this.responseService.success(
+          result,
+          'Marcas obtenidas exitosamente',
+        );
+      }
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener marcas',
+        error.message,
+      );
+    }
   }
 
   @Get('store/:storeId')
@@ -44,7 +76,29 @@ export class BrandsController {
     @Param('storeId', ParseIntPipe) storeId: number,
     @Query() query: BrandQueryDto,
   ) {
-    return this.brandsService.findByStore(storeId, query);
+    try {
+      const result = await this.brandsService.findByStore(storeId, query);
+
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Marcas de la tienda obtenidas exitosamente',
+        );
+      } else {
+        return this.responseService.success(
+          result,
+          'Marcas de la tienda obtenidas exitosamente',
+        );
+      }
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener marcas de la tienda',
+        error.message,
+      );
+    }
   }
 
   @Get(':id')
@@ -53,9 +107,17 @@ export class BrandsController {
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    return this.brandsService.findOne(id, {
-      includeInactive: includeInactive === 'true',
-    });
+    try {
+      const brand = await this.brandsService.findOne(id, {
+        includeInactive: includeInactive === 'true',
+      });
+      return this.responseService.success(brand, 'Marca obtenida exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener marca',
+        error.message,
+      );
+    }
   }
 
   @Get('slug/:slug/store/:storeId')
@@ -65,9 +127,20 @@ export class BrandsController {
     @Param('storeId', ParseIntPipe) storeId: number,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    return this.brandsService.findBySlug(slug, storeId, {
-      includeInactive: includeInactive === 'true',
-    });
+    try {
+      const brand = await this.brandsService.findBySlug(slug, storeId, {
+        includeInactive: includeInactive === 'true',
+      });
+      return this.responseService.success(
+        brand,
+        'Marca obtenida exitosamente por slug',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener marca por slug',
+        error.message,
+      );
+    }
   }
 
   @Patch(':id')
@@ -75,37 +148,74 @@ export class BrandsController {
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateBrandDto: UpdateBrandDto,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.brandsService.update(id, updateBrandDto, user);
+    try {
+      const brand = await this.brandsService.update(
+        id,
+        updateBrandDto,
+        req.user,
+      );
+      return this.responseService.updated(
+        brand,
+        'Marca actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al actualizar marca',
+        error.message,
+      );
+    }
   }
 
   @Patch(':id/activate')
   @Permissions('brands:update')
   async activate(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.brandsService.activate(id, user);
+    try {
+      const brand = await this.brandsService.activate(id, req.user);
+      return this.responseService.updated(brand, 'Marca activada exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al activar marca',
+        error.message,
+      );
+    }
   }
 
   @Patch(':id/deactivate')
   @Permissions('brands:delete')
-  @HttpCode(HttpStatus.NO_CONTENT)
   async deactivate(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.brandsService.deactivate(id, user);
+    try {
+      await this.brandsService.deactivate(id, req.user);
+      return this.responseService.deleted('Marca desactivada exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al desactivar marca',
+        error.message,
+      );
+    }
   }
 
   @Delete(':id')
   @Permissions('brands:admin_delete')
-  @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id', ParseIntPipe) id: number,
-    @CurrentUser() user: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.brandsService.remove(id, user);
+    try {
+      await this.brandsService.remove(id, req.user);
+      return this.responseService.deleted('Marca eliminada exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al eliminar marca',
+        error.message,
+      );
+    }
   }
 }

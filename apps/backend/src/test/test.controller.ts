@@ -3,16 +3,19 @@ import { RolesGuard } from '../modules/auth/guards/roles.guard';
 import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
 import { Roles } from '../modules/auth/decorators/roles.decorator';
 import { RequirePermissions } from '../modules/auth/decorators/permissions.decorator';
-import { CurrentUser } from '../modules/auth/decorators/current-user.decorator';
+import { Req } from '@nestjs/common';
+import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
 import { Public } from '../modules/auth/decorators/public.decorator';
 import { EmailService } from '../email/email.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ResponseService } from '../common/responses/response.service';
 
 @Controller('test')
 export class TestController {
   constructor(
     private readonly emailService: EmailService,
     private readonly prismaService: PrismaService,
+    private readonly responseService: ResponseService,
   ) {}
 
   // ===== RUTAS DE PRUEBA DE EMAIL =====
@@ -20,30 +23,46 @@ export class TestController {
   @Public()
   @Get('email-config')
   getEmailConfig() {
-    return {
-      message: 'Email configuration status',
-      data: {
+    try {
+      const config = {
         provider: this.emailService.getProviderName(),
         isConfigured: this.emailService.isConfigured(),
         config: this.emailService.getConfig(),
-      },
-    };
+      };
+
+      return this.responseService.success(
+        config,
+        'Configuración de email obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error al obtener configuración de email',
+        error.message,
+      );
+    }
   }
 
   @Public()
   @Post('email-quick')
   async testQuickEmail(@Body() body: { email: string }) {
-    const result = await this.emailService.sendEmail(
-      body.email,
-      'Prueba Rápida de Vendix',
-      '<h1>🎉 ¡Email funcionando!</h1><p>Tu configuración de email con Resend está trabajando perfectamente.</p>',
-      'Email funcionando! Tu configuración de email con Resend está trabajando perfectamente.',
-    );
+    try {
+      const result = await this.emailService.sendEmail(
+        body.email,
+        'Prueba Rápida de Vendix',
+        '<h1>🎉 ¡Email funcionando!</h1><p>Tu configuración de email con Resend está trabajando perfectamente.</p>',
+        'Email funcionando! Tu configuración de email con Resend está trabajando perfectamente.',
+      );
 
-    return {
-      message: 'Quick email test completed',
-      data: result,
-    };
+      return this.responseService.success(
+        result,
+        'Prueba rápida de email completada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        'Error en prueba rápida de email',
+        error.message,
+      );
+    }
   }
 
   @Public()
@@ -107,13 +126,13 @@ export class TestController {
   }
 
   @Get('protected')
-  getProtectedData(@CurrentUser() user: any) {
+  getProtectedData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Este endpoint requiere autenticación',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -121,13 +140,13 @@ export class TestController {
   @Get('admin-only')
   @UseGuards(RolesGuard)
   @Roles('admin')
-  getAdminData(@CurrentUser() user: any) {
+  getAdminData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Solo administradores pueden ver esto',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -135,13 +154,13 @@ export class TestController {
   @Get('users-permission')
   @UseGuards(PermissionsGuard)
   @RequirePermissions('users.read')
-  getUsersData(@CurrentUser() user: any) {
+  getUsersData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Requiere permiso específico: users.read',
       user: {
-        id: user.id,
-        email: user.email,
-        permissions: user.permissions,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }
@@ -149,13 +168,13 @@ export class TestController {
   @Get('manager-or-admin')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  getManagerData(@CurrentUser() user: any) {
+  getManagerData(@Req() req: AuthenticatedRequest) {
     return {
       message: 'Accesible por administradores y gerentes',
       user: {
-        id: user.id,
-        email: user.email,
-        role: user.roles,
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.user_roles,
       },
     };
   }

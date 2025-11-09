@@ -1,0 +1,36 @@
+meta {
+  name: Get User By ID
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/admin/users/{{user_id}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get user by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is complete", function() {
+    expect(res.body.data).to.have.property('email');
+    expect(res.body.data).to.have.property('first_name');
+    expect(res.body.data).to.have.property('last_name');
+    expect(res.body.data).to.have.property('organization');
+    expect(res.body.data).to.have.property('user_roles');
+  });
+  
+  test("User roles is valid array", function() {
+    expect(res.body.data.user_roles).to.be.an('array');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}
