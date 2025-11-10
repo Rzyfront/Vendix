@@ -47,7 +47,16 @@ Make sure to configure these variables in your Bruno environment:
 
 ## 📝 Test Data Examples
 
-### Basic Product Structure
+### Basic Product Structure (Required Fields Only)
+```json
+{
+  "store_id": 1,
+  "name": "Product Name",
+  "base_price": 99.99
+}
+```
+
+### Complete Product Structure (All Fields)
 ```json
 {
   "store_id": 1,
@@ -69,6 +78,21 @@ Make sure to configure these variables in your Bruno environment:
 }
 ```
 
+### Field Validation Rules
+- **store_id**: Required, Integer (must exist and be active)
+- **category_id**: Optional, Integer (must exist)
+- **brand_id**: Optional, Integer (must exist)
+- **name**: Required, String (2-255 chars)
+- **slug**: Optional, String (2-255 chars, auto-generated if not provided)
+- **description**: Optional, String
+- **base_price**: Required, Number (>= 0, max 2 decimal places)
+- **sku**: Optional, String (max 100 chars, must be unique)
+- **stock_quantity**: Optional, Integer (>= 0, default: 0)
+- **state**: Optional, Enum ('active', 'inactive', 'archived', default: 'inactive')
+- **category_ids**: Optional, Array<Integer> (multiple category assignments)
+- **tax_category_ids**: Optional, Array<Integer> (tax category assignments)
+- **image_urls**: Optional, Array<String> (image URLs)
+
 ### Product Variant Structure
 ```json
 {
@@ -80,6 +104,13 @@ Make sure to configure these variables in your Bruno environment:
 }
 ```
 
+**Variant Validation Rules:**
+- **product_id**: Required, Integer (must exist)
+- **sku**: Required, String (max 100 chars, must be unique)
+- **price_override**: Optional, Number (>= 0, max 2 decimal places)
+- **stock_quantity**: Optional, Integer (>= 0, default: 0)
+- **image_id**: Optional, Integer (must exist)
+
 ### Product Image Structure
 ```json
 {
@@ -87,6 +118,10 @@ Make sure to configure these variables in your Bruno environment:
   "is_main": false
 }
 ```
+
+**Image Validation Rules:**
+- **image_url**: Required, String (must be valid URL)
+- **is_main**: Optional, Boolean (default: false)
 
 ## 🔐 Permissions Required
 
@@ -203,3 +238,40 @@ All endpoints follow the standard Vendix ResponseService format:
 - ✅ Correct: `http://localhost:3000/api`
 
 All test endpoints use relative paths (e.g., `/products`, `/products/{{productId}}/variants`) that will be appended to your base URL.
+
+## ⚠️ Common Validation Errors and Solutions
+
+### 1. Store Validation Errors
+**Error**: `"Tienda no encontrada o inactiva"`
+**Solution**: Ensure `store_id` exists and is active. Check available stores in database.
+
+### 2. SKU Uniqueness Errors
+**Error**: `"El SKU ya está en uso"`
+**Solution**: Use unique SKU values. Test with timestamps or random numbers.
+
+### 3. Slug Uniqueness Errors
+**Error**: `"El slug del producto ya existe en esta tienda"`
+**Solution**: Either provide unique slug or omit it (auto-generated from name).
+
+### 4. Category/Brand Validation Errors
+**Error**: Foreign key constraint violations
+**Solution**: Ensure `category_id` and `brand_id` exist in database before using them.
+
+### 5. Field Validation Errors
+**Error**: Various validation errors
+**Solution**: Follow field validation rules listed above.
+
+## 🧪 Testing Strategy
+
+### Start Simple
+1. **Test basic creation** with only required fields (`Create Simple Product`)
+2. **Test complete creation** with all optional fields
+3. **Test relationships** with existing categories/brands
+4. **Test variants** after successful product creation
+5. **Test images** after successful product creation
+
+### Data Dependencies
+- Categories and brands must exist before using them
+- Product must exist before creating variants
+- Product must exist before adding images
+- Test IDs should reference existing records

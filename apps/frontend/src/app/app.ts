@@ -6,6 +6,10 @@ import { ConfigFacade } from './core/store/config';
 import { CardComponent } from './shared/components/card/card.component';
 import { SpinnerComponent } from './shared/components/spinner/spinner.component';
 import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
+import { Chart, registerables } from 'chart.js';
+
+// Register Chart.js components globally
+Chart.register(...registerables);
 
 @Component({
   selector: 'app-root',

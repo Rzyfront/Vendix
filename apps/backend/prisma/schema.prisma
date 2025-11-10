@@ -547,7 +547,7 @@ model product_variants {
 model products {
   id                       Int                        @id @default(autoincrement())
   store_id                 Int
-  category_id             Int?
+  category_id              Int?
   brand_id                 Int?
   name                     String                     @db.VarChar(255)
   slug                     String                     @db.VarChar(255)
