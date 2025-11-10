@@ -50,6 +50,7 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
       run: |
         # Update App Runner service to use new image
+        # Note: Environment variables are configured separately for security
         aws apprunner update-service \
           --service-arn $(aws apprunner list-services --query 'ServiceSummaryList[?ServiceName==`vendix-backend`].ServiceArn' --output text) \
           --source-configuration ImageRepository="{
