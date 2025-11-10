@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, TemplateRef, ContentChild, AfterContentInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, TemplateRef, ContentChild, AfterContentInit, Type } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 
@@ -8,7 +8,7 @@ export interface TableColumn {
   sortable?: boolean;
   width?: string;
   align?: 'left' | 'center' | 'right';
-  template?: TemplateRef<any>;
+  template?: any; // Using any to avoid TemplateRef conflicts
   transform?: (value: any) => string;
   defaultValue?: string;
   badge?: boolean;
@@ -57,7 +57,7 @@ export class TableComponent implements AfterContentInit {
   @Output() sort = new EventEmitter<{ column: string; direction: SortDirection }>();
   @Output() rowClick = new EventEmitter<any>();
 
-  @ContentChild('actionsTemplate') actionsTemplate?: TemplateRef<any>;
+  @ContentChild('actionsTemplate') actionsTemplate?: any; // Using any to avoid TemplateRef conflicts
 
   sortColumn: string | null = null;
   sortDirection: SortDirection = null;
