@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Patch,
   Param,
@@ -79,6 +80,27 @@ export class CategoriesController {
     }
   }
 
+  @Get('search')
+  @Permissions('categories:read')
+  async search(@Query() query: CategoryQueryDto) {
+    try {
+      const result = await this.categoriesService.findAll({
+        ...query,
+        search: query.search || '',
+      });
+      return this.responseService.success(
+        result.data || result,
+        'Búsqueda de categorías completada',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error en la búsqueda de categorías',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('categories:read')
   async findOne(
@@ -105,6 +127,32 @@ export class CategoriesController {
   @Patch(':id')
   @Permissions('categories:update')
   async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateCategoryDto: UpdateCategoryDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    try {
+      const result = await this.categoriesService.update(
+        id,
+        updateCategoryDto,
+        req.user,
+      );
+      return this.responseService.updated(
+        result,
+        'Categoría actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar la categoría',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Put(':id')
+  @Permissions('categories:update')
+  async replace(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
     @Req() req: AuthenticatedRequest,
