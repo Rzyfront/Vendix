@@ -1,0 +1,357 @@
+meta {
+  name: "Inventory Integration Tests"
+  type: "collection"
+  environment: {
+    base_url: "http://api.vendix.com"
+  }
+}
+
+# Inventory Locations Tests
+### Create Location
+POST {{base_url}}/api/inventory/locations
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "name": "Main Warehouse",
+  "code": "WH001",
+  "type": "warehouse",
+  "organization_id": 1,
+  "store_id": 1,
+  "address_id": 1
+}
+
+### Get All Locations
+GET {{base_url}}/api/inventory/locations
+Authorization: Bearer {{auth_token}}
+
+### Get Location by ID
+GET {{base_url}}/api/inventory/locations/1
+Authorization: Bearer {{auth_token}}
+
+### Update Location
+PATCH {{base_url}}/api/inventory/locations/1
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "name": "Updated Warehouse",
+  "is_active": true
+}
+
+### Delete Location
+DELETE {{base_url}}/api/inventory/locations/1
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Stock Levels Tests
+### Get Stock Levels
+GET {{base_url}}/api/inventory/stock-levels
+Authorization: Bearer {{auth_token}}
+
+### Get Stock by Product
+GET {{base_url}}/api/inventory/stock-levels/product/1
+Authorization: Bearer {{auth_token}}
+
+### Update Stock Level
+PATCH {{base_url}}/api/inventory/stock-levels/1
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "quantity_on_hand": 100,
+  "reorder_point": 20,
+  "max_stock": 500
+}
+
+---
+
+# Inventory Batches Tests
+### Create Batch
+POST {{base_url}}/api/inventory/batches
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "batch_number": "BATCH001",
+  "quantity": 50,
+  "manufacturing_date": "2025-01-01T00:00:00.000Z",
+  "expiration_date": "2025-12-31T00:00:00.000Z",
+  "location_id": 1
+}
+
+### Get All Batches
+GET {{base_url}}/api/inventory/batches
+Authorization: Bearer {{auth_token}}
+
+### Get Batch by ID
+GET {{base_url}}/api/inventory/batches/1
+Authorization: Bearer {{auth_token}}
+
+### Get Expiring Batches
+GET {{base_url}}/api/inventory/batches/expiring?days=30
+Authorization: Bearer {{auth_token}}
+
+### Update Batch
+PATCH {{base_url}}/api/inventory/batches/1
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "quantity": 45,
+  "quantity_used": 5
+}
+
+---
+
+# Serial Numbers Tests
+### Create Serial Numbers
+POST {{base_url}}/api/inventory/serial-numbers
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "serial_numbers": ["SN001", "SN002", "SN003"],
+  "batch_id": 1,
+  "location_id": 1
+}
+
+### Get All Serial Numbers
+GET {{base_url}}/api/inventory/serial-numbers
+Authorization: Bearer {{auth_token}}
+
+### Get Serial Number by ID
+GET {{base_url}}/api/inventory/serial-numbers/1
+Authorization: Bearer {{auth_token}}
+
+### Get Serial Numbers by Product
+GET {{base_url}}/api/inventory/serial-numbers/product/1
+Authorization: Bearer {{auth_token}}
+
+### Update Serial Number Status
+PATCH {{base_url}}/api/inventory/serial-numbers/1/status
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "status": "sold",
+  "notes": "Sold to customer"
+}
+
+### Get Available Serial Numbers
+GET {{base_url}}/api/inventory/serial-numbers/available?product_id=1
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Inventory Transactions Tests
+### Create Transaction
+POST {{base_url}}/api/inventory/transactions
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "variant_id": 1,
+  "type": "stock_in",
+  "quantity_change": 10,
+  "reason": "Initial stock",
+  "transaction_date": "2025-01-01T00:00:00.000Z"
+}
+
+### Get Product Transactions
+GET {{base_url}}/api/inventory/transactions/product/1
+Authorization: Bearer {{auth_token}}
+
+### Get Transaction by ID
+GET {{base_url}}/api/inventory/transactions/1
+Authorization: Bearer {{auth_token}}
+
+### Get Transaction Summary
+GET {{base_url}}/api/inventory/transactions/summary/1?variantId=1&startDate=2025-01-01&endDate=2025-12-31
+Authorization: Bearer {{auth_token}}
+
+### Get Recent Transactions
+GET {{base_url}}/api/inventory/transactions/recent/1
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Inventory Movements Tests
+### Create Movement
+POST {{base_url}}/api/inventory/movements
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "variant_id": 1,
+  "from_location_id": 1,
+  "to_location_id": 2,
+  "quantity": 5,
+  "movement_type": "transfer",
+  "reason": "Stock transfer between warehouses"
+}
+
+### Get All Movements
+GET {{base_url}}/api/inventory/movements
+Authorization: Bearer {{auth_token}}
+
+### Get Movement by ID
+GET {{base_url}}/api/inventory/movements/1
+Authorization: Bearer {{auth_token}}
+
+### Get Movements by Product
+GET {{base_url}}/api/inventory/movements/product/1
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Stock Reservations Tests
+### Reserve Stock
+POST {{base_url}}/api/inventory/stock-reservations
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "variant_id": 1,
+  "location_id": 1,
+  "quantity": 3,
+  "reserved_for_type": "order",
+  "reserved_for_id": 1,
+  "expires_at": "2025-01-08T00:00:00.000Z"
+}
+
+### Get All Reservations
+GET {{base_url}}/api/inventory/stock-reservations
+Authorization: Bearer {{auth_token}}
+
+### Get Reservation by ID
+GET {{base_url}}/api/inventory/stock-reservations/1
+Authorization: Bearer {{auth_token}}
+
+### Consume Reservation
+PATCH {{base_url}}/api/inventory/stock-reservations/1/consume
+Authorization: Bearer {{auth_token}}
+
+### Cancel Reservation
+DELETE {{base_url}}/api/inventory/stock-reservations/1
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Integration Tests with Products
+### Create Product with Stock
+POST {{base_url}}/api/products
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "store_id": 1,
+  "name": "Test Product with Inventory",
+  "base_price": 99.99,
+  "stock_quantity": 50,
+  "category_id": 1,
+  "brand_id": 1
+}
+
+### Create Product Variant with Stock
+POST {{base_url}}/api/products/1/variants
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "sku": "TEST-VAR-001",
+  "price_override": 109.99,
+  "stock_quantity": 25
+}
+
+---
+
+# Integration Tests with Sales Orders
+### Create Sales Order (Stock Reservation)
+POST {{base_url}}/api/sales-orders
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "customer_id": 1,
+  "organization_id": 1,
+  "items": [
+    {
+      "product_id": 1,
+      "quantity": 2,
+      "unit_price": 99.99,
+      "location_id": 1
+    }
+  ]
+}
+
+### Confirm Sales Order (Stock Consumption)
+PATCH {{base_url}}/api/sales-orders/1/confirm
+Authorization: Bearer {{auth_token}}
+
+---
+
+# Error Cases Tests
+### Create Duplicate Batch (Should Fail)
+POST {{base_url}}/api/inventory/batches
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "batch_number": "BATCH001",
+  "quantity": 10
+}
+
+### Reserve More Stock Than Available (Should Fail)
+POST {{base_url}}/api/inventory/stock-reservations
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "quantity": 999999,
+  "location_id": 1,
+  "reserved_for_type": "order",
+  "reserved_for_id": 1
+}
+
+### Create Serial Number with Duplicate (Should Fail)
+POST {{base_url}}/api/inventory/serial-numbers
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "serial_numbers": ["SN001"],
+  "location_id": 1
+}
+
+---
+
+# Performance Tests
+### Get Large Stock List
+GET {{base_url}}/api/inventory/stock-levels?limit=100&page=1
+Authorization: Bearer {{auth_token}}
+
+### Get Transaction History with Filters
+GET {{base_url}}/api/inventory/transactions/product/1?startDate=2025-01-01&endDate=2025-12-31&limit=50
+Authorization: Bearer {{auth_token}}
+
+### Batch Create Serial Numbers
+POST {{base_url}}/api/inventory/serial-numbers/batch
+Content-Type: application/json
+Authorization: Bearer {{auth_token}}
+
+{
+  "product_id": 1,
+  "batch_id": 1,
+  "serial_numbers": ["SN100", "SN101", "SN102", "SN103", "SN104", "SN105", "SN106", "SN107", "SN108", "SN109"],
+  "location_id": 1
+}
