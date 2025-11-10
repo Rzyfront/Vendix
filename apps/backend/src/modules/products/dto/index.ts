@@ -191,8 +191,9 @@ export class ProductQueryDto {
 
 // Product Variants DTOs
 export class CreateProductVariantDto {
+  @IsOptional()
   @IsInt()
-  product_id: number;
+  product_id?: number;
 
   @IsString()
   @MaxLength(100)
@@ -203,6 +204,12 @@ export class CreateProductVariantDto {
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })
   price_override?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  @Min(0, { message: 'El precio no puede ser negativo' })
+  price?: number;
 
   @IsOptional()
   @IsInt()

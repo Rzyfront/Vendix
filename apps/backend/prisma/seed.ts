@@ -1908,7 +1908,10 @@ async function main() {
   for (const domain of domainSettings) {
     // Inferir ownership basado en el hostname
     let ownership = 'custom_domain'; // default
-    if (domain.hostname.endsWith('.vendix.com') || domain.hostname.endsWith('.vendix.online')) {
+    if (
+      domain.hostname.endsWith('.vendix.com') ||
+      domain.hostname.endsWith('.vendix.online')
+    ) {
       const parts = domain.hostname.split('.');
       if (parts.length === 2) {
         ownership = 'vendix_core'; // vendix.com o vendix.online
@@ -2182,6 +2185,1000 @@ async function main() {
     },
   });
 
+  // 11. Crear categorías
+  console.log('📂 Creando categorías...');
+  const categories = [
+    // Categorías para Tech Solutions
+    {
+      name: 'Laptops',
+      slug: 'laptops',
+      description:
+        'Computadoras portátiles de diferentes marcas y especificaciones',
+      organization_id: techSolutionsOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Smartphones',
+      slug: 'smartphones',
+      description: 'Teléfonos inteligentes de última generación',
+      organization_id: techSolutionsOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Accesorios',
+      slug: 'accesorios',
+      description: 'Accesorios para dispositivos electrónicos',
+      organization_id: techSolutionsOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Cargadores y Cables',
+      slug: 'cargadores-cables',
+      description: 'Cargadores, cables y adaptadores',
+      organization_id: techSolutionsOrg.id,
+      parent_id: null, // Will be updated to be child of "Accesorios"
+    },
+
+    // Categorías para Fashion Retail
+    {
+      name: 'Ropa Masculina',
+      slug: 'ropa-masculina',
+      description: 'Vestimenta para hombres',
+      organization_id: fashionRetailOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Ropa Femenina',
+      slug: 'ropa-femenina',
+      description: 'Vestimenta para mujeres',
+      organization_id: fashionRetailOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Calzado',
+      slug: 'calzado',
+      description: 'Zapatos y botas para toda la familia',
+      organization_id: fashionRetailOrg.id,
+      parent_id: null,
+    },
+    {
+      name: 'Accesorios de Moda',
+      slug: 'accesorios-moda',
+      description: 'Bolsos, cinturones y otros accesorios',
+      organization_id: fashionRetailOrg.id,
+      parent_id: null,
+    },
+  ];
+
+  const createdCategories: any[] = [];
+  for (const category of categories) {
+    const createdCategory = await prisma.categories.upsert({
+      where: {
+        organization_id_slug: {
+          organization_id: category.organization_id,
+          slug: category.slug,
+        },
+      },
+      update: {},
+      create: {
+        name: category.name,
+        slug: category.slug,
+        description: category.description,
+        organization_id: category.organization_id,
+        parent_id: category.parent_id,
+      },
+    });
+    createdCategories.push(createdCategory);
+  }
+
+  // Update parent-child relationships
+  const techAccesoriosCategory = createdCategories.find(
+    (c) => c.slug === 'accesorios' && c.organization_id === techSolutionsOrg.id,
+  );
+  const techCargadoresCategory = createdCategories.find(
+    (c) =>
+      c.slug === 'cargadores-cables' &&
+      c.organization_id === techSolutionsOrg.id,
+  );
+
+  if (techAccesoriosCategory && techCargadoresCategory) {
+    await prisma.categories.update({
+      where: { id: techCargadoresCategory.id },
+      data: { parent_id: techAccesoriosCategory.id },
+    });
+  }
+
+  // 12. Crear marcas
+  console.log('🏷️ Creando marcas...');
+  const brands = [
+    // Marcas para Tech Solutions
+    {
+      name: 'Apple',
+      slug: 'apple',
+      description: 'Productos Apple originales',
+      organization_id: techSolutionsOrg.id,
+      is_featured: true,
+    },
+    {
+      name: 'Samsung',
+      slug: 'samsung',
+      description: 'Dispositivos y accesorios Samsung',
+      organization_id: techSolutionsOrg.id,
+      is_featured: true,
+    },
+    {
+      name: 'Dell',
+      slug: 'dell',
+      description: 'Computadoras y monitores Dell',
+      organization_id: techSolutionsOrg.id,
+      is_featured: false,
+    },
+    {
+      name: 'HP',
+      slug: 'hp',
+      description: 'Equipos de cómputo HP',
+      organization_id: techSolutionsOrg.id,
+      is_featured: false,
+    },
+
+    // Marcas para Fashion Retail
+    {
+      name: 'Nike',
+      slug: 'nike',
+      description: 'Ropa y calzado deportivo Nike',
+      organization_id: fashionRetailOrg.id,
+      is_featured: true,
+    },
+    {
+      name: 'Adidas',
+      slug: 'adidas',
+      description: 'Artículos deportivos Adidas',
+      organization_id: fashionRetailOrg.id,
+      is_featured: true,
+    },
+    {
+      name: 'Zara',
+      slug: 'zara',
+      description: 'Moda contemporánea Zara',
+      organization_id: fashionRetailOrg.id,
+      is_featured: false,
+    },
+    {
+      name: 'Gucci',
+      slug: 'gucci',
+      description: 'Artículos de lujo Gucci',
+      organization_id: fashionRetailOrg.id,
+      is_featured: false,
+    },
+  ];
+
+  const createdBrands: any[] = [];
+  for (const brand of brands) {
+    const createdBrand = await prisma.brands.upsert({
+      where: {
+        organization_id_slug: {
+          organization_id: brand.organization_id,
+          slug: brand.slug,
+        },
+      },
+      update: {},
+      create: {
+        name: brand.name,
+        slug: brand.slug,
+        description: brand.description,
+        organization_id: brand.organization_id,
+        is_featured: brand.is_featured,
+      },
+    });
+    createdBrands.push(createdBrand);
+  }
+
+  // 13. Crear ubicaciones de inventario
+  console.log('📍 Creando ubicaciones de inventario...');
+  const locations = [
+    // Ubicaciones para Tech Solutions
+    {
+      name: 'Bodega Principal Bogotá',
+      code: 'TECH-BOG-001',
+      type: 'warehouse',
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      is_active: true,
+      address: 'Calle 10 # 42-28, Bodega 1',
+    },
+    {
+      name: 'Tienda Tech Bogotá',
+      code: 'TECH-BOG-STORE',
+      type: 'store',
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      is_active: true,
+      address: 'Centro Comercial Santafé, Local 205',
+    },
+    {
+      name: 'Bodega Medellín',
+      code: 'TECH-MED-001',
+      type: 'warehouse',
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore2.id,
+      is_active: true,
+      address: 'Calle 50 # 30-20, Bodega Central',
+    },
+
+    // Ubicaciones para Fashion Retail
+    {
+      name: 'Bodega Principal',
+      code: 'FASH-BOG-001',
+      type: 'warehouse',
+      organization_id: fashionRetailOrg.id,
+      store_id: fashionStore1.id,
+      is_active: true,
+      address: 'Avenida 68 # 22-45, Bodega 2',
+    },
+    {
+      name: 'Tienda Fashion Norte',
+      code: 'FASH-BOG-STORE',
+      type: 'store',
+      organization_id: fashionRetailOrg.id,
+      store_id: fashionStore1.id,
+      is_active: true,
+      address: 'Centro Comercial Andino, Local 305',
+    },
+  ];
+
+  const createdLocations: any[] = [];
+  for (const location of locations) {
+    const createdLocation = await prisma.inventory_locations.upsert({
+      where: {
+        organization_id_code: {
+          organization_id: location.organization_id,
+          code: location.code,
+        },
+      },
+      update: {},
+      create: {
+        name: location.name,
+        code: location.code,
+        type: location.type as any,
+        organization_id: location.organization_id,
+        store_id: location.store_id,
+        is_active: location.is_active,
+        address: location.address,
+      },
+    });
+    createdLocations.push(createdLocation);
+  }
+
+  const techWarehouseBog = createdLocations.find(
+    (l) => l.code === 'TECH-BOG-001',
+  );
+  const techStoreBog = createdLocations.find(
+    (l) => l.code === 'TECH-BOG-STORE',
+  );
+  const techWarehouseMed = createdLocations.find(
+    (l) => l.code === 'TECH-MED-001',
+  );
+  const fashionWarehouse = createdLocations.find(
+    (l) => l.code === 'FASH-BOG-001',
+  );
+  const fashionStore = createdLocations.find(
+    (l) => l.code === 'FASH-BOG-STORE',
+  );
+
+  // 14. Crear productos
+  console.log('📦 Creando productos...');
+  const products = [
+    // Productos para Tech Solutions
+    {
+      name: 'MacBook Pro 14"',
+      slug: 'macbook-pro-14',
+      description: 'Laptop MacBook Pro de 14 pulgadas con chip M3 Pro',
+      sku: 'MBP14-M3-512',
+      price: 4500000,
+      cost_price: 3500000,
+      weight: 1.6,
+      dimensions: { length: 31.26, width: 22.12, height: 1.55 },
+      track_inventory: true,
+      stock_quantity: 25,
+      min_stock_level: 5,
+      max_stock_level: 50,
+      reorder_point: 10,
+      reorder_quantity: 20,
+      requires_serial_numbers: true,
+      requires_batch_tracking: true,
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'laptops' && c.organization_id === techSolutionsOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) => b.slug === 'apple' && b.organization_id === techSolutionsOrg.id,
+      )?.id,
+      status: 'active',
+    },
+    {
+      name: 'iPhone 15 Pro',
+      slug: 'iphone-15-pro',
+      description: 'iPhone 15 Pro con 256GB de almacenamiento',
+      sku: 'IP15P-256-BLK',
+      price: 5200000,
+      cost_price: 4200000,
+      weight: 0.221,
+      dimensions: { length: 14.67, width: 7.05, height: 0.81 },
+      track_inventory: true,
+      stock_quantity: 30,
+      min_stock_level: 8,
+      max_stock_level: 60,
+      reorder_point: 15,
+      reorder_quantity: 25,
+      requires_serial_numbers: true,
+      requires_batch_tracking: false,
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'smartphones' && c.organization_id === techSolutionsOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) => b.slug === 'apple' && b.organization_id === techSolutionsOrg.id,
+      )?.id,
+      status: 'active',
+    },
+    {
+      name: 'Samsung Galaxy S24',
+      slug: 'samsung-galaxy-s24',
+      description: 'Samsung Galaxy S24 con 256GB',
+      sku: 'SGS24-256-BLU',
+      price: 3800000,
+      cost_price: 3000000,
+      weight: 0.167,
+      dimensions: { length: 14.7, width: 7.0, height: 0.79 },
+      track_inventory: true,
+      stock_quantity: 45,
+      min_stock_level: 10,
+      max_stock_level: 80,
+      reorder_point: 20,
+      reorder_quantity: 30,
+      requires_serial_numbers: true,
+      requires_batch_tracking: false,
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'smartphones' && c.organization_id === techSolutionsOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) =>
+          b.slug === 'samsung' && b.organization_id === techSolutionsOrg.id,
+      )?.id,
+      status: 'active',
+    },
+    {
+      name: 'Cargador USB-C 65W',
+      slug: 'cargador-usb-c-65w',
+      description: 'Cargador USB-C de 65 watts con GaN',
+      sku: 'CHG-USB65-GAN',
+      price: 150000,
+      cost_price: 80000,
+      weight: 0.12,
+      dimensions: { length: 6.5, width: 6.5, height: 2.8 },
+      track_inventory: true,
+      stock_quantity: 100,
+      min_stock_level: 20,
+      max_stock_level: 200,
+      reorder_point: 40,
+      reorder_quantity: 50,
+      requires_serial_numbers: false,
+      requires_batch_tracking: true,
+      organization_id: techSolutionsOrg.id,
+      store_id: techStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'cargadores-cables' &&
+          c.organization_id === techSolutionsOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) =>
+          b.slug === 'samsung' && b.organization_id === techSolutionsOrg.id,
+      )?.id,
+      status: 'active',
+    },
+
+    // Productos para Fashion Retail
+    {
+      name: 'Nike Air Max 90',
+      slug: 'nike-air-max-90',
+      description: 'Zapatillas Nike Air Max 90 clásicas',
+      sku: 'NAM90-42-BLK',
+      price: 380000,
+      cost_price: 220000,
+      weight: 0.35,
+      dimensions: { length: 30, width: 20, height: 12 },
+      track_inventory: true,
+      stock_quantity: 60,
+      min_stock_level: 15,
+      max_stock_level: 100,
+      reorder_point: 25,
+      reorder_quantity: 40,
+      requires_serial_numbers: false,
+      requires_batch_tracking: true,
+      organization_id: fashionRetailOrg.id,
+      store_id: fashionStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'calzado' && c.organization_id === fashionRetailOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) => b.slug === 'nike' && b.organization_id === fashionRetailOrg.id,
+      )?.id,
+      status: 'active',
+    },
+    {
+      name: 'Camiseta Adidas Clásica',
+      slug: 'camiseta-adidas-clasica',
+      description: 'Camiseta deportiva Adidas con logo clásico',
+      sku: 'CAD-CLAS-M-BLK',
+      price: 120000,
+      cost_price: 65000,
+      weight: 0.18,
+      dimensions: { length: 28, width: 25, height: 2 },
+      track_inventory: true,
+      stock_quantity: 80,
+      min_stock_level: 20,
+      max_stock_level: 150,
+      reorder_point: 30,
+      reorder_quantity: 50,
+      requires_serial_numbers: false,
+      requires_batch_tracking: true,
+      organization_id: fashionRetailOrg.id,
+      store_id: fashionStore1.id,
+      category_id: createdCategories.find(
+        (c) =>
+          c.slug === 'ropa-masculina' &&
+          c.organization_id === fashionRetailOrg.id,
+      )?.id,
+      brand_id: createdBrands.find(
+        (b) => b.slug === 'adidas' && b.organization_id === fashionRetailOrg.id,
+      )?.id,
+      status: 'active',
+    },
+  ];
+
+  const createdProducts: any[] = [];
+  for (const product of products) {
+    const createdProduct = await prisma.products.upsert({
+      where: {
+        organization_id_sku: {
+          organization_id: product.organization_id,
+          sku: product.sku,
+        },
+      },
+      update: {},
+      create: {
+        name: product.name,
+        slug: product.slug,
+        description: product.description,
+        sku: product.sku,
+        price: product.price,
+        cost_price: product.cost_price,
+        weight: product.weight,
+        dimensions: product.dimensions,
+        track_inventory: product.track_inventory,
+        stock_quantity: product.stock_quantity,
+        min_stock_level: product.min_stock_level,
+        max_stock_level: product.max_stock_level,
+        reorder_point: product.reorder_point,
+        reorder_quantity: product.reorder_quantity,
+        requires_serial_numbers: product.requires_serial_numbers,
+        requires_batch_tracking: product.requires_batch_tracking,
+        organization_id: product.organization_id,
+        store_id: product.store_id,
+        category_id: product.category_id,
+        brand_id: product.brand_id,
+        status: product.status as any,
+      },
+    });
+    createdProducts.push(createdProduct);
+  }
+
+  // 15. Crear variantes de productos
+  console.log('🎨 Creando variantes de productos...');
+  const productVariants = [
+    // Variantes para MacBook Pro
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      name: 'MacBook Pro 14" - Space Gray',
+      sku: 'MBP14-M3-512-SG',
+      price: 4500000,
+      cost_price: 3500000,
+      stock_quantity: 10,
+      attributes: { color: 'Space Gray', storage: '512GB', ram: '18GB' },
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      name: 'MacBook Pro 14" - Silver',
+      sku: 'MBP14-M3-512-SLV',
+      price: 4500000,
+      cost_price: 3500000,
+      stock_quantity: 15,
+      attributes: { color: 'Silver', storage: '512GB', ram: '18GB' },
+      organization_id: techSolutionsOrg.id,
+    },
+
+    // Variantes para iPhone 15 Pro
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      name: 'iPhone 15 Pro - Black Titanium',
+      sku: 'IP15P-256-BT',
+      price: 5200000,
+      cost_price: 4200000,
+      stock_quantity: 12,
+      attributes: { color: 'Black Titanium', storage: '256GB' },
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      name: 'iPhone 15 Pro - White Titanium',
+      sku: 'IP15P-256-WT',
+      price: 5200000,
+      cost_price: 4200000,
+      stock_quantity: 8,
+      attributes: { color: 'White Titanium', storage: '256GB' },
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      name: 'iPhone 15 Pro - Blue Titanium',
+      sku: 'IP15P-256-BLT',
+      price: 5200000,
+      cost_price: 4200000,
+      stock_quantity: 10,
+      attributes: { color: 'Blue Titanium', storage: '256GB' },
+      organization_id: techSolutionsOrg.id,
+    },
+
+    // Variantes para Nike Air Max
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      name: 'Nike Air Max 90 - Talla 42',
+      sku: 'NAM90-42-BLK',
+      price: 380000,
+      cost_price: 220000,
+      stock_quantity: 20,
+      attributes: { size: '42', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      name: 'Nike Air Max 90 - Talla 43',
+      sku: 'NAM90-43-BLK',
+      price: 380000,
+      cost_price: 220000,
+      stock_quantity: 25,
+      attributes: { size: '43', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      name: 'Nike Air Max 90 - Talla 44',
+      sku: 'NAM90-44-BLK',
+      price: 380000,
+      cost_price: 220000,
+      stock_quantity: 15,
+      attributes: { size: '44', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+
+    // Variantes para Camiseta Adidas
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
+      name: 'Camiseta Adidas - M',
+      sku: 'CAD-CLAS-M-BLK',
+      price: 120000,
+      cost_price: 65000,
+      stock_quantity: 30,
+      attributes: { size: 'M', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
+      name: 'Camiseta Adidas - L',
+      sku: 'CAD-CLAS-L-BLK',
+      price: 120000,
+      cost_price: 65000,
+      stock_quantity: 25,
+      attributes: { size: 'L', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
+      name: 'Camiseta Adidas - XL',
+      sku: 'CAD-CLAS-XL-BLK',
+      price: 120000,
+      cost_price: 65000,
+      stock_quantity: 25,
+      attributes: { size: 'XL', color: 'Black' },
+      organization_id: fashionRetailOrg.id,
+    },
+  ];
+
+  const createdVariants: any[] = [];
+  for (const variant of productVariants) {
+    if (variant.product_id) {
+      const createdVariant = await prisma.product_variants.upsert({
+        where: {
+          organization_id_sku: {
+            organization_id: variant.organization_id,
+            sku: variant.sku,
+          },
+        },
+        update: {},
+        create: {
+          product_id: variant.product_id,
+          name: variant.name,
+          sku: variant.sku,
+          price: variant.price,
+          cost_price: variant.cost_price,
+          stock_quantity: variant.stock_quantity,
+          attributes: variant.attributes,
+          organization_id: variant.organization_id,
+        },
+      });
+      createdVariants.push(createdVariant);
+    }
+  }
+
+  // 16. Crear niveles de stock iniciales
+  console.log('📊 Creando niveles de stock iniciales...');
+  const stockLevels = [
+    // Stock para productos Tech Solutions
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity_available: 20,
+      quantity_reserved: 0,
+      quantity_on_order: 5,
+      min_stock_level: 5,
+      max_stock_level: 50,
+      reorder_point: 10,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity_available: 25,
+      quantity_reserved: 5,
+      quantity_on_order: 10,
+      min_stock_level: 8,
+      max_stock_level: 60,
+      reorder_point: 15,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'SGS24-256-BLU')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity_available: 40,
+      quantity_reserved: 5,
+      quantity_on_order: 15,
+      min_stock_level: 10,
+      max_stock_level: 80,
+      reorder_point: 20,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CHG-USB65-GAN')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity_available: 80,
+      quantity_reserved: 20,
+      quantity_on_order: 30,
+      min_stock_level: 20,
+      max_stock_level: 200,
+      reorder_point: 40,
+    },
+
+    // Stock para productos Fashion Retail
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      product_variant_id: null,
+      location_id: fashionWarehouse?.id,
+      organization_id: fashionRetailOrg.id,
+      quantity_available: 50,
+      quantity_reserved: 10,
+      quantity_on_order: 20,
+      min_stock_level: 15,
+      max_stock_level: 100,
+      reorder_point: 25,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
+      product_variant_id: null,
+      location_id: fashionWarehouse?.id,
+      organization_id: fashionRetailOrg.id,
+      quantity_available: 70,
+      quantity_reserved: 10,
+      quantity_on_order: 25,
+      min_stock_level: 20,
+      max_stock_level: 150,
+      reorder_point: 30,
+    },
+  ];
+
+  for (const stockLevel of stockLevels) {
+    if (stockLevel.product_id && stockLevel.location_id) {
+      await prisma.stock_levels.upsert({
+        where: {
+          product_id_location_id: {
+            product_id: stockLevel.product_id,
+            location_id: stockLevel.location_id,
+          },
+        },
+        update: {},
+        create: {
+          product_id: stockLevel.product_id,
+          product_variant_id: stockLevel.product_variant_id,
+          location_id: stockLevel.location_id,
+          organization_id: stockLevel.organization_id,
+          quantity_available: stockLevel.quantity_available,
+          quantity_reserved: stockLevel.quantity_reserved,
+          quantity_on_order: stockLevel.quantity_on_order,
+          min_stock_level: stockLevel.min_stock_level,
+          max_stock_level: stockLevel.max_stock_level,
+          reorder_point: stockLevel.reorder_point,
+        },
+      });
+    }
+  }
+
+  // 17. Crear lotes de inventario
+  console.log('🏷️ Creando lotes de inventario...');
+  const inventoryBatches = [
+    {
+      batch_number: 'BATCH-MBP-2024-001',
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity: 20,
+      quantity_available: 20,
+      unit_cost: 3500000,
+      expiration_date: null,
+      manufacture_date: new Date('2024-01-15'),
+      notes: 'Lote inicial MacBook Pro M3',
+    },
+    {
+      batch_number: 'BATCH-IP15-2024-001',
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity: 25,
+      quantity_available: 25,
+      unit_cost: 4200000,
+      expiration_date: null,
+      manufacture_date: new Date('2024-02-01'),
+      notes: 'Lote inicial iPhone 15 Pro',
+    },
+    {
+      batch_number: 'BATCH-CHG-2024-001',
+      product_id: createdProducts.find((p) => p.sku === 'CHG-USB65-GAN')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      quantity: 80,
+      quantity_available: 80,
+      unit_cost: 80000,
+      expiration_date: null,
+      manufacture_date: new Date('2024-01-20'),
+      notes: 'Lote inicial cargadores USB-C',
+    },
+    {
+      batch_number: 'BATCH-NIKE-2024-001',
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      product_variant_id: null,
+      location_id: fashionWarehouse?.id,
+      organization_id: fashionRetailOrg.id,
+      quantity: 50,
+      quantity_available: 50,
+      unit_cost: 220000,
+      expiration_date: null,
+      manufacture_date: new Date('2024-01-10'),
+      notes: 'Lote inicial Nike Air Max 90',
+    },
+  ];
+
+  const createdBatches: any[] = [];
+  for (const batch of inventoryBatches) {
+    if (batch.product_id && batch.location_id) {
+      const createdBatch = await prisma.inventory_batch.upsert({
+        where: {
+          organization_id_batch_number: {
+            organization_id: batch.organization_id,
+            batch_number: batch.batch_number,
+          },
+        },
+        update: {},
+        create: {
+          batch_number: batch.batch_number,
+          product_id: batch.product_id,
+          product_variant_id: batch.product_variant_id,
+          location_id: batch.location_id,
+          organization_id: batch.organization_id,
+          quantity: batch.quantity,
+          quantity_available: batch.quantity_available,
+          unit_cost: batch.unit_cost,
+          expiration_date: batch.expiration_date,
+          manufacture_date: batch.manufacture_date,
+          notes: batch.notes,
+        },
+      });
+      createdBatches.push(createdBatch);
+    }
+  }
+
+  // 18. Crear números de serie para productos que lo requieren
+  console.log('🔢 Creando números de serie...');
+  const serialNumbers = [];
+
+  // Números de serie para MacBook Pro
+  const macbookBatch = createdBatches.find(
+    (b) => b.batch_number === 'BATCH-MBP-2024-001',
+  );
+  if (macbookBatch) {
+    for (let i = 1; i <= 20; i++) {
+      serialNumbers.push({
+        serial_number: `MBP-M3-2024-${String(i).padStart(4, '0')}`,
+        batch_id: macbookBatch.id,
+        product_id: macbookBatch.product_id,
+        product_variant_id: null,
+        organization_id: techSolutionsOrg.id,
+        location_id: techWarehouseBog?.id,
+        status: 'IN_STOCK',
+        cost: 3500000,
+      });
+    }
+  }
+
+  // Números de serie para iPhone 15 Pro
+  const iphoneBatch = createdBatches.find(
+    (b) => b.batch_number === 'BATCH-IP15-2024-001',
+  );
+  if (iphoneBatch) {
+    for (let i = 1; i <= 25; i++) {
+      serialNumbers.push({
+        serial_number: `IP15P-2024-${String(i).padStart(4, '0')}`,
+        batch_id: iphoneBatch.id,
+        product_id: iphoneBatch.product_id,
+        product_variant_id: null,
+        organization_id: techSolutionsOrg.id,
+        location_id: techWarehouseBog?.id,
+        status: 'IN_STOCK',
+        cost: 4200000,
+      });
+    }
+  }
+
+  for (const serialNumber of serialNumbers) {
+    await prisma.inventory_serial_number.upsert({
+      where: {
+        organization_id_serial_number: {
+          organization_id: serialNumber.organization_id,
+          serial_number: serialNumber.serial_number,
+        },
+      },
+      update: {},
+      create: {
+        serial_number: serialNumber.serial_number,
+        batch_id: serialNumber.batch_id,
+        product_id: serialNumber.product_id,
+        product_variant_id: serialNumber.product_variant_id,
+        organization_id: serialNumber.organization_id,
+        location_id: serialNumber.location_id,
+        status: serialNumber.status as any,
+        cost: serialNumber.cost,
+      },
+    });
+  }
+
+  // 19. Crear transacciones de inventario iniciales
+  console.log('📋 Creando transacciones de inventario iniciales...');
+  const inventoryTransactions = [
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      transaction_type: 'INITIAL_STOCK',
+      quantity: 20,
+      reference_type: 'BATCH',
+      reference_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-MBP-2024-001',
+      )?.id,
+      notes: 'Stock inicial MacBook Pro',
+      unit_cost: 3500000,
+      batch_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-MBP-2024-001',
+      )?.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      transaction_type: 'INITIAL_STOCK',
+      quantity: 25,
+      reference_type: 'BATCH',
+      reference_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-IP15-2024-001',
+      )?.id,
+      notes: 'Stock inicial iPhone 15 Pro',
+      unit_cost: 4200000,
+      batch_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-IP15-2024-001',
+      )?.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CHG-USB65-GAN')?.id,
+      product_variant_id: null,
+      location_id: techWarehouseBog?.id,
+      organization_id: techSolutionsOrg.id,
+      transaction_type: 'INITIAL_STOCK',
+      quantity: 80,
+      reference_type: 'BATCH',
+      reference_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-CHG-2024-001',
+      )?.id,
+      notes: 'Stock inicial cargadores USB-C',
+      unit_cost: 80000,
+      batch_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-CHG-2024-001',
+      )?.id,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      product_variant_id: null,
+      location_id: fashionWarehouse?.id,
+      organization_id: fashionRetailOrg.id,
+      transaction_type: 'INITIAL_STOCK',
+      quantity: 50,
+      reference_type: 'BATCH',
+      reference_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-NIKE-2024-001',
+      )?.id,
+      notes: 'Stock inicial Nike Air Max 90',
+      unit_cost: 220000,
+      batch_id: createdBatches.find(
+        (b) => b.batch_number === 'BATCH-NIKE-2024-001',
+      )?.id,
+    },
+  ];
+
+  for (const transaction of inventoryTransactions) {
+    if (transaction.product_id && transaction.location_id) {
+      await prisma.inventory_transaction.create({
+        data: {
+          product_id: transaction.product_id,
+          product_variant_id: transaction.product_variant_id,
+          location_id: transaction.location_id,
+          organization_id: transaction.organization_id,
+          transaction_type: transaction.transaction_type as any,
+          quantity: transaction.quantity,
+          reference_type: transaction.reference_type,
+          reference_id: transaction.reference_id,
+          notes: transaction.notes,
+          unit_cost: transaction.unit_cost,
+          batch_id: transaction.batch_id,
+        },
+      });
+    }
+  }
+
   console.log('🎉 Seed mejorado completado exitosamente!');
   console.log('');
   console.log('📊 RESUMEN DEL SEED:');
@@ -2191,6 +3188,16 @@ async function main() {
   console.log(`🔗 Relaciones store_users: ${storeUsers.length}`);
   console.log(`🌐 Dominios configurados: ${domainSettings.length}`);
   console.log(`📍 Direcciones creadas: ${addresses.length}`);
+  console.log(`📂 Categorías creadas: ${createdCategories.length}`);
+  console.log(`🏷️ Marcas creadas: ${createdBrands.length}`);
+  console.log(`📍 Ubicaciones de inventario: ${createdLocations.length}`);
+  console.log(`📦 Productos creados: ${createdProducts.length}`);
+  console.log(`🎨 Variantes de productos: ${createdVariants.length}`);
+  console.log(`🏷️ Lotes de inventario: ${createdBatches.length}`);
+  console.log(`🔢 Números de serie: ${serialNumbers.length}`);
+  console.log(
+    `📋 Transacciones de inventario: ${inventoryTransactions.length}`,
+  );
   console.log('');
   console.log('🔑 CREDENCIALES DE PRUEBA:');
   console.log('Super Admin: superadmin@vendix.com / 1125634q');

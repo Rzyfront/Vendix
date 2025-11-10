@@ -16,10 +16,20 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '../../common/utils/slug.util';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { LocationsService } from '../inventory/locations/locations.service';
+import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
 export class ProductsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryIntegrationService,
+    private readonly inventoryLocationsService: LocationsService,
+    private readonly stockLevelManager: StockLevelManager,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -67,8 +77,13 @@ export class ProductsService {
         }
       }
 
-      const { category_ids, tax_category_ids, image_urls, ...productData } =
-        createProductDto;
+      const {
+        category_ids,
+        tax_category_ids,
+        image_urls,
+        stock_quantity,
+        ...productData
+      } = createProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
         // Crear producto
@@ -76,6 +91,7 @@ export class ProductsService {
           data: {
             ...productData,
             slug: slug,
+            stock_quantity: 0, // Se inicializará via stock_levels
             updated_at: new Date(),
           },
         });
@@ -110,6 +126,32 @@ export class ProductsService {
             })),
           });
         }
+
+        // Inicializar stock levels si se proporciona stock_quantity
+        if (stock_quantity && stock_quantity > 0) {
+          // Obtener ubicación default para el store
+          const defaultLocation =
+            await this.inventoryLocationsService.getDefaultLocation(
+              product.store_id,
+            );
+
+          await this.stockLevelManager.updateStock({
+            productId: product.id,
+            locationId: defaultLocation.id,
+            quantityChange: stock_quantity,
+            movementType: 'initial',
+            reason: 'Initial stock on product creation',
+            userId: 1, // Use default user ID as fallback
+            createMovement: true,
+            validateAvailability: false,
+          });
+        }
+
+        // Inicializar stock levels para todas las ubicaciones de la organización
+        await this.stockLevelManager.initializeStockLevelsForProduct(
+          product.id,
+          store.organization_id,
+        );
 
         return product;
       });
@@ -350,8 +392,13 @@ export class ProductsService {
         }
       }
 
-      const { category_ids, tax_category_ids, image_urls, ...productData } =
-        updateProductDto;
+      const {
+        category_ids,
+        tax_category_ids,
+        image_urls,
+        stock_quantity,
+        ...productData
+      } = updateProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
         // Actualizar producto
@@ -412,6 +459,30 @@ export class ProductsService {
           }
         }
 
+        // Si cambió el stock, actualizar stock levels
+        if (stock_quantity !== undefined) {
+          const stockDifference =
+            stock_quantity - existingProduct.stock_quantity;
+
+          if (stockDifference !== 0) {
+            const defaultLocation =
+              await this.inventoryLocationsService.getDefaultLocation(
+                product.store_id,
+              );
+
+            await this.stockLevelManager.updateStock({
+              productId: id,
+              locationId: defaultLocation.id,
+              quantityChange: stockDifference,
+              movementType: 'adjustment',
+              reason: 'Stock quantity updated from product edit',
+              userId: 1, // Use default user ID as fallback
+              createMovement: true,
+              validateAvailability: false,
+            });
+          }
+        }
+
         return product;
       });
 
@@ -457,6 +528,21 @@ export class ProductsService {
       // Verificar que el producto existe
       await this.findOne(id);
 
+      // Verificar si tiene stock en alguna ubicación
+      const stockLevels = await this.prisma.stock_levels.findMany({
+        where: { product_id: id },
+      });
+
+      const hasStock = stockLevels.some(
+        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
+      );
+
+      if (hasStock) {
+        throw new BadRequestException(
+          'No se puede eliminar el producto porque tiene stock existente. Elimine el stock primero.',
+        );
+      }
+
       // Verificar si tiene órdenes relacionadas
       const relatedOrders = await this.prisma.order_items.count({
         where: { product_id: id },
@@ -468,8 +554,16 @@ export class ProductsService {
         );
       }
 
-      return await this.prisma.products.delete({
-        where: { id },
+      return await this.prisma.$transaction(async (prisma) => {
+        // Eliminar stock levels
+        await prisma.stock_levels.deleteMany({
+          where: { product_id: id },
+        });
+
+        // Eliminar producto
+        return await prisma.products.delete({
+          where: { id },
+        });
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -531,15 +625,44 @@ export class ProductsService {
         throw new ConflictException('El SKU de la variante ya está en uso');
       }
 
-      return await this.prisma.product_variants.create({
-        data: {
-          ...createVariantDto,
-          updated_at: new Date(),
-        },
-        include: {
-          products: true,
-          product_images: true,
-        },
+      return await this.prisma.$transaction(async (prisma) => {
+        // Crear variante
+        const variant = await prisma.product_variants.create({
+          data: {
+            product_id: createVariantDto.product_id || product.id,
+            sku: createVariantDto.sku,
+            price_override:
+              createVariantDto.price_override || createVariantDto.price,
+            stock_quantity: 0, // Se inicializará via stock_levels
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        // Inicializar stock levels para la variante si se proporciona stock
+        if (
+          createVariantDto.stock_quantity &&
+          createVariantDto.stock_quantity > 0
+        ) {
+          const defaultLocation =
+            await this.inventoryLocationsService.getDefaultLocation(
+              product.store_id,
+            );
+
+          await this.stockLevelManager.updateStock({
+            productId: createVariantDto.product_id || product.id,
+            variantId: variant.id,
+            locationId: defaultLocation.id,
+            quantityChange: createVariantDto.stock_quantity || 0,
+            movementType: 'initial',
+            reason: 'Initial stock on variant creation',
+            userId: 1, // Use default user ID as fallback
+            createMovement: true,
+            validateAvailability: false,
+          });
+        }
+
+        return variant;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -558,6 +681,14 @@ export class ProductsService {
     try {
       const existingVariant = await this.prisma.product_variants.findUnique({
         where: { id: variantId },
+        include: {
+          products: {
+            select: {
+              id: true,
+              store_id: true,
+            },
+          },
+        },
       });
 
       if (!existingVariant) {
@@ -577,16 +708,44 @@ export class ProductsService {
         }
       }
 
-      return await this.prisma.product_variants.update({
-        where: { id: variantId },
-        data: {
-          ...updateVariantDto,
-          updated_at: new Date(),
-        },
-        include: {
-          products: true,
-          product_images: true,
-        },
+      const { stock_quantity, ...variantData } = updateVariantDto;
+
+      return await this.prisma.$transaction(async (prisma) => {
+        // Actualizar variante
+        const variant = await prisma.product_variants.update({
+          where: { id: variantId },
+          data: {
+            ...variantData,
+            updated_at: new Date(),
+          },
+        });
+
+        // Si cambió el stock, actualizar stock levels
+        if (stock_quantity !== undefined) {
+          const stockDifference =
+            stock_quantity - existingVariant.stock_quantity;
+
+          if (stockDifference !== 0) {
+            const defaultLocation =
+              await this.inventoryLocationsService.getDefaultLocation(
+                existingVariant.products.store_id,
+              );
+
+            await this.stockLevelManager.updateStock({
+              productId: existingVariant.product_id,
+              variantId: variantId,
+              locationId: defaultLocation.id,
+              quantityChange: stockDifference,
+              movementType: 'adjustment',
+              reason: 'Stock quantity updated from variant edit',
+              userId: 1, // Use default user ID as fallback
+              createMovement: true,
+              validateAvailability: false,
+            });
+          }
+        }
+
+        return variant;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -607,8 +766,37 @@ export class ProductsService {
       throw new NotFoundException('Variante no encontrada');
     }
 
-    return await this.prisma.product_variants.delete({
-      where: { id: variantId },
+    return await this.prisma.$transaction(async (prisma) => {
+      // Verificar que no haya stock en ninguna ubicación
+      const stockLevels = await prisma.stock_levels.findMany({
+        where: {
+          product_id: existingVariant.product_id,
+          product_variant_id: variantId,
+        },
+      });
+
+      const hasStock = stockLevels.some(
+        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
+      );
+
+      if (hasStock) {
+        throw new BadRequestException(
+          'Cannot delete variant with existing stock',
+        );
+      }
+
+      // Eliminar stock levels
+      await prisma.stock_levels.deleteMany({
+        where: {
+          product_id: existingVariant.product_id,
+          product_variant_id: variantId,
+        },
+      });
+
+      // Eliminar variante
+      return await prisma.product_variants.delete({
+        where: { id: variantId },
+      });
     });
   }
 
