@@ -1,0 +1,16 @@
+meta {
+  name: "Deactivate Product"
+  type: http
+  seq: 7
+}
+
+patch {
+  url: http://{{url}}/products/{{productId}}/deactivate
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,46 @@
+meta {
+  name: "Create Product with Categories and Brand"
+  type: http
+  seq: 15
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "categoria_id": 1,
+    "brand_id": 1,
+    "name": "MacBook Pro 14\"",
+    "slug": "macbook-pro-14-inch",
+    "description": "Professional laptop with M3 Pro chip",
+    "base_price": 1999.99,
+    "sku": "MACBOOKPRO14-M3-512GB",
+    "stock_quantity": 15,
+    "state": "active",
+    "tax_category_ids": [1, 2],
+    "product_category_ids": [1, 3, 5],
+    "images": [
+      {
+        "image_url": "https://example.com/macbook-pro-14-1.jpg",
+        "is_main": true
+      }
+    ],
+    "specifications": {
+      "screen": "14.2-inch Liquid Retina XDR",
+      "processor": "Apple M3 Pro",
+      "memory": "18GB Unified Memory",
+      "storage": "512GB SSD",
+      "graphics": "18-core GPU"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

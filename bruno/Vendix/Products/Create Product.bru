@@ -1,0 +1,42 @@
+meta {
+  name: "Create Product"
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "categoria_id": 1,
+    "brand_id": 1,
+    "name": "iPhone 15 Pro",
+    "slug": "iphone-15-pro",
+    "description": "Latest iPhone with advanced features",
+    "base_price": 999.99,
+    "sku": "IPHONE15PRO001",
+    "stock_quantity": 50,
+    "state": "active",
+    "tax_category_ids": [1],
+    "images": [
+      {
+        "image_url": "https://example.com/iphone15pro-1.jpg",
+        "is_main": true
+      },
+      {
+        "image_url": "https://example.com/iphone15pro-2.jpg",
+        "is_main": false
+      }
+    ]
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

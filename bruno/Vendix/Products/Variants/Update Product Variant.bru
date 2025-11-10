@@ -1,0 +1,29 @@
+meta {
+  name: "Update Product Variant"
+  type: http
+  seq: 10
+}
+
+patch {
+  url: http://{{url}}/products/variants/{{variantId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "iPhone 15 Pro - Deep Blue 256GB",
+    "base_price": 1149.99,
+    "stock_quantity": 30,
+    "attributes": {
+      "color": "Deep Blue Titanium",
+      "storage": "256GB",
+      "material": "Titanium"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

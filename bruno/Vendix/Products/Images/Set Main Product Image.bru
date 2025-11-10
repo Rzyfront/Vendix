@@ -1,0 +1,25 @@
+meta {
+  name: "Set Main Product Image"
+  type: http
+  seq: 13
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/images
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "image_url": "https://example.com/iphone15pro-main-hero.jpg",
+    "is_main": true,
+    "alt_text": "iPhone 15 Pro - Main product image",
+    "sort_order": 1
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

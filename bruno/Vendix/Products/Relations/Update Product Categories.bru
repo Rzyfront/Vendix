@@ -1,0 +1,23 @@
+meta {
+  name: "Update Product Categories"
+  type: http
+  seq: 16
+}
+
+patch {
+  url: http://{{url}}/products/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "tax_category_ids": [1, 2, 3],
+    "product_category_ids": [1, 2, 4, 6]
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
