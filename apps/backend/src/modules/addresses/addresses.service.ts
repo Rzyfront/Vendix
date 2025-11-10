@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccessValidationService } from '../../common/services/access-validation.service';
 import {
   CreateAddressDto,
   UpdateAddressDto,
@@ -15,7 +16,10 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AddressesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private accessValidation: AccessValidationService,
+  ) {}
 
   async create(createAddressDto: CreateAddressDto, user: any) {
     // Validar que solo se proporcione un tipo de entidad
@@ -33,14 +37,20 @@ export class AddressesService {
 
     // Validar permisos según el tipo de entidad
     if (createAddressDto.store_id) {
-      await this.validateStoreAccess(createAddressDto.store_id, user);
+      await this.accessValidation.validateStoreAccess(
+        createAddressDto.store_id,
+        user,
+      );
     } else if (createAddressDto.organization_id) {
-      await this.validateOrganizationAccess(
+      await this.accessValidation.validateOrganizationAccess(
         createAddressDto.organization_id,
         user,
       );
     } else if (createAddressDto.user_id) {
-      await this.validateUserAccess(createAddressDto.user_id, user);
+      await this.accessValidation.validateUserAccess(
+        createAddressDto.user_id,
+        user,
+      );
     }
 
     if (createAddressDto.is_primary) {
@@ -127,7 +137,7 @@ export class AddressesService {
 
     if (store_id) {
       where.store_id = store_id;
-      await this.validateStoreAccess(store_id, user);
+      await this.accessValidation.validateStoreAccess(store_id, user);
     }
     if (type) where.type = type as any;
     if (is_primary !== undefined) where.is_primary = is_primary;
@@ -171,18 +181,21 @@ export class AddressesService {
 
     // Validar permisos según el tipo de entidad
     if (address.store_id) {
-      await this.validateStoreAccess(address.store_id, user);
+      await this.accessValidation.validateStoreAccess(address.store_id, user);
     } else if (address.organization_id) {
-      await this.validateOrganizationAccess(address.organization_id, user);
+      await this.accessValidation.validateOrganizationAccess(
+        address.organization_id,
+        user,
+      );
     } else if (address.user_id) {
-      await this.validateUserAccess(address.user_id, user);
+      await this.accessValidation.validateUserAccess(address.user_id, user);
     }
 
     return address;
   }
 
   async findByStore(storeId: number, user: any) {
-    await this.validateStoreAccess(storeId, user);
+    await this.accessValidation.validateStoreAccess(storeId, user);
 
     return await this.prisma.addresses.findMany({
       where: { store_id: storeId },
@@ -277,47 +290,6 @@ export class AddressesService {
         }
       }
       throw error;
-    }
-  }
-
-  private async validateStoreAccess(storeId: number, user: any) {
-    const store = await this.prisma.stores.findUnique({
-      where: { id: storeId },
-    });
-    if (!store) {
-      throw new NotFoundException('Store not found');
-    }
-    // Verificar que el usuario pertenezca a la misma organización de la tienda
-    if (
-      store.organization_id !== user.organizationId &&
-      user.role !== 'super_admin'
-    ) {
-      throw new ForbiddenException('Access denied to this store');
-    }
-  }
-
-  private async validateOrganizationAccess(organizationId: number, user: any) {
-    const organization = await this.prisma.organizations.findUnique({
-      where: { id: organizationId },
-    });
-    if (!organization) {
-      throw new NotFoundException('Organization not found');
-    }
-    // Verificar que el usuario pertenezca a la organización o sea super_admin
-    const userRoles = user.roles || [];
-    const userOrganizationId = user.organizationId || user.organization_id;
-    if (
-      userOrganizationId !== organizationId &&
-      !userRoles.includes('super_admin')
-    ) {
-      throw new ForbiddenException('Access denied to this organization');
-    }
-  }
-
-  private async validateUserAccess(userId: number, currentUser: any) {
-    // Un usuario solo puede acceder a sus propias direcciones, o un super_admin puede acceder a cualquier usuario
-    if (currentUser.id !== userId && currentUser.role !== 'super_admin') {
-      throw new ForbiddenException('Access denied to this user');
     }
   }
 
