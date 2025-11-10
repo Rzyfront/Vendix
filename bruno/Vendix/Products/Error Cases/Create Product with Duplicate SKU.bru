@@ -1,0 +1,31 @@
+meta {
+  name: "Create Product with Duplicate SKU"
+  type: http
+  seq: 17
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "category_id": 1,
+    "brand_id": 1,
+    "name": "iPhone 15 Pro Copy",
+    "slug": "iphone-15-pro-copy",
+    "description": "This should fail due to duplicate SKU",
+    "base_price": 899.99,
+    "sku": "IPHONE15PRO001",
+    "stock_quantity": 10,
+    "state": "active"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

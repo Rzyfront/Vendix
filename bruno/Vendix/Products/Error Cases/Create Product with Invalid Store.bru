@@ -1,0 +1,31 @@
+meta {
+  name: "Create Product with Invalid Store"
+  type: http
+  seq: 18
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 999999,
+    "category_id": 1,
+    "brand_id": 1,
+    "name": "Invalid Store Product",
+    "slug": "invalid-store-product",
+    "description": "This should fail due to invalid store",
+    "base_price": 99.99,
+    "sku": "INVALIDSTORE001",
+    "stock_quantity": 5,
+    "state": "active"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,27 @@
+meta {
+  name: "Create Simple Product (Basic Test)"
+  type: http
+  seq: 21
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "Test Product",
+    "description": "Simple test product for validation",
+    "base_price": 99.99,
+    "sku": "TEST001",
+    "stock_quantity": 10
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

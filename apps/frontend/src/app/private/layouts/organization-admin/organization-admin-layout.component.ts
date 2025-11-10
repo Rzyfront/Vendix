@@ -16,7 +16,13 @@ import { takeUntil } from 'rxjs/operators';
 @Component({
   selector: 'app-organization-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent, OnboardingModalComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    OnboardingModalComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -31,10 +37,10 @@ import { takeUntil } from 'rxjs/operators';
 
       <!-- Main Content -->
       <div
-        class="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        class="flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
       >
-        <!-- Header -->
+        <!-- Header (Fixed) -->
         <app-header
           [breadcrumb]="breadcrumb"
           [user]="user"
@@ -42,12 +48,12 @@ import { takeUntil } from 'rxjs/operators';
         >
         </app-header>
 
-        <!-- Page Content -->
+        <!-- Page Content (Scrollable) -->
         <main
-          class="flex-1 overflow-y-auto px-4 py-2 transition-all duration-300 ease-in-out"
+          class="flex-1 overflow-y-auto overflow-x-hidden px-4 py-2 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
-          <div class="w-full h-full">
+          <div class="w-full">
             <router-outlet></router-outlet>
           </div>
         </main>
@@ -105,7 +111,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       });
   }
 
-  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -152,23 +157,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Users',
       icon: 'fas fa-users',
-      children: [
-        {
-          label: 'All Users',
-          icon: 'fas fa-circle',
-          route: '/organization/users/all',
-        },
-        {
-          label: 'Roles',
-          icon: 'fas fa-circle',
-          route: '/organization/users/roles',
-        },
-        {
-          label: 'Permissions',
-          icon: 'fas fa-circle',
-          route: '/organization/users/permissions',
-        },
-      ],
+      route: '/organization/users/all',
     },
     {
       label: 'Products',

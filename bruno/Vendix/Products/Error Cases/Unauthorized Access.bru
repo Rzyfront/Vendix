@@ -1,0 +1,31 @@
+meta {
+  name: "Unauthorized Access"
+  type: http
+  seq: 20
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "category_id": 1,
+    "brand_id": 1,
+    "name": "Unauthorized Product",
+    "slug": "unauthorized-product",
+    "description": "This should fail due to missing authentication",
+    "base_price": 99.99,
+    "sku": "UNAUTHORIZED001",
+    "stock_quantity": 5,
+    "state": "active"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

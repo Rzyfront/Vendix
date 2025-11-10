@@ -555,6 +555,11 @@ export class OnboardingWizardService {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: {
+        user_settings: {
+          select: {
+            config: true,
+          },
+        },
         organizations: {
           include: {
             addresses: true,
@@ -573,16 +578,37 @@ export class OnboardingWizardService {
       missingSteps.push('email_verification');
     }
 
-    if (!user?.organizations?.name) {
-      missingSteps.push('organization_setup');
+    // Get app type from user settings to match determineCurrentStep logic
+    const userConfig = user?.user_settings?.config || {};
+    const selectedAppType = userConfig.selected_app_type;
+
+    if (!selectedAppType) {
+      missingSteps.push('app_type_selection');
     }
 
-    if (!user?.organizations?.stores?.length) {
-      missingSteps.push('store_setup');
-    }
-
-    if (!user?.organizations?.domain_settings?.length) {
-      missingSteps.push('app_configuration');
+    // Use same logic as determineCurrentStep for consistency
+    if (selectedAppType === 'STORE_ADMIN') {
+      // Store flow - organization is auto-generated
+      if (!user?.organizations?.stores?.length) {
+        missingSteps.push('store_setup');
+      }
+      if (!user?.organizations?.name) {
+        missingSteps.push('organization_setup');
+      }
+      if (!user?.organizations?.domain_settings?.length) {
+        missingSteps.push('app_configuration');
+      }
+    } else if (selectedAppType === 'ORG_ADMIN') {
+      // Organization flow
+      if (!user?.organizations?.name) {
+        missingSteps.push('organization_setup');
+      }
+      if (!user?.organizations?.stores?.length) {
+        missingSteps.push('store_setup');
+      }
+      if (!user?.organizations?.domain_settings?.length) {
+        missingSteps.push('app_configuration');
+      }
     }
 
     return {

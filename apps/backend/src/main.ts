@@ -30,17 +30,28 @@ async function bootstrap() {
       'https://vendix.online',
       'https://www.vendix.online',
       'https://api.vendix.online',
+      // Production origins for vendix.com
+      'https://vendix.com',
+      'https://www.vendix.com',
+      'https://api.vendix.com',
       // CloudFront distributions
       'https://d10fsx06e3z6rc.cloudfront.net',
       'https://d1y0m1duatgngc.cloudfront.net',
-      // Allow any subdomain for multi-tenant
+      // Allow any subdomain for multi-tenant (both domains)
       /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.online$/,
+      /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.com$/,
       // Allow any CloudFront distribution
       /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Origin',
+      'X-Requested-With',
+    ],
     exposedHeaders: ['Authorization'],
   });
 
