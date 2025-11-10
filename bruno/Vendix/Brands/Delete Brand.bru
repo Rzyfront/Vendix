@@ -1,0 +1,21 @@
+meta {
+  name: Delete Brand
+  type: http
+  seq: 9
+}
+
+delete {
+  url: http://{{url}}/brands/{{created_brand_id}}
+  auth: inherit
+}
+
+tests {
+  test("Delete brand successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+  });
+  
+  test("Success message is correct", function() {
+    expect(res.body.message).to.include('eliminada exitosamente');
+  });
+}

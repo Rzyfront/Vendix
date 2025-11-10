@@ -143,51 +143,6 @@ export class BrandsService {
     return brand;
   }
 
-  async findBySlug(
-    slug: string,
-    storeId: number,
-    options?: { includeInactive?: boolean },
-  ) {
-    // Since brands don't have slugs in the schema, we'll treat slug as name for now
-    const brand = await this.prisma.brands.findFirst({
-      where: {
-        name: { contains: slug, mode: 'insensitive' },
-        products: {
-          some: {
-            store_id: storeId,
-          },
-        },
-      },
-      include: {
-        _count: {
-          select: { products: true },
-        },
-      },
-    });
-
-    if (!brand) {
-      throw new NotFoundException('Brand not found');
-    }
-
-    return brand;
-  }
-
-  async activate(id: number, user: any) {
-    const brand = await this.findOne(id);
-
-    // Since brands don't have a status field in the schema, we'll just return the brand
-    // In a real implementation, you might want to add a status field to the schema
-    return brand;
-  }
-
-  async deactivate(id: number, user: any) {
-    const brand = await this.findOne(id);
-
-    // Since brands don't have a status field in the schema, we'll just return the brand
-    // In a real implementation, you might want to add a status field to the schema
-    return brand;
-  }
-
   async update(id: number, updateBrandDto: UpdateBrandDto, user: any) {
     const brand = await this.findOne(id);
 

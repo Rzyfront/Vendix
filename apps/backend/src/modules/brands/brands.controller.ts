@@ -120,29 +120,6 @@ export class BrandsController {
     }
   }
 
-  @Get('slug/:slug/store/:storeId')
-  @Permissions('brands:read')
-  async findBySlug(
-    @Param('slug') slug: string,
-    @Param('storeId', ParseIntPipe) storeId: number,
-    @Query('include_inactive') includeInactive?: string,
-  ) {
-    try {
-      const brand = await this.brandsService.findBySlug(slug, storeId, {
-        includeInactive: includeInactive === 'true',
-      });
-      return this.responseService.success(
-        brand,
-        'Marca obtenida exitosamente por slug',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener marca por slug',
-        error.message,
-      );
-    }
-  }
-
   @Patch(':id')
   @Permissions('brands:update')
   async update(
@@ -163,40 +140,6 @@ export class BrandsController {
     } catch (error) {
       return this.responseService.error(
         'Error al actualizar marca',
-        error.message,
-      );
-    }
-  }
-
-  @Patch(':id/activate')
-  @Permissions('brands:update')
-  async activate(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    try {
-      const brand = await this.brandsService.activate(id, req.user);
-      return this.responseService.updated(brand, 'Marca activada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al activar marca',
-        error.message,
-      );
-    }
-  }
-
-  @Patch(':id/deactivate')
-  @Permissions('brands:delete')
-  async deactivate(
-    @Param('id', ParseIntPipe) id: number,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    try {
-      await this.brandsService.deactivate(id, req.user);
-      return this.responseService.deleted('Marca desactivada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al desactivar marca',
         error.message,
       );
     }

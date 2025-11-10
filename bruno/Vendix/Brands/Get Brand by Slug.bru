@@ -1,0 +1,25 @@
+meta {
+  name: Get Brand by Slug
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/brands/slug/nike/store/1
+  auth: inherit
+}
+
+tests {
+  test("Get brand by slug successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('slug', 'nike');
+    expect(res.body.data).to.have.property('store_id', 1);
+  });
+}

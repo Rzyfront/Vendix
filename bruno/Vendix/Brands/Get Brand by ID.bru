@@ -1,0 +1,27 @@
+meta {
+  name: Get Brand by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/brands/{{created_brand_id}}
+  auth: inherit
+}
+
+tests {
+  test("Get brand by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('logo_url');
+    expect(res.body.data).to.have.property('created_at');
+    expect(res.body.data).to.have.property('updated_at');
+  });
+}
