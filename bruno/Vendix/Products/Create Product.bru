@@ -13,7 +13,7 @@ post {
 body:json {
   {
     "store_id": 1,
-    "categoria_id": 1,
+    "category_id": 1,
     "brand_id": 1,
     "name": "iPhone 15 Pro",
     "slug": "iphone-15-pro",
@@ -22,16 +22,11 @@ body:json {
     "sku": "IPHONE15PRO001",
     "stock_quantity": 50,
     "state": "active",
+    "category_ids": [1, 2],
     "tax_category_ids": [1],
-    "images": [
-      {
-        "image_url": "https://example.com/iphone15pro-1.jpg",
-        "is_main": true
-      },
-      {
-        "image_url": "https://example.com/iphone15pro-2.jpg",
-        "is_main": false
-      }
+    "image_urls": [
+      "https://example.com/iphone15pro-1.jpg",
+      "https://example.com/iphone15pro-2.jpg"
     ]
   }
 }

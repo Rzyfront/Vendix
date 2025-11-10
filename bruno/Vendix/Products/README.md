@@ -51,7 +51,7 @@ Make sure to configure these variables in your Bruno environment:
 ```json
 {
   "store_id": 1,
-  "categoria_id": 1,
+  "category_id": 1,
   "brand_id": 1,
   "name": "Product Name",
   "slug": "product-slug",
@@ -60,13 +60,11 @@ Make sure to configure these variables in your Bruno environment:
   "sku": "UNIQUE_SKU_001",
   "stock_quantity": 50,
   "state": "active",
+  "category_ids": [1, 2],
   "tax_category_ids": [1],
-  "product_category_ids": [1, 2],
-  "images": [
-    {
-      "image_url": "https://example.com/image.jpg",
-      "is_main": true
-    }
+  "image_urls": [
+    "https://example.com/image.jpg",
+    "https://example.com/image-2.jpg"
   ]
 }
 ```
@@ -76,15 +74,17 @@ Make sure to configure these variables in your Bruno environment:
 {
   "product_id": 1,
   "sku": "VARIANT_SKU_001",
-  "name": "Product Variant Name",
-  "base_price": 109.99,
+  "price_override": 109.99,
   "stock_quantity": 25,
-  "weight": 0.5,
-  "attributes": {
-    "color": "Blue",
-    "size": "Large",
-    "material": "Cotton"
-  }
+  "image_id": 1
+}
+```
+
+### Product Image Structure
+```json
+{
+  "image_url": "https://example.com/product-image.jpg",
+  "is_main": false
 }
 ```
 
