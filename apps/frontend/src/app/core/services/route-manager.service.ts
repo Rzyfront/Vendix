@@ -122,8 +122,8 @@ export class RouteManagerService implements OnDestroy {
         path: '',
         loadComponent: () =>
           import(
-            '../../public/auth/components/contextual-login/contextual-login.component'
-          ).then((c) => c.ContextualLoginComponent),
+            '../../public/landing/vendix-landing/vendix-landing.component'
+          ).then((c) => c.VendixLandingComponent),
         pathMatch: 'full',
       },
       { path: '**', redirectTo: '' },

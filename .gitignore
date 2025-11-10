@@ -18,3 +18,5 @@ certs/
 Thumbs.db
 # Documentation
 docs/
+.claude/
+docs

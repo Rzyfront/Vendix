@@ -1,4 +1,9 @@
-import { IsOptional, IsString, IsPhoneNumber, MaxLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsPhoneNumber,
+  MaxLength,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SetupUserWizardDto {

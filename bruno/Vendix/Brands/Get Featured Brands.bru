@@ -1,0 +1,27 @@
+meta {
+  name: Get Featured Brands
+  type: http
+  seq: 12
+}
+
+get {
+  url: http://{{url}}/brands?is_featured=true&page=1&limit=10
+  auth: inherit
+}
+
+tests {
+  test("Get featured brands successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
+  });
+  
+  test("All brands are featured", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(brand => {
+        expect(brand.is_featured).to.equal(true);
+      });
+    }
+  });
+}

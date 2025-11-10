@@ -1,0 +1,25 @@
+meta {
+  name: "Update Product Variant"
+  type: http
+  seq: 10
+}
+
+patch {
+  url: http://{{url}}/products/variants/{{variantId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPHONE15PRO-DEEP-BLUE-256GB",
+    "price_override": 1149.99,
+    "stock_quantity": 30,
+    "image_id": 2
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

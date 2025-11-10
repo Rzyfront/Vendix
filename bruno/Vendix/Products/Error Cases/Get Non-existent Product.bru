@@ -1,0 +1,16 @@
+meta {
+  name: "Get Non-existent Product"
+  type: http
+  seq: 19
+}
+
+get {
+  url: http://{{url}}/products/999999
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

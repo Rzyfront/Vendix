@@ -1,0 +1,49 @@
+meta {
+  name: Create Category
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/categories
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Electrónica",
+    "description": "Dispositivos electrónicos y accesorios",
+    "store_id": 14
+  }
+}
+
+vars:post-response {
+  created_category_id: res.body.data.id
+}
+
+tests {
+  test("Create category successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('Electrónica');
+    expect(res.body.data.description).to.equal('Dispositivos electrónicos y accesorios');
+  });
+  
+  test("Category has required structure", function() {
+    expect(res.body.data).to.have.property('name');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('created_at');
+    expect(res.body.data).to.have.property('updated_at');
+  });
+  
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

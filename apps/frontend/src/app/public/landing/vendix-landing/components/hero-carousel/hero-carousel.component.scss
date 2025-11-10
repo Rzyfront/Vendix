@@ -1,0 +1,312 @@
+.hero-carousel-container {
+  position: relative;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  margin-top: 0;
+  padding-top: 64px;
+  box-sizing: border-box;
+  background: var(--color-background);
+}
+
+.hero-slide {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.5s ease-in-out;
+
+  &.active {
+    opacity: 1;
+  }
+}
+
+.slide-image-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.slide-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.slide-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to top,
+    rgba(15, 23, 42, 0.9) 0%,
+    rgba(15, 23, 42, 0.7) 30%,
+    rgba(15, 23, 42, 0.5) 60%,
+    rgba(15, 23, 42, 0.3) 100%
+  );
+  z-index: 2;
+}
+
+.slide-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  color: white;
+  padding-top: 0;
+  box-sizing: border-box;
+}
+
+.slide-message {
+  font-size: 3.5rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+  color: white;
+  letter-spacing: -0.02em;
+}
+
+.slide-subtitle {
+  font-size: 1.25rem;
+  line-height: 1.6;
+  max-width: 680px;
+  margin: 0 auto 2rem auto;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 400;
+}
+
+.slide-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.slide-btn-primary {
+  display: inline-block;
+  padding: 1rem 2.5rem;
+  background: var(--color-primary);
+  color: white;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  font-size: 1.1rem;
+  transition: all 0.3s ease;
+  box-shadow: var(--shadow-lg);
+  border: none;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--color-secondary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-xl);
+  }
+}
+
+.slide-btn-secondary {
+  display: inline-block;
+  padding: 1rem 2.5rem;
+  background: transparent;
+  color: white;
+  text-decoration: none;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: var(--radius-lg);
+  font-weight: 600;
+  font-size: 1.1rem;
+  transition: all 0.3s ease;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: white;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+// Animations
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-down {
+  animation: fadeInDown 1s ease-out both;
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 1s ease-out 0.2s both;
+}
+
+.animate-fade-in-up-delay {
+  animation: fadeInUp 1s ease-out 0.4s both;
+}
+
+// Navigation arrows
+.carousel-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--color-text-primary);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 10;
+  box-shadow: var(--shadow-md);
+
+  &:hover {
+    background: white;
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: var(--shadow-lg);
+  }
+
+  &.carousel-prev {
+    left: 24px;
+  }
+
+  &.carousel-next {
+    right: 24px;
+  }
+}
+
+// Pagination
+.carousel-pagination {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  z-index: 10;
+}
+
+.pagination-bullet {
+  background: rgba(255, 255, 255, 0.4);
+  border: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all 0.3s ease;
+
+  &.active {
+    background: var(--color-primary);
+    width: 28px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.7);
+  }
+}
+
+// Mobile responsiveness
+@media (max-width: 768px) {
+  .slide-message {
+    font-size: 2.2rem;
+    margin-bottom: 1rem;
+  }
+
+  .slide-subtitle {
+    font-size: 1.1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .slide-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .slide-btn-primary,
+  .slide-btn-secondary {
+    padding: 0.875rem 2rem;
+    font-size: 1rem;
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .carousel-nav {
+    width: 40px;
+    height: 40px;
+
+    &.carousel-prev {
+      left: 10px;
+    }
+
+    &.carousel-next {
+      right: 10px;
+    }
+  }
+
+  .carousel-pagination {
+    bottom: 20px;
+  }
+
+  .pagination-bullet {
+    width: 10px;
+    height: 10px;
+
+    &.active {
+      width: 24px;
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .slide-message {
+    font-size: 1.8rem;
+  }
+
+  .slide-subtitle {
+    font-size: 1rem;
+  }
+}
+
+// Touch device optimizations
+@media (hover: none) {
+  .slide-btn-primary:hover,
+  .slide-btn-secondary:hover {
+    transform: none;
+  }
+}

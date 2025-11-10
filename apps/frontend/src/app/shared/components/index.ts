@@ -1,6 +1,7 @@
 // Components
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
+export { ChartComponent } from './chart';
 export { InputComponent } from './input/input.component';
 export { SpinnerComponent } from './spinner/spinner.component';
 export { ModalComponent } from './modal/modal.component';
@@ -21,7 +22,7 @@ export {
   OrganizationSetupStepComponent,
   StoreSetupStepComponent,
   AppConfigStepComponent,
-  CompletionStepComponent
+  CompletionStepComponent,
 } from './onboarding-modal';
 
 // Types
@@ -46,3 +47,4 @@ export type {
   SelectorSize,
   SelectorVariant,
 } from './selector/selector.component';
+export type { ChartData } from './chart';

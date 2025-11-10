@@ -122,7 +122,7 @@ export class OnboardingWizardService {
         where: { user_id: userId },
         data: {
           config: {
-            ...user.user_settings.config as any,
+            ...(user.user_settings.config as any),
             ...config,
           },
           updated_at: new Date(),
@@ -289,7 +289,10 @@ export class OnboardingWizardService {
     }
 
     // Generate unique slug from name
-    const slug = await this.generateUniqueStoreSlug(setupStoreDto.name, user.organization_id);
+    const slug = await this.generateUniqueStoreSlug(
+      setupStoreDto.name,
+      user.organization_id,
+    );
 
     // Create store
     const store = await this.prismaService.stores.create({
@@ -355,10 +358,10 @@ export class OnboardingWizardService {
     // Generate subdomain if not provided
     const subdomain =
       setupAppConfigDto.subdomain ||
-      await this.generateUniqueSubdomain(
+      (await this.generateUniqueSubdomain(
         user.organizations?.slug || 'org',
         setupAppConfigDto.app_type,
-      );
+      ));
 
     // Generate color palette
     const palette = this.generateColorPalette(
@@ -498,7 +501,7 @@ export class OnboardingWizardService {
    */
   private determineCurrentStep(user: any): number {
     // Use the actual status fields instead of relying only on user_settings
-    const userConfig = user.user_settings?.config as any || {};
+    const userConfig = (user.user_settings?.config as any) || {};
     const selectedAppType = userConfig.selected_app_type;
 
     // New 7-step flow - Use actual status
@@ -528,13 +531,13 @@ export class OnboardingWizardService {
       if (!user.has_store) return 4; // Store setup
       if (!user.has_organization) return 5; // Auto-generated organization
       if (!user.has_app_config) return 6; // App config
-      if (!user.onboarding_completed) return 7; // Completion
+      if (!user.organizations?.onboarding) return 7; // Completion
     } else if (appType === 'ORG_ADMIN') {
       // Organization first flow
       if (!user.has_organization) return 4; // Organization setup
       if (!user.has_store) return 5; // Store setup (preloaded)
       if (!user.has_app_config) return 6; // App config
-      if (!user.onboarding_completed) return 7; // Completion
+      if (!user.organizations?.onboarding) return 7; // Completion
     }
 
     // All steps completed
@@ -552,6 +555,11 @@ export class OnboardingWizardService {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: {
+        user_settings: {
+          select: {
+            config: true,
+          },
+        },
         organizations: {
           include: {
             addresses: true,
@@ -570,16 +578,37 @@ export class OnboardingWizardService {
       missingSteps.push('email_verification');
     }
 
-    if (!user?.organizations?.name) {
-      missingSteps.push('organization_setup');
+    // Get app type from user settings to match determineCurrentStep logic
+    const userConfig = user?.user_settings?.config || {};
+    const selectedAppType = userConfig.selected_app_type;
+
+    if (!selectedAppType) {
+      missingSteps.push('app_type_selection');
     }
 
-    if (!user?.organizations?.stores?.length) {
-      missingSteps.push('store_setup');
-    }
-
-    if (!user?.organizations?.domain_settings?.length) {
-      missingSteps.push('app_configuration');
+    // Use same logic as determineCurrentStep for consistency
+    if (selectedAppType === 'STORE_ADMIN') {
+      // Store flow - organization is auto-generated
+      if (!user?.organizations?.stores?.length) {
+        missingSteps.push('store_setup');
+      }
+      if (!user?.organizations?.name) {
+        missingSteps.push('organization_setup');
+      }
+      if (!user?.organizations?.domain_settings?.length) {
+        missingSteps.push('app_configuration');
+      }
+    } else if (selectedAppType === 'ORG_ADMIN') {
+      // Organization flow
+      if (!user?.organizations?.name) {
+        missingSteps.push('organization_setup');
+      }
+      if (!user?.organizations?.stores?.length) {
+        missingSteps.push('store_setup');
+      }
+      if (!user?.organizations?.domain_settings?.length) {
+        missingSteps.push('app_configuration');
+      }
     }
 
     return {
@@ -647,7 +676,7 @@ export class OnboardingWizardService {
   private async generateUniqueSubdomain(
     orgSlug: string,
     appType?: string,
-    customSuffix?: string
+    customSuffix?: string,
   ): Promise<string> {
     const baseName = orgSlug
       .toLowerCase()
@@ -688,7 +717,10 @@ export class OnboardingWizardService {
   /**
    * Generate a unique slug for stores within an organization
    */
-  private async generateUniqueStoreSlug(storeName: string, organizationId: number): Promise<string> {
+  private async generateUniqueStoreSlug(
+    storeName: string,
+    organizationId: number,
+  ): Promise<string> {
     const baseName = this.generateSlug(storeName);
     const maxAttempts = 10;
 
@@ -708,7 +740,7 @@ export class OnboardingWizardService {
       const existing = await this.prismaService.stores.findFirst({
         where: {
           organization_id: organizationId,
-          slug: slug
+          slug: slug,
         },
       });
 

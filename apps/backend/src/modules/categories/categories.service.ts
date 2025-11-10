@@ -3,9 +3,9 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccessValidationService } from '../../common/services/access-validation.service';
 import {
   CreateCategoryDto,
   UpdateCategoryDto,
@@ -16,19 +16,35 @@ import slugify from 'slugify';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private accessValidation: AccessValidationService,
+  ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
-    await this.validateStoreAccess(createCategoryDto.store_id, user);
+    if (!createCategoryDto.store_id) {
+      throw new BadRequestException('store_id is required');
+    }
+
+    await this.accessValidation.validateStoreAccess(
+      createCategoryDto.store_id,
+      user,
+    );
     const slug = slugify(createCategoryDto.name, { lower: true, strict: true });
     await this.validateUniqueSlug(slug, createCategoryDto.store_id);
 
+    // Solo usar los campos que existen en el schema de Prisma
+    const categoryData: any = {
+      name: createCategoryDto.name,
+      slug: slug,
+      description: createCategoryDto.description,
+      store_id: createCategoryDto.store_id,
+      image_url: createCategoryDto.image_url,
+      state: 'active', // Usar 'state' en lugar de 'status'
+    };
+
     return this.prisma.categories.create({
-      data: {
-        ...createCategoryDto,
-        slug,
-        state: 'active',
-      },
+      data: categoryData,
       include: { stores: true },
     });
   }
@@ -41,12 +57,14 @@ export class CategoriesService {
       store_id,
       sort_by = 'name',
       sort_order = 'asc',
-      include_inactive = false,
+      state,
     } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
 
-    if (!include_inactive) where.state = 'active';
+    if (state) where.state = state;
+    else where.state = 'active'; // Default to active categories
+
     if (search)
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
@@ -86,16 +104,29 @@ export class CategoriesService {
   async update(id: number, updateCategoryDto: UpdateCategoryDto, user: any) {
     const category = await this.findOne(id);
     if (category.store_id)
-      await this.validateStoreAccess(category.store_id, user);
+      await this.accessValidation.validateStoreAccess(category.store_id, user);
 
-    const updateData: any = { ...updateCategoryDto };
-    if (updateCategoryDto.name && category.store_id) {
-      const slug = slugify(updateCategoryDto.name, {
-        lower: true,
-        strict: true,
-      });
-      await this.validateUniqueSlug(slug, category.store_id, id);
-      updateData.slug = slug;
+    // Solo usar los campos que existen en el schema de Prisma
+    const updateData: any = {};
+    if (updateCategoryDto.name) {
+      updateData.name = updateCategoryDto.name;
+      if (category.store_id) {
+        const slug = slugify(updateCategoryDto.name, {
+          lower: true,
+          strict: true,
+        });
+        await this.validateUniqueSlug(slug, category.store_id, id);
+        updateData.slug = slug;
+      }
+    }
+    if (updateCategoryDto.description !== undefined) {
+      updateData.description = updateCategoryDto.description;
+    }
+    if (updateCategoryDto.image_url !== undefined) {
+      updateData.image_url = updateCategoryDto.image_url;
+    }
+    if (updateCategoryDto.store_id !== undefined) {
+      updateData.store_id = updateCategoryDto.store_id;
     }
 
     return this.prisma.categories.update({
@@ -108,7 +139,7 @@ export class CategoriesService {
   async remove(id: number, user: any) {
     const category = await this.findOne(id, { includeInactive: true });
     if (category.store_id)
-      await this.validateStoreAccess(category.store_id, user);
+      await this.accessValidation.validateStoreAccess(category.store_id, user);
 
     const productCount = await this.prisma.product_categories.count({
       where: { category_id: id },
@@ -119,19 +150,6 @@ export class CategoriesService {
       );
 
     await this.prisma.categories.delete({ where: { id } });
-  }
-
-  private async validateStoreAccess(storeId: number, user: any) {
-    const store = await this.prisma.stores.findUnique({
-      where: { id: storeId },
-    });
-    if (!store) throw new NotFoundException('Store not found');
-    if (
-      store.organization_id !== user.organizationId &&
-      user.role !== 'super_admin'
-    ) {
-      throw new ForbiddenException('Access denied to this store');
-    }
   }
 
   private async validateUniqueSlug(

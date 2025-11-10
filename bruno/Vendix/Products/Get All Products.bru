@@ -1,0 +1,16 @@
+meta {
+  name: "Get All Products"
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/products?page=1&limit=10&search=iPhone&store_id=1&sort_by=name&sort_order=asc
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

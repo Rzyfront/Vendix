@@ -38,7 +38,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Get wizard status',
-    description: 'Returns the current state of the onboarding wizard for the user',
+    description:
+      'Returns the current state of the onboarding wizard for the user',
   })
   @ApiResponse({
     status: 200,
@@ -92,7 +93,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Select application type',
-    description: 'Select the type of application for the user (STORE_ADMIN or ORG_ADMIN)',
+    description:
+      'Select the type of application for the user (STORE_ADMIN or ORG_ADMIN)',
   })
   @ApiResponse({
     status: 200,
@@ -124,7 +126,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Setup user profile and address',
-    description: 'Updates user personal information and optionally their address',
+    description:
+      'Updates user personal information and optionally their address',
   })
   @ApiResponse({
     status: 200,
@@ -188,7 +191,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Setup first store',
-    description: 'Creates the first store for the organization with its address',
+    description:
+      'Creates the first store for the organization with its address',
   })
   @ApiResponse({
     status: 200,
@@ -252,7 +256,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Complete wizard',
-    description: 'Marks the onboarding wizard as completed and activates all entities',
+    description:
+      'Marks the onboarding wizard as completed and activates all entities',
   })
   @ApiResponse({
     status: 200,

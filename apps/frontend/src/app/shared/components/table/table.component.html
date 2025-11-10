@@ -62,21 +62,17 @@
             </ng-container>
             
             <!-- Custom template if provided (only when not a badge) -->
-            <ng-container
-              *ngIf="!column.badge && column.template"
-              [ngTemplateOutlet]="column.template"
-              [ngTemplateOutletContext]="{ $implicit: item, column: column }"
-            ></ng-container>
+            <div *ngIf="!column.badge && column.template" [ngTemplateOutlet]="column.template" [ngTemplateOutletContext]="{ $implicit: item, column: column }"></div>
             
             <!-- Default content (only when not a badge and no custom template) -->
             <ng-container *ngIf="!column.badge && !column.template">
               <span class="cell-content">
-                <ng-container *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''; else noDataTemplate">
+                <ng-container *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''">
                   {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item, column.key) }}
                 </ng-container>
-                <ng-template #noDataTemplate>
-                  <span class="cell-content-empty">{{ column.defaultValue || 'Data not found' }}</span>
-                </ng-template>
+                <span *ngIf="getNestedValue(item, column.key) === null || getNestedValue(item, column.key) === undefined || getNestedValue(item, column.key) === ''" class="cell-content-empty">
+                  {{ column.defaultValue || 'Data not found' }}
+                </span>
               </span>
             </ng-container>
           </td>
@@ -84,14 +80,10 @@
           <!-- Actions cell -->
           <td *ngIf="actions || actionsTemplate" class="actions-cell">
             <!-- Custom actions template -->
-            <ng-container
-              *ngIf="actionsTemplate; else defaultActions"
-              [ngTemplateOutlet]="actionsTemplate"
-              [ngTemplateOutletContext]="{ $implicit: item }"
-            ></ng-container>
+            <div *ngIf="actionsTemplate" [ngTemplateOutlet]="actionsTemplate" [ngTemplateOutletContext]="{ $implicit: item }"></div>
             
             <!-- Default actions -->
-            <ng-template #defaultActions>
+            <div *ngIf="!actionsTemplate">
               <div class="table-actions">
                 <ng-container *ngFor="let action of actions">
                   <button
@@ -113,7 +105,7 @@
                   </button>
                 </ng-container>
               </div>
-            </ng-template>
+            </div>
           </td>
         </tr>
       </ng-container>

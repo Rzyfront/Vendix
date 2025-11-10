@@ -1,0 +1,16 @@
+meta {
+  name: "Remove Product Image"
+  type: http
+  seq: 14
+}
+
+delete {
+  url: http://{{url}}/products/images/{{imageId}}
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

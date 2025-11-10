@@ -1,0 +1,40 @@
+meta {
+  name: Search Categories
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/categories/search?q=Electrónica
+  auth: inherit
+}
+
+tests {
+  test("Search categories successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+  });
+  
+  test("Search results contain query term", function() {
+    if (res.body.data.length > 0) {
+      const hasMatch = res.body.data.some(category => 
+        category.name.toLowerCase().includes('electrónica'.toLowerCase()) ||
+        category.description.toLowerCase().includes('electrónica'.toLowerCase())
+      );
+      expect(hasMatch).to.be.true;
+    }
+  });
+  
+  test("Categories have required structure", function() {
+    if (res.body.data.length > 0) {
+      const category = res.body.data[0];
+      expect(category).to.have.property('id');
+      expect(category).to.have.property('name');
+      expect(category).to.have.property('description');
+      expect(category).to.have.property('created_at');
+      expect(category).to.have.property('updated_at');
+    }
+  });
+}

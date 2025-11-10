@@ -1,0 +1,38 @@
+meta {
+  name: Create Brand
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/brands
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Nike",
+    "description": "Marca deportiva internacional",
+    "logo_url": "https://logo.com/nike.png"
+  }
+}
+
+vars:post-response {
+  created_brand_id: res.body.data.id
+}
+
+tests {
+  test("Create brand successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+  
+  test("Response data is correct", function() {
+    expect(res.body.data.name).to.equal('Nike');
+    expect(res.body.data.description).to.equal('Marca deportiva internacional');
+    expect(res.body.data.logo_url).to.equal('https://logo.com/nike.png');
+  });
+}

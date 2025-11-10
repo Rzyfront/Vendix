@@ -4,6 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AccessValidationService } from '../../common/services/access-validation.service';
 import {
   CreateTaxCategoryDto,
   UpdateTaxCategoryDto,
@@ -12,11 +13,17 @@ import {
 
 @Injectable()
 export class TaxesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private accessValidation: AccessValidationService,
+  ) {}
 
   async create(createTaxCategoryDto: CreateTaxCategoryDto, user: any) {
     if (createTaxCategoryDto.store_id) {
-      await this.validateStoreAccess(createTaxCategoryDto.store_id, user);
+      await this.accessValidation.validateStoreAccess(
+        createTaxCategoryDto.store_id,
+        user,
+      );
     }
 
     return this.prisma.tax_categories.create({
@@ -54,7 +61,10 @@ export class TaxesService {
     });
     if (!taxCategory) throw new NotFoundException('Tax category not found');
     if (taxCategory.store_id)
-      await this.validateStoreAccess(taxCategory.store_id, user);
+      await this.accessValidation.validateStoreAccess(
+        taxCategory.store_id,
+        user,
+      );
     return taxCategory;
   }
 
@@ -73,18 +83,5 @@ export class TaxesService {
   async remove(id: number, user: any) {
     await this.findOne(id, user);
     return this.prisma.tax_categories.delete({ where: { id } });
-  }
-
-  private async validateStoreAccess(storeId: number, user: any) {
-    const store = await this.prisma.stores.findUnique({
-      where: { id: storeId },
-    });
-    if (!store) throw new NotFoundException('Store not found');
-    if (
-      store.organization_id !== user.organizationId &&
-      user.role !== 'super_admin'
-    ) {
-      throw new ForbiddenException('Access denied to this store');
-    }
   }
 }

@@ -1,0 +1,22 @@
+meta {
+  name: Activate Brand
+  type: http
+  seq: 7
+}
+
+patch {
+  url: http://{{url}}/brands/{{created_brand_id}}/activate
+  auth: inherit
+}
+
+tests {
+  test("Activate brand successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+  
+  test("Brand is activated", function() {
+    expect(res.body.data.status).to.equal('active');
+  });
+}

@@ -1,0 +1,43 @@
+meta {
+  name: Get Brands by Store
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/brands/store/1?page=1&limit=10&sort_order=asc
+  body: none
+  auth: inherit
+}
+
+params:query {
+  page: 1
+  limit: 10
+  sort_order: asc
+}
+
+tests {
+  test("Get brands by store successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
+  });
+  
+  test("Response structure is correct", function() {
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.meta).to.have.property('total');
+    expect(res.body.meta).to.have.property('page');
+    expect(res.body.meta).to.have.property('limit');
+  });
+  
+  test("All brands have products in the specified store", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(brand => {
+        expect(brand).to.have.property('_count');
+        expect(brand._count).to.have.property('products');
+        expect(brand._count.products).to.be.at.least(1);
+      });
+    }
+  });
+}

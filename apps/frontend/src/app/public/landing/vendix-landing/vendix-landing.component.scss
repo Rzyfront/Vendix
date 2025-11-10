@@ -1,7 +1,100 @@
-.vendrix-landing {
+.vendix-landing {
   font-family: var(--font-primary);
   line-height: 1.6;
   color: var(--color-text-primary);
+  overflow-x: hidden;
+}
+
+// Enhanced animations and transitions
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-20px); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(var(--color-primary-rgb), 0.3); }
+  50% { box-shadow: 0 0 40px rgba(var(--color-primary-rgb), 0.6); }
+}
+
+// Glass morphism effects
+.glass-effect {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+// Enhanced button styles
+.btn-enhanced {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+  }
+  
+  &:hover::before {
+    width: 300px;
+    height: 300px;
+  }
+}
+
+// Gradient text effect
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+// Card hover effects
+.card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  &:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  }
+}
+
+// Smooth scroll behavior
+html {
+  scroll-behavior: smooth;
+}
+
+// Enhanced section spacing
+section {
+  position: relative;
+  
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--color-border), transparent);
+    opacity: 0.3;
+  }
+}
+
+// Floating elements animation
+.floating {
+  animation: float 6s ease-in-out infinite;
+}
+
+// Pulse glow for highlighted elements
+.pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
 }
 
 .container {

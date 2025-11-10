@@ -26,28 +26,28 @@ export class AppController {
   async runSeed() {
     try {
       console.log('🌱 Ejecutando seeds...');
-      
+
       // Ejecutar el seed script compilado
       const { stdout, stderr } = await execPromise('node prisma/seed.js', {
         cwd: '/app/dist',
-        env: { ...process.env }
+        env: { ...process.env },
       });
-      
+
       console.log('Seed output:', stdout);
       if (stderr) console.error('Seed errors:', stderr);
-      
+
       return {
         success: true,
         message: 'Seeds ejecutados exitosamente',
         output: stdout,
-        errors: stderr || null
+        errors: stderr || null,
       };
     } catch (error) {
       console.error('Error ejecutando seeds:', error);
       return {
         success: false,
         message: 'Error ejecutando seeds',
-        error: error.message
+        error: error.message,
       };
     }
   }
