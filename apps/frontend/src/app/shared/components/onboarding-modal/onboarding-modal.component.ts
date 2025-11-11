@@ -28,6 +28,7 @@ import { AppConfigStepComponent } from './steps/app-config-step.component';
 import { CompletionStepComponent } from './steps/completion-step.component';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { ToastService } from '../toast/toast.service';
 import { Subject, takeUntil } from 'rxjs';
 
 interface WizardStep {
@@ -394,6 +395,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     private wizardService: OnboardingWizardService,
     private authFacade: AuthFacade,
     private cdr: ChangeDetectorRef,
+    private toastService: ToastService,
   ) {
     this.initializeForms();
   }
@@ -418,6 +420,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           console.log('App type selected successfully:', response);
+          this.toastService.success('Tipo de negocio seleccionado correctamente');
 
           // Update local state
           this.steps =
@@ -432,9 +435,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error selecting app type:', error);
+          this.toastService.error(
+            error?.error?.message || 'Error al seleccionar tipo de negocio',
+            'Error'
+          );
           this.isProcessing = false;
           this.cdr.markForCheck(); // Trigger change detection
-          // Handle error appropriately - maybe show a toast
         },
       });
   }
@@ -709,6 +715,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
+      this.toastService.warning('Por favor completa los campos requeridos');
       this.isProcessing = false;
       this.cdr.markForCheck();
       return;
@@ -724,6 +731,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isProcessing = false;
         if (response.success) {
           this.wizardData.user = userData;
+          this.toastService.success('Perfil actualizado correctamente');
           // The service already calls nextStep() automatically
         }
         this.cdr.markForCheck();
@@ -732,8 +740,11 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up user:', error);
+        this.toastService.error(
+          error?.error?.message || 'Error al configurar tu perfil',
+          'Error'
+        );
         this.cdr.markForCheck();
-        // Handle error - show toast message
       },
     });
   }
@@ -743,6 +754,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });
+      this.toastService.warning('Por favor completa los campos requeridos de la tienda');
       this.isProcessing = false;
       this.cdr.markForCheck();
       return;
@@ -758,6 +770,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isProcessing = false;
         if (response.success) {
           this.wizardData.store = storeData;
+          this.toastService.success('Tienda configurada correctamente');
           // The service already calls nextStep() automatically
         }
         this.cdr.markForCheck();
@@ -766,6 +779,10 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up store:', error);
+        this.toastService.error(
+          error?.error?.message || 'Error al configurar la tienda',
+          'Error'
+        );
         this.cdr.markForCheck();
       },
     });
@@ -776,6 +793,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.organizationForm.controls).forEach((key) => {
         this.organizationForm.get(key)?.markAsTouched();
       });
+      this.toastService.warning('Por favor completa los campos requeridos de la organización');
       this.isProcessing = false;
       this.cdr.markForCheck();
       return;
@@ -791,6 +809,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isProcessing = false;
         if (response.success) {
           this.wizardData.organization = organizationData;
+          this.toastService.success('Organización creada correctamente');
           // The service already calls nextStep() automatically
         }
         this.cdr.markForCheck();
@@ -799,6 +818,10 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up organization:', error);
+        this.toastService.error(
+          error?.error?.message || 'Error al configurar la organización',
+          'Error'
+        );
         this.cdr.markForCheck();
       },
     });
@@ -809,6 +832,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.appConfigForm.controls).forEach((key) => {
         this.appConfigForm.get(key)?.markAsTouched();
       });
+      this.toastService.warning('Por favor completa la configuración de la aplicación');
       this.isProcessing = false;
       this.cdr.markForCheck();
       return;
@@ -824,6 +848,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isProcessing = false;
         if (response.success) {
           this.wizardData.appConfig = appConfigData;
+          this.toastService.success('Configuración guardada correctamente');
           // The service already calls nextStep() automatically
         }
         this.cdr.markForCheck();
@@ -832,6 +857,10 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up app config:', error);
+        this.toastService.error(
+          error?.error?.message || 'Error al guardar la configuración',
+          'Error'
+        );
         this.cdr.markForCheck();
       },
     });
@@ -841,20 +870,46 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     
     this.wizardService.completeWizard().subscribe({
       next: (response) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         if (response.success) {
+          this.toastService.success('¡Configuración completada! Bienvenido a Vendix', 'Éxito');
           this.completed.emit();
           this.close();
+        } else {
+          this.toastService.error(
+            response.message || 'No se pudo completar la configuración',
+            'Error'
+          );
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error completing wizard:', error);
+        
+        // More detailed error message
+        const errorMsg = error?.error?.message || error?.message || 'Error al completar la configuración';
+        this.toastService.error(errorMsg, 'Error');
+        
+        // If it's a validation error, show which steps are missing
+        if (error?.error?.error && typeof error.error.error === 'string') {
+          const missingStepsMatch = error.error.error.match(/Missing steps: (.+)/);
+          if (missingStepsMatch) {
+            this.toastService.warning(
+              `Faltan algunos pasos: ${missingStepsMatch[1]}`,
+              'Atención',
+              5000
+            );
+          }
+        }
+        
+        this.cdr.markForCheck();
       },
     });
   }

@@ -600,35 +600,29 @@ export class OnboardingWizardService {
     const userConfig = (user?.user_settings?.config as any) || {};
     const selectedAppType = userConfig?.selected_app_type;
 
-    if (!selectedAppType) {
+    // If user has organization and store, they're good to go regardless of app_type
+    // This makes validation more flexible and prevents blocking on minor config issues
+    const hasBasicSetup = user?.organizations?.name && user?.organizations?.stores?.length > 0;
+
+    if (!selectedAppType && !hasBasicSetup) {
+      // Only require app_type if they don't have basic setup completed
       missingSteps.push('app_type_selection');
-      console.log('Missing app type selection. User settings config:', userConfig);
+      console.log('Missing app type selection and basic setup. User settings config:', userConfig);
     }
 
-    // Use same logic as determineCurrentStep for consistency
-    if (selectedAppType === 'STORE_ADMIN') {
-      // Store flow - organization is auto-generated
-      if (!user?.organizations?.stores?.length) {
-        missingSteps.push('store_setup');
-      }
-      if (!user?.organizations?.name) {
-        missingSteps.push('organization_setup');
-      }
-      if (!user?.organizations?.domain_settings?.length) {
-        missingSteps.push('app_configuration');
-      }
-    } else if (selectedAppType === 'ORG_ADMIN') {
-      // Organization flow
-      if (!user?.organizations?.name) {
-        missingSteps.push('organization_setup');
-      }
-      if (!user?.organizations?.stores?.length) {
-        missingSteps.push('store_setup');
-      }
-      if (!user?.organizations?.domain_settings?.length) {
-        missingSteps.push('app_configuration');
-      }
+    // Validate core requirements regardless of app type
+    if (!user?.organizations?.name) {
+      missingSteps.push('organization_setup');
     }
+    
+    if (!user?.organizations?.stores?.length) {
+      missingSteps.push('store_setup');
+    }
+
+    // Domain settings are optional - don't block completion on this
+    // if (!user?.organizations?.domain_settings?.length) {
+    //   missingSteps.push('app_configuration');
+    // }
 
     return {
       isValid: missingSteps.length === 0,
