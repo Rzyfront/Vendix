@@ -36,7 +36,19 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
         run: |
-          aws s3 sync apps/frontend/dist/vendix/ s3://vendix-online-frontend/ --delete
+          # Sync all compiled files to S3 with correct MIME types
+          aws s3 sync apps/frontend/dist/vendix/ s3://vendix-online-frontend/ --delete --exclude "*.js" --exclude "*.css" --exclude "*.map"
+
+          # Upload JavaScript files with correct MIME type
+          find apps/frontend/dist/vendix/browser -name "*.js" -exec aws s3 cp {} s3://vendix-online-frontend/browser/ --content-type "application/javascript" \;
+
+          # Upload CSS files with correct MIME type
+          find apps/frontend/dist/vendix/browser -name "*.css" -exec aws s3 cp {} s3://vendix-online-frontend/browser/ --content-type "text/css" \;
+
+          # Copy index.html to root level for static website hosting
+          aws s3 cp apps/frontend/dist/vendix/browser/index.html s3://vendix-online-frontend/index.html
+          # Copy 3rdpartylicenses.txt to root level
+          aws s3 cp apps/frontend/dist/vendix/3rdpartylicenses.txt s3://vendix-online-frontend/3rdpartylicenses.txt
 
       - name: Invalidate CloudFront
         env:
