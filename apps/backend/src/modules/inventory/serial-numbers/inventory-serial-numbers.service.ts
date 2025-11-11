@@ -9,8 +9,13 @@ import { UpdateInventorySerialNumberDto } from '../dto/create-inventory-serial-n
 // Using local enum definitions until Prisma client is regenerated
 enum InventoryTransactionType {
   STOCK_IN = 'stock_in',
+  STOCK_OUT = 'stock_out',
   SALE = 'sale',
   RETURN = 'return',
+  TRANSFER_IN = 'transfer_in',
+  TRANSFER_OUT = 'transfer_out',
+  ADJUSTMENT_IN = 'adjustment_in',
+  ADJUSTMENT_OUT = 'adjustment_out',
   ADJUSTMENT_DAMAGE = 'adjustment_damage',
   INITIAL = 'initial',
 }
@@ -164,7 +169,7 @@ export class InventorySerialNumbersService {
     serialNumber: string,
     organizationId: string,
   ) {
-    const serial = await this.prisma.inventorySerialNumber.findFirst({
+    const serial = await this.prisma.inventory_serial_numbers.findFirst({
       where: {
         serialNumber,
         organizationId,
@@ -272,7 +277,7 @@ export class InventorySerialNumbersService {
       ];
     }
 
-    return this.prisma.inventorySerialNumber.findMany({
+    return this.prisma.inventory_serial_numbers.findMany({
       where,
       include: {
         product: {
@@ -403,22 +408,14 @@ export class InventorySerialNumbersService {
 
       // Update stock levels if quantity changes
       if (quantity !== 0) {
-        await this.stockLevelManager.adjustStock(
-          serialNumber.productId,
-          serialNumber.productVariantId,
-          metadata?.locationId || serialNumber.locationId,
-          organizationId,
-          quantity,
-          {
-            transactionType,
-            referenceType: 'SERIAL_NUMBER',
-            referenceId: id,
-            notes: `Serial number status change: ${status}`,
-            batchId: serialNumber.batchId,
-            serialNumberId: id,
-          },
-          tx,
-        );
+        await this.stockLevelManager.updateStock({
+          productId: serialNumber.productId,
+          variantId: serialNumber.productVariantId,
+          locationId: metadata?.locationId || serialNumber.locationId,
+          quantityChange: quantity,
+          movementType: transactionType as any,
+          reason: `Serial number status change: ${status}`,
+        });
       }
 
       return updated;
@@ -510,39 +507,23 @@ export class InventorySerialNumbersService {
       });
 
       // Update stock levels
-      await this.stockLevelManager.adjustStock(
-        serialNumber.productId,
-        serialNumber.productVariantId,
-        serialNumber.locationId,
-        organizationId,
-        -1,
-        {
-          transactionType: InventoryTransactionType.STOCK_OUT,
-          referenceType: 'SERIAL_NUMBER',
-          referenceId: id,
-          notes: `Transfer out: ${serialNumber.serialNumber}`,
-          batchId: serialNumber.batchId,
-          serialNumberId: id,
-        },
-        tx,
-      );
+      await this.stockLevelManager.updateStock({
+        productId: serialNumber.productId,
+        variantId: serialNumber.productVariantId,
+        locationId: serialNumber.locationId,
+        quantityChange: -1,
+        movementType: InventoryTransactionType.STOCK_OUT,
+        reason: `Transfer out: ${serialNumber.serialNumber}`,
+      });
 
-      await this.stockLevelManager.adjustStock(
-        serialNumber.productId,
-        serialNumber.productVariantId,
-        targetLocationId,
-        organizationId,
-        1,
-        {
-          transactionType: InventoryTransactionType.TRANSFER_IN,
-          referenceType: 'SERIAL_NUMBER',
-          referenceId: id,
-          notes: `Transfer in: ${serialNumber.serialNumber}`,
-          batchId: serialNumber.batchId,
-          serialNumberId: id,
-        },
-        tx,
-      );
+      await this.stockLevelManager.updateStock({
+        productId: serialNumber.productId,
+        variantId: serialNumber.productVariantId,
+        locationId: Number(targetLocationId),
+        quantityChange: 1,
+        movementType: 'transfer',
+        reason: `Transfer in: ${serialNumber.serialNumber}`,
+      });
 
       return updated;
     });
@@ -628,7 +609,7 @@ export class InventorySerialNumbersService {
       where.locationId = additionalFilters.locationId;
     }
 
-    return this.prisma.inventorySerialNumber.findMany({
+    return this.prisma.inventory_serial_numbers.findMany({
       where,
       include: {
         product: {
@@ -674,7 +655,7 @@ export class InventorySerialNumbersService {
     locationId: string,
     organizationId: string,
   ) {
-    return this.prisma.inventorySerialNumber.findMany({
+    return this.prisma.inventory_serial_numbers.findMany({
       where: {
         productId,
         productVariantId,
@@ -731,21 +712,14 @@ export class InventorySerialNumbersService {
 
       // Adjust stock levels
       if (serialNumber.status === SerialNumberStatus.IN_STOCK) {
-        await this.stockLevelManager.adjustStock(
-          serialNumber.productId,
-          serialNumber.productVariantId,
-          serialNumber.locationId,
-          organizationId,
-          -1,
-          {
-            transactionType: InventoryTransactionType.ADJUSTMENT_DAMAGE,
-            referenceType: 'SERIAL_NUMBER',
-            referenceId: id,
-            notes: `Deleted serial number: ${serialNumber.serialNumber}`,
-            batchId: serialNumber.batchId,
-          },
-          tx,
-        );
+        await this.stockLevelManager.updateStock({
+          productId: serialNumber.productId,
+          variantId: serialNumber.productVariantId,
+          locationId: serialNumber.locationId,
+          quantityChange: 1,
+          movementType: 'transfer',
+          reason: `Transfer in: ${serialNumber.serialNumber}`,
+        });
       }
     });
 
