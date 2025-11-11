@@ -347,8 +347,12 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   @Input() userEmail: string = '';
   @Output() nextStep = new EventEmitter<void>();
   @Output() skipStep = new EventEmitter<void>();
+  @Output() previousStep = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
+  private pollingSubscription: any = null;
+  private maxPollingAttempts = 60; // Max 5 minutes (60 * 5s)
+  private currentPollingAttempt = 0;
 
   // State
   isEmailVerified = false;
@@ -370,15 +374,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadUserEmail();
     this.checkEmailVerification();
-
-    // Set up periodic check for email verification
-    interval(5000) // Check every 5 seconds
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        if (!this.isEmailVerified && this.verificationStatus !== 'error') {
-          this.checkEmailVerification();
-        }
-      });
+    this.startPolling();
 
     // Set up resend cooldown timer
     interval(1000) // Update cooldown every second
@@ -389,12 +385,46 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.stopPolling();
     this.destroy$.next();
     this.destroy$.complete();
   }
 
+  private startPolling(): void {
+    // Stop any existing polling
+    this.stopPolling();
+    
+    // Reset counter
+    this.currentPollingAttempt = 0;
+
+    // Poll every 5 seconds with a maximum limit
+    this.pollingSubscription = interval(5000)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.currentPollingAttempt++;
+        
+        // Stop polling if verified or max attempts reached
+        if (this.isEmailVerified || this.currentPollingAttempt >= this.maxPollingAttempts) {
+          this.stopPolling();
+          return;
+        }
+
+        // Check verification status
+        if (this.verificationStatus !== 'error') {
+          this.checkEmailVerificationSilently();
+        }
+      });
+  }
+
+  private stopPolling(): void {
+    if (this.pollingSubscription) {
+      this.pollingSubscription.unsubscribe();
+      this.pollingSubscription = null;
+    }
+  }
+
   private loadUserEmail(): void {
-    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe(user => {
+    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe((user: any) => {
       if (user?.email) {
         this.userEmail = user.email;
       }
@@ -404,17 +434,47 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   private checkEmailVerification(): void {
     this.isCheckingStatus = true;
     this.wizardService.checkEmailVerification().subscribe({
-      next: (response) => {
+      next: (response: any) => {
         this.isCheckingStatus = false;
         if (response.data?.verified) {
           this.isEmailVerified = true;
           this.verificationStatus = 'verified';
+          this.stopPolling(); // Stop polling once verified
+          // Auto-advance to next step
+          setTimeout(() => {
+            this.nextStep.emit();
+          }, 500);
         } else {
           this.verificationStatus = response.data?.state || 'pending';
         }
       },
-      error: (error) => {
+      error: (error: any) => {
         this.isCheckingStatus = false;
+        this.verificationStatus = 'error';
+        console.error('Error checking email verification:', error);
+      }
+    });
+  }
+
+  /**
+   * Silent check without showing loading state (used during polling)
+   */
+  private checkEmailVerificationSilently(): void {
+    this.wizardService.checkEmailVerification().subscribe({
+      next: (response: any) => {
+        if (response.data?.verified) {
+          this.isEmailVerified = true;
+          this.verificationStatus = 'verified';
+          this.stopPolling(); // Stop polling once verified
+          // Auto-advance to next step
+          setTimeout(() => {
+            this.nextStep.emit();
+          }, 500);
+        } else {
+          this.verificationStatus = response.data?.state || 'pending';
+        }
+      },
+      error: (error: any) => {
         this.verificationStatus = 'error';
         console.error('Error checking email verification:', error);
       }
@@ -438,14 +498,14 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
     this.lastResendTime = Date.now();
 
     this.wizardService.resendVerificationEmail().subscribe({
-      next: (response) => {
+      next: (response: any) => {
         this.isResendingEmail = false;
         if (response.success) {
           console.log('Verification email resent successfully');
           // Optionally show success message
         }
       },
-      error: (error) => {
+      error: (error: any) => {
         this.isResendingEmail = false;
         this.lastResendTime = null; // Reset cooldown on error
         console.error('Error resending verification email:', error);
@@ -455,8 +515,6 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   }
 
   checkVerification(): void {
-    if (this.isEmailVerified) {
-      this.nextStep.emit();
-    }
+    this.checkEmailVerification();
   }
 }
