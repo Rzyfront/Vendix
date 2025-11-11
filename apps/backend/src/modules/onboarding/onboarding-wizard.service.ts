@@ -74,6 +74,7 @@ export class OnboardingWizardService {
         user.organizations?.domain_settings &&
         user.organizations.domain_settings.length > 0,
       current_step: this.determineCurrentStep(user),
+      user_settings: user.user_settings, // Include user settings for app type
     };
   }
 
@@ -113,18 +114,21 @@ export class OnboardingWizardService {
     // Update or create user_settings with selected app type
     const config = {
       selected_app_type: selectAppTypeDto.app_type,
-      selection_notes: selectAppTypeDto.notes,
+      selection_notes: selectAppTypeDto.notes || '',
       selected_at: new Date().toISOString(),
     };
 
     if (user.user_settings) {
+      // Get existing config or empty object
+      const existingConfig = (user.user_settings.config as any) || {};
+      
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
           config: {
-            ...user.user_settings.config,
+            ...existingConfig,
             ...config,
-          },
+          } as any,
           updated_at: new Date(),
         },
       });
@@ -132,7 +136,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.create({
         data: {
           user_id: userId,
-          config,
+          config: config as any,
         },
       });
     }
@@ -497,51 +501,65 @@ export class OnboardingWizardService {
   // ===== HELPER METHODS =====
 
   /**
-   * Determine current wizard step
+   * Determine current wizard step (1-7)
+   * Returns steps that match the frontend flow:
+   * - STORE_ADMIN: 1-6 steps
+   * - ORG_ADMIN: 1-7 steps
    */
   private determineCurrentStep(user: any): number {
-    // Use the actual status fields instead of relying only on user_settings
-    const userConfig = user.user_settings?.config || {};
-    const selectedAppType = userConfig.selected_app_type;
+    const userConfig = (user.user_settings?.config as any) || {};
+    const selectedAppType = userConfig?.selected_app_type;
 
-    // New 7-step flow - Use actual status
-    if (!selectedAppType) return 1; // App type selection
+    // Step 1: App type selection
+    if (!selectedAppType) return 1;
 
-    if (!user.email_verified) return 2; // Email verification
+    // Step 2: Email verification
+    if (!user.email_verified) return 2;
 
-    // Check user data completeness (includes address)
-    if (!user.has_user_data) return 3; // User setup with address
+    // Step 3: User setup with address
+    const hasUserData = !!(user.first_name && user.last_name);
+    const hasUserAddress = user.addresses && user.addresses.length > 0;
+    if (!hasUserData || !hasUserAddress) return 3;
 
-    // If we have all the data but no app type selected, we need to determine app type
-    // based on existing data structure
-    let appType = selectedAppType;
+    // Conditional flow based on app type
+    if (selectedAppType === 'STORE_ADMIN') {
+      // Store first flow (6 steps total)
+      // Step 4: Store setup
+      const hasStore = user.organizations?.stores && user.organizations.stores.length > 0;
+      if (!hasStore) return 4;
 
-    // Try to infer app type from existing data if not explicitly set
-    if (!appType && user.has_organization && user.has_store) {
-      // If both organization and store exist, we can determine the flow
-      // Store-first vs Organization-first depends on the data structure
-      appType = 'STORE_ADMIN'; // Default assumption
+      // Step 5: App config
+      const hasAppConfig = user.organizations?.domain_settings && user.organizations.domain_settings.length > 0;
+      if (!hasAppConfig) return 5;
+
+      // Step 6: Completion
+      if (!user.organizations?.onboarding) return 6;
+      
+      // All completed
+      return 6;
+    } else if (selectedAppType === 'ORG_ADMIN') {
+      // Organization first flow (7 steps total)
+      // Step 4: Organization setup
+      const hasOrganization = !!user.organizations?.name;
+      if (!hasOrganization) return 4;
+
+      // Step 5: Store setup (preloaded)
+      const hasStore = user.organizations?.stores && user.organizations.stores.length > 0;
+      if (!hasStore) return 5;
+
+      // Step 6: App config
+      const hasAppConfig = user.organizations?.domain_settings && user.organizations.domain_settings.length > 0;
+      if (!hasAppConfig) return 6;
+
+      // Step 7: Completion
+      if (!user.organizations?.onboarding) return 7;
+      
+      // All completed
+      return 7;
     }
 
-    if (!appType) return 1; // Still can't determine app type, go to step 1
-
-    // Conditional flow based on app type - use actual status
-    if (appType === 'STORE_ADMIN') {
-      // Store first flow
-      if (!user.has_store) return 4; // Store setup
-      if (!user.has_organization) return 5; // Auto-generated organization
-      if (!user.has_app_config) return 6; // App config
-      if (!user.organizations?.onboarding) return 7; // Completion
-    } else if (appType === 'ORG_ADMIN') {
-      // Organization first flow
-      if (!user.has_organization) return 4; // Organization setup
-      if (!user.has_store) return 5; // Store setup (preloaded)
-      if (!user.has_app_config) return 6; // App config
-      if (!user.organizations?.onboarding) return 7; // Completion
-    }
-
-    // All steps completed
-    return 8; // Done
+    // Fallback to step 1 if app type is unknown
+    return 1;
   }
 
   /**
@@ -579,11 +597,12 @@ export class OnboardingWizardService {
     }
 
     // Get app type from user settings to match determineCurrentStep logic
-    const userConfig = user?.user_settings?.config || {};
-    const selectedAppType = userConfig.selected_app_type;
+    const userConfig = (user?.user_settings?.config as any) || {};
+    const selectedAppType = userConfig?.selected_app_type;
 
     if (!selectedAppType) {
       missingSteps.push('app_type_selection');
+      console.log('Missing app type selection. User settings config:', userConfig);
     }
 
     // Use same logic as determineCurrentStep for consistency

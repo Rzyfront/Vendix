@@ -9,10 +9,30 @@ async function cleanDatabase() {
     // Limpiar en orden para respetar las relaciones de clave foránea
     console.log('🗑️  Eliminando datos existentes...');
 
-    // Primero eliminar datos de tablas con dependencias
+    // 1. Eliminar transacciones e inventario (más dependientes)
+    await prisma.stock_transfer_items.deleteMany({});
+    await prisma.stock_transfers.deleteMany({});
+    await prisma.stock_reservations.deleteMany({});
+    await prisma.inventory_transactions.deleteMany({});
+    await prisma.inventory_serial_numbers.deleteMany({});
+    await prisma.inventory_batches.deleteMany({});
+    await prisma.stock_levels.deleteMany({});
+    
+    // 2. Eliminar variantes y productos
+    await prisma.product_variants.deleteMany({});
+    await prisma.products.deleteMany({});
+    
+    // 3. Eliminar categorías, marcas y ubicaciones
+    await prisma.categories.deleteMany({});
+    await prisma.brands.deleteMany({});
+    await prisma.inventory_locations.deleteMany({});
+    
+    // 4. Eliminar relaciones de usuarios
     await prisma.role_permissions.deleteMany({});
     await prisma.user_roles.deleteMany({});
     await prisma.store_users.deleteMany({});
+    
+    // 5. Eliminar configuraciones y dominios
     await prisma.domain_settings.deleteMany({});
     await prisma.addresses.deleteMany({});
     await prisma.store_settings.deleteMany({});
@@ -20,7 +40,7 @@ async function cleanDatabase() {
     await prisma.refresh_tokens.deleteMany({});
     await prisma.login_attempts.deleteMany({});
     
-    // Eliminar datos de tablas principales
+    // 6. Eliminar datos de tablas principales
     await prisma.users.deleteMany({});
     await prisma.stores.deleteMany({});
     await prisma.organizations.deleteMany({});
@@ -30,6 +50,18 @@ async function cleanDatabase() {
     console.log('✅ Base de datos limpiada exitosamente');
     console.log('');
     console.log('📋 Tablas limpiadas:');
+    console.log('  - stock_transfer_items');
+    console.log('  - stock_transfers');
+    console.log('  - stock_reservations');
+    console.log('  - inventory_transactions');
+    console.log('  - inventory_serial_numbers');
+    console.log('  - inventory_batches');
+    console.log('  - stock_levels');
+    console.log('  - product_variants');
+    console.log('  - products');
+    console.log('  - categories');
+    console.log('  - brands');
+    console.log('  - inventory_locations');
     console.log('  - role_permissions');
     console.log('  - user_roles');
     console.log('  - store_users');

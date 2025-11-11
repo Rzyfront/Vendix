@@ -6,6 +6,7 @@ import {
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -67,7 +68,7 @@ interface WizardStep {
       (closed)="onClosed()"
     >
       <!-- Progress Bar -->
-      <div class="mb-6">
+      <div class="mb-6" *ngIf="businessType">
         <div class="flex justify-between items-center mb-2">
           <span class="text-sm text-[var(--color-text-secondary)]"
             >Paso {{ currentStep }} de {{ steps.length }}</span
@@ -231,7 +232,7 @@ interface WizardStep {
             variant="primary"
             size="sm"
             (clicked)="nextStep()"
-            [disabled]="isSubmitting"
+            [disabled]="isSubmitting || isProcessing"
           >
             {{
               isSubmitting
@@ -267,6 +268,9 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   @Output() completed = new EventEmitter<void>();
 
   private destroy$ = new Subject<void>();
+  
+  // Prevent multiple simultaneous actions (public for template access)
+  isProcessing = false;
 
   currentStep = 1;
   isSubmitting = false;
@@ -389,6 +393,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private wizardService: OnboardingWizardService,
     private authFacade: AuthFacade,
+    private cdr: ChangeDetectorRef,
   ) {
     this.initializeForms();
   }
@@ -399,6 +404,9 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   onBusinessTypeSelected(event: { type: 'STORE' | 'ORGANIZATION' }): void {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
+
     this.businessType = event.type;
 
     // Call backend to save app type selection
@@ -416,19 +424,16 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
             event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
           this.updateAppConfigForm();
           this.updateFormBasedOnBusinessType();
-
-          // Refresh wizard status to get the correct next step from backend
-          this.wizardService.getWizardStatus().subscribe({
-            next: (statusResponse) => {
-              console.log('Wizard status refreshed:', statusResponse);
-            },
-            error: (error) => {
-              console.error('Error refreshing wizard status:', error);
-            },
-          });
+          
+          // Move to next step
+          this.wizardService.nextStep();
+          this.isProcessing = false;
+          this.cdr.markForCheck(); // Trigger change detection
         },
         error: (error) => {
           console.error('Error selecting app type:', error);
+          this.isProcessing = false;
+          this.cdr.markForCheck(); // Trigger change detection
           // Handle error appropriately - maybe show a toast
         },
       });
@@ -577,19 +582,21 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe((step) => {
         this.currentStep = step;
+        this.cdr.markForCheck(); // Trigger change detection
       });
 
-    // Load wizard status from backend to sync current step
+    // Load wizard status from backend to sync current step - only once on init
     this.wizardService.getWizardStatus().subscribe({
       next: (response) => {
         console.log('Wizard status loaded:', response);
         if (response.success && response.data) {
           // Set business type based on selected app type
-          if (response.data.selected_app_type) {
+          const userSettings = response.data.user_settings?.config;
+          const selectedAppType = userSettings?.selected_app_type;
+          
+          if (selectedAppType) {
             this.businessType =
-              response.data.selected_app_type === 'STORE_ADMIN'
-                ? 'STORE'
-                : 'ORGANIZATION';
+              selectedAppType === 'STORE_ADMIN' ? 'STORE' : 'ORGANIZATION';
             this.steps =
               this.businessType === 'STORE'
                 ? this.storeSteps
@@ -597,6 +604,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
             this.updateAppConfigForm();
             this.updateFormBasedOnBusinessType();
           }
+          
+          // Sync current step from backend
+          if (response.data.current_step) {
+            this.wizardService.goToStep(response.data.current_step);
+          }
+          this.cdr.markForCheck(); // Trigger change detection
         }
       },
       error: (error) => {
@@ -635,7 +648,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   nextStep(): void {
-    if (!this.canGoNext) return;
+    if (!this.canGoNext || this.isProcessing) return;
+    this.isProcessing = true;
 
     // Handle form submission based on current step
     switch (this.currentStep) {
@@ -659,6 +673,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       case 6: // App Configuration (Org flow) or Completion (Store flow)
         if (this.businessType === 'STORE') {
           // Store flow: step 6 is completion, no form submission needed
+          this.isProcessing = false;
           this.wizardService.nextStep();
         } else {
           this.submitAppConfig();
@@ -666,18 +681,19 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         break;
       default:
         // For steps without form submission, just move to next step
+        this.isProcessing = false;
         this.wizardService.nextStep();
     }
   }
 
   previousStep(): void {
-    if (this.canGoBack) {
+    if (this.canGoBack && !this.isProcessing) {
       this.wizardService.previousStep();
     }
   }
 
   skipStep(): void {
-    if (this.canSkip) {
+    if (this.canSkip && !this.isProcessing) {
       this.wizardService.nextStep();
     }
   }
@@ -693,38 +709,30 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
+      this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const userData = this.userForm.value;
 
     this.wizardService.setupUser(userData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         if (response.success) {
           this.wizardData.user = userData;
-          // Refresh wizard status to get the correct next step from backend
-          this.wizardService.getWizardStatus().subscribe({
-            next: (statusResponse) => {
-              console.log('Wizard status after user setup:', statusResponse);
-              // Automatically advance to next step after successful user setup
-              this.nextStep();
-            },
-            error: (error) => {
-              console.error(
-                'Error refreshing wizard status after user setup:',
-                error,
-              );
-              // Still try to advance even if status refresh fails
-              this.nextStep();
-            },
-          });
+          // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         console.error('Error setting up user:', error);
+        this.cdr.markForCheck();
         // Handle error - show toast message
       },
     });
@@ -735,34 +743,30 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });
+      this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const storeData = this.storeForm.value;
 
     this.wizardService.setupStore(storeData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         if (response.success) {
           this.wizardData.store = storeData;
-          // Refresh wizard status to get the correct next step from backend
-          this.wizardService.getWizardStatus().subscribe({
-            next: (statusResponse) => {
-              console.log('Wizard status after store setup:', statusResponse);
-            },
-            error: (error) => {
-              console.error(
-                'Error refreshing wizard status after store setup:',
-                error,
-              );
-            },
-          });
+          // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         console.error('Error setting up store:', error);
+        this.cdr.markForCheck();
       },
     });
   }
@@ -772,37 +776,30 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.organizationForm.controls).forEach((key) => {
         this.organizationForm.get(key)?.markAsTouched();
       });
+      this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const organizationData = this.organizationForm.value;
 
     this.wizardService.setupOrganization(organizationData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         if (response.success) {
           this.wizardData.organization = organizationData;
-          // Refresh wizard status to get the correct next step from backend
-          this.wizardService.getWizardStatus().subscribe({
-            next: (statusResponse) => {
-              console.log(
-                'Wizard status after organization setup:',
-                statusResponse,
-              );
-            },
-            error: (error) => {
-              console.error(
-                'Error refreshing wizard status after organization setup:',
-                error,
-              );
-            },
-          });
+          // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         console.error('Error setting up organization:', error);
+        this.cdr.markForCheck();
       },
     });
   }
@@ -812,43 +809,43 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       Object.keys(this.appConfigForm.controls).forEach((key) => {
         this.appConfigForm.get(key)?.markAsTouched();
       });
+      this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const appConfigData = this.appConfigForm.value;
 
     this.wizardService.setupAppConfig(appConfigData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         if (response.success) {
           this.wizardData.appConfig = appConfigData;
-          // Refresh wizard status to get the correct next step from backend
-          this.wizardService.getWizardStatus().subscribe({
-            next: (statusResponse) => {
-              console.log('Wizard status after app config:', statusResponse);
-            },
-            error: (error) => {
-              console.error(
-                'Error refreshing wizard status after app config:',
-                error,
-              );
-            },
-          });
+          // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         console.error('Error setting up app config:', error);
+        this.cdr.markForCheck();
       },
     });
   }
 
   completeWizard(): void {
+    if (this.isProcessing) return;
+    this.isProcessing = true;
     this.isSubmitting = true;
+    
     this.wizardService.completeWizard().subscribe({
       next: (response) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         if (response.success) {
           this.completed.emit();
           this.close();
@@ -856,14 +853,17 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         this.isSubmitting = false;
+        this.isProcessing = false;
         console.error('Error completing wizard:', error);
       },
     });
   }
 
   close(): void {
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
+    if (!this.isProcessing) {
+      this.isOpen = false;
+      this.isOpenChange.emit(false);
+    }
   }
 
   onClosed(): void {

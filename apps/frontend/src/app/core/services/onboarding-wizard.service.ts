@@ -114,10 +114,23 @@ export class OnboardingWizardService {
    * Get wizard status
    */
   getWizardStatus(): Observable<any> {
+    return this.http.get(`${this.apiUrl}/status`);
+  }
+
+  /**
+   * Sync wizard status from backend and update local state
+   */
+  syncWizardStatus(): Observable<any> {
     return this.http.get(`${this.apiUrl}/status`).pipe(
       tap((response: any) => {
         if (response.success && response.data) {
-          this.currentStepSubject.next(response.data.current_step);
+          // Only update step if it's different to avoid loops
+          const backendStep = response.data.current_step;
+          const currentStep = this.currentStepSubject.value;
+          
+          if (backendStep !== currentStep) {
+            this.currentStepSubject.next(backendStep);
+          }
         }
       }),
     );
@@ -166,6 +179,8 @@ export class OnboardingWizardService {
             ...currentData,
             user: data,
           });
+          // Auto-advance to next step
+          this.nextStep();
         }
       }),
     );
@@ -183,6 +198,8 @@ export class OnboardingWizardService {
             ...currentData,
             organization: data,
           });
+          // Auto-advance to next step
+          this.nextStep();
         }
       }),
     );
@@ -200,6 +217,8 @@ export class OnboardingWizardService {
             ...currentData,
             store: data,
           });
+          // Auto-advance to next step
+          this.nextStep();
         }
       }),
     );
@@ -217,6 +236,8 @@ export class OnboardingWizardService {
             ...currentData,
             appConfig: data,
           });
+          // Auto-advance to next step
+          this.nextStep();
         }
       }),
     );
