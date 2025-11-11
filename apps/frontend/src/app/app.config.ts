@@ -28,6 +28,17 @@ import * as ConfigActions from './core/store/config/config.actions';
 
 import { routes } from './app.routes';
 
+// Factory para el APP_INITIALIZER
+export function initializeApp(
+  store: Store,
+  routeManager: RouteManagerService,
+): () => Promise<boolean> {
+  return () => {
+    store.dispatch(ConfigActions.initializeApp());
+    return firstValueFrom(routeManager.routesConfigured$);
+  };
+}
+
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
@@ -63,6 +74,12 @@ export const appConfig: ApplicationConfig = {
     {
       provide: HTTP_INTERCEPTORS,
       useClass: AuthInterceptor,
+      multi: true,
+    },
+    {
+      provide: APP_INITIALIZER,
+      useFactory: initializeApp,
+      deps: [Store, RouteManagerService],
       multi: true,
     },
   ],
