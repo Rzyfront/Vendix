@@ -1346,8 +1346,24 @@ async function main() {
 
   const createdStores: any[] = [];
   for (const store of stores) {
-    // Mock store for now - requires organization setup
-    const createdStore = { id: 1, name: store.name };
+    const createdStore = await prisma.stores.upsert({
+      where: {
+        organization_id_slug: {
+          organization_id: store.organization_id,
+          slug: store.slug,
+        },
+      },
+      update: {},
+      create: {
+        name: store.name,
+        slug: store.slug,
+        organization_id: store.organization_id,
+        store_code: store.store_code,
+        store_type: store.store_type as any,
+        is_active: store.is_active,
+        timezone: store.timezone,
+      },
+    });
     createdStores.push(createdStore);
   }
 
@@ -1358,8 +1374,6 @@ async function main() {
   const techStore3: any = createdStores[4];
   const fashionStore1: any = createdStores[5];
   const fashionStore2: any = createdStores[6];
-
-  // ...existing code...
   const gourmetStore1: any = createdStores[7];
   const homeStore1: any = createdStores[8];
 
@@ -2316,8 +2330,10 @@ async function main() {
 
   const createdBrands: any[] = [];
   for (const brand of brands) {
-    const createdBrand = await prisma.brands.create({
-      data: {
+    const createdBrand = await prisma.brands.upsert({
+      where: { name: brand.name },
+      update: {},
+      create: {
         name: brand.name,
         description: brand.description,
       },
@@ -2383,7 +2399,7 @@ async function main() {
     const createdLocation = await prisma.inventory_locations.upsert({
       where: {
         organization_id_code: {
-          organization_id: 1,
+          organization_id: location.organization_id,
           code: location.code,
         },
       },
@@ -2393,7 +2409,7 @@ async function main() {
         code: location.code,
         type: location.type as any,
         store_id: location.store_id,
-        organization_id: 1,
+        organization_id: location.organization_id,
         is_active: location.is_active,
       },
     });
@@ -2969,9 +2985,8 @@ async function main() {
         batch_id: macbookBatch.id,
         product_id: macbookBatch.product_id,
         product_variant_id: null,
-        organization_id: techSolutionsOrg.id,
         location_id: techWarehouseBog?.id,
-        status: 'IN_STOCK',
+        status: 'in_stock',
         cost: 3500000,
       });
     }
@@ -2988,9 +3003,8 @@ async function main() {
         batch_id: iphoneBatch.id,
         product_id: iphoneBatch.product_id,
         product_variant_id: null,
-        organization_id: techSolutionsOrg.id,
         location_id: techWarehouseBog?.id,
-        status: 'IN_STOCK',
+        status: 'in_stock',
         cost: 4200000,
       });
     }
@@ -3022,7 +3036,7 @@ async function main() {
       product_variant_id: null,
       location_id: techWarehouseBog?.id,
       organization_id: techSolutionsOrg.id,
-      transaction_type: 'INITIAL_STOCK',
+      transaction_type: 'initial',
       quantity: 20,
       reference_type: 'BATCH',
       reference_id: createdBatches.find(
@@ -3039,7 +3053,7 @@ async function main() {
       product_variant_id: null,
       location_id: techWarehouseBog?.id,
       organization_id: techSolutionsOrg.id,
-      transaction_type: 'INITIAL_STOCK',
+      transaction_type: 'initial',
       quantity: 25,
       reference_type: 'BATCH',
       reference_id: createdBatches.find(
@@ -3056,7 +3070,7 @@ async function main() {
       product_variant_id: null,
       location_id: techWarehouseBog?.id,
       organization_id: techSolutionsOrg.id,
-      transaction_type: 'INITIAL_STOCK',
+      transaction_type: 'initial',
       quantity: 80,
       reference_type: 'BATCH',
       reference_id: createdBatches.find(
@@ -3073,7 +3087,7 @@ async function main() {
       product_variant_id: null,
       location_id: fashionWarehouse?.id,
       organization_id: fashionRetailOrg.id,
-      transaction_type: 'INITIAL_STOCK',
+      transaction_type: 'initial',
       quantity: 50,
       reference_type: 'BATCH',
       reference_id: createdBatches.find(
