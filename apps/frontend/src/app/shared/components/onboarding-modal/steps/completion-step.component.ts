@@ -232,11 +232,11 @@ import { ButtonComponent, IconComponent } from '../../index';
     }
 
     .next-steps {
-      background: #FAFBFC;
+      background: #F8FAFC;
       border: 1px solid #E5E7EB;
       border-radius: 1rem;
       padding: 1.5rem;
-      margin-bottom: 2rem;
+      margin-bottom: 2.5rem;
     }
 
     .next-steps-header {
@@ -250,7 +250,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     .next-steps-icon {
       width: 40px;
       height: 40px;
-      background: #FEF3C7;
+      background: #DBEAFE;
       border-radius: 0.5rem;
       display: flex;
       align-items: center;
@@ -258,7 +258,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     }
 
     .next-steps-icon-element {
-      color: #F59E0B;
+      color: #3B82F6;
     }
 
     .next-steps-title {
@@ -270,32 +270,33 @@ import { ButtonComponent, IconComponent } from '../../index';
 
     .next-steps-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       gap: 1rem;
     }
 
     .next-step-card {
       display: flex;
-      align-items: flex-start;
-      gap: 1rem;
-      padding: 1rem;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1.25rem;
       background: white;
       border-radius: 0.75rem;
       border: 1px solid #E5E7EB;
       transition: all 0.2s ease;
-      text-align: left;
+      text-align: center;
     }
 
     .next-step-card:hover {
-      border-color: #F59E0B;
-      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.15);
+      border-color: #3B82F6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
       transform: translateY(-2px);
     }
 
     .step-card-icon {
       width: 48px;
       height: 48px;
-      background: #FEF3C7;
+      background: #DBEAFE;
       border-radius: 0.5rem;
       display: flex;
       align-items: center;
@@ -304,7 +305,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     }
 
     .step-card-icon-element {
-      color: #F59E0B;
+      color: #3B82F6;
     }
 
     .step-card-content {
@@ -315,21 +316,41 @@ import { ButtonComponent, IconComponent } from '../../index';
       font-size: 0.875rem;
       font-weight: 600;
       color: #1F2937;
-      margin-bottom: 0.25rem;
+      margin-bottom: 0.375rem;
     }
 
     .step-card-description {
       font-size: 0.75rem;
       color: #6B7280;
-      line-height: 1.4;
+      line-height: 1.5;
     }
 
     .completion-action {
-      margin-bottom: 1rem;
+      margin-top: 2rem;
+      padding-top: 2rem;
+      border-top: 2px solid #E5E7EB;
+      display: flex;
+      justify-content: center;
     }
 
     .action-button {
-      min-width: 200px;
+      min-width: 240px;
+      height: 56px;
+      font-size: 1.125rem;
+      font-weight: 600;
+      box-shadow: 0 4px 16px rgba(34, 197, 94, 0.24);
+      transition: all 0.2s ease;
+    }
+
+    .action-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(34, 197, 94, 0.32);
+    }
+
+    .action-button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
     }
 
     .loading-overlay {
@@ -525,9 +546,9 @@ import { ButtonComponent, IconComponent } from '../../index';
           <div class="next-steps">
             <div class="next-steps-header">
               <div class="next-steps-icon">
-                <app-icon name="compass" size="20" class="next-steps-icon-element"></app-icon>
+                <app-icon name="lightbulb" size="20" class="next-steps-icon-element"></app-icon>
               </div>
-              <h3 class="next-steps-title">¿Qué sigue?</h3>
+              <h3 class="next-steps-title">Próximos pasos recomendados</h3>
             </div>
 
             <div class="next-steps-grid">
@@ -569,12 +590,12 @@ import { ButtonComponent, IconComponent } from '../../index';
 
               <div class="next-step-card">
                 <div class="step-card-icon">
-                  <app-icon name="bar-chart" size="24" class="step-card-icon-element"></app-icon>
+                  <app-icon name="chart-bar" size="24" class="step-card-icon-element"></app-icon>
                 </div>
                 <div class="step-card-content">
                   <h4 class="step-card-title">Ver reportes</h4>
                   <p class="step-card-description">
-                    Monitorea tu crecimiento y ventas
+                    Monitorea tu crecimiento y analiza ventas
                   </p>
                 </div>
               </div>
@@ -590,8 +611,8 @@ import { ButtonComponent, IconComponent } from '../../index';
               [disabled]="isCompleting"
               class="action-button"
             >
-              <app-icon name="rocket" size="20" slot="icon"></app-icon>
-              {{ isCompleting ? 'Finalizando...' : 'Ir a mi panel' }}
+              <app-icon name="layout-dashboard" size="24" slot="icon"></app-icon>
+              {{ isCompleting ? 'Finalizando configuración...' : 'Ir a mi panel de control' }}
             </app-button>
           </div>
 
