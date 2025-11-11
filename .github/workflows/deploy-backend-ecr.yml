@@ -43,20 +43,25 @@ jobs:
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
-    - name: Update App Runner service
+    - name: Trigger App Runner deployment
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: vendix-backend
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Update App Runner service to use new image
-        # Note: Environment variables are configured separately for security
+        # Get service ARN
+        SERVICE_ARN=$(aws apprunner list-services --query 'ServiceSummaryList[?ServiceName==`vendix-backend`].ServiceArn' --output text)
+        
+        # Update service to point to new image (preserves all existing config)
         aws apprunner update-service \
-          --service-arn $(aws apprunner list-services --query 'ServiceSummaryList[?ServiceName==`vendix-backend`].ServiceArn' --output text) \
-          --source-configuration ImageRepository="{
-            ImageIdentifier=\"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\",
-            ImageRepositoryType=\"ECR\",
-            ImageConfiguration={
-              Port=3000
-            }
+          --service-arn "$SERVICE_ARN" \
+          --source-configuration "{
+            \"ImageRepository\": {
+              \"ImageIdentifier\": \"$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG\",
+              \"ImageRepositoryType\": \"ECR\"
+            },
+            \"AutoDeploymentsEnabled\": true
           }"
+        
+        echo "✅ Deployment triggered with image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        echo "ℹ️  Environment variables and VPC configuration are preserved from service settings"
