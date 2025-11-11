@@ -29,8 +29,8 @@ export class InventoryBatchesService {
       // 1. Validar que el batch number sea único para el producto
       const existingBatch = await prisma.inventory_batches.findFirst({
         where: {
-          product_id: createBatchDto.productId,
-          batch_number: createBatchDto.batchNumber,
+          product_id: createBatchDto.product_id,
+          batch_number: createBatchDto.batch_code,
         },
       });
 
@@ -41,8 +41,8 @@ export class InventoryBatchesService {
       }
 
       // 2. Validar fechas
-      if (createBatchDto.expirationDate && createBatchDto.manufacturingDate) {
-        if (createBatchDto.expirationDate <= createBatchDto.manufacturingDate) {
+      if (createBatchDto.expiry_date && createBatchDto.manufacturing_date) {
+        if (createBatchDto.expiry_date <= createBatchDto.manufacturing_date) {
           throw new BadRequestException(
             'Expiration date must be after manufacturing date',
           );
@@ -88,9 +88,9 @@ export class InventoryBatchesService {
 
       // 4. Actualizar stock levels
       await this.stockLevelManager.updateStock({
-        productId: createBatchDto.productId,
-        variantId: createBatchDto.variantId,
-        locationId: createBatchDto.locationId,
+        productId: createBatchDto.product_id,
+        variantId: createBatchDto.product_variant_id,
+        locationId: createBatchDto.location_id || 1,
         quantityChange: createBatchDto.quantity,
         movementType: 'stock_in',
         reason: `Batch ${createBatchDto.batchNumber} received`,
@@ -179,10 +179,23 @@ export class InventoryBatchesService {
       this.prisma.inventory_batches.count({ where }),
     ]);
 
+    const hasMore = (query.offset || 0) + batches.length < total;
+
     return {
-      batches,
-      total,
-      hasMore: (query.offset || 0) + batches.length < total,
+      batches: batches,
+      total: total,
+      hasMore: hasMore,
+      id: 0,
+      batch_code: '',
+      product_id: 0,
+      quantity: 0,
+      quantity_remaining: 0,
+      manufacturing_date: undefined,
+      expiry_date: undefined,
+      status: '',
+      notes: '',
+      created_at: new Date(),
+      updated_at: new Date(),
     };
   }
 

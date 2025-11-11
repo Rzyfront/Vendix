@@ -122,7 +122,7 @@ export class OnboardingWizardService {
         where: { user_id: userId },
         data: {
           config: {
-            ...(user.user_settings.config as any),
+            ...user.user_settings.config,
             ...config,
           },
           updated_at: new Date(),
@@ -501,7 +501,7 @@ export class OnboardingWizardService {
    */
   private determineCurrentStep(user: any): number {
     // Use the actual status fields instead of relying only on user_settings
-    const userConfig = (user.user_settings?.config as any) || {};
+    const userConfig = user.user_settings?.config || {};
     const selectedAppType = userConfig.selected_app_type;
 
     // New 7-step flow - Use actual status

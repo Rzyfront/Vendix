@@ -165,7 +165,7 @@ export class InventorySerialNumbersController {
   ) {
     return this.serialNumbersService.updateSerialNumberStatus(
       id,
-      updateDto.status,
+      updateDto.status!,
       req.user.organizationId,
       {
         salesOrderId: updateDto.salesOrderId,
