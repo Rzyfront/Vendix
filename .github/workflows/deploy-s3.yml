@@ -1,14 +1,21 @@
-name: Build and Deploy to AWS
+name: Deploy Frontend to AWS
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  AWS_REGION: us-east-1
+  S3_BUCKET: vendix-online-frontend
+  CLOUDFRONT_DISTRIBUTION_ID: E1I27OYFJX7VYJ
 
 jobs:
   deploy-frontend:
+    name: Build and Deploy Frontend
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -16,91 +23,40 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Angular CLI
-        run: npm install -g @angular/cli
+      - name: Build frontend for production
+        working-directory: apps/frontend
+        run: npm run build:prod
 
-      - name: Build frontend
-        run: npm run build:prod -w apps/frontend
-        env:
-          API_URL: https://api.vendix.online
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy to S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
         run: |
-          # Sync all compiled files to S3 with correct MIME types
-          aws s3 sync apps/frontend/dist/vendix/ s3://vendix-online-frontend/ --delete --exclude "*.js" --exclude "*.css" --exclude "*.map"
-
-          # Upload JavaScript files with correct MIME type
-          find apps/frontend/dist/vendix/browser -name "*.js" -exec aws s3 cp {} s3://vendix-online-frontend/browser/ --content-type "application/javascript" \;
-
-          # Upload CSS files with correct MIME type
-          find apps/frontend/dist/vendix/browser -name "*.css" -exec aws s3 cp {} s3://vendix-online-frontend/browser/ --content-type "text/css" \;
-
-          # Copy index.html to root level for static website hosting with fixed paths
-          python3 -c "
-import re
-with open('apps/frontend/dist/vendix/browser/index.html', 'r') as f:
-    content = f.read()
-# Fix relative paths to include browser/ prefix
-content = re.sub(r'src=\"([^\"]*\.js)\"', r'src=\"browser/\1\"', content)
-content = re.sub(r'href=\"([^\"]*\.(js|css))\"', r'href=\"browser/\1\"', content)
-# Fix external URLs to remove browser/ prefix
-content = re.sub(r'href=\"browser/(https?://[^\"]+)\"', r'href=\"\1\"', content)
-content = re.sub(r'src=\"browser/(https?://[^\"]+)\"', r'src=\"\1\"', content)
-with open('/tmp/fixed-index.html', 'w') as f:
-    f.write(content)
-"
-          aws s3 cp /tmp/fixed-index.html s3://vendix-online-frontend/index.html --content-type "text/html"
-          # Copy 3rdpartylicenses.txt to root level
-          aws s3 cp apps/frontend/dist/vendix/3rdpartylicenses.txt s3://vendix-online-frontend/3rdpartylicenses.txt
-
-      - name: Fix CloudFront Error Responses
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
-        run: |
-          # Get current distribution config
-          aws cloudfront get-distribution-config --id E1I27OYFJX7VYJ > /tmp/config.json
+          # Sync browser directory with all assets
+          aws s3 sync apps/frontend/dist/vendix/browser/ \
+            s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
           
-          # Update config to remove 404 redirect (keep only 403 for S3 static website)
-          python3 -c "
-import json
-with open('/tmp/config.json', 'r') as f:
-    config = json.load(f)
-etag = config['ETag']
-dist_config = config['DistributionConfig']
-dist_config['CustomErrorResponses'] = {
-    'Quantity': 1,
-    'Items': [{
-        'ErrorCode': 403,
-        'ResponsePagePath': '/index.html',
-        'ResponseCode': '200',
-        'ErrorCachingMinTTL': 300
-    }]
-}
-with open('/tmp/updated-config.json', 'w') as f:
-    json.dump(dist_config, f, indent=2)
-print(f'ETag: {etag}')
-"
-          
-          # Update distribution
-          ETAG=$(python3 -c "import json; print(json.load(open('/tmp/config.json'))['ETag'])")
-          aws cloudfront update-distribution --id E1I27OYFJX7VYJ --distribution-config file:///tmp/updated-config.json --if-match $ETAG
+          # Upload index.html with no-cache (for SPA routing)
+          aws s3 cp apps/frontend/dist/vendix/browser/index.html \
+            s3://${{ env.S3_BUCKET }}/index.html \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html"
 
-      - name: Invalidate CloudFront
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
+      - name: Invalidate CloudFront cache
         run: |
-          aws cloudfront create-invalidation --distribution-id E1I27OYFJX7VYJ --paths "/*"
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
