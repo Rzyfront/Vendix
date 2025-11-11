@@ -114,18 +114,21 @@ export class OnboardingWizardService {
     // Update or create user_settings with selected app type
     const config = {
       selected_app_type: selectAppTypeDto.app_type,
-      selection_notes: selectAppTypeDto.notes,
+      selection_notes: selectAppTypeDto.notes || '',
       selected_at: new Date().toISOString(),
     };
 
     if (user.user_settings) {
+      // Get existing config or empty object
+      const existingConfig = (user.user_settings.config as any) || {};
+      
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
           config: {
-            ...user.user_settings.config,
+            ...existingConfig,
             ...config,
-          },
+          } as any,
           updated_at: new Date(),
         },
       });
@@ -133,7 +136,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.create({
         data: {
           user_id: userId,
-          config,
+          config: config as any,
         },
       });
     }
@@ -504,8 +507,8 @@ export class OnboardingWizardService {
    * - ORG_ADMIN: 1-7 steps
    */
   private determineCurrentStep(user: any): number {
-    const userConfig = user.user_settings?.config || {};
-    const selectedAppType = userConfig.selected_app_type;
+    const userConfig = (user.user_settings?.config as any) || {};
+    const selectedAppType = userConfig?.selected_app_type;
 
     // Step 1: App type selection
     if (!selectedAppType) return 1;
@@ -594,11 +597,12 @@ export class OnboardingWizardService {
     }
 
     // Get app type from user settings to match determineCurrentStep logic
-    const userConfig = user?.user_settings?.config || {};
-    const selectedAppType = userConfig.selected_app_type;
+    const userConfig = (user?.user_settings?.config as any) || {};
+    const selectedAppType = userConfig?.selected_app_type;
 
     if (!selectedAppType) {
       missingSteps.push('app_type_selection');
+      console.log('Missing app type selection. User settings config:', userConfig);
     }
 
     // Use same logic as determineCurrentStep for consistency

@@ -6,6 +6,7 @@ import {
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -392,6 +393,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private wizardService: OnboardingWizardService,
     private authFacade: AuthFacade,
+    private cdr: ChangeDetectorRef,
   ) {
     this.initializeForms();
   }
@@ -426,10 +428,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           // Move to next step
           this.wizardService.nextStep();
           this.isProcessing = false;
+          this.cdr.markForCheck(); // Trigger change detection
         },
         error: (error) => {
           console.error('Error selecting app type:', error);
           this.isProcessing = false;
+          this.cdr.markForCheck(); // Trigger change detection
           // Handle error appropriately - maybe show a toast
         },
       });
@@ -578,6 +582,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe((step) => {
         this.currentStep = step;
+        this.cdr.markForCheck(); // Trigger change detection
       });
 
     // Load wizard status from backend to sync current step - only once on init
@@ -604,6 +609,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           if (response.data.current_step) {
             this.wizardService.goToStep(response.data.current_step);
           }
+          this.cdr.markForCheck(); // Trigger change detection
         }
       },
       error: (error) => {
@@ -704,10 +710,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.userForm.get(key)?.markAsTouched();
       });
       this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const userData = this.userForm.value;
 
     this.wizardService.setupUser(userData).subscribe({
@@ -718,11 +726,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           this.wizardData.user = userData;
           // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up user:', error);
+        this.cdr.markForCheck();
         // Handle error - show toast message
       },
     });
@@ -734,10 +744,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.storeForm.get(key)?.markAsTouched();
       });
       this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const storeData = this.storeForm.value;
 
     this.wizardService.setupStore(storeData).subscribe({
@@ -748,11 +760,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           this.wizardData.store = storeData;
           // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up store:', error);
+        this.cdr.markForCheck();
       },
     });
   }
@@ -763,10 +777,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.organizationForm.get(key)?.markAsTouched();
       });
       this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const organizationData = this.organizationForm.value;
 
     this.wizardService.setupOrganization(organizationData).subscribe({
@@ -777,11 +793,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           this.wizardData.organization = organizationData;
           // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up organization:', error);
+        this.cdr.markForCheck();
       },
     });
   }
@@ -792,10 +810,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.appConfigForm.get(key)?.markAsTouched();
       });
       this.isProcessing = false;
+      this.cdr.markForCheck();
       return;
     }
 
     this.isSubmitting = true;
+    this.cdr.markForCheck();
     const appConfigData = this.appConfigForm.value;
 
     this.wizardService.setupAppConfig(appConfigData).subscribe({
@@ -806,11 +826,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           this.wizardData.appConfig = appConfigData;
           // The service already calls nextStep() automatically
         }
+        this.cdr.markForCheck();
       },
       error: (error) => {
         this.isSubmitting = false;
         this.isProcessing = false;
         console.error('Error setting up app config:', error);
+        this.cdr.markForCheck();
       },
     });
   }
