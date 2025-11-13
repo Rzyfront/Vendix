@@ -582,6 +582,185 @@ export class BreadcrumbService {
       parent: 'Configuration',
       icon: 'globe-2',
     },
+
+    // Store Admin Routes
+    { path: '/store', title: 'Tienda', icon: 'store' },
+    {
+      path: '/store/dashboard',
+      title: 'Dashboard',
+      parent: 'Tienda',
+      icon: 'home',
+    },
+
+    // Products
+    {
+      path: '/store/products',
+      title: 'Products',
+      parent: 'Tienda',
+      icon: 'package',
+    },
+    {
+      path: '/store/products/all',
+      title: 'All Products',
+      parent: 'Products',
+      icon: 'package',
+    },
+    {
+      path: '/store/products/categories',
+      title: 'Categories',
+      parent: 'Products',
+      icon: 'tag',
+    },
+    {
+      path: '/store/products/inventory',
+      title: 'Inventory',
+      parent: 'Products',
+      icon: 'archive',
+    },
+
+    // Orders
+    {
+      path: '/store/orders',
+      title: 'Orders',
+      parent: 'Tienda',
+      icon: 'clipboard-list',
+    },
+    {
+      path: '/store/orders/list',
+      title: 'Orders List',
+      parent: 'Orders',
+      icon: 'list',
+    },
+    {
+      path: '/store/orders/:id',
+      title: 'Order Details',
+      parent: 'Orders',
+      icon: 'eye',
+    },
+
+    // Customers
+    {
+      path: '/store/customers',
+      title: 'Customers',
+      parent: 'Tienda',
+      icon: 'users',
+    },
+    {
+      path: '/store/customers/all',
+      title: 'All Customers',
+      parent: 'Customers',
+      icon: 'users',
+    },
+    {
+      path: '/store/customers/:id',
+      title: 'Customer Details',
+      parent: 'Customers',
+      icon: 'user',
+    },
+    {
+      path: '/store/customers/reviews',
+      title: 'Customer Reviews',
+      parent: 'Customers',
+      icon: 'star',
+    },
+
+    // Marketing
+    {
+      path: '/store/marketing',
+      title: 'Marketing',
+      parent: 'Tienda',
+      icon: 'bullhorn',
+    },
+    {
+      path: '/store/marketing/promotions',
+      title: 'Promotions',
+      parent: 'Marketing',
+      icon: 'gift',
+    },
+    {
+      path: '/store/marketing/coupons',
+      title: 'Coupons',
+      parent: 'Marketing',
+      icon: 'ticket',
+    },
+
+    // Analytics
+    {
+      path: '/store/analytics',
+      title: 'Analytics',
+      parent: 'Tienda',
+      icon: 'chart-line',
+    },
+    {
+      path: '/store/analytics/sales',
+      title: 'Sales Analytics',
+      parent: 'Analytics',
+      icon: 'dollar-sign',
+    },
+    {
+      path: '/store/analytics/traffic',
+      title: 'Traffic Analytics',
+      parent: 'Analytics',
+      icon: 'globe',
+    },
+    {
+      path: '/store/analytics/performance',
+      title: 'Performance',
+      parent: 'Analytics',
+      icon: 'trending-up',
+    },
+
+    // Settings
+    {
+      path: '/store/settings',
+      title: 'Settings',
+      parent: 'Tienda',
+      icon: 'cog',
+    },
+    {
+      path: '/store/settings/general',
+      title: 'General Settings',
+      parent: 'Settings',
+      icon: 'cog',
+    },
+    {
+      path: '/store/settings/appearance',
+      title: 'Appearance',
+      parent: 'Settings',
+      icon: 'palette',
+    },
+    {
+      path: '/store/settings/security',
+      title: 'Security',
+      parent: 'Settings',
+      icon: 'shield',
+    },
+
+    // POS (Point of Sale)
+    {
+      path: '/store/pos',
+      title: 'Point of Sale',
+      parent: 'Tienda',
+      icon: 'cash-register',
+    },
+    {
+      path: '/store/pos/register',
+      title: 'POS Register',
+      parent: 'Point of Sale',
+      icon: 'register',
+    },
+    {
+      path: '/store/pos/cart',
+      title: 'POS Cart',
+      parent: 'Point of Sale',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/store/pos/payment',
+      title: 'POS Payment',
+      parent: 'Point of Sale',
+      icon: 'credit-card',
+    },
   ];
 
   constructor(private router: Router) {
@@ -677,6 +856,11 @@ export class BreadcrumbService {
     // Para Admin/Organization Admin: construir URL base
     if (route.path.startsWith('/admin/')) {
       return '/admin';
+    }
+
+    // Para Store Admin: construir URL base
+    if (route.path.startsWith('/store/')) {
+      return '/store';
     }
 
     // Para Organization Admin (legacy): construir URL base
