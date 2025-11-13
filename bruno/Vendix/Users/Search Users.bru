@@ -1,0 +1,53 @@
+meta {
+  name: Search Users
+  type: http
+  seq: 9
+}
+
+get {
+  url: http://{{url}}/users?search=admin&page=1&limit=5
+  body: none
+  auth: none
+}
+
+tests {
+  test("Search users successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('obtenidos exitosamente');
+  });
+
+  test("Search results structure is correct", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('page', 1);
+    expect(res.body.pagination).to.have.property('limit', 5);
+  });
+
+  test("Search results contain relevant users", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(user => {
+        expect(user).to.have.property('id');
+        expect(user).to.have.property('first_name');
+        expect(user).to.have.property('last_name');
+        expect(user).to.have.property('email');
+
+        // Verificar que los resultados contienen el término de búsqueda
+        const searchText = user.first_name.toLowerCase() +
+                          user.last_name.toLowerCase() +
+                          user.email.toLowerCase();
+        expect(searchText).to.include('admin');
+      });
+    }
+  });
+
+  test("Search respects pagination", function() {
+    expect(res.body.pagination.page).to.equal(1);
+    expect(res.body.pagination.limit).to.equal(5);
+    expect(res.body.data.length).to.be.at.most(5);
+  });
+}
