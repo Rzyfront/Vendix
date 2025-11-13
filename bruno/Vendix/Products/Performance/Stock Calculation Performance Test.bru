@@ -1,0 +1,82 @@
+meta {
+  name: "Stock Calculation Performance Test"
+  type: http
+  seq: 9
+}
+
+get {
+  url: http://{{baseUrl}}/products?per_page=50
+  body: none
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Products listing with dynamic stock calculation performs well", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const result = res.body.data;
+    expect(result).to.have.property('products');
+    expect(result.products).to.be.an('array');
+  });
+
+  test("Response time is acceptable for stock calculations", function() {
+    // Verificar que la respuesta sea rápida (< 2 segundos)
+    const responseTime = res.responseTime;
+    expect(responseTime).to.be.below(2000);
+  });
+
+  test("Dynamic stock fields are calculated for all products", function() {
+    const products = res.body.data.products;
+
+    products.forEach(product => {
+      expect(product).to.have.property('stock_quantity');
+      expect(product).to.have.property('total_stock_available');
+      expect(product).to.have.property('total_stock_reserved');
+
+      // Los campos deben ser números válidos
+      expect(product.total_stock_available).to.be.a('number');
+      expect(product.total_stock_reserved).to.be.a('number');
+      expect(product.stock_quantity).to.be.a('number');
+
+      // No deben ser null o undefined
+      expect(product.total_stock_available).to.not.be.null;
+      expect(product.total_stock_reserved).to.not.be.null;
+      expect(product.stock_quantity).to.not.be.null;
+    });
+  });
+
+  test("Stock by location is efficiently calculated when present", function() {
+    const products = res.body.data.products;
+
+    products.forEach(product => {
+      if (product.stock_by_location) {
+        expect(product.stock_by_location).to.be.an('array');
+
+        // Si hay stock_by_location, la suma debe coincidir con total_stock_available
+        const totalByLocation = product.stock_by_location
+          .reduce((sum, loc) => sum + (loc.available || 0), 0);
+        expect(totalByLocation).to.equal(product.total_stock_available);
+      }
+    });
+  });
+
+  test("Response size is reasonable", function() {
+    // Verificar que el tamaño de respuesta no sea excesivo
+    const responseSize = JSON.stringify(res.body).length;
+    expect(responseSize).to.be.below(100000); // Menos de 100KB para 50 productos
+  });
+
+  test("Pagination works correctly with dynamic stock", function() {
+    const result = res.body.data;
+    expect(result).to.have.property('pagination');
+    expect(result.pagination).to.have.property('page');
+    expect(result.pagination).to.have.property('per_page');
+    expect(result.pagination).to.have.property('total');
+    expect(result.pagination).to.have.property('total_pages');
+  });
+}

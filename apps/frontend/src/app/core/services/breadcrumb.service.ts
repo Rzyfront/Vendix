@@ -348,8 +348,240 @@ export class BreadcrumbService {
       icon: 'eye',
     },
 
-    // Admin
+    // Admin - Organization Admin Routes
     { path: '/admin', title: 'Panel Administrativo', icon: 'settings' },
+    {
+      path: '/admin/dashboard',
+      title: 'Dashboard',
+      parent: 'Panel Administrativo',
+      icon: 'home',
+    },
+
+    // Financial
+    {
+      path: '/admin/financial',
+      title: 'Financial',
+      parent: 'Panel Administrativo',
+      icon: 'dollar-sign',
+    },
+    {
+      path: '/admin/financial/reports',
+      title: 'Reports',
+      parent: 'Financial',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/financial/billing',
+      title: 'Billing & Subscriptions',
+      parent: 'Financial',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/financial/cost-analysis',
+      title: 'Cost Analysis',
+      parent: 'Financial',
+      icon: 'bar-chart',
+    },
+    {
+      path: '/admin/financial/cash-flow',
+      title: 'Cash Flow',
+      parent: 'Financial',
+      icon: 'trending-up',
+    },
+
+    // Analytics & BI
+    {
+      path: '/admin/analytics',
+      title: 'Analytics & BI',
+      parent: 'Panel Administrativo',
+      icon: 'chart-line',
+    },
+    {
+      path: '/admin/analytics/predictive',
+      title: 'Predictive Analysis',
+      parent: 'Analytics & BI',
+      icon: 'bar-chart',
+    },
+    {
+      path: '/admin/analytics/cross-store',
+      title: 'Cross-Store Analysis',
+      parent: 'Analytics & BI',
+      icon: 'store',
+    },
+
+    // Stores Management
+    {
+      path: '/admin/stores-management',
+      title: 'Stores',
+      parent: 'Panel Administrativo',
+      icon: 'store',
+    },
+
+    // Users Management
+    {
+      path: '/admin/users',
+      title: 'Users',
+      parent: 'Panel Administrativo',
+      icon: 'users',
+    },
+    {
+      path: '/admin/users/global-users',
+      title: 'Global Users',
+      parent: 'Users',
+      icon: 'user',
+    },
+    {
+      path: '/admin/users/roles-permissions',
+      title: 'Roles & Permissions',
+      parent: 'Users',
+      icon: 'shield',
+    },
+    {
+      path: '/admin/users/store-assignments',
+      title: 'Store Assignments',
+      parent: 'Users',
+      icon: 'building',
+    },
+    {
+      path: '/admin/users/access-audit',
+      title: 'Access Audit',
+      parent: 'Users',
+      icon: 'eye',
+    },
+
+    // Inventory
+    {
+      path: '/admin/inventory',
+      title: 'Inventory',
+      parent: 'Panel Administrativo',
+      icon: 'warehouse',
+    },
+    {
+      path: '/admin/inventory/stock',
+      title: 'Stock Management',
+      parent: 'Inventory',
+      icon: 'package',
+    },
+    {
+      path: '/admin/inventory/transfers',
+      title: 'Stock Transfers',
+      parent: 'Inventory',
+      icon: 'refresh-ccw',
+    },
+    {
+      path: '/admin/inventory/suppliers',
+      title: 'Suppliers',
+      parent: 'Inventory',
+      icon: 'truck',
+    },
+    {
+      path: '/admin/inventory/demand-forecast',
+      title: 'Demand Forecast',
+      parent: 'Inventory',
+      icon: 'trending-up',
+    },
+
+    // Operations
+    {
+      path: '/admin/operations',
+      title: 'Operations',
+      parent: 'Panel Administrativo',
+      icon: 'truck',
+    },
+    {
+      path: '/admin/operations/shipping',
+      title: 'Shipping Management',
+      parent: 'Operations',
+      icon: 'truck',
+    },
+    {
+      path: '/admin/operations/procurement',
+      title: 'Procurement',
+      parent: 'Operations',
+      icon: 'cart',
+    },
+    {
+      path: '/admin/operations/returns',
+      title: 'Returns Management',
+      parent: 'Operations',
+      icon: 'rotate-ccw',
+    },
+    {
+      path: '/admin/operations/route-optimization',
+      title: 'Route Optimization',
+      parent: 'Operations',
+      icon: 'globe-2',
+    },
+
+    // Audit & Compliance
+    {
+      path: '/admin/audit',
+      title: 'Audit & Compliance',
+      parent: 'Panel Administrativo',
+      icon: 'shield',
+    },
+    {
+      path: '/admin/audit/logs',
+      title: 'Audit Logs',
+      parent: 'Audit & Compliance',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/audit/compliance',
+      title: 'Compliance Reports',
+      parent: 'Audit & Compliance',
+      icon: 'file-check',
+    },
+    {
+      path: '/admin/audit/legal-docs',
+      title: 'Legal Documents',
+      parent: 'Audit & Compliance',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/audit/backup',
+      title: 'Backup & Recovery',
+      parent: 'Audit & Compliance',
+      icon: 'backup',
+    },
+
+    // Configuration
+    {
+      path: '/admin/config',
+      title: 'Configuration',
+      parent: 'Panel Administrativo',
+      icon: 'settings',
+    },
+    {
+      path: '/admin/config/application',
+      title: 'Application Settings',
+      parent: 'Configuration',
+      icon: 'sliders',
+    },
+    {
+      path: '/admin/config/policies',
+      title: 'Policies',
+      parent: 'Configuration',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/config/integrations',
+      title: 'Integrations',
+      parent: 'Configuration',
+      icon: 'link-2',
+    },
+    {
+      path: '/admin/config/taxes',
+      title: 'Taxes',
+      parent: 'Configuration',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/config/domains',
+      title: 'Domains',
+      parent: 'Configuration',
+      icon: 'globe-2',
+    },
   ];
 
   constructor(private router: Router) {
@@ -442,7 +674,12 @@ export class BreadcrumbService {
       return '/super-admin';
     }
 
-    // Para Organization Admin: construir URL base
+    // Para Admin/Organization Admin: construir URL base
+    if (route.path.startsWith('/admin/')) {
+      return '/admin';
+    }
+
+    // Para Organization Admin (legacy): construir URL base
     if (route.path.startsWith('/organization/')) {
       return '/organization';
     }

@@ -1,0 +1,97 @@
+meta {
+  name: "Validate Cross-Location Stock Availability"
+  type: http
+  seq: 3
+}
+
+# Nota: Esta prueba asume que existe un endpoint para validación consolidada
+# Si no existe, se debería crear el endpoint correspondiente
+
+post {
+  url: http://{{baseUrl}}/inventory/validate-consolidated-stock
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "product_id": {{productId}},
+  "quantity": 12,
+  "organization_id": 16
+}
+
+tests {
+  test("Cross-location validation successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Stock availability is correctly calculated", function() {
+    const result = res.body.data;
+    expect(result).to.have.property('isAvailable', true); // 12 <= 18 (10+5+3)
+    expect(result).to.have.property('totalAvailable', 18);
+    expect(result).to.have.property('locations');
+    expect(result.locations).to.be.an('array');
+    expect(result.locations.length).to.equal(3);
+  });
+
+  test("Suggested allocation is provided", function() {
+    const result = res.body.data;
+    if (result.suggestedAllocation) {
+      expect(result.suggestedAllocation).to.be.an('array');
+
+      // Suma de allocation debe igualar la cantidad solicitada
+      const totalAllocated = result.suggestedAllocation.reduce((sum, item) => sum + item.quantity, 0);
+      expect(totalAllocated).to.equal(12);
+    }
+  });
+
+  test("Location details are included", function() {
+    const result = res.body.data;
+    result.locations.forEach(location => {
+      expect(location).to.have.property('locationId');
+      expect(location).to.have.property('locationName');
+      expect(location).to.have.property('available');
+      expect(location).to.have.property('reserved');
+      expect(location).to.have.property('type');
+    });
+  });
+
+  test("Location types are correct", function() {
+    const result = res.body.data;
+    const types = result.locations.map(l => l.type);
+    expect(types).to.include('warehouse');
+    expect(types).to.include('showroom');
+    expect(types).to.include('retail');
+  });
+}
+
+# Prueba de stock insuficiente
+post {
+  url: http://{{baseUrl}}/inventory/validate-consolidated-stock
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "product_id": {{productId}},
+  "quantity": 25,
+  "organization_id": 16
+}
+
+tests {
+  test("Insufficient stock handled correctly", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('isAvailable', false); // 25 > 18
+    expect(result).to.have.property('totalAvailable', 18);
+  });
+}

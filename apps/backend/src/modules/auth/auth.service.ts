@@ -775,21 +775,13 @@ export class AuthService {
       );
     }
 
-    // Buscar usuario con rol y permisos
+    // Buscar usuario con rol (sin permisos para token optimizado)
     const user = await this.prismaService.users.findFirst({
       where: { email },
       include: {
         user_roles: {
           include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
-                },
-              },
-            },
+            roles: true,
           },
         },
         organizations: true,
@@ -902,7 +894,7 @@ export class AuthService {
       });
     }
 
-    // Generar tokens
+    // Generar tokens (con usuario sin permisos para payload optimizado)
     const tokens = await this.generateTokens(user, {
       organization_id: target_organization_id!,
       store_id: target_store_id,
@@ -2281,9 +2273,6 @@ export class AuthService {
   }> {
     const payload = {
       sub: user.id,
-      email: user.email,
-      roles: user.user_roles.map((r) => r.roles.name),
-      permissions: this.getPermissionsFromRoles(user.user_roles),
       organization_id: scope.organization_id,
       store_id: scope.store_id,
     };

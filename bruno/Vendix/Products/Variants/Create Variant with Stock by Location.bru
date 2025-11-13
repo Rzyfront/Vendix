@@ -1,0 +1,118 @@
+meta {
+  name: "Create Product Variants with Stock by Location"
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{baseUrl}}/products/variants
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "product_id": {{productId}},
+  "name": "Laptop Gaming Pro Max - RTX 4080",
+  "sku": "LP-GAM-PRO-MAX-RTX4080",
+  "base_price": 1599.99,
+  "attributes": {
+    "processor": "Intel i9-13900HX",
+    "graphics": "NVIDIA RTX 4080",
+    "ram": "32GB DDR5",
+    "storage": "2TB NVMe"
+  },
+  "stock_by_location": [
+    {
+      "location_id": 1,
+      "quantity": 8,
+      "notes": "Variante premium en bodega central"
+    },
+    {
+      "location_id": 2,
+      "quantity": 3,
+      "notes": "Unidades para demo en showroom"
+    },
+    {
+      "location_id": 3,
+      "quantity": 2,
+      "notes": "Stock limitado en tienda física"
+    }
+  ]
+}
+
+tests {
+  test("Product variant created with stock by location", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const variant = res.body.data;
+    expect(variant).to.have.property('id');
+    expect(variant).to.have.property('product_id', parseInt({{productId}}));
+    expect(variant).to.have.property('name', 'Laptop Gaming Pro Max - RTX 4080');
+    expect(variant).to.have.property('sku', 'LP-GAM-PRO-MAX-RTX4080');
+    expect(variant).to.have.property('base_price', 1599.99);
+  });
+
+  test("Variant stock is properly distributed across locations", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property('stock_quantity'); // Mantener compatibilidad
+    expect(variant).to.have.property('total_stock_available'); // Nuevo campo
+    expect(variant).to.have.property('stock_by_location'); // Nuevo detalle
+
+    // El stock total debe ser la suma de todas las ubicaciones
+    expect(variant.total_stock_available).to.equal(13); // 8 + 3 + 2
+    expect(variant.stock_quantity).to.equal(13); // Mantiene compatibilidad
+  });
+
+  test("Variant stock by location contains correct quantities", function() {
+    const variant = res.body.data;
+    expect(variant.stock_by_location).to.be.an('array');
+    expect(variant.stock_by_location).to.have.length(3);
+
+    const locations = variant.stock_by_location;
+    const location1 = locations.find(l => l.location_id === 1);
+    const location2 = locations.find(l => l.location_id === 2);
+    const location3 = locations.find(l => l.location_id === 3);
+
+    expect(location1).to.exist;
+    expect(location1.available).to.equal(8);
+    expect(location1.notes).to.equal('Variante premium en bodega central');
+
+    expect(location2).to.exist;
+    expect(location2.available).to.equal(3);
+    expect(location2.notes).to.equal('Unidades para demo en showroom');
+
+    expect(location3).to.exist;
+    expect(location3.available).to.equal(2);
+    expect(location3.notes).to.equal('Stock limitado en tienda física');
+  });
+
+  test("Variant attributes are properly stored", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property('attributes');
+    expect(variant.attributes).to.be.an('object');
+    expect(variant.attributes.processor).to.equal('Intel i9-13900HX');
+    expect(variant.attributes.graphics).to.equal('NVIDIA RTX 4080');
+    expect(variant.attributes.ram).to.equal('32GB DDR5');
+    expect(variant.attributes.storage).to.equal('2TB NVMe');
+  });
+
+  test("Product relationship is correctly established", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property('products');
+    expect(variant.products).to.have.property('id', parseInt({{productId}}));
+    expect(variant.products).to.have.property('name', 'Laptop Gaming Pro Max');
+  });
+}
+
+script {
+  post-response: {
+    if (res.status === 201 && res.body.success) {
+      bru.setEnvVar('variantId', res.body.data.id.toString());
+    }
+  }
+}

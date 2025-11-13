@@ -1,0 +1,173 @@
+meta {
+  name: "Validate Multi-Product Cross-Location Stock Allocation"
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{baseUrl}}/inventory/validate-multiple-consolidated-stock
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "products": [
+    {
+      "product_id": {{productId}},
+      "quantity": 25
+    },
+    {
+      "product_id": {{variantId}},
+      "quantity": 8
+    }
+  ],
+  "organization_id": 16
+}
+
+tests {
+  test("Multi-product cross-location validation successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const result = res.body.data;
+    expect(result).to.have.property('products');
+    expect(result.products).to.be.an('array');
+    expect(result.products).to.have.length(2);
+  });
+
+  test("Individual product availability is correctly calculated", function() {
+    const result = res.body.data;
+
+    // Producto base: solicita 25, disponible 31 (18 base + 13 variante)
+    const baseProduct = result.products.find(p => p.product_id === parseInt({{productId}}));
+    expect(baseProduct).to.exist;
+    expect(baseProduct).to.have.property('isAvailable', true); // 25 <= 31
+    expect(baseProduct).to.have.property('totalAvailable', 31);
+    expect(baseProduct).to.have.property('requested', 25);
+
+    // Variante: solicita 8, disponible 13
+    const variant = result.products.find(p => p.product_id === parseInt({{variantId}}));
+    expect(variant).to.exist;
+    expect(variant).to.have.property('isAvailable', true); // 8 <= 13
+    expect(variant).to.have.property('totalAvailable', 13);
+    expect(variant).to.have.property('requested', 8);
+  });
+
+  test("Location details are provided for each product", function() {
+    const result = res.body.data;
+
+    result.products.forEach(product => {
+      expect(product).to.have.property('locations');
+      expect(product.locations).to.be.an('array');
+      expect(product.locations.length).to.be.at.least(1);
+
+      product.locations.forEach(location => {
+        expect(location).to.have.property('locationId');
+        expect(location).to.have.property('locationName');
+        expect(location).to.have.property('available');
+        expect(location).to.have.property('type');
+      });
+    });
+  });
+
+  test("Optimal allocation suggestions are provided", function() {
+    const result = res.body.data;
+
+    result.products.forEach(product => {
+      if (product.suggestedAllocation) {
+        expect(product.suggestedAllocation).to.be.an('array');
+
+        // Suma de allocation debe igualar la cantidad solicitada
+        const totalAllocated = product.suggestedAllocation
+          .reduce((sum, item) => sum + item.quantity, 0);
+        expect(totalAllocated).to.equal(product.requested);
+
+        // Verificar que las ubicaciones sugeridas existan en locations
+        product.suggestedAllocation.forEach(allocation => {
+          const locationExists = product.locations
+            .some(loc => loc.locationId === allocation.locationId);
+          expect(locationExists).to.be.true;
+        });
+      }
+    });
+  });
+
+  test("Overall order feasibility is assessed", function() {
+    const result = res.body.data;
+    expect(result).to.have.property('orderFeasible');
+
+    // Ambos productos deberían estar disponibles
+    const allAvailable = result.products
+      .every(product => product.isAvailable);
+    expect(result.orderFeasible).to.equal(allAvailable);
+  });
+
+  test("Summary statistics are calculated correctly", function() {
+    const result = res.body.data;
+
+    if (result.summary) {
+      expect(result.summary).to.have.property('totalProductsRequested', 2);
+      expect(result.summary).to.have.property('totalProductsAvailable');
+      expect(result.summary).to.have.property('totalQuantityRequested');
+      expect(result.summary).to.have.property('totalQuantityAvailable');
+
+      // Totales calculados
+      const totalRequested = result.products
+        .reduce((sum, p) => sum + p.requested, 0);
+      const totalAvailable = result.products
+        .reduce((sum, p) => sum + p.totalAvailable, 0);
+
+      expect(result.summary.totalQuantityRequested).to.equal(totalRequested);
+      expect(result.summary.totalQuantityAvailable).to.equal(totalAvailable);
+    }
+  });
+}
+
+# Prueba de multi-product con stock insuficiente
+post {
+  url: http://{{baseUrl}}/inventory/validate-multiple-consolidated-stock
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "products": [
+    {
+      "product_id": {{productId}},
+      "quantity": 25
+    },
+    {
+      "product_id": {{variantId}},
+      "quantity": 15
+    }
+  ],
+  "organization_id": 16
+}
+
+tests {
+  test("Insufficient stock handled correctly in multi-product scenario", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+
+    // Producto base: 25 <= 31 (disponible)
+    const baseProduct = result.products.find(p => p.product_id === parseInt({{productId}}));
+    expect(baseProduct.isAvailable).to.be.true;
+
+    // Variante: 15 > 13 (no disponible)
+    const variant = result.products.find(p => p.product_id === parseInt({{variantId}}));
+    expect(variant.isAvailable).to.be.false;
+    expect(variant.totalAvailable).to.equal(13);
+
+    // El pedido general no es factible
+    expect(result.orderFeasible).to.be.false;
+  });
+}
