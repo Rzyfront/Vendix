@@ -1,0 +1,61 @@
+meta {
+  name: Get User Stats
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/users/stats?organization_id=16&start_date=2024-01-01&end_date=2024-12-31
+  body: none
+  auth: none
+}
+
+tests {
+  test("Get user stats successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Estadísticas de usuarios obtenidas exitosamente');
+  });
+
+  test("Stats data structure is correct", function() {
+    expect(res.body).to.have.property('data');
+    const stats = res.body.data;
+
+    // Verificar estadísticas comunes que debería devolver
+    expect(stats).to.be.an('object');
+
+    // Debe tener contadores de usuarios por estado
+    if (stats.byState) {
+      expect(stats.byState).to.have.property('active');
+      expect(stats.byState).to.have.property('inactive');
+      expect(stats.byState).to.have.property('archived');
+    }
+
+    // Debe tener contadores por rol
+    if (stats.byRole) {
+      expect(stats.byRole).to.be.an('object');
+    }
+
+    // Debe tener información de fechas
+    if (stats.period) {
+      expect(stats.period).to.have.property('start_date');
+      expect(stats.period).to.have.property('end_date');
+    }
+  });
+
+  test("Stats values are numbers", function() {
+    const stats = res.body.data;
+
+    if (stats.byState) {
+      expect(stats.byState.active).to.be.a('number');
+      expect(stats.byState.inactive).to.be.a('number');
+      expect(stats.byState.archived).to.be.a('number');
+    }
+
+    if (stats.total) {
+      expect(stats.total).to.be.a('number');
+    }
+  });
+}

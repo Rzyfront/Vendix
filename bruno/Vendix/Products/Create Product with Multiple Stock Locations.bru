@@ -1,0 +1,113 @@
+meta {
+  name: "Create Product with Multiple Stock Locations"
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{baseUrl}}/products
+  body: json
+  auth: bearer
+}
+
+body:json {
+  "store_id": 1,
+  "category_id": 1,
+  "brand_id": 1,
+  "name": "Laptop Gaming Pro Max",
+  "slug": "laptop-gaming-pro-max",
+  "description": "High-performance laptop for gaming and productivity with RGB keyboard and advanced cooling system",
+  "base_price": 1299.99,
+  "sku": "LP-GAM-PRO-MAX-001",
+  "state": "active",
+  "category_ids": [1, 2],
+  "tax_category_ids": [1],
+  "image_urls": [
+    "https://example.com/laptop-gaming-1.jpg",
+    "https://example.com/laptop-gaming-2.jpg"
+  ],
+  "stock_by_location": [
+    {
+      "location_id": 1,
+      "quantity": 10,
+      "notes": "Stock principal en bodega central"
+    },
+    {
+      "location_id": 2,
+      "quantity": 5,
+      "notes": "Unidades disponibles en showroom para demostración"
+    },
+    {
+      "location_id": 3,
+      "quantity": 3,
+      "notes": "Stock en tienda física para venta inmediata"
+    }
+  ]
+}
+
+tests {
+  test("Product created successfully with multiple stock locations", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const product = res.body.data;
+    expect(product).to.have.property('id');
+    expect(product).to.have.property('name', 'Laptop Gaming Pro Max');
+    expect(product).to.have.property('sku', 'LP-GAM-PRO-MAX-001');
+    expect(product).to.have.property('base_price', 1299.99);
+    expect(product).to.have.property('state', 'active');
+  });
+
+  test("Stock fields reflect total consolidated quantity", function() {
+    const product = res.body.data;
+    expect(product).to.have.property('stock_quantity'); // Mantener compatibilidad
+    expect(product).to.have.property('total_stock_available'); // Nuevo campo
+    expect(product).to.have.property('stock_by_location'); // Nuevo detalle
+
+    // El stock total debe ser la suma de todas las ubicaciones
+    expect(product.total_stock_available).to.equal(18); // 10 + 5 + 3
+    expect(product.stock_quantity).to.equal(18); // Mantiene compatibilidad
+  });
+
+  test("Stock by location contains all specified locations", function() {
+    const product = res.body.data;
+    expect(product.stock_by_location).to.be.an('array');
+    expect(product.stock_by_location).to.have.length(3);
+
+    const locations = product.stock_by_location;
+    const location1 = locations.find(l => l.location_id === 1);
+    const location2 = locations.find(l => l.location_id === 2);
+    const location3 = locations.find(l => l.location_id === 3);
+
+    expect(location1).to.exist;
+    expect(location2).to.exist;
+    expect(location3).to.exist;
+
+    expect(location1.available).to.equal(10);
+    expect(location2.available).to.equal(5);
+    expect(location3.available).to.equal(3);
+  });
+
+  test("Stock reservations handled correctly", function() {
+    const product = res.body.data;
+    expect(product).to.have.property('total_stock_reserved');
+    expect(product.total_stock_reserved).to.equal(0); // Sin reservas iniciales
+  });
+
+  test("Product relationships are properly included", function() {
+    const product = res.body.data;
+    expect(product).to.have.property('stores');
+    expect(product).to.have.property('brands');
+    expect(product).to.have.property('product_categories');
+    expect(product).to.have.property('product_images');
+  });
+}
+
+script {
+  post-response: {
+    if (res.status === 201 && res.body.success) {
+      bru.setEnvVar('productId', res.body.data.id.toString());
+    }
+  }
+}

@@ -47,6 +47,12 @@ import {
   List,
   FileText,
   HelpCircle,
+  DollarSign,
+  BarChart3,
+  Warehouse,
+  Truck,
+  FileCheck,
+  HardDrive,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -107,6 +113,14 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'globe-2': Globe,
   list: List,
   'file-text': FileText,
+
+  // Financial and business icons
+  'dollar-sign': DollarSign,
+  'bar-chart': BarChart3,
+  warehouse: Warehouse,
+  truck: Truck,
+  'file-check': FileCheck,
+  backup: HardDrive,
 
   // Default fallback icon
   default: HelpCircle,

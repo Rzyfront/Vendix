@@ -1,0 +1,59 @@
+meta {
+  name: Get All Stores
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/stores?page=1&limit=10&organization_id=16
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get all stores successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('obtenidas exitosamente');
+  });
+  
+  test("Response has correct structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('page');
+    expect(res.body.pagination).to.have.property('limit');
+    expect(res.body.pagination).to.have.property('totalPages');
+  });
+  
+  test("Stores have required fields", function() {
+    if (res.body.data.length > 0) {
+      const store = res.body.data[0];
+      expect(store).to.have.property('id');
+      expect(store).to.have.property('name');
+      expect(store).to.have.property('slug');
+      expect(store).to.have.property('organization_id');
+      expect(store).to.have.property('is_active');
+      expect(store).to.have.property('store_type');
+      expect(store).to.have.property('created_at');
+    }
+  });
+  
+  test("Pagination values are correct", function() {
+    expect(res.body.pagination.page).to.equal(1);
+    expect(res.body.pagination.limit).to.equal(10);
+    expect(res.body.pagination.total).to.be.a('number');
+    expect(res.body.pagination.totalPages).to.be.a('number');
+  });
+  
+  test("Stores belong to correct organization", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(store => {
+        expect(store.organization_id).to.equal(16);
+      });
+    }
+  });
+}

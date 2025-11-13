@@ -15,6 +15,7 @@ import {
   IsJSON,
   IsNumber,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -85,6 +86,29 @@ export class CreateProductDto {
   @IsArray()
   @IsString({ each: true })
   image_urls?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StockByLocationDto)
+  stock_by_location?: StockByLocationDto[];
+}
+
+// DTO para especificar stock por ubicación
+export class StockByLocationDto {
+  @IsInt()
+  @Min(1)
+  location_id: number;
+
+  @IsInt()
+  @Type(() => Number)
+  @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
+  quantity: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  notes?: string;
 }
 
 export class UpdateProductDto {
@@ -147,6 +171,12 @@ export class UpdateProductDto {
   @IsArray()
   @IsString({ each: true })
   image_urls?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StockByLocationDto)
+  stock_by_location?: StockByLocationDto[];
 }
 
 export class ProductQueryDto {

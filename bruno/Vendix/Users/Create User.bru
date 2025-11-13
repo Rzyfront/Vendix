@@ -1,0 +1,55 @@
+meta {
+  name: Create User
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/users
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "app": "STORE_ADMIN",
+    "organization_id": 16,
+    "first_name": "Test",
+    "last_name": "User",
+    "username": "testuser123",
+    "email": "testuser@example.com",
+    "password": "password123",
+    "state": "active"
+  }
+}
+
+vars:post-response {
+  created_user_id: res.body.data.id
+  created_user_email: res.body.data.email
+}
+
+tests {
+  test("Create user successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('creado exitosamente');
+  });
+
+  test("User data is complete", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('first_name', 'Test');
+    expect(res.body.data).to.have.property('last_name', 'User');
+    expect(res.body.data).to.have.property('username', 'testuser123');
+    expect(res.body.data).to.have.property('email', 'testuser@example.com');
+    expect(res.body.data).to.have.property('state', 'active');
+    expect(res.body.data).to.not.have.property('password');
+  });
+
+  test("User ID extracted correctly", function() {
+    expect(bru.getEnvVar('created_user_id')).to.be.a('number');
+    expect(bru.getEnvVar('created_user_email')).to.equal('testuser@example.com');
+  });
+}
