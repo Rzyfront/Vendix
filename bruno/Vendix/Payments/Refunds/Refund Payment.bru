@@ -1,17 +1,18 @@
 meta {
-  name: Process Refund
-  type: http
-  seq: 6
+  name: "Refund Payment",
+  type: "http",
+  seq: 5,
+  enabled: true
 }
 
 post {
-  url: http://localhost:3000/api/payments/txn_123456789012345678/refund
+  url: "http://localhost:3000/api/payments/{{paymentId}}/refund",
   headers: {
     "Authorization": "Bearer {{authToken}}",
     "Content-Type": "application/json"
   },
   body: {
-    "amount": 275.00,
+    "amount": 50.00,
     "reason": "Customer requested refund due to product defect"
   }
 }
@@ -23,7 +24,7 @@ tests {
     expect(res.body).to.have.property('data');
     expect(res.body.data).to.have.property('success', true);
     expect(res.body.data).to.have.property('refundId');
-    expect(res.body.data).to.have.property('amount', 275.00);
+    expect(res.body.data).to.have.property('amount', 50.00);
     expect(res.body.data).to.have.property('status', 'succeeded');
     expect(res.body.data).to.have.property('message');
   });
@@ -36,7 +37,7 @@ tests {
 
   test("Should validate refund amount", function() {
     expect(res.body.data.amount).to.be.a('number');
-    expect(res.body.data.amount).to.equal(275.00);
+    expect(res.body.data.amount).to.equal(50.00);
   });
 
   test("Should include refund reason", function() {

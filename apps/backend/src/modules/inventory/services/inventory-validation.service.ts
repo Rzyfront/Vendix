@@ -44,10 +44,13 @@ export class InventoryValidationService {
     const isAvailable = totalAvailable >= quantity;
 
     // Crear sugerencia de asignación óptima
-    const suggestedAllocation = this.calculateOptimalAllocation(stockLevels, quantity);
+    const suggestedAllocation = this.calculateOptimalAllocation(
+      stockLevels,
+      quantity,
+    );
 
     // Formatear locations para respuesta
-    const locations = stockLevels.map(level => ({
+    const locations = stockLevels.map((level) => ({
       locationId: level.inventory_locations.id,
       locationName: level.inventory_locations.name,
       available: level.quantity_available || 0,
@@ -60,14 +63,20 @@ export class InventoryValidationService {
       isAvailable,
       totalAvailable,
       totalReserved,
-      totalOnHand: stockLevels.reduce((sum, level) => sum + (level.quantity_on_hand || 0), 0),
+      totalOnHand: stockLevels.reduce(
+        (sum, level) => sum + (level.quantity_on_hand || 0),
+        0,
+      ),
       requested: quantity,
       locations,
-      suggestedAllocation: suggestedAllocation.length > 0 ? suggestedAllocation : null,
+      suggestedAllocation:
+        suggestedAllocation.length > 0 ? suggestedAllocation : null,
     };
   }
 
-  async validateMultipleConsolidatedStock(validateDto: ValidateMultipleConsolidatedStockDto) {
+  async validateMultipleConsolidatedStock(
+    validateDto: ValidateMultipleConsolidatedStockDto,
+  ) {
     const { products, organization_id } = validateDto;
 
     // Validar cada producto
@@ -93,14 +102,20 @@ export class InventoryValidationService {
     );
 
     // Evaluar factibilidad del pedido general
-    const orderFeasible = productResults.every(product => product.isAvailable);
+    const orderFeasible = productResults.every(
+      (product) => product.isAvailable,
+    );
 
     // Calcular estadísticas resumidas
     const summary = {
       totalProductsRequested: products.length,
-      totalProductsAvailable: productResults.filter(p => p.isAvailable).length,
+      totalProductsAvailable: productResults.filter((p) => p.isAvailable)
+        .length,
       totalQuantityRequested: products.reduce((sum, p) => sum + p.quantity, 0),
-      totalQuantityAvailable: productResults.reduce((sum, p) => sum + p.totalAvailable, 0),
+      totalQuantityAvailable: productResults.reduce(
+        (sum, p) => sum + p.totalAvailable,
+        0,
+      ),
     };
 
     return {
@@ -110,7 +125,10 @@ export class InventoryValidationService {
     };
   }
 
-  async getConsolidatedStockByProduct(productId: number, organizationId?: number) {
+  async getConsolidatedStockByProduct(
+    productId: number,
+    organizationId?: number,
+  ) {
     const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
         product_id: productId,
@@ -149,7 +167,7 @@ export class InventoryValidationService {
       totalAvailable,
       totalReserved,
       totalOnHand,
-      stockByLocation: stockLevels.map(level => ({
+      stockByLocation: stockLevels.map((level) => ({
         locationId: level.inventory_locations.id,
         locationName: level.inventory_locations.name,
         available: level.quantity_available || 0,
@@ -161,10 +179,13 @@ export class InventoryValidationService {
     };
   }
 
-  private calculateOptimalAllocation(stockLevels: any[], requestedQuantity: number) {
+  private calculateOptimalAllocation(
+    stockLevels: any[],
+    requestedQuantity: number,
+  ) {
     // Ordenar por cantidad disponible (mayor a menor)
     const sortedLevels = stockLevels
-      .filter(level => level.quantity_available > 0)
+      .filter((level) => level.quantity_available > 0)
       .sort((a, b) => b.quantity_available - a.quantity_available);
 
     const allocation: { locationId: number; quantity: number }[] = [];

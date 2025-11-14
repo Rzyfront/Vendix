@@ -1,0 +1,61 @@
+meta {
+  name: "Process Payment - Existing Order",
+  type: "http",
+  seq: 1,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/payments",
+  headers: {
+    "Authorization": "Bearer {{authToken}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "orderId": 1,
+    "customerId": 1,
+    "amount": 100.00,
+    "currency": "USD",
+    "paymentMethodId": 1,
+    "storeId": 1,
+    "metadata": {
+      "source": "web",
+      "device": "desktop"
+    },
+    "returnUrl": "https://vendix.com/payment/success",
+    "cancelUrl": "https://vendix.com/payment/cancel"
+  }
+}
+
+tests {
+  test("Should process payment successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('success', true);
+    expect(res.body.data).to.have.property('transactionId');
+    expect(res.body.data).to.have.property('status');
+    expect(res.body.data).to.have.property('message');
+  });
+
+  test("Should validate payment response structure", function() {
+    expect(res.body.data).to.have.property('transactionId').that.is.a('string');
+    expect(res.body.data).to.have.property('status').that.is.a('string');
+    expect(res.body.data).to.have.property('message').that.is.a('string');
+    expect(res.body.data.transactionId).to.match(/^(txn_|pi_|PAY-)/);
+  });
+
+  test("Should validate payment amount", function() {
+    expect(res.body.data).to.have.property('amount', 100.00);
+  });
+
+  test("Should include metadata", function() {
+    expect(res.body.data).to.have.property('metadata');
+    expect(res.body.data.metadata).to.have.property('source', 'web');
+    expect(res.body.data.metadata).to.have.property('device', 'desktop');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(5000);
+  });
+}

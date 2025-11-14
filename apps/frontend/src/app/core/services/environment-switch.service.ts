@@ -98,7 +98,9 @@ export class EnvironmentSwitchService {
       } else if (targetEnvironment === 'ORG_ADMIN') {
         response = await this.switchToOrganization().toPromise();
       } else {
-        throw new Error('Invalid environment switch request');
+        throw new Error(
+          'Invalid environment switch request: Missing required parameters',
+        );
       }
 
       if (response?.success && response.tokens) {
@@ -121,7 +123,7 @@ export class EnvironmentSwitchService {
       return false;
     } catch (error) {
       console.error('Environment switch failed:', error);
-      return false;
+      throw error; // Re-throw para mejor manejo de errores en el componente
     }
   }
 }

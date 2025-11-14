@@ -367,7 +367,9 @@ export class InventoryIntegrationService {
     }));
 
     // Generate suggested allocation if stock is available
-    let suggestedAllocation: Array<{ locationId: number; quantity: number }> | undefined;
+    let suggestedAllocation:
+      | Array<{ locationId: number; quantity: number }>
+      | undefined;
 
     if (totalAvailable >= requiredQuantity) {
       suggestedAllocation = this.generateOptimalAllocation(

@@ -19,7 +19,9 @@ export class EmailTemplates {
 
   static getVerificationTemplate(data: EmailTemplateData) {
     const verificationUrl = `${this.BASE_URL}/auth/verify-email?token=${data.token}`;
-    const loginUrl = data.vlink ? `https://${data.vlink}.vendix.online` : this.BASE_URL;
+    const loginUrl = data.vlink
+      ? `https://${data.vlink}.vendix.online`
+      : this.BASE_URL;
 
     return {
       subject: `🎉 ¡Bienvenido a ${this.COMPANY_NAME}! Verifica tu cuenta`,
@@ -110,12 +112,16 @@ export class EmailTemplates {
                     <span class="login-label">📧 Tu correo:</span>
                     <span class="login-value">${data.email}</span>
                   </div>
-                  ${data.password ? `
+                  ${
+                    data.password
+                      ? `
                   <div class="login-item">
                     <span class="login-label">🔑 Tu contraseña:</span>
                     <span class="login-value">${'•'.repeat(data.password.length)}</span>
                   </div>
-                  ` : ''}
+                  `
+                      : ''
+                  }
                 </div>
                 <div style="color: #92400E; font-size: 14px; margin-top: 15px;">
                   💡 <strong>Consejo:</strong> Guarda esta información en un lugar seguro.
@@ -225,7 +231,9 @@ El equipo de ${this.COMPANY_NAME}
 
   static getPasswordResetTemplate(data: EmailTemplateData) {
     const resetUrl = `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
-    const loginUrl = data.vlink ? `https://${data.vlink}.vendix.online` : this.BASE_URL;
+    const loginUrl = data.vlink
+      ? `https://${data.vlink}.vendix.online`
+      : this.BASE_URL;
 
     return {
       subject: `🔐 Restablece tu contraseña en ${this.COMPANY_NAME}`,
@@ -384,7 +392,9 @@ El equipo de ${this.COMPANY_NAME}
 
   static getWelcomeTemplate(data: EmailTemplateData) {
     const dashboardUrl = `${this.BASE_URL}/dashboard`;
-    const loginUrl = data.vlink ? `https://${data.vlink}.vendix.online` : this.BASE_URL;
+    const loginUrl = data.vlink
+      ? `https://${data.vlink}.vendix.online`
+      : this.BASE_URL;
 
     return {
       subject: `🎉 ¡Tu cuenta ${this.COMPANY_NAME} está lista! Comienza ahora`,
@@ -592,12 +602,15 @@ El equipo de ${this.COMPANY_NAME}
 
   static getOnboardingTemplate(data: EmailTemplateData & { step: string }) {
     const dashboardUrl = `${this.BASE_URL}/onboarding`;
-    const loginUrl = data.vlink ? `https://${data.vlink}.vendix.online` : this.BASE_URL;
+    const loginUrl = data.vlink
+      ? `https://${data.vlink}.vendix.online`
+      : this.BASE_URL;
 
     const stepMessages = {
       create_organization: {
         title: '🏢 Configura tu Organización',
-        message: 'El siguiente paso es configurar tu organización con tus datos de negocio.',
+        message:
+          'El siguiente paso es configurar tu organización con tus datos de negocio.',
         action: 'Configurar Organización',
         icon: '🏢',
         color: '#3B82F6',
@@ -607,8 +620,8 @@ El equipo de ${this.COMPANY_NAME}
         benefits: [
           'Establece tu identidad corporativa',
           'Configura preferencias fiscales',
-          'Define equipos y permisos'
-        ]
+          'Define equipos y permisos',
+        ],
       },
       create_store: {
         title: '🏪 Crea tu Primera Tienda',
@@ -622,12 +635,13 @@ El equipo de ${this.COMPANY_NAME}
         benefits: [
           'Personaliza tu tienda online',
           'Configura métodos de pago',
-          'Establece zonas de envío'
-        ]
+          'Establece zonas de envío',
+        ],
       },
       setup_store: {
         title: '⚙️ Configura tu Tienda',
-        message: 'Configura tu tienda con inventario, métodos de pago y envíos.',
+        message:
+          'Configura tu tienda con inventario, métodos de pago y envíos.',
         action: 'Configurar Tienda',
         icon: '⚙️',
         color: '#F59E0B',
@@ -637,12 +651,13 @@ El equipo de ${this.COMPANY_NAME}
         benefits: [
           'Agrega tus primeros productos',
           'Configura tu inventario',
-          'Activa notificaciones'
-        ]
+          'Activa notificaciones',
+        ],
       },
     };
 
-    const stepInfo = stepMessages[data.step] || stepMessages['create_organization'];
+    const stepInfo =
+      stepMessages[data.step] || stepMessages['create_organization'];
 
     return {
       subject: `${stepInfo.title} - Tu setup ${this.COMPANY_NAME} está casi listo`,
@@ -732,12 +747,16 @@ El equipo de ${this.COMPANY_NAME}
 
               <div class="benefits">
                 <div class="benefits-title">✨ Beneficios de completar este paso</div>
-                ${stepInfo.benefits.map(benefit => `
+                ${stepInfo.benefits
+                  .map(
+                    (benefit) => `
                   <div class="benefit-item">
                     <span class="benefit-icon">✓</span>
                     <span>${benefit}</span>
                   </div>
-                `).join('')}
+                `,
+                  )
+                  .join('')}
               </div>
 
               <div class="timeline">
@@ -804,7 +823,7 @@ ${stepInfo.message}
 📊 PROGRESO: ${stepInfo.progress}% completado
 
 ✨ BENEFICIOS DE ESTE PASO:
-${stepInfo.benefits.map(benefit => `✓ ${benefit}`).join('\n')}
+${stepInfo.benefits.map((benefit) => `✓ ${benefit}`).join('\n')}
 
 🎯 ACCIÓN REQUERIDA:
 Continúa tu configuración aquí:

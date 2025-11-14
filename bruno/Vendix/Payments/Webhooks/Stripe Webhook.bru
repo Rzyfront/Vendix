@@ -1,0 +1,48 @@
+meta {
+  name: "Stripe Webhook",
+  type: "http",
+  seq: 7,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/webhooks/stripe",
+  headers: {
+    "stripe-signature": "v1={{webhookSignature}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "type": "payment_intent.succeeded",
+    "data": {
+      "object": {
+        "id": "pi_1234567890",
+        "object": "payment_intent",
+        "amount": 10000,
+        "currency": "usd",
+        "status": "succeeded",
+        "metadata": {
+          "order_id": "1"
+        }
+      }
+    }
+  }
+}
+
+tests {
+  test("Should handle Stripe webhook successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('received', true);
+  });
+
+  test("Should validate webhook signature", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Should process payment intent succeeded", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(3000);
+  });
+}

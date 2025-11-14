@@ -18,8 +18,8 @@ import { StoreEmptyStateComponent } from './components/store-empty-state/store-e
 import { StoreEditModalComponent } from './components/store-edit-modal/store-edit-modal.component';
 import { StoreCardComponent } from './components/store-card/store-card.component';
 import { StorePaginationComponent } from './components/store-pagination/store-pagination.component';
-import { StoreSwitchDialogComponent } from './components/store-switch-dialog/store-switch-dialog.component';
 import { EnvironmentSwitchService } from '../../../../core/services/environment-switch.service';
+import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 
 // App shared components
 import {
@@ -42,7 +42,6 @@ import {
     StoreEditModalComponent,
     StoreCardComponent,
     StorePaginationComponent,
-    StoreSwitchDialogComponent,
     // App shared components
     SpinnerComponent,
   ],
@@ -193,17 +192,6 @@ import {
         (close)="closeEditModal()"
         (save)="onStoreUpdate($event)"
       ></app-store-edit-modal>
-
-      <!-- Store Switch Dialog -->
-      <app-store-switch-dialog
-        [isVisible]="showStoreSwitchDialog"
-        [isLoading]="isSwitchingEnvironment"
-        [data]="{
-          storeName: selectedStoreForSwitch?.name || '',
-          storeSlug: selectedStoreForSwitch?.domain || '',
-        }"
-        (close)="onStoreSwitchDialogClose($event)"
-      ></app-store-switch-dialog>
     </div>
   `,
   styles: [
@@ -220,9 +208,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
   showCreateModal = false;
   showEditModal = false;
   editLoading = false;
-  showStoreSwitchDialog = false;
-  isSwitchingEnvironment = false;
-  selectedStoreForSwitch: StoreListItem | null = null;
 
   // View management
   viewMode: 'table' | 'card' = 'table';
@@ -258,6 +243,7 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     private storesService: OrganizationStoresService,
     private toastService: ToastService,
     private environmentSwitchService: EnvironmentSwitchService,
+    private dialogService: DialogService,
   ) {}
 
   ngOnInit(): void {
@@ -446,8 +432,7 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
   // Store actions
   viewStore(store: StoreListItem): void {
     console.log('View store:', store);
-    this.selectedStoreForSwitch = store;
-    this.showStoreSwitchDialog = true;
+    this.switchToStoreEnvironment(store);
   }
 
   toggleStoreStatus(store: StoreListItem): void {
@@ -495,39 +480,34 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     }
   }
 
-  // Store switch dialog handlers
-  onStoreSwitchDialogClose(confirmed: boolean): void {
-    this.showStoreSwitchDialog = false;
-
-    if (confirmed && this.selectedStoreForSwitch) {
-      this.switchToStoreEnvironment(this.selectedStoreForSwitch);
-    }
-
-    this.selectedStoreForSwitch = null;
-  }
-
   private async switchToStoreEnvironment(store: StoreListItem): Promise<void> {
-    this.isSwitchingEnvironment = true;
-
     try {
-      const success =
-        await this.environmentSwitchService.performEnvironmentSwitch(
-          'STORE_ADMIN',
-          store.domain,
-        );
+      const confirmed = await this.dialogService.confirm({
+        title: 'Cambiar al entorno de la tienda',
+        message: `¿Deseas cambiar al entorno de administración de la tienda <strong>${store.name}</strong>? Serás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
+        confirmText: 'Cambiar de entorno',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      });
 
-      if (success) {
-        this.toastService.success(
-          `Cambiado al entorno de la tienda "${store.name}"`,
-        );
-      } else {
-        this.toastService.error('No se pudo cambiar al entorno de la tienda');
+      if (confirmed) {
+        const success =
+          await this.environmentSwitchService.performEnvironmentSwitch(
+            'STORE_ADMIN',
+            store.slug, // ✅ Corregido: store.slug en lugar de store.domain
+          );
+
+        if (success) {
+          this.toastService.success(
+            `Cambiado al entorno de la tienda "${store.name}"`,
+          );
+        } else {
+          this.toastService.error('No se pudo cambiar al entorno de la tienda');
+        }
       }
     } catch (error) {
       console.error('Error switching to store environment:', error);
       this.toastService.error('Error al cambiar al entorno de la tienda');
-    } finally {
-      this.isSwitchingEnvironment = false;
     }
   }
 }

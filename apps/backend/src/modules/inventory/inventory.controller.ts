@@ -12,9 +12,14 @@ export class InventoryController {
   ) {}
 
   @Post('validate-consolidated-stock')
-  async validateConsolidatedStock(@Body() validateDto: ValidateConsolidatedStockDto) {
+  async validateConsolidatedStock(
+    @Body() validateDto: ValidateConsolidatedStockDto,
+  ) {
     try {
-      const result = await this.inventoryValidationService.validateConsolidatedStock(validateDto);
+      const result =
+        await this.inventoryValidationService.validateConsolidatedStock(
+          validateDto,
+        );
       return this.responseService.success(
         result,
         'Validación de stock consolidado completada exitosamente',
@@ -29,9 +34,14 @@ export class InventoryController {
   }
 
   @Post('validate-multiple-consolidated-stock')
-  async validateMultipleConsolidatedStock(@Body() validateDto: ValidateMultipleConsolidatedStockDto) {
+  async validateMultipleConsolidatedStock(
+    @Body() validateDto: ValidateMultipleConsolidatedStockDto,
+  ) {
     try {
-      const result = await this.inventoryValidationService.validateMultipleConsolidatedStock(validateDto);
+      const result =
+        await this.inventoryValidationService.validateMultipleConsolidatedStock(
+          validateDto,
+        );
       return this.responseService.success(
         result,
         'Validación de stock consolidado múltiple completada exitosamente',
@@ -51,10 +61,11 @@ export class InventoryController {
     @Query('organization_id') organizationId?: number,
   ) {
     try {
-      const result = await this.inventoryValidationService.getConsolidatedStockByProduct(
-        +productId,
-        organizationId ? +organizationId : undefined,
-      );
+      const result =
+        await this.inventoryValidationService.getConsolidatedStockByProduct(
+          +productId,
+          organizationId ? +organizationId : undefined,
+        );
       return this.responseService.success(
         result,
         'Stock consolidado del producto obtenido exitosamente',

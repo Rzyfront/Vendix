@@ -2862,20 +2862,25 @@ export class AuthService {
 
     // Validar el entorno objetivo
     if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
-      throw new BadRequestException('Se requiere el slug de la tienda para cambiar a STORE_ADMIN');
+      throw new BadRequestException(
+        'Se requiere el slug de la tienda para cambiar a STORE_ADMIN',
+      );
     }
 
     // Verificar que el usuario tenga los roles necesarios
-    const userRoles = user.user_roles.map(ur => ur.roles.name);
-    
+    const userRoles = user.user_roles.map((ur) => ur.roles.name);
+
     let storeId = null;
     if (targetEnvironment === 'STORE_ADMIN') {
-      const hasStoreRole = userRoles.includes('store_admin') || 
-                          userRoles.includes('owner') || 
-                          userRoles.includes('manager');
-      
+      const hasStoreRole =
+        userRoles.includes('store_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('manager');
+
       if (!hasStoreRole) {
-        throw new UnauthorizedException('No tienes permisos para acceder al entorno de tienda');
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de tienda',
+        );
       }
 
       // Verificar que la tienda exista y el usuario tenga acceso
@@ -2891,9 +2896,10 @@ export class AuthService {
       }
 
       // Verificar que el usuario pertenezca a la organización de la tienda
-      const hasAccess = userRoles.includes('super_admin') || 
-                       userRoles.includes('owner') ||
-                       store.organizations.owner_id === userId;
+      const hasAccess =
+        userRoles.includes('super_admin') ||
+        userRoles.includes('owner') ||
+        store.organizations.owner_id === userId;
 
       if (!hasAccess) {
         throw new UnauthorizedException('No tienes acceso a esta tienda');
@@ -2903,12 +2909,15 @@ export class AuthService {
     }
 
     if (targetEnvironment === 'ORG_ADMIN') {
-      const hasOrgRole = userRoles.includes('org_admin') || 
-                        userRoles.includes('owner') || 
-                        userRoles.includes('super_admin');
-      
+      const hasOrgRole =
+        userRoles.includes('org_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('super_admin');
+
       if (!hasOrgRole) {
-        throw new UnauthorizedException('No tienes permisos para acceder al entorno de organización');
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de organización',
+        );
       }
     }
 

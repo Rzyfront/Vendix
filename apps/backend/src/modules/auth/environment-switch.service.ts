@@ -112,12 +112,21 @@ export class EnvironmentSwitchService {
       }
     }
 
-    // Generar tokens simples para el cambio de entorno
+    // Generar tokens con scope específico para el cambio de entorno
     const payload = {
       sub: user.id,
       email: user.email,
       environment: targetEnvironment,
       storeSlug: storeSlug,
+      organizationId: storeId
+        ? (
+            await this.prismaService.stores.findUnique({
+              where: { id: storeId },
+              select: { organization_id: true },
+            })
+          )?.organization_id || user.organization_id
+        : user.organization_id,
+      storeId: storeId,
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -136,6 +145,22 @@ export class EnvironmentSwitchService {
     // Obtener permisos y roles actualizados
     const permissions = this.getPermissionsFromRoles(user.user_roles);
     const roles = userRoles;
+
+    // Actualizar user settings con el nuevo entorno
+    await this.prismaService.user_settings.upsert({
+      where: { user_id: userId },
+      update: {
+        config: {
+          app: targetEnvironment,
+        },
+      },
+      create: {
+        user_id: userId,
+        config: {
+          app: targetEnvironment,
+        },
+      },
+    });
 
     // Registrar el cambio de entorno en auditoría
     await this.auditService.log({

@@ -1,0 +1,106 @@
+meta {
+  name: "Create Order and Process Payment",
+  type: "http",
+  seq: 2,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/payments/with-order",
+  headers: {
+    "Authorization": "Bearer {{authToken}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "orderId": 1,
+    "customerId": 1,
+    "amount": 150.00,
+    "currency": "USD",
+    "paymentMethodId": 1,
+    "storeId": 1,
+    "customerEmail": "customer@example.com",
+    "customerName": "John Doe",
+    "customerPhone": "+1234567890",
+    "billingAddressId": 1,
+    "shippingAddressId": 2,
+    "items": [
+      {
+        "productId": 1,
+        "productName": "Test Product 1",
+        "productVariantId": 1,
+        "variantSku": "TP1-RED-M",
+        "variantAttributes": {
+          "color": "red",
+          "size": "M"
+        },
+        "quantity": 2,
+        "unitPrice": 50.00,
+        "totalPrice": 100.00,
+        "taxRate": 0.08,
+        "taxAmountItem": 8.00
+      },
+      {
+        "productId": 2,
+        "productName": "Test Product 2",
+        "quantity": 1,
+        "unitPrice": 42.00,
+        "totalPrice": 42.00,
+        "taxRate": 0.08,
+        "taxAmountItem": 3.36
+      }
+    ],
+    "metadata": {
+      "source": "web",
+      "device": "mobile",
+      "campaign": "summer_sale"
+    },
+    "returnUrl": "https://vendix.com/payment/success",
+    "cancelUrl": "https://vendix.com/payment/cancel"
+  }
+}
+
+tests {
+  test("Should create order and process payment successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('success', true);
+    expect(res.body.data).to.have.property('transactionId');
+    expect(res.body.data).to.have.property('status');
+    expect(res.body).to.have.property('message', 'Order created and payment processed successfully');
+  });
+
+  test("Should validate order items structure", function() {
+    expect(res.body.data).to.have.property('orderId');
+    expect(res.body.data).to.have.property('orderNumber');
+    expect(res.body.data.orderItems).to.be.an('array');
+    expect(res.body.data.orderItems).to.have.length(2);
+  });
+
+  test("Should validate item calculations", function() {
+    const items = res.body.data.orderItems || [];
+    const firstItem = items[0];
+    
+    expect(firstItem).to.have.property('quantity', 2);
+    expect(firstItem).to.have.property('unitPrice', 50.00);
+    expect(firstItem).to.have.property('totalPrice', 100.00);
+    expect(firstItem).to.have.property('taxAmountItem', 8.00);
+  });
+
+  test("Should validate total amount", function() {
+    expect(res.body.data).to.have.property('subtotalAmount', 142.00);
+    expect(res.body.data).to.have.property('taxAmount', 11.36);
+    expect(res.body.data).to.have.property('grandTotal', 153.36);
+  });
+
+  test("Should include customer information", function() {
+    expect(res.body.data).to.have.property('customer');
+    expect(res.body.data.customer).to.have.property('email', 'customer@example.com');
+    expect(res.body.data.customer).to.have.property('name', 'John Doe');
+    expect(res.body.data.customer).to.have.property('phone', '+1234567890');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(8000);
+  });
+}
