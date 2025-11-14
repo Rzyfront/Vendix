@@ -91,7 +91,7 @@ export class EnvironmentSwitchService {
     storeSlug?: string,
   ): Promise<boolean> {
     try {
-      let response: SwitchEnvironmentResponse;
+      let response: SwitchEnvironmentResponse | undefined;
 
       if (targetEnvironment === 'STORE_ADMIN' && storeSlug) {
         response = await this.switchToStore(storeSlug).toPromise();

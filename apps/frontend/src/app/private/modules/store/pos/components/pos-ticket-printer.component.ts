@@ -83,7 +83,7 @@ import {
               />
               Enviar por email
               <span *ngIf="ticketData?.customer?.email" class="customer-info">
-                ({{ ticketData.customer.email }})
+                ({{ ticketData.customer!.email }})
               </span>
             </label>
           </div>
@@ -98,7 +98,7 @@ import {
               />
               Enviar por SMS
               <span *ngIf="ticketData?.customer?.phone" class="customer-info">
-                ({{ ticketData.customer.phone }})
+                ({{ ticketData.customer!.phone }})
               </span>
             </label>
           </div>

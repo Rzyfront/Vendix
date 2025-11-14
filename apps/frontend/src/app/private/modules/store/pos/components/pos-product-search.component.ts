@@ -191,7 +191,11 @@ import {
 
       <div
         class="search-suggestions"
-        *ngIf="showSuggestions && (suggestions$ | async)?.length > 0"
+        *ngIf="
+          showSuggestions &&
+          (suggestions$ | async)?.length &&
+          (suggestions$ | async)!.length > 0
+        "
       >
         <div class="suggestions-list">
           <div

@@ -16,7 +16,6 @@ import { StoreCreateModalComponent } from './components/store-create-modal/store
 import { StoreStatsComponent } from './components/store-stats/store-stats.component';
 import { StoreEmptyStateComponent } from './components/store-empty-state/store-empty-state.component';
 import { StoreEditModalComponent } from './components/store-edit-modal/store-edit-modal.component';
-import { StoreSettingsModalComponent } from './components/store-settings-modal/store-settings-modal.component';
 import { StoreCardComponent } from './components/store-card/store-card.component';
 import { StorePaginationComponent } from './components/store-pagination/store-pagination.component';
 import { StoreSwitchDialogComponent } from './components/store-switch-dialog/store-switch-dialog.component';
@@ -41,14 +40,11 @@ import {
     StoreStatsComponent,
     StoreEmptyStateComponent,
     StoreEditModalComponent,
-    StoreSettingsModalComponent,
     StoreCardComponent,
     StorePaginationComponent,
     StoreSwitchDialogComponent,
     // App shared components
     SpinnerComponent,
-    ButtonComponent,
-    ModalComponent,
   ],
   template: `
     <div class="min-h-screen bg-[var(--color-background)]">
