@@ -8,12 +8,9 @@ meta {
 # Si no existe, se debería crear el endpoint correspondiente
 
 post {
-  url: http://{{baseUrl}}/inventory/validate-consolidated-stock
+  url: http://{{url}}/inventory/validate-consolidated-stock
   body: json
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 body:json {
@@ -71,12 +68,9 @@ tests {
 
 # Prueba de stock insuficiente
 post {
-  url: http://{{baseUrl}}/inventory/validate-consolidated-stock
+  url: http://{{url}}/inventory/validate-consolidated-stock
   body: json
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 body:json {

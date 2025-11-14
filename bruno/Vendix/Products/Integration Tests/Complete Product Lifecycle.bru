@@ -1,0 +1,231 @@
+meta {
+  name: "Complete Product Lifecycle Integration Test"
+  type: http
+  seq: 30
+}
+
+# Step 1: Create a new product
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "category_id": 1,
+    "brand_id": 1,
+    "name": "Integration Test Product",
+    "slug": "integration-test-product",
+    "description": "Product for integration testing complete lifecycle",
+    "base_price": 299.99,
+    "sku": "INTEGRATION-TEST-001",
+    "state": "active",
+    "category_ids": [1, 2],
+    "tax_category_ids": [1],
+    "stock_by_location": [
+      {
+        "location_id": 1,
+        "quantity": 20,
+        "notes": "Main stock for integration testing"
+      },
+      {
+        "location_id": 2,
+        "quantity": 10,
+        "notes": "Secondary stock location"
+      }
+    ]
+  }
+}
+
+tests {
+  test("Product created successfully in lifecycle test", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const product = res.body.data;
+    expect(product).to.have.property('id');
+    expect(product).to.have.property('name', 'Integration Test Product');
+    expect(product).to.have.property('total_stock_available', 30); // 20 + 10
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("lifecycleProductId", res.body.data.id);
+  }
+}
+
+# Step 2: Add images to the product
+post {
+  url: http://{{url}}/products/{{lifecycleProductId}}/images
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "image_url": "https://example.com/integration-test-main.jpg",
+    "is_main": true
+  }
+}
+
+tests {
+  test("Main image added to lifecycle product", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data.is_main).to.be.true;
+  });
+}
+
+# Step 3: Add additional image
+post {
+  url: http://{{url}}/products/{{lifecycleProductId}}/images
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "image_url": "https://example.com/integration-test-secondary.jpg",
+    "is_main": false
+  }
+}
+
+tests {
+  test("Secondary image added to lifecycle product", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data.is_main).to.be.false;
+  });
+}
+
+# Step 4: Create product variant
+post {
+  url: http://{{url}}/products/{{lifecycleProductId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "INTEGRATION-TEST-VARIANT-001",
+    "price_override": 349.99,
+    "stock_quantity": 15
+  }
+}
+
+tests {
+  test("Variant created for lifecycle product", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data.sku).to.equal('INTEGRATION-TEST-VARIANT-001');
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("lifecycleVariantId", res.body.data.id);
+  }
+}
+
+# Step 5: Verify consolidated stock
+get {
+  url: http://{{url}}/inventory/consolidated-stock/product/{{lifecycleProductId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Consolidated stock calculated for complete product", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const stockData = res.body.data;
+    expect(stockData).to.have.property('totalAvailable');
+    expect(stockData.totalAvailable).to.equal(45); // 30 (base) + 15 (variant)
+  });
+}
+
+# Step 6: Update the product
+patch {
+  url: http://{{url}}/products/{{lifecycleProductId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Integration Test Product - Updated",
+    "base_price": 319.99,
+    "stock_quantity": 35
+  }
+}
+
+tests {
+  test("Product updated in lifecycle", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const product = res.body.data;
+    expect(product.name).to.equal('Integration Test Product - Updated');
+    expect(product.base_price).to.equal(319.99);
+  });
+}
+
+# Step 7: Validate cross-location stock availability
+post {
+  url: http://{{url}}/inventory/validate-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "product_id": {{lifecycleProductId}},
+  "quantity": 40,
+  "organization_id": 16
+}
+
+tests {
+  test("Cross-location stock validation in lifecycle", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('isAvailable');
+    expect(result.totalAvailable).to.be.at.least(40);
+  });
+}
+
+# Step 8: Deactivate the product
+patch {
+  url: http://{{url}}/products/{{lifecycleProductId}}/deactivate
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Product deactivated in lifecycle", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+  });
+}
+
+# Step 9: Verify product is deactivated
+get {
+  url: http://{{url}}/products/{{lifecycleProductId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Product is properly deactivated", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const product = res.body.data;
+    expect(product).to.have.property('state', 'inactive');
+  });
+}

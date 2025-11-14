@@ -5,12 +5,9 @@ meta {
 }
 
 get {
-  url: http://{{baseUrl}}/inventory/stock-levels/product/{{productId}}
+  url: http://{{url}}/inventory/stock-levels/product/{{productId}}
   body: none
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 tests {

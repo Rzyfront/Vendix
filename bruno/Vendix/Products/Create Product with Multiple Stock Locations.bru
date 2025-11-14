@@ -5,9 +5,9 @@ meta {
 }
 
 post {
-  url: http://{{baseUrl}}/products
+  url: http://{{url}}/products
   body: json
-  auth: bearer
+  auth: inherit
 }
 
 body:json {
@@ -104,10 +104,8 @@ tests {
   });
 }
 
-script {
-  post-response: {
-    if (res.status === 201 && res.body.success) {
-      bru.setEnvVar('productId', res.body.data.id.toString());
-    }
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("productId", res.body.data.id);
   }
 }

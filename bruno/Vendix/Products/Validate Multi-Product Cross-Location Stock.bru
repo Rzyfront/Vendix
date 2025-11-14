@@ -5,12 +5,9 @@ meta {
 }
 
 post {
-  url: http://{{baseUrl}}/inventory/validate-multiple-consolidated-stock
+  url: http://{{url}}/inventory/validate-multiple-consolidated-stock
   body: json
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 body:json {
@@ -129,12 +126,9 @@ tests {
 
 # Prueba de multi-product con stock insuficiente
 post {
-  url: http://{{baseUrl}}/inventory/validate-multiple-consolidated-stock
+  url: http://{{url}}/inventory/validate-multiple-consolidated-stock
   body: json
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 body:json {

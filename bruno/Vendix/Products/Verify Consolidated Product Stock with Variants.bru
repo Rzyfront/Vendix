@@ -5,12 +5,9 @@ meta {
 }
 
 get {
-  url: http://{{baseUrl}}/products/{{productId}}
+  url: http://{{url}}/products/{{productId}}
   body: none
-  headers: {
-    Authorization: Bearer {{adminToken}}
-    Content-Type: application/json
-  }
+  auth: inherit
 }
 
 tests {

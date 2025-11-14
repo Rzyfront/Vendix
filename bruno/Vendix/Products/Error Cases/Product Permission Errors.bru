@@ -1,0 +1,92 @@
+meta {
+  name: "Product Permission Errors"
+  type: http
+  seq: 21
+}
+
+# Test 1: Create product without authentication
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "Unauthorized Product",
+    "base_price": 99.99,
+    "sku": "UNAUTHORIZED-001"
+  }
+}
+
+tests {
+  test("Unauthorized product creation fails", function() {
+    expect(res.status).to.equal(401);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('unauthorized') || expect(res.body.message).to.include('authentication');
+  });
+}
+
+# Test 2: Delete product without proper permissions
+delete {
+  url: http://{{url}}/products/{{productId}}
+  body: none
+  auth: none
+}
+
+tests {
+  test("Unauthorized product deletion fails", function() {
+    expect(res.status).to.equal(401);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('unauthorized') || expect(res.body.message).to.include('authentication');
+  });
+}
+
+# Test 3: Access product from different store (assuming user has limited permissions)
+get {
+  url: http://{{url}}/products/store/999
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Access to restricted store products fails", function() {
+    // This might return 403, 404, or empty array depending on implementation
+    expect([403, 404, 200]).to.include(res.status);
+
+    if (res.status === 200) {
+      // If 200, should return empty array for unauthorized store access
+      expect(res.body).to.have.property('data');
+      expect(res.body.data).to.be.an('array');
+      expect(res.body.data.length).to.equal(0);
+    } else {
+      expect(res.body).to.have.property('success', false);
+    }
+  });
+}
+
+# Test 4: Create variant for product without ownership
+post {
+  url: http://{{url}}/products/1/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "UNAUTHORIZED-VARIANT-001",
+    "price_override": 199.99,
+    "stock_quantity": 10
+  }
+}
+
+tests {
+  test("Unauthorized variant creation fails", function() {
+    // This should fail if user doesn't own product 1
+    expect([400, 403, 404]).to.include(res.status);
+    if (res.status !== 200) {
+      expect(res.body).to.have.property('success', false);
+    }
+  });
+}

@@ -12,8 +12,8 @@ post {
 
 body:json {
   {
-    "organization_slug": "tech-solutions",
-    "email": "employee1@tech-bogota.com",
+    "organization_slug": "vendix-corp",
+    "email": "superadmin@vendix.com",
     "password": "1125634q"
   }
 }
@@ -29,18 +29,18 @@ tests {
     expect(res.body).to.have.property('access_token');
     expect(res.body).to.have.property('user');
   });
-
+  
   test("User data is complete", function() {
     expect(res.body.user).to.have.property('id');
     expect(res.body.user).to.have.property('email');
     expect(res.body.user).to.have.property('roles');
     expect(res.body.user).to.not.have.property('password');
   });
-
+  
   test("User has super_admin role", function() {
     expect(res.body.user.roles).to.include('super_admin');
   });
-
+  
   test("Token is valid", function() {
     expect(res.body.access_token).to.be.a('string');
     expect(res.body.access_token.length).to.be.greaterThan(0);
