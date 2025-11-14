@@ -1,4 +1,11 @@
-import { Component, Output, EventEmitter, HostListener, inject, OnInit } from '@angular/core';
+import {
+  Component,
+  Output,
+  EventEmitter,
+  HostListener,
+  inject,
+  OnInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { Observable } from 'rxjs';
@@ -6,12 +13,14 @@ import { Observable } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
+import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 
 export interface UserMenuOption {
   label: string;
   icon: string;
   action: () => void;
   type?: 'default' | 'danger';
+  condition?: () => boolean;
 }
 
 @Component({
@@ -24,7 +33,8 @@ export interface UserMenuOption {
         class="user-trigger"
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
-        aria-label="Menú de usuario">
+        aria-label="Menú de usuario"
+      >
         <div class="user-info">
           <span class="user-name">{{ user.name || 'Usuario' }}</span>
           <span class="user-role">{{ user.role || 'Administrador' }}</span>
@@ -36,7 +46,8 @@ export interface UserMenuOption {
           name="chevron"
           [size]="16"
           class="chevron-icon"
-          [class.rotate]="isOpen">
+          [class.rotate]="isOpen"
+        >
         </app-icon>
       </button>
 
@@ -53,28 +64,34 @@ export interface UserMenuOption {
 
         <div class="dropdown-content">
           <button
-            *ngFor="let option of menuOptions"
+            *ngFor="let option of visibleMenuOptions"
             class="dropdown-item"
             [class.danger]="option.type === 'danger'"
-            (click)="handleOptionClick(option)">
-            <app-icon [name]="option.icon" [size]="18" class="item-icon"></app-icon>
+            (click)="handleOptionClick(option)"
+          >
+            <app-icon
+              [name]="option.icon"
+              [size]="18"
+              class="item-icon"
+            ></app-icon>
             <span class="item-label">{{ option.label }}</span>
           </button>
         </div>
       </div>
     </div>
   `,
-  styleUrls: ['./user-dropdown.component.scss']
+  styleUrls: ['./user-dropdown.component.scss'],
 })
 export class UserDropdownComponent implements OnInit {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
-  
+
   private router = inject(Router);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
-  
+  private environmentSwitchService = inject(EnvironmentSwitchService);
+
   userContext$: Observable<{
     user?: any;
     organization?: any;
@@ -101,7 +118,7 @@ export class UserDropdownComponent implements OnInit {
         name: 'Usuario',
         email: 'user@example.com',
         role: 'Administrador',
-        initials: 'US'
+        initials: 'US',
       };
     }
 
@@ -113,7 +130,7 @@ export class UserDropdownComponent implements OnInit {
       name,
       email: user.email || 'user@example.com',
       role: this.getRoleDisplay(context),
-      initials
+      initials,
     };
   }
 
@@ -121,20 +138,32 @@ export class UserDropdownComponent implements OnInit {
     {
       label: 'Mi Perfil',
       icon: 'user',
-      action: () => this.goToProfile()
+      action: () => this.goToProfile(),
     },
     {
       label: 'Configuración',
       icon: 'settings',
-      action: () => this.goToSettings()
+      action: () => this.goToSettings(),
+    },
+    {
+      label: 'Administrar Organización',
+      icon: 'building',
+      action: () => this.switchToOrganization(),
+      condition: () => this.canSwitchToOrganization(),
     },
     {
       label: 'Cerrar Sesión',
       icon: 'logout',
       action: () => this.logout(),
-      type: 'danger'
-    }
+      type: 'danger',
+    },
   ];
+
+  get visibleMenuOptions(): UserMenuOption[] {
+    return this.menuOptions.filter(
+      (option) => !option.condition || option.condition(),
+    );
+  }
 
   @HostListener('document:click', ['$event'])
   onClickOutside(event: MouseEvent) {
@@ -185,15 +214,15 @@ export class UserDropdownComponent implements OnInit {
       error: (error) => {
         console.error('Error en logout:', error);
         this.router.navigate(['/auth/login']);
-      }
+      },
     });
   }
 
   private generateInitials(name: string): string {
     return name
       .split(' ')
-      .filter(word => word.length > 0)
-      .map(word => word[0].toUpperCase())
+      .filter((word) => word.length > 0)
+      .map((word) => word[0].toUpperCase())
       .slice(0, 2)
       .join('');
   }
@@ -217,5 +246,42 @@ export class UserDropdownComponent implements OnInit {
     }
 
     return user.roles?.[0] || 'Usuario';
+  }
+
+  private canSwitchToOrganization(): boolean {
+    const context = this.globalFacade.getUserContext();
+    if (!context?.user) return false;
+
+    const { user, store } = context;
+
+    // Solo mostrar si está en STORE_ADMIN y tiene acceso a ORG_ADMIN
+    const hasStoreRole =
+      user.roles?.includes('store_admin') ||
+      user.roles?.includes('owner') ||
+      user.roles?.includes('manager');
+    const hasOrgRole =
+      user.roles?.includes('org_admin') ||
+      user.roles?.includes('owner') ||
+      user.roles?.includes('super_admin');
+
+    return hasStoreRole && hasOrgRole && store;
+  }
+
+  private async switchToOrganization(): Promise<void> {
+    try {
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'ORG_ADMIN',
+        );
+
+      if (success) {
+        // El éxito se maneja en el servicio con la redirección
+        console.log('Switched to organization environment');
+      } else {
+        console.error('Failed to switch to organization environment');
+      }
+    } catch (error) {
+      console.error('Error switching to organization environment:', error);
+    }
   }
 }

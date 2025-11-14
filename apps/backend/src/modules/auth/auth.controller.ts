@@ -687,4 +687,63 @@ export class AuthController {
       );
     }
   }
+
+  // ===== RUTAS DE CAMBIO DE ENTORNO =====
+
+  @Post('switch-environment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cambiar entre entornos de administración',
+    description: 'Permite a los usuarios cambiar entre ORG_ADMIN y STORE_ADMIN',
+  })
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Cambio de entorno exitoso',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Entorno cambiado exitosamente' },
+        data: {
+          type: 'object',
+          properties: {
+            user: { type: 'object' },
+            tokens: {
+              type: 'object',
+              properties: {
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
+              },
+            },
+            permissions: { type: 'array', items: { type: 'string' } },
+            roles: { type: 'array', items: { type: 'string' } },
+            updatedEnvironment: { type: 'string' },
+          },
+        },
+      },
+    },
+  })
+  async switchEnvironment(
+    @Req() req: AuthenticatedRequest,
+    @Body() switchDto: any,
+  ) {
+    try {
+      const result = await this.authService.switchEnvironment(
+        req.user.id,
+        switchDto.target_environment,
+        switchDto.store_slug,
+      );
+      return this.responseService.success(
+        result,
+        'Entorno cambiado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al cambiar de entorno',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
 }

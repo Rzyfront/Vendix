@@ -7,7 +7,7 @@ import { StoreListItem } from '../../interfaces/store.interface';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './store-card.component.html',
-  styleUrls: ['./store-card.component.scss']
+  styleUrls: ['./store-card.component.scss'],
 })
 export class StoreCardComponent {
   @Input() store: StoreListItem | null = null;
@@ -16,6 +16,7 @@ export class StoreCardComponent {
   @Output() edit = new EventEmitter<StoreListItem>();
   @Output() delete = new EventEmitter<StoreListItem>();
   @Output() toggleStatus = new EventEmitter<StoreListItem>();
+  @Output() viewStore = new EventEmitter<StoreListItem>();
 
   onSelect(): void {
     if (this.store) {
@@ -41,6 +42,13 @@ export class StoreCardComponent {
     event.stopPropagation();
     if (this.store) {
       this.toggleStatus.emit(this.store);
+    }
+  }
+
+  onViewStore(event: Event): void {
+    event.stopPropagation();
+    if (this.store) {
+      this.viewStore.emit(this.store);
     }
   }
 
@@ -73,7 +81,7 @@ export class StoreCardComponent {
   getInitials(name: string): string {
     return name
       .split(' ')
-      .map(word => word.charAt(0))
+      .map((word) => word.charAt(0))
       .join('')
       .toUpperCase()
       .substring(0, 2);

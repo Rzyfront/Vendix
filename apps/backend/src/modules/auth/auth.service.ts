@@ -2277,7 +2277,9 @@ export class AuthService {
       store_id: scope.store_id,
     };
 
-    const accessToken = this.jwtService.sign(payload);
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
+    });
     const refreshToken = this.jwtService.sign(payload, {
       secret:
         this.configService.get<string>('JWT_REFRESH_SECRET') ||
@@ -2825,5 +2827,136 @@ export class AuthService {
     }
 
     return Array.from(permissions);
+  }
+
+  // ===== MÉTODOS DE CAMBIO DE ENTORNO =====
+
+  async switchEnvironment(
+    userId: number,
+    targetEnvironment: 'STORE_ADMIN' | 'ORG_ADMIN',
+    storeSlug?: string,
+  ) {
+    // Validar que el usuario exista
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+
+    // Validar el entorno objetivo
+    if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
+      throw new BadRequestException(
+        'Se requiere el slug de la tienda para cambiar a STORE_ADMIN',
+      );
+    }
+
+    // Verificar que el usuario tenga los roles necesarios
+    const userRoles = user.user_roles.map((ur) => ur.roles.name);
+
+    let storeId = null;
+    if (targetEnvironment === 'STORE_ADMIN') {
+      const hasStoreRole =
+        userRoles.includes('store_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('manager');
+
+      if (!hasStoreRole) {
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de tienda',
+        );
+      }
+
+      // Verificar que la tienda exista y el usuario tenga acceso
+      const store = await this.prismaService.stores.findUnique({
+        where: { domain: storeSlug },
+        include: {
+          organizations: true,
+        },
+      });
+
+      if (!store) {
+        throw new NotFoundException('Tienda no encontrada');
+      }
+
+      // Verificar que el usuario pertenezca a la organización de la tienda
+      const hasAccess =
+        userRoles.includes('super_admin') ||
+        userRoles.includes('owner') ||
+        store.organizations.owner_id === userId;
+
+      if (!hasAccess) {
+        throw new UnauthorizedException('No tienes acceso a esta tienda');
+      }
+
+      storeId = store.id;
+    }
+
+    if (targetEnvironment === 'ORG_ADMIN') {
+      const hasOrgRole =
+        userRoles.includes('org_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('super_admin');
+
+      if (!hasOrgRole) {
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de organización',
+        );
+      }
+    }
+
+    // Generar nuevos tokens con el contexto actualizado
+    const tokenResponse = await this.generateTokens(user, {
+      organization_id: user.organization_id,
+      store_id: storeId,
+    });
+
+    const tokens = {
+      accessToken: tokenResponse.access_token,
+      refreshToken: tokenResponse.refresh_token,
+    };
+
+    // Obtener permisos y roles actualizados
+    const permissions = this.getPermissionsFromRoles(user.user_roles);
+    const roles = userRoles;
+
+    // Registrar el cambio de entorno en auditoría
+    await this.auditService.log({
+      userId: userId,
+      action: AuditAction.UPDATE,
+      resource: AuditResource.USERS,
+      metadata: `Cambio de entorno a ${targetEnvironment}${storeSlug ? ` (tienda: ${storeSlug})` : ''}`,
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        roles,
+        permissions,
+      },
+      tokens,
+      permissions,
+      roles,
+      updatedEnvironment: targetEnvironment,
+    };
   }
 }
