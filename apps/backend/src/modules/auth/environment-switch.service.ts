@@ -142,7 +142,11 @@ export class EnvironmentSwitchService {
       userId: userId,
       action: AuditAction.UPDATE,
       resource: AuditResource.USERS,
-      metadata: `Cambio de entorno a ${targetEnvironment}${storeSlug ? ` (tienda: ${storeSlug})` : ''}`,
+      metadata: {
+        action: 'environment_switch',
+        targetEnvironment,
+        storeSlug: storeSlug || null,
+      },
     });
 
     return {
