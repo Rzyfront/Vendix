@@ -14,6 +14,7 @@ import {
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
+import { EnvironmentSwitchService } from './environment-switch.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
@@ -35,6 +36,7 @@ import { AuthenticatedRequest } from '../../common/interfaces/authenticated-requ
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly environmentSwitchService: EnvironmentSwitchService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -729,7 +731,7 @@ export class AuthController {
     @Body() switchDto: any,
   ) {
     try {
-      const result = await this.authService.switchEnvironment(
+      const result = await this.environmentSwitchService.switchEnvironment(
         req.user.id,
         switchDto.target_environment,
         switchDto.store_slug,
