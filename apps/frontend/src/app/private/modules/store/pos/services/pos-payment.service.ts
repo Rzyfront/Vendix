@@ -8,6 +8,14 @@ import {
   Transaction,
 } from '../models/payment.model';
 
+// Re-export types for component usage
+export type {
+  PaymentMethod,
+  PaymentRequest,
+  PaymentResponse,
+  Transaction,
+} from '../models/payment.model';
+
 @Injectable({
   providedIn: 'root',
 })

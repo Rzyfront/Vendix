@@ -79,7 +79,7 @@ import {
                 type="checkbox"
                 [(ngModel)]="printOptions.emailReceipt"
                 (change)="onOptionsChange()"
-                [disabled]="!ticketData?.customer?.email"
+                [disabled]="!hasCustomerEmail()"
               />
               Enviar por email
               <span *ngIf="ticketData?.customer?.email" class="customer-info">
@@ -94,7 +94,7 @@ import {
                 type="checkbox"
                 [(ngModel)]="printOptions.smsReceipt"
                 (change)="onOptionsChange()"
-                [disabled]="!ticketData?.customer?.phone"
+                [disabled]="!hasCustomerPhone()"
               />
               Enviar por SMS
               <span *ngIf="ticketData?.customer?.phone" class="customer-info">
@@ -398,6 +398,14 @@ export class PosTicketPrinterComponent implements OnInit {
   printing: boolean = false;
 
   constructor(private ticketService: PosTicketService) {}
+
+  hasCustomerEmail(): boolean {
+    return !!this.ticketData?.customer?.email;
+  }
+
+  hasCustomerPhone(): boolean {
+    return !!this.ticketData?.customer?.phone;
+  }
 
   ngOnInit(): void {
     this.printers$ = this.ticketService.getPrinterConfig();

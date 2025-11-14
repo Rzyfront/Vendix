@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { AuthFacade } from '../../core/store/auth/auth.facade';
+import { AuthService } from './auth.service';
 
 export interface SwitchEnvironmentRequest {
   target_environment: 'STORE_ADMIN' | 'ORG_ADMIN';
@@ -29,12 +30,33 @@ export class EnvironmentSwitchService {
   private readonly apiUrl = '/api/auth';
   private http = inject(HttpClient);
   private authFacade = inject(AuthFacade);
+  private authService = inject(AuthService);
 
   switchToStore(storeSlug: string): Observable<SwitchEnvironmentResponse> {
     const request: SwitchEnvironmentRequest = {
       target_environment: 'STORE_ADMIN',
       store_slug: storeSlug,
     };
+
+    // Verificar que tenemos un token antes de hacer la petición
+    const currentToken = this.authService.getToken();
+    if (!currentToken) {
+      console.error('No authentication token available for environment switch');
+      return of({
+        success: false,
+        user: null,
+        tokens: { accessToken: '', refreshToken: '' },
+        permissions: [],
+        roles: [],
+        updatedEnvironment: '',
+        message: 'No authentication token available',
+      });
+    }
+
+    console.log(
+      'Switching to store with token:',
+      currentToken.substring(0, 20) + '...',
+    );
 
     return this.http
       .post<SwitchEnvironmentResponse>(
@@ -61,6 +83,26 @@ export class EnvironmentSwitchService {
     const request: SwitchEnvironmentRequest = {
       target_environment: 'ORG_ADMIN',
     };
+
+    // Verificar que tenemos un token antes de hacer la petición
+    const currentToken = this.authService.getToken();
+    if (!currentToken) {
+      console.error('No authentication token available for environment switch');
+      return of({
+        success: false,
+        user: null,
+        tokens: { accessToken: '', refreshToken: '' },
+        permissions: [],
+        roles: [],
+        updatedEnvironment: '',
+        message: 'No authentication token available',
+      });
+    }
+
+    console.log(
+      'Switching to organization with token:',
+      currentToken.substring(0, 20) + '...',
+    );
 
     return this.http
       .post<SwitchEnvironmentResponse>(
