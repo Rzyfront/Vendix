@@ -55,7 +55,7 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npm i && npx ng serve --host 0.0.0.0"
+    command: sh -c "npx ng serve --host 0.0.0.0 --poll 2000"
 
   nginx:
     image: nginx:alpine

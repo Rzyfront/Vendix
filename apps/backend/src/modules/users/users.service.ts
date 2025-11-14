@@ -187,11 +187,27 @@ export class UsersService {
         organizations: true,
         user_roles: { include: { roles: true } },
         store_users: { include: { store: true } },
+        user_settings: true,
       },
     });
     if (!user) {
       throw new NotFoundException('User not found');
     }
+    return user;
+  }
+
+  async findUserSettings(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+      include: {
+        user_settings: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
     return user;
   }
 

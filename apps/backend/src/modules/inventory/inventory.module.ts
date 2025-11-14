@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ResponseModule } from '../../common/responses/response.module';
 import { LocationsModule } from './locations/locations.module';
 import { StockLevelsModule } from './stock-levels/stock-levels.module';
 import { MovementsModule } from './movements/movements.module';
@@ -15,6 +16,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 @Module({
   imports: [
     PrismaModule,
+    ResponseModule,
     LocationsModule,
     StockLevelsModule,
     MovementsModule,

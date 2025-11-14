@@ -66,6 +66,15 @@ export class AuthFacade {
   readonly userOrganizationSlug$ = this.store.select(
     AuthSelectors.selectUserOrganizationSlug,
   );
+
+  // Organization onboarding observables
+  readonly organizationOnboarding$ = this.store.select(
+    AuthSelectors.selectOrganizationOnboarding,
+  );
+  readonly needsOrganizationOnboarding$ = this.store.select(
+    AuthSelectors.selectNeedsOrganizationOnboarding,
+  );
+
   readonly userStore$ = this.store.select(AuthSelectors.selectUserStore);
   readonly userStoreName$ = this.store.select(
     AuthSelectors.selectUserStoreName,

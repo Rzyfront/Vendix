@@ -1,6 +1,6 @@
 import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
 import { InventoryValidationService } from './services/inventory-validation.service';
-import { ResponseService } from '../../../common/responses/response.service';
+import { ResponseService } from '../../common/responses/response.service';
 import { ValidateConsolidatedStockDto } from './dto/validate-consolidated-stock.dto';
 import { ValidateMultipleConsolidatedStockDto } from './dto/validate-multiple-consolidated-stock.dto';
 

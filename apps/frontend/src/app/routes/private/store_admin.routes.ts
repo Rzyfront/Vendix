@@ -16,6 +16,29 @@ export const storeAdminRoutes: Routes = [
         path: 'dashboard',
         loadComponent: () => import('../../private/modules/store/dashboard/dashboard.component').then(c => c.DashboardComponent)
       },
+        // POS Routes
+      {
+        path: 'pos',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'register'
+          },
+          {
+            path: 'register',
+            loadComponent: () => import('../../private/modules/store/pos/register/pos-register.component').then(c => c.PosRegisterComponent)
+          },
+          {
+            path: 'cart',
+            loadComponent: () => import('../../private/modules/store/pos/cart/pos-cart.component').then(c => c.PosCartComponent)
+          },
+          {
+            path: 'payment',
+            loadComponent: () => import('../../private/modules/store/pos/payment/pos-payment.component').then(c => c.PosPaymentComponent)
+          }
+        ]
+      },
       // Products Routes
       {
         path: 'products',
@@ -146,29 +169,7 @@ export const storeAdminRoutes: Routes = [
           }
         ]
       },
-      // POS Routes
-      {
-        path: 'pos',
-        children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            redirectTo: 'register'
-          },
-          {
-            path: 'register',
-            loadComponent: () => import('../../private/modules/store/pos/register/pos-register.component').then(c => c.PosRegisterComponent)
-          },
-          {
-            path: 'cart',
-            loadComponent: () => import('../../private/modules/store/pos/cart/pos-cart.component').then(c => c.PosCartComponent)
-          },
-          {
-            path: 'payment',
-            loadComponent: () => import('../../private/modules/store/pos/payment/pos-payment.component').then(c => c.PosPaymentComponent)
-          }
-        ]
-      }
+    
     ]
   }
 ];

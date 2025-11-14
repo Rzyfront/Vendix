@@ -60,8 +60,9 @@ import { takeUntil } from 'rxjs/operators';
       </div>
     </div>
 
-    <!-- Onboarding Modal -->
+    <!-- Onboarding Modal - Only render if onboarding is needed -->
     <app-onboarding-modal
+      *ngIf="needsOnboarding"
       [(isOpen)]="showOnboardingModal"
       (completed)="onOnboardingCompleted($event)"
     ></app-onboarding-modal>
@@ -80,6 +81,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Onboarding Modal
   showOnboardingModal = false;
+  needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -91,18 +93,13 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.authFacade.checkOnboardingStatus();
-
-    // Set initial state immediately based on current needs
-    this.showOnboardingModal = this.authFacade.needsOnboarding();
-
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
+    // Subscribe to organization onboarding status from user data (no API call)
+    this.authFacade.needsOrganizationOnboarding$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
+      .subscribe((needsOnboarding: boolean) => {
+        this.needsOnboarding = needsOnboarding;
         if (needsOnboarding) {
-          // Show onboarding modal instead of redirecting
+          // Show onboarding modal only if onboarding is needed
           this.showOnboardingModal = true;
         } else {
           // Close modal if it's open
@@ -132,6 +129,11 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       label: 'Dashboard',
       icon: 'home',
       route: '/admin/dashboard',
+    },
+    {
+      label: 'Stores',
+      icon: 'store',
+      route: '/admin/stores-management',
     },
     {
       label: 'Financial',
@@ -174,11 +176,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/analytics/cross-store',
         },
       ],
-    },
-    {
-      label: 'Stores',
-      icon: 'store',
-      route: '/admin/stores-management',
     },
     {
       label: 'Users',

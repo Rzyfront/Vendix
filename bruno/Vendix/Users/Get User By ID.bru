@@ -5,9 +5,9 @@ meta {
 }
 
 get {
-  url: http://{{url}}/users/{{created_user_id}}
+  url: http://{{url}}/users/109
   body: none
-  auth: none
+  auth: inherit
 }
 
 tests {
@@ -18,7 +18,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('obtenido exitosamente');
   });
-
+  
   test("User data is complete", function() {
     expect(res.body).to.have.property('data');
     const user = res.body.data;
@@ -32,11 +32,11 @@ tests {
     expect(user).to.have.property('created_at');
     expect(user).to.not.have.property('password');
   });
-
+  
   test("User ID matches requested ID", function() {
     expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_user_id')));
   });
-
+  
   test("User has required permissions data", function() {
     expect(res.body.data).to.have.property('user_roles');
     expect(res.body.data.user_roles).to.be.an('array');

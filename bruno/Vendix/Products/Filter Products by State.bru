@@ -1,0 +1,120 @@
+meta {
+  name: "Filter Products by State"
+  type: http
+  seq: 13
+}
+
+# Test 1: Get only active products
+get {
+  url: http://{{url}}/products?state=active
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Filter active products returns only active items", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    products.forEach(product => {
+      expect(product.state).to.equal('active');
+    });
+  });
+
+  test("Active products have required fields", function() {
+    const products = res.body.data;
+    products.forEach(product => {
+      expect(product).to.have.property('id');
+      expect(product).to.have.property('name');
+      expect(product).to.have.property('base_price');
+      expect(product).to.have.property('state', 'active');
+      expect(product).to.have.property('stock_quantity');
+    });
+  });
+}
+
+# Test 2: Get inactive products
+get {
+  url: http://{{url}}/products?state=inactive
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Filter inactive products returns only inactive items", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    products.forEach(product => {
+      expect(product.state).to.equal('inactive');
+    });
+  });
+}
+
+# Test 3: Get archived products
+get {
+  url: http://{{url}}/products?state=archived
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Filter archived products returns only archived items", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    products.forEach(product => {
+      expect(product.state).to.equal('archived');
+    });
+  });
+}
+
+# Test 4: Filter by category and state
+get {
+  url: http://{{url}}/products?state=active&category_id=1
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Filter by category and state works correctly", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    products.forEach(product => {
+      expect(product.state).to.equal('active');
+      // Check if product belongs to category (either main or through categories relation)
+      expect(product.category_id || product.categories?.length > 0).to.be.ok;
+    });
+  });
+}
+
+# Test 5: Invalid state filter
+get {
+  url: http://{{url}}/products?state=invalid_state
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Invalid state filter handled gracefully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    // Should return empty array or all products (depending on implementation)
+    expect(res.body.data).to.be.an('array');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { ValidateConsolidatedStockDto } from '../dto/validate-consolidated-stock.dto';
 import { ValidateMultipleConsolidatedStockDto } from '../dto/validate-multiple-consolidated-stock.dto';
 
@@ -11,7 +11,7 @@ export class InventoryValidationService {
     const { product_id, quantity, organization_id } = validateDto;
 
     // Obtener todos los niveles de stock para el producto
-    const stockLevels = await this.prisma.inventory_stock_levels.findMany({
+    const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
         product_id,
         ...(organization_id && {
@@ -111,12 +111,12 @@ export class InventoryValidationService {
   }
 
   async getConsolidatedStockByProduct(productId: number, organizationId?: number) {
-    const stockLevels = await this.prisma.inventory_stock_levels.findMany({
+    const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
         product_id: productId,
         ...(organizationId && {
           inventory_locations: {
-            organization_id,
+            organization_id: organizationId,
           },
         }),
       },

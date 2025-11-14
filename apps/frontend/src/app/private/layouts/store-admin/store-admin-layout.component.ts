@@ -126,7 +126,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Dashboard',
       icon: 'fas fa-home',
-      route: '/store/dashboard',
+      route: '/admin/dashboard',
     },
     {
       label: 'Products',
@@ -135,24 +135,24 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'All Products',
           icon: 'fas fa-circle',
-          route: '/store/products/all',
+          route: '/admin/products/all',
         },
         {
           label: 'Categories',
           icon: 'fas fa-circle',
-          route: '/store/products/categories',
+          route: '/admin/products/categories',
         },
         {
           label: 'Inventory',
           icon: 'fas fa-circle',
-          route: '/store/products/inventory',
+          route: '/admin/products/inventory',
         },
       ],
     },
     {
       label: 'Orders',
       icon: 'fas fa-shopping-cart',
-      route: '/store/orders',
+      route: '/admin/orders',
       badge: '8',
     },
     {
@@ -162,12 +162,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'All Customers',
           icon: 'fas fa-circle',
-          route: '/store/customers/all',
+          route: '/admin/customers/all',
         },
         {
           label: 'Reviews',
           icon: 'fas fa-circle',
-          route: '/store/customers/reviews',
+          route: '/admin/customers/reviews',
         },
       ],
     },
@@ -178,12 +178,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'Promotions',
           icon: 'fas fa-circle',
-          route: '/store/marketing/promotions',
+          route: '/admin/marketing/promotions',
         },
         {
           label: 'Coupons',
           icon: 'fas fa-circle',
-          route: '/store/marketing/coupons',
+          route: '/admin/marketing/coupons',
         },
       ],
     },
@@ -194,17 +194,17 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'Sales',
           icon: 'fas fa-circle',
-          route: '/store/analytics/sales',
+          route: '/admin/analytics/sales',
         },
         {
           label: 'Traffic',
           icon: 'fas fa-circle',
-          route: '/store/analytics/traffic',
+          route: '/admin/analytics/traffic',
         },
         {
           label: 'Performance',
           icon: 'fas fa-circle',
-          route: '/store/analytics/performance',
+          route: '/admin/analytics/performance',
         },
       ],
     },
@@ -215,17 +215,17 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
         {
           label: 'General',
           icon: 'fas fa-circle',
-          route: '/store/settings/general',
+          route: '/admin/settings/general',
         },
         {
           label: 'Appearance',
           icon: 'fas fa-circle',
-          route: '/store/settings/appearance',
+          route: '/admin/settings/appearance',
         },
         {
           label: 'Security',
           icon: 'fas fa-circle',
-          route: '/store/settings/security',
+          route: '/admin/settings/security',
         },
       ],
     },

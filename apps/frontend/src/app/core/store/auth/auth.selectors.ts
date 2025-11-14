@@ -176,6 +176,17 @@ export const selectUserOrganizationSlug = createSelector(
   (organization: any) => organization?.slug || null,
 );
 
+// Organization onboarding selectors
+export const selectOrganizationOnboarding = createSelector(
+  selectUserOrganization,
+  (organization: any) => organization?.onboarding || false,
+);
+
+export const selectNeedsOrganizationOnboarding = createSelector(
+  selectOrganizationOnboarding,
+  (onboarding: boolean) => !onboarding,
+);
+
 export const selectUserStore = createSelector(
   selectUser,
   (user: any) => user?.stores || null,
