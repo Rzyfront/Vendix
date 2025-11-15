@@ -5,16 +5,18 @@ import {
   HostListener,
   inject,
   OnInit,
+  OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { Observable } from 'rxjs';
+import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
+import { FullscreenService } from '../../services/fullscreen.service';
 
 export interface UserMenuOption {
   label: string;
@@ -83,16 +85,19 @@ export interface UserMenuOption {
   `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
-export class UserDropdownComponent implements OnInit {
+export class UserDropdownComponent implements OnInit, OnDestroy {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
+  isFullscreen = false;
+  private destroy$ = new Subject<void>();
 
   private router = inject(Router);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
+  private fullscreenService = inject(FullscreenService);
 
   userContext$: Observable<{
     user?: any;
@@ -110,7 +115,18 @@ export class UserDropdownComponent implements OnInit {
   }
 
   ngOnInit() {
-    // El observable ya está inicializado en el constructor
+    // Suscribirse a cambios de fullscreen
+    this.fullscreenService.isFullscreen
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isFullscreen => {
+        this.isFullscreen = isFullscreen;
+        this.updateFullscreenOption();
+      });
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   get user() {
@@ -146,6 +162,18 @@ export class UserDropdownComponent implements OnInit {
       label: 'Configuración',
       icon: 'settings',
       action: () => this.goToSettings(),
+    },
+    {
+      label: 'Pantalla Completa',
+      icon: 'fullscreen-enter',
+      action: () => this.toggleFullscreen(),
+      condition: () => this.fullscreenService.isFullscreenSupported() && !this.isFullscreen,
+    },
+    {
+      label: 'Salir de Pantalla Completa',
+      icon: 'fullscreen-exit',
+      action: () => this.exitFullscreen(),
+      condition: () => this.isFullscreen,
     },
     {
       label: 'Administrar Organización',
@@ -308,5 +336,26 @@ export class UserDropdownComponent implements OnInit {
 
   private canSwitchToStore(): boolean {
     return this.environmentContextService.canSwitchToStore();
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.toggleFullscreen();
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
+    }
+  }
+
+  private async exitFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.exitFullscreen();
+    } catch (error) {
+      console.error('Error exiting fullscreen:', error);
+    }
+  }
+
+  private updateFullscreenOption(): void {
+    // Las opciones se actualizan automáticamente mediante las condiciones
+    // Esto asegura que el menú se actualice cuando cambia el estado de fullscreen
   }
 }

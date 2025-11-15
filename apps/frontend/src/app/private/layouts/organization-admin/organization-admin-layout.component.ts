@@ -93,19 +93,49 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    // Check onboarding status considering both organization state and user role
+    this.checkOnboardingWithRoleValidation();
+
     // Subscribe to organization onboarding status from user data (no API call)
     this.authFacade.needsOrganizationOnboarding$
       .pipe(takeUntil(this.destroy$))
       .subscribe((needsOnboarding: boolean) => {
         this.needsOnboarding = needsOnboarding;
-        if (needsOnboarding) {
-          // Show onboarding modal only if onboarding is needed
-          this.showOnboardingModal = true;
-        } else {
-          // Close modal if it's open
-          this.showOnboardingModal = false;
-        }
+        this.updateOnboardingModal();
       });
+  }
+
+  private checkOnboardingWithRoleValidation(): void {
+    // Only proceed with onboarding logic if user is owner
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.needsOnboarding = false;
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Check actual onboarding status from persistent data
+    const currentUser = this.authFacade.getCurrentUser();
+    const organizationOnboarding = currentUser?.organizations?.onboarding;
+
+    this.needsOnboarding = !organizationOnboarding;
+    this.updateOnboardingModal();
+  }
+
+  private updateOnboardingModal(): void {
+    // Double-check owner role before showing modal
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Verify onboarding status from current user data
+    const currentUser = this.authFacade.getCurrentUser();
+    const organizationOnboarding = currentUser?.organizations?.onboarding;
+    const actuallyNeedsOnboarding = !organizationOnboarding;
+
+    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
 
   ngOnDestroy(): void {

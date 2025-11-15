@@ -58,6 +58,8 @@ import {
   UserPlus,
   Barcode,
   Save,
+  Maximize,
+  Minimize,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -134,6 +136,12 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Action icons
   save: Save,
+
+  // Fullscreen icons
+  maximize: Maximize,
+  minimize: Minimize,
+  'fullscreen-enter': Maximize,
+  'fullscreen-exit': Minimize,
 
   // Financial and business icons
   'dollar-sign': DollarSign,

@@ -80,6 +80,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
+  needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -90,25 +91,50 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeSlug$ = this.authFacade.userStoreSlug$;
   }
 
-  ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.authFacade.checkOnboardingStatus();
+    ngOnInit(): void {
+      // Check onboarding status when component initializes
+      this.checkOnboardingWithRoleValidation();
 
-    // Set initial state immediately based on current needs
-    this.showOnboardingModal = this.authFacade.needsOnboarding();
+      // Subscribe to onboarding needs and show modal instead of redirecting
+      this.authFacade.needsOnboarding$
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((needsOnboarding: any) => {
+          this.needsOnboarding = needsOnboarding;
+          this.updateOnboardingModal();
+        });
+    }
 
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
-        if (needsOnboarding) {
-          // Show onboarding modal instead of redirecting
-          this.showOnboardingModal = true;
-        } else {
-          // Close modal if it's open
-          this.showOnboardingModal = false;
-        }
-      });
+  private checkOnboardingWithRoleValidation(): void {
+    // Only proceed with onboarding logic if user is owner
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.needsOnboarding = false;
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Check actual onboarding status from persistent data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+
+    this.needsOnboarding = !storeOnboarding;
+    this.updateOnboardingModal();
+  }
+
+  private updateOnboardingModal(): void {
+    // Double-check owner role before showing modal
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Verify onboarding status from current user data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+    const actuallyNeedsOnboarding = !storeOnboarding;
+
+    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
 
   ngOnDestroy(): void {
