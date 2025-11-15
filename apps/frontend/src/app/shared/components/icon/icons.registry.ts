@@ -55,6 +55,9 @@ import {
   HardDrive,
   Megaphone,
   Circle,
+  UserPlus,
+  Barcode,
+  Save,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -122,6 +125,15 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // UI elements
   circle: Circle,
+
+  // User action icons
+  'user-plus': UserPlus,
+
+  // POS and product icons
+  barcode: Barcode,
+
+  // Action icons
+  save: Save,
 
   // Financial and business icons
   'dollar-sign': DollarSign,

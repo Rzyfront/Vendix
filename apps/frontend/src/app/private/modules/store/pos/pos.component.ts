@@ -26,35 +26,32 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
     SpinnerComponent,
     PosProductSelectionComponent,
   ],
+  styleUrls: ['./pos.component.scss'],
   template: `
-    <div class="h-screen flex flex-col bg-gray-100">
-      <header class="bg-white border-b px-6 py-4">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-4">
-            <div
-              class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center"
-            >
+    <div class="pos-container">
+      <header class="pos-header">
+        <div class="header-content">
+          <div class="header-brand">
+            <div class="brand-icon-container">
               <app-icon
-                name="shopping-cart"
+                name="store"
                 [size]="20"
                 color="white"
               ></app-icon>
             </div>
-            <div>
-              <h1 class="text-xl font-bold text-gray-900">Vendix POS</h1>
-              <p class="text-sm text-gray-600">Punto de Venta</p>
+            <div class="brand-text">
+              <h1>Vendix POS</h1>
+              <p>Punto de Venta</p>
             </div>
           </div>
 
-          <div class="flex items-center gap-3">
+          <div class="header-actions">
             <div
               *ngIf="selectedCustomer"
-              class="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg"
+              class="customer-badge"
             >
-              <app-icon name="user" [size]="16" color="blue"></app-icon>
-              <span class="text-sm font-medium text-blue-600">{{
-                selectedCustomer.name
-              }}</span>
+              <app-icon name="user" [size]="16"></app-icon>
+              <span>{{ selectedCustomer.name }}</span>
             </div>
 
             <app-button
@@ -70,18 +67,18 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
         </div>
       </header>
 
-      <div class="flex-1 flex overflow-hidden">
-        <div class="w-2/3 border-r bg-white p-0">
+      <div class="pos-main">
+        <div class="product-section">
           <app-pos-product-selection
             (productSelected)="onProductSelected($event)"
             (productAddedToCart)="onProductAddedToCart($event)"
           ></app-pos-product-selection>
         </div>
 
-        <div class="w-1/3 flex flex-col bg-gray-50">
-          <div class="p-4 border-b">
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="text-lg font-semibold text-gray-900">Carrito</h2>
+        <div class="cart-section">
+          <div class="cart-header">
+            <div class="cart-title-row">
+              <h2 class="cart-title">Carrito</h2>
               <app-button
                 *ngIf="!isEmpty"
                 variant="ghost"
@@ -92,33 +89,33 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
               </app-button>
             </div>
 
-            <div *ngIf="isEmpty" class="text-center py-8">
+            <div *ngIf="isEmpty" class="cart-empty-state">
               <app-icon
-                name="shopping-cart"
+                name="cart"
                 [size]="48"
-                color="gray"
+                class="cart-empty-icon"
               ></app-icon>
-              <p class="mt-3 text-gray-600">Carrito vacío</p>
-              <p class="text-sm text-gray-500">
+              <p class="cart-empty-text">Carrito vacío</p>
+              <p class="cart-empty-subtext">
                 Agrega productos para comenzar
               </p>
             </div>
 
-            <div *ngIf="!isEmpty" class="space-y-2 max-h-64 overflow-y-auto">
+            <div *ngIf="!isEmpty" class="cart-items-container">
               <div
                 *ngFor="let item of cartItems"
-                class="flex items-center justify-between p-2 bg-white rounded-lg"
+                class="cart-item"
               >
-                <div class="flex-1 min-w-0">
-                  <p class="font-medium text-gray-900 text-sm truncate">
+                <div class="cart-item-info">
+                  <p class="cart-item-name">
                     {{ item.product.name }}
                   </p>
-                  <p class="text-xs text-gray-600">
+                  <p class="cart-item-details">
                     {{ item.quantity }}x {{ item.unitPrice }}
                   </p>
                 </div>
-                <div class="flex items-center gap-2">
-                  <span class="font-bold text-gray-900">{{
+                <div class="cart-item-actions">
+                  <span class="cart-item-price">{{
                     item.totalPrice
                   }}</span>
                   <app-button
@@ -133,32 +130,32 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
             </div>
           </div>
 
-          <div *ngIf="!isEmpty" class="flex-1 p-4 space-y-4">
+          <div *ngIf="!isEmpty" class="cart-summary-section">
             <div class="space-y-2">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600">Subtotal:</span>
-                <span>{{ cartSummary.subtotal }}</span>
+              <div class="summary-row">
+                <span class="summary-label">Subtotal:</span>
+                <span class="summary-value">{{ cartSummary.subtotal }}</span>
               </div>
               <div
                 *ngIf="cartSummary.discountAmount > 0"
-                class="flex justify-between text-sm"
+                class="summary-row discount"
               >
-                <span class="text-gray-600">Descuento:</span>
-                <span class="text-red-600"
-                  >-{{ cartSummary.discountAmount }}</span
-                >
+                <span class="summary-label">Descuento:</span>
+                <span class="summary-value">
+                  -{{ cartSummary.discountAmount }}
+                </span>
               </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-600">Impuestos:</span>
-                <span>{{ cartSummary.taxAmount }}</span>
+              <div class="summary-row">
+                <span class="summary-label">Impuestos:</span>
+                <span class="summary-value">{{ cartSummary.taxAmount }}</span>
               </div>
-              <div class="flex justify-between text-lg font-bold pt-2 border-t">
-                <span class="text-gray-900">Total:</span>
-                <span class="text-blue-600">{{ cartSummary.total }}</span>
+              <div class="summary-row total">
+                <span class="summary-label">Total:</span>
+                <span class="summary-value">{{ cartSummary.total }}</span>
               </div>
             </div>
 
-            <div class="space-y-3">
+            <div class="payment-actions">
               <app-button
                 variant="outline"
                 size="md"
@@ -168,16 +165,14 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
                 <app-icon name="save" [size]="16" slot="icon"></app-icon>
                 Guardar Borrador
               </app-button>
-              <app-button
-                variant="primary"
-                size="lg"
-                class="w-full"
-                (clicked)="onCheckout()"
+              <button
+                class="pay-button"
+                (click)="onCheckout()"
                 [disabled]="isEmpty || loading"
               >
-                <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                <app-icon name="credit-card" [size]="16"></app-icon>
                 Procesar Venta
-              </app-button>
+              </button>
             </div>
           </div>
         </div>

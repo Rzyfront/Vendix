@@ -56,10 +56,7 @@ export class EnvironmentSwitchService {
       return of(this.createErrorResponse('No authentication token available'));
     }
 
-    console.log(
-      'Switching to store with token:',
-      currentToken.substring(0, 20) + '...',
-    );
+    // Token logging removed for production
 
     return this.http
       .post<SwitchEnvironmentResponse>(
@@ -90,10 +87,7 @@ export class EnvironmentSwitchService {
       return of(this.createErrorResponse('No authentication token available'));
     }
 
-    console.log(
-      'Switching to organization with token:',
-      currentToken.substring(0, 20) + '...',
-    );
+    // Token logging removed for production
 
     return this.http
       .post<SwitchEnvironmentResponse>(
@@ -121,9 +115,7 @@ export class EnvironmentSwitchService {
     storeSlug?: string,
   ): Promise<boolean> {
     try {
-      console.log(`🔄 Starting environment switch to ${targetEnvironment}`, {
-        storeSlug,
-      });
+      // Environment switch debug logging removed
 
       // 1. Validar parámetros
       if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
@@ -144,7 +136,7 @@ export class EnvironmentSwitchService {
         throw new Error('Invalid environment switch request');
       }
 
-      console.log('📥 Backend response received:', response);
+      // Response logging removed
 
       // 3. Extraer datos de la respuesta del backend
       const responseData = response.data || response;
@@ -159,7 +151,7 @@ export class EnvironmentSwitchService {
       }
 
       // 5. Actualizar estado de autenticación
-      console.log('🔄 Updating auth state with new tokens and user data');
+      // Auth state update logging removed
       this.authFacade.restoreAuthState(
         responseData.user,
         responseData.tokens,
@@ -183,15 +175,11 @@ export class EnvironmentSwitchService {
         storeSlug,
       );
       if (!isConsistent) {
-        console.warn(
-          '⚠️ Environment consistency check failed, but proceeding with reload',
-        );
+        // Environment consistency warning removed
       }
 
       // 10. Redirigir a la ruta del nuevo entorno
-      console.log(
-        '✅ Environment switch completed successfully, redirecting to environment',
-      );
+      // Success redirect logging removed
       await this.redirectToEnvironment();
 
       return true;
@@ -205,7 +193,7 @@ export class EnvironmentSwitchService {
    * Espera a que el estado de autenticación se sincronice completamente
    */
   private async waitForAuthStateSync(): Promise<void> {
-    console.log('⏳ Waiting for auth state synchronization...');
+    // Auth state sync wait logging removed
 
     return new Promise((resolve) => {
       this.authFacade.isAuthenticated$
@@ -216,11 +204,11 @@ export class EnvironmentSwitchService {
         )
         .subscribe({
           next: () => {
-            console.log('✅ Auth state synchronized successfully');
+            // Auth state sync success logging removed
             resolve();
           },
           error: () => {
-            console.warn('⚠️ Auth state sync timeout, proceeding anyway');
+            // Auth state sync timeout warning removed
             resolve();
           },
         });
@@ -254,7 +242,7 @@ export class EnvironmentSwitchService {
       localStorage.setItem('access_token', responseData.tokens.accessToken);
       localStorage.setItem('refresh_token', responseData.tokens.refreshToken);
 
-      console.log('💾 Unified auth state saved to localStorage');
+      // Auth state save logging removed
     } catch (error) {
       console.error('❌ Failed to save auth state to localStorage:', error);
     }
@@ -265,10 +253,7 @@ export class EnvironmentSwitchService {
    */
   private async updateAppConfig(newEnvironment: string): Promise<void> {
     try {
-      console.log(
-        '🔄 Updating AppConfigService with new environment:',
-        newEnvironment,
-      );
+      // App config update logging removed
 
       // Forzar la recarga de la configuración
       const currentConfig = await this.appConfigService.setupConfig();
@@ -279,7 +264,7 @@ export class EnvironmentSwitchService {
         newEnvironment,
       );
 
-      console.log('✅ AppConfigService updated successfully');
+      // App config success logging removed
     } catch (error) {
       console.error('❌ Failed to update AppConfigService:', error);
       // No lanzamos error para no interrumpir el flujo principal
@@ -297,10 +282,7 @@ export class EnvironmentSwitchService {
       // Verificar que el entorno en localStorage coincida
       const cachedEnv = localStorage.getItem('vendix_user_environment');
       if (cachedEnv !== targetEnvironment) {
-        console.warn('⚠️ Environment mismatch in localStorage:', {
-          cached: cachedEnv,
-          expected: targetEnvironment,
-        });
+        // Environment mismatch warning removed
         return false;
       }
 
@@ -308,7 +290,7 @@ export class EnvironmentSwitchService {
       const accessToken = localStorage.getItem('access_token');
       const refreshToken = localStorage.getItem('refresh_token');
       if (!accessToken || !refreshToken) {
-        console.warn('⚠️ Missing tokens in localStorage');
+        // Missing tokens warning removed
         return false;
       }
 
@@ -318,15 +300,12 @@ export class EnvironmentSwitchService {
           localStorage.getItem('vendix_auth_state') || '{}',
         );
         if (authState.user?.store?.slug !== storeSlug) {
-          console.warn('⚠️ Store slug mismatch:', {
-            stored: authState.user?.store?.slug,
-            expected: storeSlug,
-          });
+          // Store slug mismatch warning removed
           return false;
         }
       }
 
-      console.log('✅ Environment consistency verified');
+      // Environment consistency verification logging removed
       return true;
     } catch (error) {
       console.error('❌ Error verifying environment consistency:', error);
@@ -351,16 +330,11 @@ export class EnvironmentSwitchService {
       // Determinar la ruta de redirección según el entorno
       let redirectPath = '/admin/dashboard';
 
-      console.log(
-        '🔄 Redirecting to environment:',
-        currentEnv,
-        'path:',
-        redirectPath,
-      );
+      // Environment redirect logging removed
 
       // Forzar la recarga completa de la ruta para asegurar que se cargue el layout correcto
       const currentUrl = this.router.url;
-      console.log('🔄 Current URL before redirect:', currentUrl);
+      // Current URL logging removed
 
       // Navegar a la ruta final directamente
       await this.router.navigate([redirectPath]);
@@ -368,13 +342,13 @@ export class EnvironmentSwitchService {
       // Forzar la recarga de la página para asegurar que se cargue el nuevo layout
       // pero manteniendo la sesión activa
       setTimeout(() => {
-        console.log('🔄 Forcing page reload to apply new layout');
+        // Page reload logging removed
         window.location.reload();
       }, 200);
     } catch (error) {
       console.error('❌ Error redirecting to environment:', error);
       // Fallback a recarga completa si la navegación falla
-      console.log('🔄 Using fallback: full page reload');
+      // Fallback reload logging removed
       window.location.href = window.location.origin + '/admin/dashboard';
     }
   }
