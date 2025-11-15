@@ -782,8 +782,6 @@ export class BreadcrumbService {
     const cleanUrl = url.split('?')[0];
     const routeData = this.findRouteMatch(cleanUrl);
 
-    console.log('Breadcrumb Update:', { url: cleanUrl, routeData });
-
     if (routeData) {
       const breadcrumb = {
         title: routeData.title,
@@ -800,7 +798,6 @@ export class BreadcrumbService {
         },
       };
 
-      console.log('Breadcrumb Generated:', breadcrumb);
       this.breadcrumbSubject.next(breadcrumb);
     } else {
       // Breadcrumb por defecto si no hay coincidencia

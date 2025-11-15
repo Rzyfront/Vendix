@@ -57,14 +57,12 @@ export class EnvironmentContextService {
 
     // Si no hay user_settings, no hay configuración de entorno disponible
     if (!userSettings?.config?.app) {
-      console.log('🔍 canSwitchToOrganization: No user_settings found');
       return false;
     }
 
     // Obtener roles del usuario actual
     const currentUser = user || this.getCurrentUserFromAuth();
     if (!currentUser) {
-      console.log('🔍 canSwitchToOrganization: No user found for roles');
       return false;
     }
 
@@ -77,17 +75,8 @@ export class EnvironmentContextService {
 
     // Verificar la configuración permanente del usuario (fuente única de verdad)
     const userPermanentEnvironment = userSettings.config.app;
-    const isInStoreAdminPermanently = userPermanentEnvironment === 'STORE_ADMIN';
-
-    console.log('🔍 canSwitchToOrganization debug:', {
-      user: currentUser.email,
-      roles: currentUser.roles,
-      hasStoreRole,
-      hasOrgRole,
-      userPermanentEnvironment,
-      isInStoreAdminPermanently,
-      canSwitch: hasOrgRole && isInStoreAdminPermanently,
-    });
+    const isInStoreAdminPermanently =
+      userPermanentEnvironment === 'STORE_ADMIN';
 
     // Para cambiar a organización, debe:
     // 1. Tener rol de organización
@@ -213,12 +202,10 @@ export class EnvironmentContextService {
 
     if (userSettings?.config?.app) {
       const env = userSettings.config.app as AppEnvironment;
-      console.log('🔍 Environment from user_settings (single source of truth):', env);
       return env;
     }
 
     // Fallback solo si no hay configuración (caso extremo)
-    console.log('🔍 No user settings found, using default environment');
     return AppEnvironment.VENDIX_LANDING;
   }
 }

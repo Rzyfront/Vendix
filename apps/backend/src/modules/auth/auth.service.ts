@@ -789,19 +789,26 @@ export class AuthService {
       },
     });
 
+    if (!user) {
+      await this.logLoginAttempt(null, false, email);
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
     const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+
+    console.log('🔍 LOGIN - Transformación de roles:', {
+      user_id: user.id,
+      email: user.email,
+      original_user_roles_count: user_roles?.length || 0,
+      transformed_roles: roles,
+    });
 
     const userWithRolesArray = {
       ...userWithoutRoles,
       roles, // Array simple: ["owner", "admin"]
     };
-
-    if (!user) {
-      await this.logLoginAttempt(null, false, email);
-      throw new UnauthorizedException('Credenciales inválidas');
-    }
 
     // ✅ Validar que el usuario no esté suspended o archived
     if (user.state === 'suspended' || user.state === 'archived') {

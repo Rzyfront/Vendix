@@ -99,7 +99,8 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       this.authFacade.needsOnboarding$
         .pipe(takeUntil(this.destroy$))
         .subscribe((needsOnboarding: any) => {
-          this.needsOnboarding = needsOnboarding;
+          // this.needsOnboarding = needsOnboarding;
+           this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
           this.updateOnboardingModal();
         });
     }
@@ -117,9 +118,10 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     const currentUser = this.authFacade.getCurrentUser();
     const storeOnboarding = currentUser?.stores?.onboarding;
 
-    this.needsOnboarding = !storeOnboarding;
+    // this.needsOnboarding = !storeOnboarding;
+    this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
     this.updateOnboardingModal();
-  }
+  }   
 
   private updateOnboardingModal(): void {
     // Double-check owner role before showing modal

@@ -185,6 +185,13 @@ export class EnvironmentSwitchService {
     const { user_roles, ...userWithoutRoles } = completeUser;
     const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
 
+    console.log('🔍 SWITCH - Transformación de roles:', {
+      user_id: userId,
+      targetEnvironment,
+      original_user_roles_count: user_roles?.length || 0,
+      transformed_roles: roles,
+    });
+
     const userWithRolesArray = {
       ...userWithoutRoles,
       roles, // Array simple: ["owner", "admin"]
@@ -223,3 +230,4 @@ export class EnvironmentSwitchService {
 
     return response;
   }
+}

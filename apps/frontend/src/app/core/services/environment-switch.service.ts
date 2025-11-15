@@ -159,13 +159,19 @@ export class EnvironmentSwitchService {
       };
 
       // 6. Actualizar estado de autenticación con estructura completa
-      // Auth state update logging removed
+      console.log('🔍 FRONTEND - Datos enviados a restoreAuthState:', {
+        user_roles: responseData.user?.roles,
+        user_keys: Object.keys(responseData.user || {}),
+        user_has_roles: !!responseData.user?.roles,
+        user_has_user_roles: !!responseData.user?.user_roles,
+      });
+
       this.authFacade.restoreAuthState(
         responseData.user,          // Usuario completo con todas las relaciones
         tokens,                     // Tokens en formato de login
-        [],                         // Permisos ahora están dentro del usuario
-        [],                         // Roles ahora están dentro del usuario
-        responseData.user_settings, // user_settings separado como en login
+        responseData.user?.permissions || [], // Permisos del usuario (si vienen)
+        responseData.user?.roles || [],     // Roles transformados del backend
+        responseData.user_settings,         // user_settings separado como en login
       );
 
       // 7. Sincronizar localStorage de forma unificada

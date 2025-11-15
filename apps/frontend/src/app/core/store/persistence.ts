@@ -13,7 +13,10 @@ export function hydrateAuthState(): Partial<AuthState> {
     if (unifiedAuthState) {
       const parsedState = JSON.parse(unifiedAuthState);
       if (parsedState.user && parsedState.tokens?.accessToken) {
-        console.log('[HYDRATE] OK unified with user_settings', parsedState.user.email);
+        console.log(
+          '[HYDRATE] OK unified with user_settings',
+          parsedState.user.email,
+        );
         return {
           user: parsedState.user,
           user_settings: parsedState.user_settings,
@@ -22,7 +25,7 @@ export function hydrateAuthState(): Partial<AuthState> {
           permissions: parsedState.permissions || [],
           loading: false,
           error: null,
-          isAuthenticated: true
+          isAuthenticated: true,
         };
       }
     }
@@ -33,17 +36,18 @@ export function hydrateAuthState(): Partial<AuthState> {
 
     if (userJson && accessToken && refreshToken) {
       const user: User = JSON.parse(userJson);
-      console.log('[HYDRATE] OK granular with environment fallback', user.email);
 
       // Create user_settings from environment for backward compatibility
-      const user_settings = userEnvironment ? { config: { app: userEnvironment } } : undefined;
+      const user_settings = userEnvironment
+        ? { config: { app: userEnvironment } }
+        : undefined;
 
       const unifiedState = {
         user,
         user_settings,
         tokens: { accessToken, refreshToken },
         roles: user.roles || [],
-        permissions: []
+        permissions: [],
       };
       localStorage.setItem('vendix_auth_state', JSON.stringify(unifiedState));
       return {
@@ -54,11 +58,14 @@ export function hydrateAuthState(): Partial<AuthState> {
         permissions: [],
         loading: false,
         error: null,
-        isAuthenticated: true
+        isAuthenticated: true,
       };
     }
   } catch (error) {
-    console.warn('[HYDRATE] ERROR, no se puede parsear vendix_auth_state, retornando estado inicial ', error);
+    console.warn(
+      '[HYDRATE] ERROR, no se puede parsear vendix_auth_state, retornando estado inicial ',
+      error,
+    );
   }
   console.warn('[HYDRATE] DEFAULT, no auth state');
   return {
@@ -69,7 +76,7 @@ export function hydrateAuthState(): Partial<AuthState> {
     permissions: [],
     loading: false,
     error: null,
-    isAuthenticated: false
+    isAuthenticated: false,
   };
 }
 
@@ -84,7 +91,7 @@ export function saveAuthState(state: AuthState): void {
         user_settings: state.user_settings,
         tokens: state.tokens,
         roles: state.roles,
-        permissions: state.permissions
+        permissions: state.permissions,
       };
       localStorage.setItem('vendix_auth_state', JSON.stringify(stateToSave));
 
@@ -95,7 +102,10 @@ export function saveAuthState(state: AuthState): void {
 
       // Keep vendix_user_environment in sync with user_settings.config.app for compatibility
       if (state.user_settings?.config?.app) {
-        localStorage.setItem('vendix_user_environment', state.user_settings.config.app);
+        localStorage.setItem(
+          'vendix_user_environment',
+          state.user_settings.config.app,
+        );
       }
     }
   } catch (error) {
