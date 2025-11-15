@@ -7,7 +7,7 @@ meta {
 post {
   url: http://{{url}}/auth/switch-environment
   body: json
-  auth: bearer
+  auth: inherit
 }
 
 body:json {
@@ -29,12 +29,12 @@ tests {
     expect(res.body.data).to.have.property('tokens');
     expect(res.body.data.updatedEnvironment).to.equal('ORG_ADMIN');
   });
-
+  
   test("New tokens are provided", function() {
     expect(res.body.data.tokens).to.have.property('accessToken');
     expect(res.body.data.tokens).to.have.property('refreshToken');
   });
-
+  
   test("User data includes roles and permissions", function() {
     expect(res.body.data.user).to.have.property('roles');
     expect(res.body.data.user).to.have.property('permissions');
