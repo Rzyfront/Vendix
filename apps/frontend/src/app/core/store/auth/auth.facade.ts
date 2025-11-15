@@ -15,6 +15,7 @@ export class AuthFacade {
 
   // State observables
   readonly user$ = this.store.select(AuthSelectors.selectUser);
+  readonly userSettings$ = this.store.select(AuthSelectors.selectUserSettings);
   readonly tokens$ = this.store.select(AuthSelectors.selectTokens);
   readonly isAuthenticated$ = this.store.select(
     AuthSelectors.selectIsAuthenticated,
@@ -120,9 +121,10 @@ export class AuthFacade {
     tokens: { accessToken: string; refreshToken: string },
     permissions?: string[],
     roles?: string[],
+    user_settings?: any,
   ): void {
     this.store.dispatch(
-      AuthActions.restoreAuthState({ user, tokens, permissions, roles }),
+      AuthActions.restoreAuthState({ user, user_settings, tokens, permissions, roles }),
     );
   }
 
@@ -150,6 +152,12 @@ export class AuthFacade {
   getCurrentUser(): any {
     let result: any = null;
     this.user$.pipe(take(1)).subscribe((user) => (result = user));
+    return result;
+  }
+
+  getUserSettings(): any {
+    let result: any = null;
+    this.userSettings$.pipe(take(1)).subscribe((userSettings) => (result = userSettings));
     return result;
   }
 

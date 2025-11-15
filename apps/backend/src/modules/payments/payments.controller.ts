@@ -23,6 +23,7 @@ import {
   CreateOrderPaymentDto,
   RefundPaymentDto,
   PaymentQueryDto,
+  CreatePosPaymentDto,
 } from './dto';
 
 @ApiTags('Payments')
@@ -93,6 +94,54 @@ export class PaymentsController {
   @ApiResponse({ status: 200, description: 'Payments retrieved successfully' })
   async findAll(@Query() query: PaymentQueryDto, @Request() req) {
     return this.paymentsService.findAll(query, req.user);
+  }
+
+  @Post('pos')
+  @ApiOperation({
+    summary: 'Process POS payment - unified entry point for all POS sales',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'POS payment processed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        order: {
+          type: 'object',
+          properties: {
+            id: { type: 'number' },
+            order_number: { type: 'string' },
+            status: { type: 'string' },
+            payment_status: { type: 'string' },
+            total_amount: { type: 'number' },
+          },
+        },
+        payment: {
+          type: 'object',
+          properties: {
+            id: { type: 'number' },
+            amount: { type: 'number' },
+            payment_method: { type: 'string' },
+            status: { type: 'string' },
+            transaction_id: { type: 'string' },
+            change: { type: 'number' },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 403, description: 'Access denied' })
+  async processPosPayment(
+    @Body() createPosPaymentDto: CreatePosPaymentDto,
+    @Request() req,
+  ) {
+    return this.paymentsService.processPosPayment(
+      createPosPaymentDto,
+      req.user,
+    );
   }
 
   @Get(':paymentId')

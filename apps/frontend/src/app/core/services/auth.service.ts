@@ -88,7 +88,7 @@ export class AuthService {
 
           return {
             ...response,
-            data: { ...response.data, user, permissions: decodedToken?.permissions || [] },
+            data: { ...response.data, user, user_settings, permissions: decodedToken?.permissions || [] },
             updatedEnvironment: (user_settings.config.app || '').toUpperCase()
           };
         })

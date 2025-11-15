@@ -14,11 +14,18 @@ import {
   PosCustomer,
 } from './services/pos-customer.service';
 import { PosOrderService } from './services/pos-order.service';
+import { PosProductSelectionComponent } from './components/pos-product-selection.component';
 
 @Component({
   selector: 'app-pos',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [
+    CommonModule,
+    ButtonComponent,
+    IconComponent,
+    SpinnerComponent,
+    PosProductSelectionComponent,
+  ],
   template: `
     <div class="h-screen flex flex-col bg-gray-100">
       <header class="bg-white border-b px-6 py-4">
@@ -64,11 +71,11 @@ import { PosOrderService } from './services/pos-order.service';
       </header>
 
       <div class="flex-1 flex overflow-hidden">
-        <div class="w-2/3 border-r bg-white p-4">
-          <h2 class="text-lg font-semibold text-gray-900 mb-4">Productos</h2>
-          <p class="text-sm text-gray-600">
-            Selecciona productos para agregar al carrito
-          </p>
+        <div class="w-2/3 border-r bg-white p-0">
+          <app-pos-product-selection
+            (productSelected)="onProductSelected($event)"
+            (productAddedToCart)="onProductAddedToCart($event)"
+          ></app-pos-product-selection>
         </div>
 
         <div class="w-1/3 flex flex-col bg-gray-50">
@@ -291,7 +298,10 @@ export class PosComponent implements OnInit, OnDestroy {
     this.toastService.success('Cliente actualizado correctamente');
   }
 
-  onProductSelected(product: any): void {}
+  onProductSelected(product: any): void {
+    // Product selected from POS product selection
+    console.log('Product selected:', product);
+  }
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
     this.toastService.success(event.product.name + ' agregado al carrito');

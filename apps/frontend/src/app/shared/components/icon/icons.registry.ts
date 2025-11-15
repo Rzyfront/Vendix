@@ -53,6 +53,8 @@ import {
   Truck,
   FileCheck,
   HardDrive,
+  Megaphone,
+  Circle,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -113,6 +115,13 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'globe-2': Globe,
   list: List,
   'file-text': FileText,
+
+  // Marketing and communication icons
+  megaphone: Megaphone,
+  bullhorn: Megaphone, // Alternative name for backward compatibility
+
+  // UI elements
+  circle: Circle,
 
   // Financial and business icons
   'dollar-sign': DollarSign,

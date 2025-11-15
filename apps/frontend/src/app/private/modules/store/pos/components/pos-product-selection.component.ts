@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, NO_ERRORS_SCHEMA } from '@angular/core';
+import { Component, OnInit, OnDestroy, NO_ERRORS_SCHEMA, Output, EventEmitter } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
@@ -171,6 +171,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   categories: any[] = [];
   addingToCart = new Set<string>();
 
+  @Output() productSelected = new EventEmitter<any>();
+  @Output() productAddedToCart = new EventEmitter<{ product: any; quantity: number }>();
+
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
 
@@ -214,8 +217,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   private loadProducts(): void {
     this.loading = true;
+    // Use POS optimized search for real products
     this.productService
-      .searchProducts({})
+      .searchProducts({ pos_optimized: true, include_stock: true })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result: SearchResult) => {
@@ -265,8 +269,8 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   onSelectProduct(product: any): void {
     // This would typically open a product details modal
-    // For now, just add to cart
-    this.onAddToCart(product);
+    // For now, just emit the product selection event
+    this.productSelected.emit(product);
   }
 
   onAddToCart(product: any): void {
@@ -287,6 +291,8 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(`${product.name} agregado al carrito`);
+          // Emit event when product is successfully added to cart
+          this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
           this.addingToCart.delete(product.id);

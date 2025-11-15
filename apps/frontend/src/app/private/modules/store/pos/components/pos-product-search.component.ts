@@ -18,6 +18,8 @@ import {
   PosProductService,
   SearchFilters,
   Product,
+  Category,
+  Brand,
 } from '../services/pos-product.service';
 
 @Component({
@@ -87,9 +89,9 @@ import {
               <option value="">Todas las categorías</option>
               <option
                 *ngFor="let category of categories$ | async"
-                [value]="category"
+                [value]="category.id"
               >
-                {{ category }}
+                {{ category.name }}
               </option>
             </select>
           </div>
@@ -103,8 +105,8 @@ import {
               (change)="applyFilters()"
             >
               <option value="">Todas las marcas</option>
-              <option *ngFor="let brand of brands$ | async" [value]="brand">
-                {{ brand }}
+              <option *ngFor="let brand of brands$ | async" [value]="brand.id">
+                {{ brand.name }}
               </option>
             </select>
           </div>
@@ -571,8 +573,8 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
     sortOrder: 'asc',
   };
 
-  categories$!: Observable<string[]>;
-  brands$!: Observable<string[]>;
+  categories$!: Observable<Category[]>;
+  brands$!: Observable<Brand[]>;
   suggestions$!: Observable<string[]>;
 
   private searchSubject = new Subject<string>();

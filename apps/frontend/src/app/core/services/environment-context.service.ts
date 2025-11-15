@@ -23,6 +23,9 @@ export class EnvironmentContextService {
   private authFacade = inject(AuthFacade);
   private globalFacade = inject(GlobalFacade);
 
+  /**
+   * Obtiene el contexto completo del entorno actual
+   */
   getCurrentEnvironmentContext(): Observable<EnvironmentContext> {
     return this.authFacade.user$.pipe(
       take(1),
@@ -45,48 +48,56 @@ export class EnvironmentContextService {
     );
   }
 
+  /**
+   * Verifica si el usuario puede cambiar al entorno de organización
+   */
   canSwitchToOrganization(user?: any): boolean {
-    let currentUser = user || this.getCurrentUserFromAuth();
+    // Obtener user_settings desde el store como única fuente de verdad
+    const userSettings = this.authFacade.getUserSettings();
 
-    if (!currentUser) {
-      try {
-        const authState = JSON.parse(
-          localStorage.getItem('vendix_auth_state') || '{}',
-        );
-        currentUser = authState.user;
-        console.log('🔍 canSwitchToOrganization: Using user from localStorage');
-      } catch (error) {
-        console.log(
-          '🔍 canSwitchToOrganization: No user found in localStorage',
-        );
-        return false;
-      }
-    }
-
-    if (!currentUser) {
-      console.log('🔍 canSwitchToOrganization: No user found anywhere');
+    // Si no hay user_settings, no hay configuración de entorno disponible
+    if (!userSettings?.config?.app) {
+      console.log('🔍 canSwitchToOrganization: No user_settings found');
       return false;
     }
 
+    // Obtener roles del usuario actual
+    const currentUser = user || this.getCurrentUserFromAuth();
+    if (!currentUser) {
+      console.log('🔍 canSwitchToOrganization: No user found for roles');
+      return false;
+    }
+
+    const hasStoreRole = currentUser.roles?.some((role: string) =>
+      ['store_admin', 'owner', 'manager'].includes(role),
+    );
     const hasOrgRole = currentUser.roles?.some((role: string) =>
       ['org_admin', 'owner', 'super_admin'].includes(role),
     );
 
-    const currentEnv = this.getCurrentEnvironmentFromUser(currentUser);
-    const isInStoreEnvironment = currentEnv === AppEnvironment.STORE_ADMIN;
+    // Verificar la configuración permanente del usuario (fuente única de verdad)
+    const userPermanentEnvironment = userSettings.config.app;
+    const isInStoreAdminPermanently = userPermanentEnvironment === 'STORE_ADMIN';
 
     console.log('🔍 canSwitchToOrganization debug:', {
       user: currentUser.email,
       roles: currentUser.roles,
+      hasStoreRole,
       hasOrgRole,
-      currentEnv,
-      isInStoreEnvironment,
-      canSwitch: hasOrgRole && isInStoreEnvironment,
+      userPermanentEnvironment,
+      isInStoreAdminPermanently,
+      canSwitch: hasOrgRole && isInStoreAdminPermanently,
     });
 
-    return hasOrgRole && isInStoreEnvironment;
+    // Para cambiar a organización, debe:
+    // 1. Tener rol de organización
+    // 2. Tener su configuración permanente establecida en STORE_ADMIN
+    return hasOrgRole && isInStoreAdminPermanently;
   }
 
+  /**
+   * Verifica si el usuario puede cambiar al entorno de tienda
+   */
   canSwitchToStore(user?: any): boolean {
     const currentUser = user || this.getCurrentUserFromAuth();
     if (!currentUser) return false;
@@ -101,21 +112,33 @@ export class EnvironmentContextService {
     return hasOrgRole && hasStoreRole && currentUser.organization;
   }
 
+  /**
+   * Obtiene el entorno actual del usuario
+   */
   getCurrentEnvironment(): AppEnvironment {
     const user = this.getCurrentUserFromAuth();
     return this.getCurrentEnvironmentFromUser(user);
   }
 
+  /**
+   * Verifica si el usuario está en entorno de organización
+   */
   isInOrganizationEnvironment(): boolean {
     const env = this.getCurrentEnvironment();
     return env === AppEnvironment.ORG_ADMIN;
   }
 
+  /**
+   * Verifica si el usuario está en entorno de tienda
+   */
   isInStoreEnvironment(): boolean {
     const env = this.getCurrentEnvironment();
     return env === AppEnvironment.STORE_ADMIN;
   }
 
+  /**
+   * Obtiene información del entorno actual de forma síncrona
+   */
   getEnvironmentInfo() {
     const user = this.getCurrentUserFromAuth();
     const context = this.globalFacade.getUserContext();
@@ -130,6 +153,9 @@ export class EnvironmentContextService {
     };
   }
 
+  /**
+   * Limpia el contexto del entorno (usado durante logout)
+   */
   clearEnvironmentContext(): void {
     try {
       localStorage.removeItem('vendix_user_environment');
@@ -139,6 +165,9 @@ export class EnvironmentContextService {
     }
   }
 
+  /**
+   * Valida la consistencia del entorno actual
+   */
   validateEnvironmentConsistency(): boolean {
     try {
       const cachedEnv = localStorage.getItem('vendix_user_environment');
@@ -170,6 +199,8 @@ export class EnvironmentContextService {
     }
   }
 
+  // Métodos privados
+
   private getCurrentUserFromAuth(): any {
     let user: any = null;
     this.authFacade.user$.pipe(take(1)).subscribe((u) => (user = u));
@@ -177,53 +208,17 @@ export class EnvironmentContextService {
   }
 
   private getCurrentEnvironmentFromUser(user: any): AppEnvironment {
-    if (!user) return AppEnvironment.VENDIX_LANDING;
+    // Fuente única de verdad: user_settings.config.app del store
+    const userSettings = this.authFacade.getUserSettings();
 
-    if (user.user_settings?.config?.app) {
-      const env = user.user_settings.config.app as AppEnvironment;
-      console.log('🔍 Environment from user settings:', env);
+    if (userSettings?.config?.app) {
+      const env = userSettings.config.app as AppEnvironment;
+      console.log('🔍 Environment from user_settings (single source of truth):', env);
       return env;
     }
 
-    const context = this.globalFacade.getUserContext();
-    if (context?.store) {
-      console.log(
-        '🔍 Environment from context store:',
-        AppEnvironment.STORE_ADMIN,
-      );
-      return AppEnvironment.STORE_ADMIN;
-    }
-    if (context?.organization) {
-      console.log(
-        '🔍 Environment from context organization:',
-        AppEnvironment.ORG_ADMIN,
-      );
-      return AppEnvironment.ORG_ADMIN;
-    }
-
-    if (user.roles?.includes('super_admin')) {
-      console.log(
-        '🔍 Environment from super_admin role:',
-        AppEnvironment.VENDIX_ADMIN,
-      );
-      return AppEnvironment.VENDIX_ADMIN;
-    }
-    if (user.roles?.includes('org_admin') || user.roles?.includes('owner')) {
-      console.log('🔍 Environment from org role:', AppEnvironment.ORG_ADMIN);
-      return AppEnvironment.ORG_ADMIN;
-    }
-    if (
-      user.roles?.includes('store_admin') ||
-      user.roles?.includes('manager')
-    ) {
-      console.log(
-        '🔍 Environment from store role:',
-        AppEnvironment.STORE_ADMIN,
-      );
-      return AppEnvironment.STORE_ADMIN;
-    }
-
-    console.log('🔍 Default environment:', AppEnvironment.VENDIX_LANDING);
+    // Fallback solo si no hay configuración (caso extremo)
+    console.log('🔍 No user settings found, using default environment');
     return AppEnvironment.VENDIX_LANDING;
   }
 }

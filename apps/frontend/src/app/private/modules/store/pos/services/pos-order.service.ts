@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
 import {
   PosOrder,
   PosOrderStatus,
@@ -28,7 +29,7 @@ export class PosOrderService {
   private readonly loading$ = new BehaviorSubject<boolean>(false);
   private readonly currentOrder$ = new BehaviorSubject<PosOrder | null>(null);
 
-  constructor() {
+  constructor(private http: HttpClient) {
     this.initializeMockData();
   }
 
@@ -65,20 +66,45 @@ export class PosOrderService {
       );
     }
 
-    const request: CreatePosOrderRequest = {
-      customer: cartState.customer,
-      items: cartState.items,
-      summary: cartState.summary,
-      discounts: cartState.appliedDiscounts,
-      notes: cartState.notes,
-      storeId,
-      organizationId,
-      createdBy,
+    // Build POS payment request for credit sale (no payment)
+    const posPaymentRequest = {
+      customer_id: cartState.customer?.id || 0,
+      customer_name: cartState.customer?.name || 'Cliente General',
+      customer_email: cartState.customer?.email || '',
+      customer_phone: cartState.customer?.phone || '',
+      store_id: parseInt(storeId),
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        cost: item.product.cost,
+      })),
+      subtotal: cartState.summary.subtotal,
+      tax_amount: cartState.summary.taxAmount,
+      discount_amount: cartState.summary.discountAmount,
+      total_amount: cartState.summary.total,
+      requires_payment: false, // Credit sale
+      credit_terms: {
+        payment_terms: 'Pendiente de pago',
+      },
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: createdBy,
+      internal_notes: cartState.notes,
+      update_inventory: true,
     };
 
-    return of(request).pipe(
-      delay(500),
-      map((req) => this.processCreateOrder(req)),
+    // Call unified POS endpoint
+    return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
+      map((response: any) => {
+        if (response.success) {
+          return this.mapBackendOrderToPosOrder(response.order);
+        } else {
+          throw new Error(response.message || 'Error creating order');
+        }
+      }),
       tap((order) => {
         const currentOrders = this.orders$.value;
         this.orders$.next([order, ...currentOrders]);
@@ -162,19 +188,67 @@ export class PosOrderService {
   }
 
   /**
-   * Process payment for order
+   * Process payment for order (using unified POS endpoint)
    */
   processPayment(
     request: ProcessPaymentRequest,
   ): Observable<ProcessPaymentResponse> {
     this.loading$.next(true);
 
-    return of(request).pipe(
-      delay(2000), // Simulate payment processing
-      map((req) => this.processPaymentRequest(req)),
+    // Build POS payment request for cash sale
+    const posPaymentRequest = {
+      customer_id: request.customer?.id || 0,
+      customer_name: request.customer?.name || 'Cliente General',
+      customer_email: request.customer?.email || '',
+      customer_phone: request.customer?.phone || '',
+      store_id: parseInt(request.storeId || '1'),
+      items: (request.items || []).map((item) => ({
+        product_id: parseInt(item.productId),
+        product_name: item.productName,
+        product_sku: item.productSku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        cost: item.cost,
+      })),
+      subtotal: request.subtotal || 0,
+      tax_amount: request.taxAmount || 0,
+      discount_amount: request.discountAmount || 0,
+      total_amount: request.amount,
+      requires_payment: true, // Cash sale
+      payment_method_id: parseInt(request.paymentMethod.id),
+      amount_received: request.cashReceived,
+      payment_reference: request.reference,
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: request.sellerUserId || 'current_user',
+      internal_notes: request.notes || '',
+      update_inventory: true,
+    };
+
+    // Call unified POS endpoint
+    return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
+      map((response: any) => {
+        if (response.success) {
+          return {
+            success: true,
+            payment: response.payment,
+            order: this.mapBackendOrderToPosOrder(response.order),
+            change: response.payment?.change,
+            message: response.message,
+          };
+        } else {
+          return {
+            success: false,
+            message: response.message || 'Error processing payment',
+            errors: response.errors,
+          };
+        }
+      }),
       tap((response) => {
-        if (response.success && response.payment) {
-          this.updateOrderPaymentStatus(request.orderId, response.payment);
+        if (response.success && response.order) {
+          const currentOrders = this.orders$.value;
+          this.orders$.next([response.order, ...currentOrders]);
+          this.currentOrder$.next(response.order);
         }
         this.loading$.next(false);
       }),
@@ -183,6 +257,57 @@ export class PosOrderService {
         return throwError(() => error);
       }),
     );
+  }
+
+  /**
+   * Map backend order to POS order format
+   */
+  private mapBackendOrderToPosOrder(backendOrder: any): PosOrder {
+    return {
+      id: backendOrder.id.toString(),
+      orderNumber: backendOrder.order_number,
+      customer: {
+        id: backendOrder.customer_id?.toString() || '0',
+        name: backendOrder.customer_name || 'Cliente General',
+        email: backendOrder.customer_email || '',
+        phone: backendOrder.customer_phone || '',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      items:
+        backendOrder.items?.map((item: any) => ({
+          id: `ITEM_${item.product_id}`,
+          productId: item.product_id.toString(),
+          productName: item.product_name,
+          productSku: item.product_sku,
+          quantity: item.quantity,
+          unitPrice: item.unit_price,
+          totalPrice: item.total_price,
+          cost: item.cost,
+        })) || [],
+      summary: {
+        subtotal: backendOrder.subtotal_amount,
+        discountAmount: backendOrder.discount_amount,
+        taxAmount: backendOrder.tax_amount,
+        total: backendOrder.total_amount,
+        itemCount: backendOrder.items?.length || 0,
+        totalItems:
+          backendOrder.items?.reduce(
+            (sum: number, item: any) => sum + item.quantity,
+            0,
+          ) || 0,
+        profit: 0, // Will be calculated if needed
+      },
+      status: backendOrder.state,
+      paymentStatus: backendOrder.payment_status,
+      payments: [],
+      notes: backendOrder.internal_notes || '',
+      createdAt: new Date(backendOrder.created_at),
+      updatedAt: new Date(backendOrder.updated_at),
+      createdBy: backendOrder.created_by,
+      storeId: backendOrder.store_id?.toString(),
+      organizationId: backendOrder.organization_id?.toString(),
+    };
   }
 
   /**

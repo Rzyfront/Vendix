@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Observable, of, BehaviorSubject } from 'rxjs';
-import { delay, map } from 'rxjs/operators';
+import { delay, map, catchError } from 'rxjs/operators';
+import { HttpClient, HttpParams } from '@angular/common/http';
 
 export interface Product {
   id: string;
@@ -21,6 +22,16 @@ export interface Product {
   updatedAt: Date;
 }
 
+export interface Category {
+  id: string;
+  name: string;
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+}
+
 export interface SearchFilters {
   query?: string;
   category?: string;
@@ -30,6 +41,9 @@ export interface SearchFilters {
   inStock?: boolean;
   sortBy?: 'name' | 'price' | 'stock' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
+  pos_optimized?: boolean;
+  barcode?: string;
+  include_stock?: boolean;
 }
 
 export interface SearchResult {
@@ -45,11 +59,11 @@ export interface SearchResult {
 })
 export class PosProductService {
   private products: Product[] = [];
-  private categories: string[] = [];
-  private brands: string[] = [];
+  private categories: Category[] = [];
+  private brands: Brand[] = [];
   private searchHistory$ = new BehaviorSubject<string[]>([]);
 
-  constructor() {
+  constructor(private http: HttpClient) {
     this.initializeMockData();
   }
 
@@ -57,141 +71,69 @@ export class PosProductService {
     this.products = [
       {
         id: '1',
-        name: 'Laptop Dell Inspiron 15',
-        sku: 'LAP-DEL-001',
-        price: 899.99,
-        cost: 650.0,
-        category: 'Electrónica',
-        brand: 'Dell',
-        stock: 15,
-        minStock: 5,
-        barcode: '1234567890123',
-        tags: ['computadora', 'portátil', 'dell'],
+        name: 'Mouse Inalámbrico',
+        sku: 'MOUSE-WIFI-001',
+        price: 25.99,
+        cost: 15.0,
+        category: 'Accesorios',
+        brand: 'Logitech',
+        stock: 50,
+        minStock: 10,
+        barcode: '2345678901234',
+        tags: ['mouse', 'inalámbrico', 'logitech'],
         isActive: true,
         createdAt: new Date('2024-01-15'),
         updatedAt: new Date('2024-01-15'),
       },
       {
         id: '2',
-        name: 'Mouse Logitech MX Master 3',
-        sku: 'MOU-LOG-002',
-        price: 99.99,
-        cost: 65.0,
-        category: 'Accesorios',
-        brand: 'Logitech',
-        stock: 25,
-        minStock: 10,
-        barcode: '2345678901234',
-        tags: ['mouse', 'inalámbrico', 'logitech'],
-        isActive: true,
-        createdAt: new Date('2024-01-16'),
-        updatedAt: new Date('2024-01-16'),
-      },
-      {
-        id: '3',
         name: 'Teclado Mecánico RGB',
         sku: 'KEY-MEC-003',
         price: 129.99,
         cost: 85.0,
         category: 'Accesorios',
         brand: 'Corsair',
-        stock: 8,
+        stock: 25,
         minStock: 5,
         barcode: '3456789012345',
         tags: ['teclado', 'mecánico', 'rgb'],
         isActive: true,
-        createdAt: new Date('2024-01-17'),
-        updatedAt: new Date('2024-01-17'),
+        createdAt: new Date('2024-01-16'),
+        updatedAt: new Date('2024-01-16'),
       },
       {
-        id: '4',
+        id: '3',
         name: 'Monitor LG 27" 4K',
-        sku: 'MON-LG-004',
-        price: 449.99,
-        cost: 320.0,
-        category: 'Electrónica',
+        sku: 'MON-LG-007',
+        price: 299.99,
+        cost: 200.0,
+        category: 'Accesorios',
         brand: 'LG',
-        stock: 12,
+        stock: 15,
         minStock: 3,
         barcode: '4567890123456',
         tags: ['monitor', '4k', 'lg'],
         isActive: true,
-        createdAt: new Date('2024-01-18'),
-        updatedAt: new Date('2024-01-18'),
-      },
-      {
-        id: '5',
-        name: 'Auriculares Bluetooth Sony',
-        sku: 'AUD-SON-005',
-        price: 199.99,
-        cost: 140.0,
-        category: 'Audio',
-        brand: 'Sony',
-        stock: 0,
-        minStock: 5,
-        barcode: '5678901234567',
-        tags: ['auriculares', 'bluetooth', 'sony'],
-        isActive: true,
-        createdAt: new Date('2024-01-19'),
-        updatedAt: new Date('2024-01-19'),
-      },
-      {
-        id: '6',
-        name: 'USB-C Hub 7-en-1',
-        sku: 'HUB-USB-006',
-        price: 49.99,
-        cost: 25.0,
-        category: 'Accesorios',
-        brand: 'Anker',
-        stock: 30,
-        minStock: 10,
-        barcode: '6789012345678',
-        tags: ['hub', 'usb-c', 'anker'],
-        isActive: true,
-        createdAt: new Date('2024-01-20'),
-        updatedAt: new Date('2024-01-20'),
-      },
-      {
-        id: '7',
-        name: 'Webcam HD 1080p',
-        sku: 'CAM-HD-007',
-        price: 79.99,
-        cost: 45.0,
-        category: 'Accesorios',
-        brand: 'Logitech',
-        stock: 18,
-        minStock: 8,
-        barcode: '7890123456789',
-        tags: ['webcam', 'hd', 'logitech'],
-        isActive: true,
-        createdAt: new Date('2024-01-21'),
-        updatedAt: new Date('2024-01-21'),
-      },
-      {
-        id: '8',
-        name: 'Silla Gaming Ergonómica',
-        sku: 'SIL-GAM-008',
-        price: 299.99,
-        cost: 180.0,
-        category: 'Muebles',
-        brand: 'DXRacer',
-        stock: 6,
-        minStock: 2,
-        barcode: '8901234567890',
-        tags: ['silla', 'gaming', 'ergonómica'],
-        isActive: true,
-        createdAt: new Date('2024-01-22'),
-        updatedAt: new Date('2024-01-22'),
+        createdAt: new Date('2024-01-17'),
+        updatedAt: new Date('2024-01-17'),
       },
     ];
 
-    this.categories = [...new Set(this.products.map((p) => p.category))];
+    this.categories = [
+      { id: 'all', name: 'Todos' },
+      { id: 'electronics', name: 'Electronicos' },
+      { id: 'clothing', name: 'Ropa' },
+      { id: 'food', name: 'Alimentos' },
+      { id: 'books', name: 'Libros' },
+      { id: 'other', name: 'Otros' },
+    ];
+
     this.brands = [
-      ...new Set(
-        this.products
-          .map((p) => p.brand)
-          .filter((brand): brand is string => Boolean(brand)),
-      ),
+      { id: 'all', name: 'Todos' },
+      { id: 'logitech', name: 'Logitech' },
+      { id: 'corsair', name: 'Corsair' },
+      { id: 'lg', name: 'LG' },
+      { id: 'samsung', name: 'Samsung' },
     ];
   }
 
@@ -200,142 +142,83 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
-    return of(filters).pipe(
-      delay(300),
-      map(() => {
-        let filteredProducts = this.products.filter((p) => p.isActive);
+    // Use real API call for POS optimized search
+    const params = new HttpParams()
+      .set('pos_optimized', filters.pos_optimized ? 'true' : 'false')
+      .set('include_stock', filters.include_stock ? 'true' : 'false')
+      .set('page', page.toString())
+      .set('limit', pageSize.toString());
 
-        if (filters.query) {
-          const query = filters.query.toLowerCase();
-          filteredProducts = filteredProducts.filter(
-            (p) =>
-              p.name.toLowerCase().includes(query) ||
-              p.sku.toLowerCase().includes(query) ||
-              p.barcode?.includes(query) ||
-              p.tags?.some((tag) => tag.toLowerCase().includes(query)),
-          );
+    if (filters.barcode) {
+      params.set('barcode', filters.barcode);
+    } else if (filters.query) {
+      params.set('search', filters.query);
+    }
 
-          this.addToSearchHistory(filters.query);
-        }
+    if (filters.category) {
+      params.set('category_id', filters.category);
+    }
 
-        if (filters.category) {
-          filteredProducts = filteredProducts.filter(
-            (p) => p.category === filters.category,
-          );
-        }
+    if (filters.brand) {
+      params.set('brand_id', filters.brand);
+    }
 
-        if (filters.brand) {
-          filteredProducts = filteredProducts.filter(
-            (p) => p.brand === filters.brand,
-          );
-        }
-
-        if (filters.minPrice !== undefined) {
-          filteredProducts = filteredProducts.filter(
-            (p) => p.price >= filters.minPrice!,
-          );
-        }
-
-        if (filters.maxPrice !== undefined) {
-          filteredProducts = filteredProducts.filter(
-            (p) => p.price <= filters.maxPrice!,
-          );
-        }
-
-        if (filters.inStock) {
-          filteredProducts = filteredProducts.filter((p) => p.stock > 0);
-        }
-
-        if (filters.sortBy) {
-          filteredProducts.sort((a, b) => {
-            let aValue: any = a[filters.sortBy!];
-            let bValue: any = b[filters.sortBy!];
-
-            if (filters.sortBy === 'name') {
-              aValue = aValue.toLowerCase();
-              bValue = bValue.toLowerCase();
-            }
-
-            if (filters.sortOrder === 'desc') {
-              return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
-            } else {
-              return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
-            }
-          });
-        }
-
-        const total = filteredProducts.length;
-        const totalPages = Math.ceil(total / pageSize);
-        const startIndex = (page - 1) * pageSize;
-        const endIndex = startIndex + pageSize;
-        const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-
-        return {
-          products: paginatedProducts,
-          total,
-          page,
-          pageSize,
-          totalPages,
-        };
-      }),
-    );
-  }
-
-  getProductByBarcode(barcode: string): Observable<Product | null> {
-    return of(barcode).pipe(
-      delay(100),
-      map(() => {
-        const product = this.products.find(
-          (p) => p.barcode === barcode && p.isActive,
-        );
-        return product || null;
+    return this.http.get<SearchResult>('/api/products', { params }).pipe(
+      map(
+        (response) =>
+          response || { products: [], total: 0, page, pageSize, totalPages: 0 },
+      ),
+      catchError((error: any) => {
+        console.error('Error searching products:', error);
+        return of({ products: [], total: 0, page, pageSize, totalPages: 0 });
       }),
     );
   }
 
   getProductById(id: string): Observable<Product | null> {
-    return of(id).pipe(
-      delay(100),
-      map(() => {
-        const product = this.products.find((p) => p.id === id && p.isActive);
-        return product || null;
-      }),
-    );
+    const product = this.products.find((p) => p.id === id);
+    return of(product || null).pipe(delay(100));
+  }
+
+  getProductByBarcode(barcode: string): Observable<Product | null> {
+    const product = this.products.find((p) => p.barcode === barcode);
+    return of(product || null).pipe(delay(100));
   }
 
   getProductBySku(sku: string): Observable<Product | null> {
-    return of(sku).pipe(
-      delay(100),
-      map(() => {
-        const product = this.products.find(
-          (p) => p.sku.toLowerCase() === sku.toLowerCase() && p.isActive,
-        );
-        return product || null;
-      }),
-    );
+    const product = this.products.find((p) => p.sku === sku);
+    return of(product || null).pipe(delay(100));
   }
 
-  getCategories(): Observable<string[]> {
+  getCategories(): Observable<Category[]> {
     return of(this.categories).pipe(delay(100));
   }
 
-  getBrands(): Observable<string[]> {
+  getBrands(): Observable<Brand[]> {
     return of(this.brands).pipe(delay(100));
+  }
+
+  getCategoryIds(): Observable<string[]> {
+    return of(this.categories.map((c) => c.id)).pipe(delay(100));
+  }
+
+  getBrandIds(): Observable<string[]> {
+    return of(this.brands.map((b) => b.id)).pipe(delay(100));
   }
 
   getSearchHistory(): Observable<string[]> {
     return this.searchHistory$.asObservable();
   }
 
-  private addToSearchHistory(query: string): void {
+  addToSearchHistory(query: string): void {
     if (!query || query.trim().length < 2) return;
 
-    const currentHistory = this.searchHistory$.value;
-    const updatedHistory = [
-      query.trim(),
-      ...currentHistory.filter((q) => q !== query.trim()),
-    ].slice(0, 10);
-    this.searchHistory$.next(updatedHistory);
+    const current = this.searchHistory$.value;
+    const filtered = current.filter(
+      (q) => q.toLowerCase() !== query.toLowerCase(),
+    );
+    const updated = [query, ...filtered].slice(0, 10);
+    this.searchHistory$.next(updated);
   }
 
   clearSearchHistory(): void {
@@ -343,33 +226,27 @@ export class PosProductService {
   }
 
   getPopularProducts(limit: number = 10): Observable<Product[]> {
-    return of(
-      this.products
-        .filter((p) => p.isActive && p.stock > 0)
-        .sort((a, b) => b.stock - a.stock)
-        .slice(0, limit),
-    ).pipe(delay(200));
+    const popular = this.products
+      .filter((p) => p.isActive)
+      .sort((a, b) => b.stock - a.stock)
+      .slice(0, limit);
+    return of(popular).pipe(delay(200));
   }
 
-  getLowStockProducts(): Observable<Product[]> {
-    return of(
-      this.products
-        .filter((p) => p.isActive && p.stock <= p.minStock)
-        .sort((a, b) => a.stock - b.stock),
-    ).pipe(delay(200));
+  getLowStockProducts(limit: number = 10): Observable<Product[]> {
+    const lowStock = this.products
+      .filter((p) => p.isActive && p.stock <= p.minStock)
+      .sort((a, b) => a.stock - b.stock)
+      .slice(0, limit);
+    return of(lowStock).pipe(delay(200));
   }
 
   updateStock(productId: string, quantity: number): Observable<Product | null> {
-    return of(productId).pipe(
-      delay(100),
-      map(() => {
-        const product = this.products.find((p) => p.id === productId);
-        if (product) {
-          product.stock = Math.max(0, product.stock - quantity);
-          product.updatedAt = new Date();
-        }
-        return product || null;
-      }),
-    );
+    const product = this.products.find((p) => p.id === productId);
+    if (product) {
+      product.stock = Math.max(0, quantity);
+      product.updatedAt = new Date();
+    }
+    return of(product || null).pipe(delay(100));
   }
 }

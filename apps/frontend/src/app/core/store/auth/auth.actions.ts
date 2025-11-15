@@ -15,6 +15,7 @@ export const loginSuccess = createAction(
   '[Auth] Login Success',
   props<{
     user: any;
+    user_settings?: any;
     tokens: { accessToken: string; refreshToken: string };
     permissions?: string[];
     roles?: string[];
@@ -72,6 +73,7 @@ export const restoreAuthState = createAction(
   '[Auth] Restore Auth State',
   props<{
     user: any;
+    user_settings?: any;
     tokens: { accessToken: string; refreshToken: string };
     permissions?: string[];
     roles?: string[];

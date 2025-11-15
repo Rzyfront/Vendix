@@ -103,6 +103,23 @@ export interface ProcessPaymentRequest {
   amount: number;
   reference?: string;
   cashReceived?: number;
+  // Additional fields for POS integration
+  items?: Array<{
+    productId: string;
+    productName: string;
+    productSku: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    cost?: number;
+  }>;
+  subtotal?: number;
+  taxAmount?: number;
+  discountAmount?: number;
+  storeId?: string;
+  customer?: PosCustomer;
+  sellerUserId?: string;
+  notes?: string;
 }
 
 export interface ProcessPaymentResponse {

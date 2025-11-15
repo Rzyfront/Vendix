@@ -195,19 +195,31 @@ export class ProductsService {
       category_id,
       brand_id,
       include_inactive,
+      pos_optimized,
+      barcode,
+      include_stock,
     } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.productsWhereInput = {
-      // Solo productos activos por defecto (borrado lógico)
-      state: include_inactive ? undefined : ProductState.ACTIVE,
-      ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
+      // Para POS optimizado, siempre incluir activos
+      state: pos_optimized
+        ? ProductState.ACTIVE
+        : include_inactive
+          ? undefined
+          : ProductState.ACTIVE,
+      ...(barcode && {
+        // Búsqueda exacta por código de barras para POS
+        OR: [{ sku: { equals: barcode, mode: 'insensitive' } }],
       }),
+      ...(search &&
+        !barcode && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
       ...(state && { state }),
       ...(store_id && { store_id }),
       ...(brand_id && { brand_id }),
@@ -251,19 +263,21 @@ export class ProductsService {
             where: { is_main: true },
             take: 1,
           },
-          stock_levels: {
-            select: {
-              quantity_available: true,
-              quantity_reserved: true,
-              inventory_locations: {
-                select: {
-                  id: true,
-                  name: true,
-                  type: true,
+          ...(include_stock && {
+            stock_levels: {
+              select: {
+                quantity_available: true,
+                quantity_reserved: true,
+                inventory_locations: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                  },
                 },
               },
             },
-          },
+          }),
           _count: {
             select: {
               product_variants: true,
@@ -277,16 +291,31 @@ export class ProductsService {
       this.prisma.products.count({ where }),
     ]);
 
+    // Para POS optimizado, retornar productos directamente sin cálculos complejos
+    if (pos_optimized) {
+      return {
+        data: products,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    }
+
     // Calcular stock totals dinámicamente para cada producto
     const productsWithStock = products.map((product) => {
-      const totalStockAvailable = product.stock_levels.reduce(
-        (sum, stock) => sum + stock.quantity_available,
-        0,
-      );
-      const totalStockReserved = product.stock_levels.reduce(
-        (sum, stock) => sum + stock.quantity_reserved,
-        0,
-      );
+      const totalStockAvailable =
+        product.stock_levels?.reduce(
+          (sum, stock) => sum + stock.quantity_available,
+          0,
+        ) || 0;
+      const totalStockReserved =
+        product.stock_levels?.reduce(
+          (sum, stock) => sum + stock.quantity_reserved,
+          0,
+        ) || 0;
 
       return {
         ...product,
@@ -295,13 +324,14 @@ export class ProductsService {
         // Nuevos campos agregados para mayor claridad
         total_stock_available: totalStockAvailable,
         total_stock_reserved: totalStockReserved,
-        stock_by_location: product.stock_levels.map((stock) => ({
-          location_id: stock.inventory_locations.id,
-          location_name: stock.inventory_locations.name,
-          location_type: stock.inventory_locations.type,
-          available: stock.quantity_available,
-          reserved: stock.quantity_reserved,
-        })),
+        stock_by_location:
+          product.stock_levels?.map((stock) => ({
+            location_id: stock.inventory_locations.id,
+            location_name: stock.inventory_locations.name,
+            location_type: stock.inventory_locations.type,
+            available: stock.quantity_available,
+            reserved: stock.quantity_reserved,
+          })) || [],
       };
     });
 

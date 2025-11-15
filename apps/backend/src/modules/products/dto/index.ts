@@ -217,6 +217,20 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   include_inactive?: boolean = false;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  pos_optimized?: boolean = false;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  include_stock?: boolean = true;
 }
 
 // Product Variants DTOs

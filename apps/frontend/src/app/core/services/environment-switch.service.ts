@@ -165,6 +165,7 @@ export class EnvironmentSwitchService {
         responseData.tokens,
         responseData.permissions,
         responseData.roles,
+        responseData.user?.user_settings, // Extraer user_settings del usuario actualizado
       );
 
       // 6. Sincronizar localStorage de forma unificada

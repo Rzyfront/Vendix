@@ -130,106 +130,111 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   menuItems: MenuItem[] = [
     {
       label: 'Dashboard',
-      icon: 'fas fa-home',
+      icon: 'home',
       route: '/admin/dashboard',
     },
     {
+      label: 'POS',
+      icon: 'store',
+      route: '/admin/pos',
+    },
+    {
       label: 'Products',
-      icon: 'fas fa-box',
+      icon: 'package',
       children: [
         {
           label: 'All Products',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/products/all',
         },
         {
           label: 'Categories',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/products/categories',
         },
         {
           label: 'Inventory',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/products/inventory',
         },
       ],
     },
     {
       label: 'Orders',
-      icon: 'fas fa-shopping-cart',
+      icon: 'cart',
       route: '/admin/orders',
       badge: '8',
     },
     {
       label: 'Customers',
-      icon: 'fas fa-users',
+      icon: 'users',
       children: [
         {
           label: 'All Customers',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/customers/all',
         },
         {
           label: 'Reviews',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/customers/reviews',
         },
       ],
     },
     {
       label: 'Marketing',
-      icon: 'fas fa-bullhorn',
+      icon: 'megaphone',
       children: [
         {
           label: 'Promotions',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/marketing/promotions',
         },
         {
           label: 'Coupons',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/marketing/coupons',
         },
       ],
     },
     {
       label: 'Analytics',
-      icon: 'fas fa-chart-line',
+      icon: 'chart-line',
       children: [
         {
           label: 'Sales',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/analytics/sales',
         },
         {
           label: 'Traffic',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/analytics/traffic',
         },
         {
           label: 'Performance',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/analytics/performance',
         },
       ],
     },
     {
       label: 'Settings',
-      icon: 'fas fa-cog',
+      icon: 'settings',
       children: [
         {
           label: 'General',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/settings/general',
         },
         {
           label: 'Appearance',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/settings/appearance',
         },
         {
           label: 'Security',
-          icon: 'fas fa-circle',
+          icon: 'circle',
           route: '/admin/settings/security',
         },
       ],
