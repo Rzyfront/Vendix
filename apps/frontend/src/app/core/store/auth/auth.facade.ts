@@ -179,6 +179,12 @@ export class AuthFacade {
     return result;
   }
 
+  isOwner(): boolean {
+    let result = false;
+    this.isOwner$.pipe(take(1)).subscribe((owner) => (result = owner));
+    return result;
+  }
+
   isLoading(): boolean {
     let result = false;
     this.loading$.pipe(take(1)).subscribe((loading) => (result = loading));
