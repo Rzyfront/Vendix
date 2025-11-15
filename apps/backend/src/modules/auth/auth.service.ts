@@ -2884,8 +2884,11 @@ export class AuthService {
       }
 
       // Verificar que la tienda exista y el usuario tenga acceso
-      const store = await this.prismaService.stores.findUnique({
-        where: { domain: storeSlug },
+      const store = await this.prismaService.stores.findFirst({
+        where: {
+          slug: storeSlug,
+          organization_id: user.organization_id,
+        },
         include: {
           organizations: true,
         },

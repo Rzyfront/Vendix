@@ -75,10 +75,18 @@ export class EnvironmentSwitchService {
       }
 
       // Verificar que la tienda exista y el usuario tenga acceso
-      const store = await this.prismaService.stores.findUnique({
-        where: { domain: storeSlug },
+      const store = await this.prismaService.stores.findFirst({
+        where: {
+          slug: storeSlug,
+          organization_id: user.organization_id,
+        },
         include: {
           organizations: true,
+          store_users: {
+            where: {
+              user_id: userId,
+            },
+          },
         },
       });
 
@@ -86,11 +94,12 @@ export class EnvironmentSwitchService {
         throw new NotFoundException('Tienda no encontrada');
       }
 
-      // Verificar que el usuario pertenezca a la organización de la tienda
+      // Verificar que el usuario pertenezca a la organización de la tienda o esté asignado a la tienda
       const hasAccess =
         userRoles.includes('super_admin') ||
         userRoles.includes('owner') ||
-        store.organizations.owner_id === userId;
+        store.organizations.owner_id === userId ||
+        store.store_users.length > 0;
 
       if (!hasAccess) {
         throw new UnauthorizedException('No tienes acceso a esta tienda');

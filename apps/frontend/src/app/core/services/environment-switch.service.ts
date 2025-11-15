@@ -4,6 +4,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { AuthService } from './auth.service';
+import { environment } from '../../../environments/environment';
 
 export interface SwitchEnvironmentRequest {
   target_environment: 'STORE_ADMIN' | 'ORG_ADMIN';
@@ -27,7 +28,7 @@ export interface SwitchEnvironmentResponse {
   providedIn: 'root',
 })
 export class EnvironmentSwitchService {
-  private readonly apiUrl = '/api/auth';
+  private readonly apiUrl = environment.apiUrl + '/auth';
   private http = inject(HttpClient);
   private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
@@ -145,7 +146,16 @@ export class EnvironmentSwitchService {
         );
       }
 
+      console.log('Environment switch response:', response);
+
       if (response?.success && response.tokens) {
+        console.log('Updating auth state with new tokens and user:', {
+          user: response.user,
+          tokens: response.tokens,
+          permissions: response.permissions,
+          roles: response.roles,
+        });
+
         // Actualizar el estado de autenticación con los nuevos tokens
         this.authFacade.restoreAuthState(
           response.user,
@@ -154,14 +164,16 @@ export class EnvironmentSwitchService {
           response.roles,
         );
 
-        // Recargar la página para aplicar el nuevo entorno
+        // Esperar un momento para que el estado se actualice y luego recargar
         setTimeout(() => {
+          console.log('Reloading page to apply new environment...');
           window.location.href = window.location.origin;
-        }, 100);
+        }, 500);
 
         return true;
       }
 
+      console.error('Environment switch failed: Invalid response', response);
       return false;
     } catch (error) {
       console.error('Environment switch failed:', error);
