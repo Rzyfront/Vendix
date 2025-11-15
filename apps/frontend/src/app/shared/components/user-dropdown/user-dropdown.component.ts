@@ -154,6 +154,12 @@ export class UserDropdownComponent implements OnInit {
       condition: () => this.canSwitchToOrganization(),
     },
     {
+      label: 'Ir a Tienda',
+      icon: 'store',
+      action: () => this.switchToStore(),
+      condition: () => this.canSwitchToStore(),
+    },
+    {
       label: 'Cerrar Sesión',
       icon: 'logout',
       action: () => this.logout(),
@@ -270,5 +276,37 @@ export class UserDropdownComponent implements OnInit {
     } catch (error) {
       console.error('Error switching to organization environment:', error);
     }
+  }
+
+  private async switchToStore(): Promise<void> {
+    try {
+      // Obtener la primera tienda disponible del usuario
+      const user = this.globalFacade.getUserContext()?.user;
+      const availableStores = user?.stores || [];
+
+      if (availableStores.length === 0) {
+        console.warn('No stores available for switching');
+        return;
+      }
+
+      const firstStore = availableStores[0];
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'STORE_ADMIN',
+          firstStore.slug,
+        );
+
+      if (success) {
+        console.log('Switched to store environment');
+      } else {
+        console.error('Failed to switch to store environment');
+      }
+    } catch (error) {
+      console.error('Error switching to store environment:', error);
+    }
+  }
+
+  private canSwitchToStore(): boolean {
+    return this.environmentContextService.canSwitchToStore();
   }
 }
