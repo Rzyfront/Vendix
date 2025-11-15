@@ -151,11 +151,7 @@ export class EnvironmentSwitchService {
       refreshToken,
     };
 
-    // Obtener permisos y roles actualizados
-    const permissions = this.getPermissionsFromRoles(user.user_roles);
-    const roles = userRoles;
-
-    // Actualizar user settings con el nuevo entorno
+    // Primero actualizar user settings con el nuevo entorno (antes de consultar)
     await this.prismaService.user_settings.upsert({
       where: { user_id: userId },
       update: {
@@ -171,6 +167,34 @@ export class EnvironmentSwitchService {
       },
     });
 
+    // Obtener el usuario completo con todas las relaciones necesarias
+    const completeUser = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        organizations: true,
+        addresses: true,
+      },
+    });
+
+    // Transformar user_roles a roles array simple para compatibilidad con frontend
+    const { user_roles, ...userWithoutRoles } = completeUser;
+    const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+
+    const userWithRolesArray = {
+      ...userWithoutRoles,
+      roles, // Array simple: ["owner", "admin"]
+    };
+
+    // Obtener user_settings actualizados (después de la actualización)
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+
     // Registrar el cambio de entorno en auditoría
     await this.auditService.log({
       userId: userId,
@@ -183,36 +207,19 @@ export class EnvironmentSwitchService {
       },
     });
 
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        roles,
-        permissions,
-      },
-      tokens,
-      permissions,
-      roles,
-      updatedEnvironment: targetEnvironment,
+    // Remover password del response (igual que en login)
+    const { password, ...userWithRolesAndPassword } = userWithRolesArray || user;
+
+    // Estructura idéntica a la del login: { user, user_settings, ...tokens }
+    const response = {
+      user: userWithRolesAndPassword,  // Usar usuario con roles array simple
+      user_settings: userSettings,
+      access_token: accessToken,  // Formato igual que login
+      refresh_token: refreshToken,  // Formato igual que login
+      token_type: 'Bearer',  // Igual que login
+      expires_in: 3600,  // Igual que login
+      updatedEnvironment: targetEnvironment, // Campo adicional específico del switch
     };
+
+    return response;
   }
-
-  // Método auxiliar para obtener permisos de roles
-  private getPermissionsFromRoles(userRoles: any[]): string[] {
-    const permissions = new Set<string>();
-
-    for (const userRole of userRoles) {
-      if (userRole.roles?.role_permissions) {
-        for (const rolePermission of userRole.roles.role_permissions) {
-          if (rolePermission.permissions?.name) {
-            permissions.add(rolePermission.permissions.name);
-          }
-        }
-      }
-    }
-
-    return Array.from(permissions);
-  }
-}

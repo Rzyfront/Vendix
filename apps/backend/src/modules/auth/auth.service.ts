@@ -785,8 +785,18 @@ export class AuthService {
           },
         },
         organizations: true,
+        addresses: true,  // Agregar direcciones para consistencia con switch environment
       },
     });
+
+    // Transformar user_roles a roles array simple para compatibilidad con frontend
+    const { user_roles, ...userWithoutRoles } = user;
+    const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+
+    const userWithRolesArray = {
+      ...userWithoutRoles,
+      roles, // Array simple: ["owner", "admin"]
+    };
 
     if (!user) {
       await this.logLoginAttempt(null, false, email);
@@ -936,10 +946,10 @@ export class AuthService {
     });
 
     // Remover password del response
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
     return {
-      user: userWithoutPassword,
+      user: userWithRolesAndPassword,  // Usar usuario con roles array simple
       user_settings: userSettings,
       ...tokens,
     };

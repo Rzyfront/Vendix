@@ -141,8 +141,8 @@ export class EnvironmentSwitchService {
       // 3. Extraer datos de la respuesta del backend
       const responseData = response.data || response;
 
-      // 4. Validar respuesta del backend
-      if (!response?.success || !responseData?.tokens) {
+      // 4. Validar respuesta del backend (nueva estructura idéntica a login)
+      if (!response?.success || (!responseData?.access_token && !responseData?.tokens)) {
         console.error(
           '❌ Environment switch failed: Invalid response',
           response,
@@ -150,26 +150,34 @@ export class EnvironmentSwitchService {
         throw new Error(response?.message || 'Invalid response from server');
       }
 
-      // 5. Actualizar estado de autenticación
+      // 5. Extraer tokens del formato actualizado (estructura de login)
+      const tokens = responseData.tokens || {
+        access_token: responseData.access_token,
+        refresh_token: responseData.refresh_token,
+        token_type: responseData.token_type,
+        expires_in: responseData.expires_in,
+      };
+
+      // 6. Actualizar estado de autenticación con estructura completa
       // Auth state update logging removed
       this.authFacade.restoreAuthState(
-        responseData.user,
-        responseData.tokens,
-        responseData.permissions,
-        responseData.roles,
-        responseData.user?.user_settings, // Extraer user_settings del usuario actualizado
+        responseData.user,          // Usuario completo con todas las relaciones
+        tokens,                     // Tokens en formato de login
+        [],                         // Permisos ahora están dentro del usuario
+        [],                         // Roles ahora están dentro del usuario
+        responseData.user_settings, // user_settings separado como en login
       );
 
-      // 6. Sincronizar localStorage de forma unificada
+      // 7. Sincronizar localStorage de forma unificada
       this.saveUnifiedAuthState(responseData);
 
-      // 7. Actualizar AppConfigService inmediatamente
+      // 8. Actualizar AppConfigService inmediatamente
       await this.updateAppConfig(responseData.updatedEnvironment);
 
-      // 8. Esperar a que el estado se sincronice completamente
+      // 9. Esperar a que el estado se sincronice completamente
       await this.waitForAuthStateSync();
 
-      // 9. Verificación final de consistencia
+      // 10. Verificación final de consistencia
       const isConsistent = await this.verifyEnvironmentConsistency(
         targetEnvironment,
         storeSlug,
@@ -220,11 +228,18 @@ export class EnvironmentSwitchService {
    */
   private saveUnifiedAuthState(responseData: any): void {
     try {
+      // Extraer tokens en formato consistente (estructura de login)
+      const tokens = responseData.tokens || {
+        access_token: responseData.access_token,
+        refresh_token: responseData.refresh_token,
+        token_type: responseData.token_type || 'Bearer',
+        expires_in: responseData.expires_in || 3600,
+      };
+
       const unifiedState = {
-        user: responseData.user,
-        tokens: responseData.tokens,
-        permissions: responseData.permissions,
-        roles: responseData.roles,
+        user: responseData.user,              // Usuario completo con relaciones
+        user_settings: responseData.user_settings, // Configuración actualizada
+        tokens: tokens,                       // Tokens en formato estándar
         environment: responseData.updatedEnvironment,
         timestamp: Date.now(),
       };
@@ -239,8 +254,8 @@ export class EnvironmentSwitchService {
       );
 
       // Guardar tokens individualmente para compatibilidad con AuthService
-      localStorage.setItem('access_token', responseData.tokens.accessToken);
-      localStorage.setItem('refresh_token', responseData.tokens.refreshToken);
+      localStorage.setItem('access_token', tokens.access_token);
+      localStorage.setItem('refresh_token', tokens.refresh_token);
 
       // Auth state save logging removed
     } catch (error) {
