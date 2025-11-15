@@ -14,6 +14,7 @@ import { IconComponent } from '../icon/icon.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
+import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 
 export interface UserMenuOption {
   label: string;
@@ -91,6 +92,7 @@ export class UserDropdownComponent implements OnInit {
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
+  private environmentContextService = inject(EnvironmentContextService);
 
   userContext$: Observable<{
     user?: any;
@@ -249,22 +251,7 @@ export class UserDropdownComponent implements OnInit {
   }
 
   private canSwitchToOrganization(): boolean {
-    const context = this.globalFacade.getUserContext();
-    if (!context?.user) return false;
-
-    const { user, store } = context;
-
-    // Solo mostrar si está en STORE_ADMIN y tiene acceso a ORG_ADMIN
-    const hasStoreRole =
-      user.roles?.includes('store_admin') ||
-      user.roles?.includes('owner') ||
-      user.roles?.includes('manager');
-    const hasOrgRole =
-      user.roles?.includes('org_admin') ||
-      user.roles?.includes('owner') ||
-      user.roles?.includes('super_admin');
-
-    return hasStoreRole && hasOrgRole && store;
+    return this.environmentContextService.canSwitchToOrganization();
   }
 
   private async switchToOrganization(): Promise<void> {

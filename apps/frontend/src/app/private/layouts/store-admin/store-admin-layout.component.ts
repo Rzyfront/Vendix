@@ -15,7 +15,13 @@ import { takeUntil } from 'rxjs/operators';
 @Component({
   selector: 'app-store-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent, OnboardingModalComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    OnboardingModalComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -105,7 +111,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
   }
 
-  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
