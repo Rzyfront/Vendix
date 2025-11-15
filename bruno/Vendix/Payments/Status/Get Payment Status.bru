@@ -1,0 +1,48 @@
+meta {
+  name: "Get Payment Status",
+  type: "http",
+  seq: 6,
+  enabled: true
+}
+
+get {
+  url: "http://localhost:3000/api/payments/{{paymentId}}/status",
+  headers: {
+    "Authorization": "Bearer {{authToken}}"
+  }
+}
+
+tests {
+  test("Should return payment status", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('status');
+    expect(res.body.data).to.have.property('transactionId');
+  });
+
+  test("Should validate status values", function() {
+    const validStatuses = ['pending', 'succeeded', 'failed', 'authorized', 'captured', 'refunded', 'partially_refunded'];
+    expect(validStatuses).to.include(res.body.data.status);
+  });
+
+  test("Should include transaction ID", function() {
+    expect(res.body.data).to.have.property('transactionId').that.is.a('string');
+    expect(res.body.data.transactionId).to.match(/^(txn_|pi_|PAY-)/);
+  });
+
+  test("Should include payment date if successful", function() {
+    if (res.body.data.status === 'succeeded' || res.body.data.status === 'captured') {
+      expect(res.body.data).to.have.property('paidAt');
+      expect(new Date(res.body.data.paidAt)).to.be.a('date');
+    }
+  });
+
+  test("Should include gateway response", function() {
+    expect(res.body.data).to.have.property('gatewayResponse');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+}

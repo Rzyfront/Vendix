@@ -1,0 +1,62 @@
+meta {
+  name: "Get Payment by ID",
+  type: "http",
+  seq: 4,
+  enabled: true
+}
+
+get {
+  url: "http://localhost:3000/api/payments/{{paymentId}}",
+  headers: {
+    "Authorization": "Bearer {{authToken}}"
+  }
+}
+
+tests {
+  test("Should return payment details", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('transaction_id');
+    expect(res.body.data).to.have.property('amount');
+    expect(res.body.data).to.have.property('currency');
+    expect(res.body.data).to.have.property('state');
+  });
+
+  test("Should include complete order information", function() {
+    expect(res.body.data).to.have.property('orders');
+    expect(res.body.data.orders).to.have.property('id');
+    expect(res.body.data.orders).to.have.property('order_number');
+    expect(res.body.data.orders).to.have.property('state');
+    expect(res.body.data.orders).to.have.property('grand_total');
+    expect(res.body.data.orders).to.have.property('stores');
+  });
+
+  test("Should include payment method details", function() {
+    expect(res.body.data).to.have.property('payment_methods');
+    expect(res.body.data.payment_methods).to.have.property('name');
+    expect(res.body.data.payment_methods).to.have.property('type');
+    expect(res.body.data.payment_methods).to.have.property('state');
+  });
+
+  test("Should include order items", function() {
+    expect(res.body.data.orders).to.have.property('order_items');
+    expect(res.body.data.orders.order_items).to.be.an('array');
+    if (res.body.data.orders.order_items.length > 0) {
+      const item = res.body.data.orders.order_items[0];
+      expect(item).to.have.property('product_name');
+      expect(item).to.have.property('quantity');
+      expect(item).to.have.property('unit_price');
+      expect(item).to.have.property('total_price');
+    }
+  });
+
+  test("Should include refunds if any", function() {
+    expect(res.body.data).to.have.property('refunds');
+    expect(res.body.data.refunds).to.be.an('array');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(2000);
+  });
+}

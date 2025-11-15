@@ -1,0 +1,107 @@
+meta {
+  name: "Product Validation Errors"
+  type: http
+  seq: 20
+}
+
+# Test 1: Create product with invalid data
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": null,
+    "name": "",
+    "base_price": -100,
+    "stock_quantity": -5,
+    "sku": ""
+  }
+}
+
+tests {
+  test("Product creation fails with invalid data", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body).to.have.property('message');
+    expect(res.body).to.have.property('error');
+  });
+
+  test("Validation errors are specific", function() {
+    expect(res.body.error).to.include('name') || expect(res.body.message).to.include('name');
+    expect(res.body.error).to.include('price') || expect(res.body.message).to.include('price');
+    expect(res.body.error).to.include('stock') || expect(res.body.message).to.include('stock');
+  });
+}
+
+# Test 2: Duplicate SKU error
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "Duplicate SKU Test",
+    "base_price": 99.99,
+    "sku": "TEST001"
+  }
+}
+
+tests {
+  test("Duplicate SKU is rejected", function() {
+    // Assuming TEST001 already exists from previous tests
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('SKU') || expect(res.body.message).to.include('duplicate');
+  });
+}
+
+# Test 3: Invalid store_id
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 999999,
+    "name": "Invalid Store Test",
+    "base_price": 99.99,
+    "sku": "INVALID-STORE-001"
+  }
+}
+
+tests {
+  test("Invalid store ID is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('store') || expect(res.body.message).to.include('tienda');
+  });
+}
+
+# Test 4: Update non-existent product
+patch {
+  url: http://{{url}}/products/999999
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Updated Name"
+  }
+}
+
+tests {
+  test("Non-existent product update fails", function() {
+    expect(res.status).to.equal(404);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('not found') || expect(res.body.message).to.include('encontrado');
+  });
+}

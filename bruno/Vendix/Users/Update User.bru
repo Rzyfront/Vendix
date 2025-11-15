@@ -1,0 +1,47 @@
+meta {
+  name: Update User
+  type: http
+  seq: 4
+}
+
+patch {
+  url: http://{{url}}/users/{{created_user_id}}
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "first_name": "Updated",
+    "last_name": "Name",
+    "username": "updateduser123",
+    "state": "active"
+  }
+}
+
+tests {
+  test("Update user successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('actualizado exitosamente');
+  });
+
+  test("User data was updated correctly", function() {
+    expect(res.body).to.have.property('data');
+    const user = res.body.data;
+    expect(user.first_name).to.equal('Updated');
+    expect(user.last_name).to.equal('Name');
+    expect(user.username).to.equal('updateduser123');
+    expect(user.state).to.equal('active');
+  });
+
+  test("Updated user ID matches", function() {
+    expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_user_id')));
+  });
+
+  test("Password still not exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+  });
+}

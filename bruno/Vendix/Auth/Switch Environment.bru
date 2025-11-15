@@ -1,0 +1,42 @@
+meta {
+  name: Switch Environment
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/auth/switch-environment
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "target_environment": "ORG_ADMIN"
+  }
+}
+
+vars:post-response {
+  new_access_token: res.body.data.tokens.accessToken
+  new_refresh_token: res.body.data.tokens.refreshToken
+}
+
+tests {
+  test("Switch to ORG_ADMIN successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.equal(true);
+    expect(res.body.data).to.have.property('user');
+    expect(res.body.data).to.have.property('tokens');
+    expect(res.body.data.updatedEnvironment).to.equal('ORG_ADMIN');
+  });
+  
+  test("New tokens are provided", function() {
+    expect(res.body.data.tokens).to.have.property('accessToken');
+    expect(res.body.data.tokens).to.have.property('refreshToken');
+  });
+  
+  test("User data includes roles and permissions", function() {
+    expect(res.body.data.user).to.have.property('roles');
+    expect(res.body.data.user).to.have.property('permissions');
+  });
+}

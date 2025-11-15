@@ -24,15 +24,26 @@ This collection contains comprehensive tests for the Products module in the Vend
 - `Set Main Product Image` - Set the primary product image
 - `Remove Product Image` - Delete product images
 
-### **Relations & Categories** `/Relations/`
-- `Create Product with Categories and Brand` - Complex product creation
-- `Update Product Categories` - Modify product category assignments
+### **Inventory Stock Management**
+- `Create Product with Multiple Stock Locations` - Create product with location-based stock
+- `Verify Consolidated Stock Levels` - Check stock levels across all locations
+- `Validate Cross-Location Stock Availability` - Test stock availability validation
+- `Verify Consolidated Product Stock with Variants` - Check stock including variants
+- `Validate Multi-Product Cross-Location Stock` - Test multiple product stock validation
+
+### **Inventory Validation APIs**
+- `POST /inventory/validate-consolidated-stock` - Validate single product stock
+- `POST /inventory/validate-multiple-consolidated-stock` - Validate multiple products
+- `GET /inventory/consolidated-stock/product/:id` - Get consolidated stock by product
 
 ### **Error Cases** `/Error Cases/`
-- `Create Product with Duplicate SKU` - Test uniqueness validation
-- `Create Product with Invalid Store` - Test store validation
-- `Get Non-existent Product` - Test 404 handling
-- `Unauthorized Access` - Test authentication requirements
+- `Product Validation Errors` - Test data validation and business rules
+- `Product Permission Errors` - Test authentication and authorization
+- `Inventory Stock Errors` - Test stock validation edge cases
+
+### **Integration Tests** `/Integration Tests/`
+- `Complete Product Lifecycle` - End-to-end product management workflow
+- `Multi-Product Stock Allocation` - Complex stock allocation scenarios
 
 ## 🔧 Environment Variables
 
@@ -122,6 +133,97 @@ Make sure to configure these variables in your Bruno environment:
 **Image Validation Rules:**
 - **image_url**: Required, String (must be valid URL)
 - **is_main**: Optional, Boolean (default: false)
+
+### Stock by Location Structure (Advanced Feature)
+```json
+{
+  "stock_by_location": [
+    {
+      "location_id": 1,
+      "quantity": 50,
+      "notes": "Main warehouse stock"
+    },
+    {
+      "location_id": 2,
+      "quantity": 25,
+      "notes": "Showroom display units"
+    },
+    {
+      "location_id": 3,
+      "quantity": 10,
+      "notes": "Retail store inventory"
+    }
+  ]
+}
+```
+
+**Stock by Location Validation Rules:**
+- **location_id**: Required, Integer (must exist and belong to organization)
+- **quantity**: Required, Integer (>= 0)
+- **notes**: Optional, String (max 255 chars, for internal reference)
+
+### Inventory Validation API Examples
+
+#### Validate Single Product Stock
+```bash
+POST /inventory/validate-consolidated-stock
+{
+  "product_id": 123,
+  "quantity": 15,
+  "organization_id": 16
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "isAvailable": true,
+    "totalAvailable": 85,
+    "totalReserved": 5,
+    "requested": 15,
+    "locations": [
+      {
+        "locationId": 1,
+        "locationName": "Main Warehouse",
+        "available": 50,
+        "reserved": 3,
+        "type": "warehouse"
+      }
+    ],
+    "suggestedAllocation": [
+      {
+        "locationId": 1,
+        "quantity": 15
+      }
+    ]
+  }
+}
+```
+
+#### Validate Multiple Products Stock
+```bash
+POST /inventory/validate-multiple-consolidated-stock
+{
+  "products": [
+    {
+      "product_id": 123,
+      "quantity": 25
+    },
+    {
+      "product_id": 456,
+      "quantity": 10
+    }
+  ],
+  "organization_id": 16
+}
+```
+
+#### Get Consolidated Stock by Product
+```bash
+GET /inventory/consolidated-stock/product/123?organization_id=16
+```
 
 ## 🔐 Permissions Required
 

@@ -1,0 +1,98 @@
+meta {
+  name: "Search Products"
+  type: http
+  seq: 12
+}
+
+# Test 1: Search products by name
+get {
+  url: http://{{url}}/products?search=Laptop
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Search products by name returns matching results", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    if (products.length > 0) {
+      const firstProduct = products[0];
+      expect(firstProduct.name.toLowerCase()).to.include('laptop');
+    }
+  });
+
+  test("Search response includes pagination metadata", function() {
+    if (res.body.meta) {
+      expect(res.body.meta).to.have.property('total');
+      expect(res.body.meta).to.have.property('page');
+      expect(res.body.meta).to.have.property('limit');
+    }
+  });
+}
+
+# Test 2: Search products by SKU
+get {
+  url: http://{{url}}/products?search=MBP14-M3-512
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Search products by SKU returns exact match", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const products = res.body.data;
+    if (products.length > 0) {
+      const firstProduct = products[0];
+      expect(firstProduct.sku).to.equal('MBP14-M3-512');
+    }
+  });
+}
+
+# Test 3: Search with pagination
+get {
+  url: http://{{url}}/products?search=iPhone&page=1&limit=5
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Search with pagination works correctly", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    if (res.body.meta) {
+      expect(res.body.meta.page).to.equal(1);
+      expect(res.body.meta.limit).to.equal(5);
+      expect(res.body.data.length).to.be.at.most(5);
+    }
+  });
+}
+
+# Test 4: Search with no results
+get {
+  url: http://{{url}}/products?search=NONEXISTENTPRODUCTXYZ
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Search with no results returns empty array", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.data.length).to.equal(0);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

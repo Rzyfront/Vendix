@@ -211,15 +211,9 @@ export class StockLevelManager {
         },
       });
 
-      // 5. Crear transaction
-      await this.transactionsService.createTransaction({
-        productId,
-        variantId,
-        type: 'stock_in', // Usamos stock_in para reservas (es un movimiento interno)
-        quantityChange: 0, // No cambia el stock físico, solo la reserva
-        reason: `Stock reserved for ${reservedForType} ${reservedForId}`,
-        userId,
-      });
+      // 5. La reserva misma sirve como registro de auditoría
+      // No se crea transacción con quantityChange: 0 para evitar contaminar el historial
+      // El registro en stock_reservations es suficiente para trazabilidad
     });
   }
 
@@ -366,23 +360,24 @@ export class StockLevelManager {
 
   /**
    * Sincroniza el stock agregado con products.stock_quantity
+   * Incluye tanto el stock base del producto como el de todas sus variantes
    */
   private async syncProductStock(
     prisma: any,
     productId: number,
   ): Promise<void> {
-    // Sumar todo el stock disponible del producto across all locations
+    // Sumar TODO el stock disponible del producto (base + variantes) across all locations
     const totalStock = await prisma.stock_levels.aggregate({
       where: {
         product_id: productId,
-        product_variant_id: null, // Solo stock base del producto
+        // Incluir tanto stock base como variantes para el cálculo total
       },
       _sum: {
         quantity_available: true,
       },
     });
 
-    // Actualizar products.stock_quantity
+    // Actualizar products.stock_quantity con el stock total consolidado
     await prisma.products.update({
       where: { id: productId },
       data: {

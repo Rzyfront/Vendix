@@ -60,8 +60,9 @@ import { takeUntil } from 'rxjs/operators';
       </div>
     </div>
 
-    <!-- Onboarding Modal -->
+    <!-- Onboarding Modal - Only render if onboarding is needed -->
     <app-onboarding-modal
+      *ngIf="needsOnboarding"
       [(isOpen)]="showOnboardingModal"
       (completed)="onOnboardingCompleted($event)"
     ></app-onboarding-modal>
@@ -80,6 +81,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Onboarding Modal
   showOnboardingModal = false;
+  needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -91,24 +93,49 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.authFacade.checkOnboardingStatus();
+    // Check onboarding status considering both organization state and user role
+    this.checkOnboardingWithRoleValidation();
 
-    // Set initial state immediately based on current needs
-    this.showOnboardingModal = this.authFacade.needsOnboarding();
-
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
+    // Subscribe to organization onboarding status from user data (no API call)
+    this.authFacade.needsOrganizationOnboarding$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
-        if (needsOnboarding) {
-          // Show onboarding modal instead of redirecting
-          this.showOnboardingModal = true;
-        } else {
-          // Close modal if it's open
-          this.showOnboardingModal = false;
-        }
+      .subscribe((needsOnboarding: boolean) => {
+        this.needsOnboarding = needsOnboarding;
+        this.updateOnboardingModal();
       });
+  }
+
+  private checkOnboardingWithRoleValidation(): void {
+    // Only proceed with onboarding logic if user is owner
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.needsOnboarding = false;
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Check actual onboarding status from persistent data
+    const currentUser = this.authFacade.getCurrentUser();
+    const organizationOnboarding = currentUser?.organizations?.onboarding;
+
+    this.needsOnboarding = !organizationOnboarding;
+    this.updateOnboardingModal();
+  }
+
+  private updateOnboardingModal(): void {
+    // Double-check owner role before showing modal
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Verify onboarding status from current user data
+    const currentUser = this.authFacade.getCurrentUser();
+    const organizationOnboarding = currentUser?.organizations?.onboarding;
+    const actuallyNeedsOnboarding = !organizationOnboarding;
+
+    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
 
   ngOnDestroy(): void {
@@ -117,7 +144,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   breadcrumb = {
-    parent: { label: 'Organización', url: '/organization' },
+    parent: { label: 'Panel Administrativo', url: '/admin' },
     current: { label: 'Dashboard' },
   };
 
@@ -130,80 +157,188 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   menuItems: MenuItem[] = [
     {
       label: 'Dashboard',
-      icon: 'fas fa-home',
-      route: '/organization/dashboard',
+      icon: 'home',
+      route: '/admin/dashboard',
     },
     {
-      label: 'Analytics',
-      icon: 'fas fa-chart-line',
+      label: 'Stores',
+      icon: 'store',
+      route: '/admin/stores-management',
+    },
+    {
+      label: 'Financial',
+      icon: 'dollar-sign',
       children: [
         {
           label: 'Reports',
-          icon: 'fas fa-circle',
-          route: '/organization/analytics/reports',
+          icon: 'file-text',
+          route: '/admin/financial/reports',
         },
         {
-          label: 'Statistics',
-          icon: 'fas fa-circle',
-          route: '/organization/analytics/statistics',
+          label: 'Billing & Subscriptions',
+          icon: 'credit-card',
+          route: '/admin/financial/billing',
         },
         {
-          label: 'Insights',
-          icon: 'fas fa-circle',
-          route: '/organization/analytics/insights',
+          label: 'Cost Analysis',
+          icon: 'bar-chart',
+          route: '/admin/financial/cost-analysis',
+        },
+        {
+          label: 'Cash Flow',
+          icon: 'trending-up',
+          route: '/admin/financial/cash-flow',
+        },
+      ],
+    },
+    {
+      label: 'Analytics & BI',
+      icon: 'chart-line',
+      children: [
+        {
+          label: 'Predictive Analysis',
+          icon: 'bar-chart',
+          route: '/admin/analytics/predictive',
+        },
+        {
+          label: 'Cross-Store Analysis',
+          icon: 'store',
+          route: '/admin/analytics/cross-store',
         },
       ],
     },
     {
       label: 'Users',
-      icon: 'fas fa-users',
-      route: '/organization/users/all',
-    },
-    {
-      label: 'Products',
-      icon: 'fas fa-box',
+      icon: 'users',
       children: [
         {
-          label: 'All Products',
-          icon: 'fas fa-circle',
-          route: '/organization/products/all',
+          label: 'Global Users',
+          icon: 'user',
+          route: '/admin/users/global-users',
         },
         {
-          label: 'Categories',
-          icon: 'fas fa-circle',
-          route: '/organization/products/categories',
+          label: 'Roles & Permissions',
+          icon: 'shield',
+          route: '/admin/users/roles-permissions',
         },
         {
-          label: 'Inventory',
-          icon: 'fas fa-circle',
-          route: '/organization/products/inventory',
+          label: 'Store Assignments',
+          icon: 'building',
+          route: '/admin/users/store-assignments',
+        },
+        {
+          label: 'Access Audit',
+          icon: 'eye',
+          route: '/admin/users/access-audit',
         },
       ],
     },
     {
-      label: 'Orders',
-      icon: 'fas fa-shopping-cart',
-      route: '/organization/orders',
-      badge: '12',
-    },
-    {
-      label: 'Settings',
-      icon: 'fas fa-cog',
+      label: 'Inventory',
+      icon: 'warehouse',
       children: [
         {
-          label: 'General',
-          icon: 'fas fa-circle',
-          route: '/organization/settings/general',
+          label: 'Stock Management',
+          icon: 'package',
+          route: '/admin/inventory/stock',
         },
         {
-          label: 'Security',
-          icon: 'fas fa-circle',
-          route: '/organization/settings/security',
+          label: 'Stock Transfers',
+          icon: 'refresh-ccw',
+          route: '/admin/inventory/transfers',
         },
         {
-          label: 'Notifications',
-          icon: 'fas fa-circle',
-          route: '/organization/settings/notifications',
+          label: 'Suppliers',
+          icon: 'truck',
+          route: '/admin/inventory/suppliers',
+        },
+        {
+          label: 'Demand Forecast',
+          icon: 'trending-up',
+          route: '/admin/inventory/demand-forecast',
+        },
+      ],
+    },
+    {
+      label: 'Operations',
+      icon: 'truck',
+      children: [
+        {
+          label: 'Shipping Management',
+          icon: 'truck',
+          route: '/admin/operations/shipping',
+        },
+        {
+          label: 'Procurement',
+          icon: 'cart',
+          route: '/admin/operations/procurement',
+        },
+        {
+          label: 'Returns Management',
+          icon: 'rotate-ccw',
+          route: '/admin/operations/returns',
+        },
+        {
+          label: 'Route Optimization',
+          icon: 'globe-2',
+          route: '/admin/operations/route-optimization',
+        },
+      ],
+    },
+    {
+      label: 'Audit & Compliance',
+      icon: 'shield',
+      children: [
+        {
+          label: 'Audit Logs',
+          icon: 'file-text',
+          route: '/admin/audit/logs',
+        },
+        {
+          label: 'Compliance Reports',
+          icon: 'file-check',
+          route: '/admin/audit/compliance',
+        },
+        {
+          label: 'Legal Documents',
+          icon: 'file-text',
+          route: '/admin/audit/legal-docs',
+        },
+        {
+          label: 'Backup & Recovery',
+          icon: 'backup',
+          route: '/admin/audit/backup',
+        },
+      ],
+    },
+    {
+      label: 'Configuration',
+      icon: 'settings',
+      children: [
+        {
+          label: 'Application Settings',
+          icon: 'sliders',
+          route: '/admin/config/application',
+        },
+        {
+          label: 'Policies',
+          icon: 'file-text',
+          route: '/admin/config/policies',
+        },
+        {
+          label: 'Integrations',
+          icon: 'link-2',
+          route: '/admin/config/integrations',
+        },
+        {
+          label: 'Taxes',
+          icon: 'credit-card',
+          route: '/admin/config/taxes',
+        },
+        {
+          label: 'Domains',
+          icon: 'globe-2',
+          route: '/admin/config/domains',
         },
       ],
     },

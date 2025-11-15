@@ -17,7 +17,37 @@ body:json {
   }
 }
 
+tests {
+  test("Product image added successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const image = res.body.data;
+    expect(image).to.have.property('id');
+    expect(image).to.have.property('image_url', 'https://example.com/iphone15pro-new-image.jpg');
+    expect(image).to.have.property('is_main', false);
+  });
+
+  test("Image is not marked as main by default", function() {
+    const image = res.body.data;
+    expect(image.is_main).to.be.false;
+  });
+
+  test("Image is associated with correct product", function() {
+    const image = res.body.data;
+    expect(image).to.have.property('product_id');
+    expect(image.product_id).to.equal(parseInt({{productId}}));
+  });
+}
+
 settings {
   encodeUrl: true
   timeout: 0
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("imageId", res.body.data.id);
+  }
 }

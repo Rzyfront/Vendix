@@ -6,8 +6,6 @@ import { PrismaService } from '../../../prisma/prisma.service';
 
 export interface JwtPayload {
   sub: number; // user id
-  email: string;
-  roles: string[];
   organization_id: number; // ✅ Scope de organización del token
   store_id?: number | null; // ✅ Scope de tienda del token (opcional)
 }

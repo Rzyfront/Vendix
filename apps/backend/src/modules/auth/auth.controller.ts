@@ -14,6 +14,7 @@ import {
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
+import { EnvironmentSwitchService } from './environment-switch.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
@@ -35,6 +36,7 @@ import { AuthenticatedRequest } from '../../common/interfaces/authenticated-requ
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly environmentSwitchService: EnvironmentSwitchService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -682,6 +684,65 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al verificar el email',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  // ===== RUTAS DE CAMBIO DE ENTORNO =====
+
+  @Post('switch-environment')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cambiar entre entornos de administración',
+    description: 'Permite a los usuarios cambiar entre ORG_ADMIN y STORE_ADMIN',
+  })
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Cambio de entorno exitoso',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Entorno cambiado exitosamente' },
+        data: {
+          type: 'object',
+          properties: {
+            user: { type: 'object' },
+            tokens: {
+              type: 'object',
+              properties: {
+                accessToken: { type: 'string' },
+                refreshToken: { type: 'string' },
+              },
+            },
+            permissions: { type: 'array', items: { type: 'string' } },
+            roles: { type: 'array', items: { type: 'string' } },
+            updatedEnvironment: { type: 'string' },
+          },
+        },
+      },
+    },
+  })
+  async switchEnvironment(
+    @Req() req: AuthenticatedRequest,
+    @Body() switchDto: any,
+  ) {
+    try {
+      const result = await this.environmentSwitchService.switchEnvironment(
+        req.user.id,
+        switchDto.target_environment,
+        switchDto.store_slug,
+      );
+      return this.responseService.success(
+        result,
+        'Entorno cambiado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al cambiar de entorno',
         error.response?.message || error.message,
         error.status || 400,
       );

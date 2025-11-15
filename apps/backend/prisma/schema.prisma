@@ -718,6 +718,10 @@ model stock_levels {
   product_variants    product_variants?   @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
 
   @@unique([product_id, product_variant_id, location_id])
+  @@index([product_id, location_id]) // Para búsquedas de stock por producto y ubicación
+  @@index([product_id]) // Para cálculos de stock total por producto
+  @@index([location_id, quantity_available]) // Para búsquedas de productos con stock disponible
+  @@index([quantity_available, reorder_point]) // Para alertas de stock bajo
 }
 
 model inventory_movements {

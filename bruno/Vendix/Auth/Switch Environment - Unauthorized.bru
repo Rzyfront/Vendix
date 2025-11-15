@@ -1,0 +1,24 @@
+meta {
+  name: Switch Environment - Unauthorized
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/auth/switch-environment
+  body: json
+  auth: bearer
+}
+
+body:json {
+  {
+    "target_environment": "ORG_ADMIN"
+  }
+}
+
+tests {
+  test("Error when user lacks permissions", function() {
+    expect(res.status).to.equal(401);
+    expect(res.body.message).to.include('No tienes permisos');
+  });
+}

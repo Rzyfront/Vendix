@@ -15,7 +15,13 @@ import { takeUntil } from 'rxjs/operators';
 @Component({
   selector: 'app-store-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent, OnboardingModalComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    OnboardingModalComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -74,6 +80,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
+  needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -84,28 +91,54 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeSlug$ = this.authFacade.userStoreSlug$;
   }
 
-  ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.authFacade.checkOnboardingStatus();
+    ngOnInit(): void {
+      // Check onboarding status when component initializes
+      this.checkOnboardingWithRoleValidation();
 
-    // Set initial state immediately based on current needs
-    this.showOnboardingModal = this.authFacade.needsOnboarding();
+      // Subscribe to onboarding needs and show modal instead of redirecting
+      this.authFacade.needsOnboarding$
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((needsOnboarding: any) => {
+          // this.needsOnboarding = needsOnboarding;
+           this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+          this.updateOnboardingModal();
+        });
+    }
 
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
-        if (needsOnboarding) {
-          // Show onboarding modal instead of redirecting
-          this.showOnboardingModal = true;
-        } else {
-          // Close modal if it's open
-          this.showOnboardingModal = false;
-        }
-      });
+  private checkOnboardingWithRoleValidation(): void {
+    // Only proceed with onboarding logic if user is owner
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.needsOnboarding = false;
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Check actual onboarding status from persistent data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+
+    // this.needsOnboarding = !storeOnboarding;
+    this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+    this.updateOnboardingModal();
+  }   
+
+  private updateOnboardingModal(): void {
+    // Double-check owner role before showing modal
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Verify onboarding status from current user data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+    const actuallyNeedsOnboarding = !storeOnboarding;
+
+    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
 
-  
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -125,107 +158,112 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   menuItems: MenuItem[] = [
     {
       label: 'Dashboard',
-      icon: 'fas fa-home',
-      route: '/store/dashboard',
+      icon: 'home',
+      route: '/admin/dashboard',
+    },
+    {
+      label: 'POS',
+      icon: 'store',
+      route: '/admin/pos',
     },
     {
       label: 'Products',
-      icon: 'fas fa-box',
+      icon: 'package',
       children: [
         {
           label: 'All Products',
-          icon: 'fas fa-circle',
-          route: '/store/products/all',
+          icon: 'circle',
+          route: '/admin/products/all',
         },
         {
           label: 'Categories',
-          icon: 'fas fa-circle',
-          route: '/store/products/categories',
+          icon: 'circle',
+          route: '/admin/products/categories',
         },
         {
           label: 'Inventory',
-          icon: 'fas fa-circle',
-          route: '/store/products/inventory',
+          icon: 'circle',
+          route: '/admin/products/inventory',
         },
       ],
     },
     {
       label: 'Orders',
-      icon: 'fas fa-shopping-cart',
-      route: '/store/orders',
+      icon: 'cart',
+      route: '/admin/orders',
       badge: '8',
     },
     {
       label: 'Customers',
-      icon: 'fas fa-users',
+      icon: 'users',
       children: [
         {
           label: 'All Customers',
-          icon: 'fas fa-circle',
-          route: '/store/customers/all',
+          icon: 'circle',
+          route: '/admin/customers/all',
         },
         {
           label: 'Reviews',
-          icon: 'fas fa-circle',
-          route: '/store/customers/reviews',
+          icon: 'circle',
+          route: '/admin/customers/reviews',
         },
       ],
     },
     {
       label: 'Marketing',
-      icon: 'fas fa-bullhorn',
+      icon: 'megaphone',
       children: [
         {
           label: 'Promotions',
-          icon: 'fas fa-circle',
-          route: '/store/marketing/promotions',
+          icon: 'circle',
+          route: '/admin/marketing/promotions',
         },
         {
           label: 'Coupons',
-          icon: 'fas fa-circle',
-          route: '/store/marketing/coupons',
+          icon: 'circle',
+          route: '/admin/marketing/coupons',
         },
       ],
     },
     {
       label: 'Analytics',
-      icon: 'fas fa-chart-line',
+      icon: 'chart-line',
       children: [
         {
           label: 'Sales',
-          icon: 'fas fa-circle',
-          route: '/store/analytics/sales',
+          icon: 'circle',
+          route: '/admin/analytics/sales',
         },
         {
           label: 'Traffic',
-          icon: 'fas fa-circle',
-          route: '/store/analytics/traffic',
+          icon: 'circle',
+          route: '/admin/analytics/traffic',
         },
         {
           label: 'Performance',
-          icon: 'fas fa-circle',
-          route: '/store/analytics/performance',
+          icon: 'circle',
+          route: '/admin/analytics/performance',
         },
       ],
     },
     {
       label: 'Settings',
-      icon: 'fas fa-cog',
+      icon: 'settings',
       children: [
         {
           label: 'General',
-          icon: 'fas fa-circle',
-          route: '/store/settings/general',
+          icon: 'circle',
+          route: '/admin/settings/general',
         },
         {
           label: 'Appearance',
-          icon: 'fas fa-circle',
-          route: '/store/settings/appearance',
+          icon: 'circle',
+          route: '/admin/settings/appearance',
         },
         {
           label: 'Security',
-          icon: 'fas fa-circle',
-          route: '/store/settings/security',
+          icon: 'circle',
+          route: '/admin/settings/security',
         },
       ],
     },

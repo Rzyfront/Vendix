@@ -1,0 +1,57 @@
+meta {
+  name: "Get All Payments",
+  type: "http",
+  seq: 3,
+  enabled: true
+}
+
+get {
+  url: "http://localhost:3000/api/payments?page=1&limit=10",
+  headers: {
+    "Authorization": "Bearer {{authToken}}"
+  }
+}
+
+tests {
+  test("Should return paginated payments", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.data).to.be.an('array');
+  });
+
+  test("Should validate pagination structure", function() {
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('page', 1);
+    expect(res.body.pagination).to.have.property('limit', 10);
+    expect(res.body.pagination).to.have.property('totalPages');
+  });
+
+  test("Should validate payment items", function() {
+    if (res.body.data.length > 0) {
+      const payment = res.body.data[0];
+      expect(payment).to.have.property('id');
+      expect(payment).to.have.property('transaction_id');
+      expect(payment).to.have.property('amount');
+      expect(payment).to.have.property('currency');
+      expect(payment).to.have.property('state');
+      expect(payment).to.have.property('created_at');
+    }
+  });
+
+  test("Should include related data", function() {
+    if (res.body.data.length > 0) {
+      const payment = res.body.data[0];
+      expect(payment).to.have.property('orders');
+      expect(payment).to.have.property('payment_methods');
+      expect(payment.orders).to.have.property('id');
+      expect(payment.orders).to.have.property('order_number');
+      expect(payment.payment_methods).to.have.property('name');
+      expect(payment.payment_methods).to.have.property('type');
+    }
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(3000);
+  });
+}

@@ -120,15 +120,15 @@ export class OnboardingWizardService {
 
     if (user.user_settings) {
       // Get existing config or empty object
-      const existingConfig = (user.user_settings.config as any) || {};
-      
+      const existingConfig = user.user_settings.config || {};
+
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
           config: {
             ...existingConfig,
             ...config,
-          } as any,
+          },
           updated_at: new Date(),
         },
       });
@@ -507,7 +507,7 @@ export class OnboardingWizardService {
    * - ORG_ADMIN: 1-7 steps
    */
   private determineCurrentStep(user: any): number {
-    const userConfig = (user.user_settings?.config as any) || {};
+    const userConfig = user.user_settings?.config || {};
     const selectedAppType = userConfig?.selected_app_type;
 
     // Step 1: App type selection
@@ -525,16 +525,19 @@ export class OnboardingWizardService {
     if (selectedAppType === 'STORE_ADMIN') {
       // Store first flow (6 steps total)
       // Step 4: Store setup
-      const hasStore = user.organizations?.stores && user.organizations.stores.length > 0;
+      const hasStore =
+        user.organizations?.stores && user.organizations.stores.length > 0;
       if (!hasStore) return 4;
 
       // Step 5: App config
-      const hasAppConfig = user.organizations?.domain_settings && user.organizations.domain_settings.length > 0;
+      const hasAppConfig =
+        user.organizations?.domain_settings &&
+        user.organizations.domain_settings.length > 0;
       if (!hasAppConfig) return 5;
 
       // Step 6: Completion
       if (!user.organizations?.onboarding) return 6;
-      
+
       // All completed
       return 6;
     } else if (selectedAppType === 'ORG_ADMIN') {
@@ -544,16 +547,19 @@ export class OnboardingWizardService {
       if (!hasOrganization) return 4;
 
       // Step 5: Store setup (preloaded)
-      const hasStore = user.organizations?.stores && user.organizations.stores.length > 0;
+      const hasStore =
+        user.organizations?.stores && user.organizations.stores.length > 0;
       if (!hasStore) return 5;
 
       // Step 6: App config
-      const hasAppConfig = user.organizations?.domain_settings && user.organizations.domain_settings.length > 0;
+      const hasAppConfig =
+        user.organizations?.domain_settings &&
+        user.organizations.domain_settings.length > 0;
       if (!hasAppConfig) return 6;
 
       // Step 7: Completion
       if (!user.organizations?.onboarding) return 7;
-      
+
       // All completed
       return 7;
     }
@@ -597,24 +603,28 @@ export class OnboardingWizardService {
     }
 
     // Get app type from user settings to match determineCurrentStep logic
-    const userConfig = (user?.user_settings?.config as any) || {};
+    const userConfig = user?.user_settings?.config || {};
     const selectedAppType = userConfig?.selected_app_type;
 
     // If user has organization and store, they're good to go regardless of app_type
     // This makes validation more flexible and prevents blocking on minor config issues
-    const hasBasicSetup = user?.organizations?.name && user?.organizations?.stores?.length > 0;
+    const hasBasicSetup =
+      user?.organizations?.name && user?.organizations?.stores?.length > 0;
 
     if (!selectedAppType && !hasBasicSetup) {
       // Only require app_type if they don't have basic setup completed
       missingSteps.push('app_type_selection');
-      console.log('Missing app type selection and basic setup. User settings config:', userConfig);
+      console.log(
+        'Missing app type selection and basic setup. User settings config:',
+        userConfig,
+      );
     }
 
     // Validate core requirements regardless of app type
     if (!user?.organizations?.name) {
       missingSteps.push('organization_setup');
     }
-    
+
     if (!user?.organizations?.stores?.length) {
       missingSteps.push('store_setup');
     }

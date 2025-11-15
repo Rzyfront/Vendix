@@ -1,8 +1,11 @@
 import { Module } from '@nestjs/common';
+import { ResponseModule } from '../../common/responses/response.module';
 import { LocationsModule } from './locations/locations.module';
 import { StockLevelsModule } from './stock-levels/stock-levels.module';
 import { MovementsModule } from './movements/movements.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { InventoryController } from './inventory.controller';
+import { InventoryValidationService } from './services/inventory-validation.service';
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
 import { StockLevelManager } from './shared/services/stock-level-manager.service';
 import { InventoryBatchesService } from './batches/inventory-batches.service';
@@ -13,13 +16,15 @@ import { PrismaModule } from '../../prisma/prisma.module';
 @Module({
   imports: [
     PrismaModule,
+    ResponseModule,
     LocationsModule,
     StockLevelsModule,
     MovementsModule,
     SuppliersModule,
   ],
-  controllers: [],
+  controllers: [InventoryController],
   providers: [
+    InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
     InventoryBatchesService,
@@ -31,6 +36,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
     StockLevelsModule,
     MovementsModule,
     SuppliersModule,
+    InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
     InventoryBatchesService,

@@ -1,0 +1,42 @@
+meta {
+  name: "Invalid Order Payment",
+  type: "http",
+  seq: 8,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/payments",
+  headers: {
+    "Authorization": "Bearer {{authToken}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "orderId": 99999,
+    "customerId": 1,
+    "amount": 100.00,
+    "currency": "USD",
+    "paymentMethodId": 1,
+    "storeId": 1
+  }
+}
+
+tests {
+  test("Should return error for non-existent order", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body).to.have.property('code', 'INVALID_ORDER');
+    expect(res.body).to.have.property('message');
+  });
+
+  test("Should validate error response structure", function() {
+    expect(res.body).to.have.property('statusCode', 400);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.have.property('message', 'Order not found');
+  });
+
+  test("Should include error details", function() {
+    expect(res.body).to.have.property('devDetails');
+    expect(res.body.devDetails).to.have.property('name', 'BadRequestException');
+  });
+}

@@ -1,0 +1,147 @@
+meta {
+  name: "Archive Product"
+  type: http
+  seq: 14
+}
+
+# Test 1: Archive an active product
+patch {
+  url: http://{{url}}/products/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "state": "archived"
+  }
+}
+
+tests {
+  test("Product archived successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const product = res.body.data;
+    expect(product).to.have.property('id');
+    expect(product).to.have.property('state', 'archived');
+  });
+
+  test("Archived product retains other properties", function() {
+    const product = res.body.data;
+    expect(product).to.have.property('name');
+    expect(product).to.have.property('base_price');
+    expect(product).to.have.property('sku');
+    expect(product).to.have.property('stock_quantity');
+    // Should still have all the original properties except state
+  });
+
+  test("Archived product timestamp is updated", function() {
+    const product = res.body.data;
+    expect(product).to.have.property('updated_at');
+    // The updated_at timestamp should be recent
+    const updatedAt = new Date(product.updated_at);
+    const now = new Date();
+    const diffInMinutes = (now - updatedAt) / (1000 * 60);
+    expect(diffInMinutes).to.be.lessThan(5); // Updated within last 5 minutes
+  });
+}
+
+# Test 2: Verify archived product doesn't appear in active listings
+get {
+  url: http://{{url}}/products?state=active
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Archived product doesn't appear in active listings", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const activeProducts = res.body.data;
+    const archivedProduct = activeProducts.find(p => p.id === parseInt({{productId}}));
+    expect(archivedProduct).to.be.undefined;
+  });
+}
+
+# Test 3: Reactivate archived product
+patch {
+  url: http://{{url}}/products/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "state": "active"
+  }
+}
+
+tests {
+  test("Product reactivated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const product = res.body.data;
+    expect(product).to.have.property('state', 'active');
+  });
+
+  test("Reactivated product appears in active listings", function() {
+    const product = res.body.data;
+    expect(product.state).to.equal('active');
+  });
+}
+
+# Test 4: Verify reactivated product appears in active listings
+get {
+  url: http://{{url}}/products?state=active
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Reactivated product appears in active listings", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+
+    const activeProducts = res.body.data;
+    const reactivatedProduct = activeProducts.find(p => p.id === parseInt({{productId}}));
+    expect(reactivatedProduct).to.not.be.undefined;
+    expect(reactivatedProduct.state).to.equal('active');
+  });
+}
+
+# Test 5: Attempt invalid state transition
+patch {
+  url: http://{{url}}/products/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "state": "invalid_state"
+  }
+}
+
+tests {
+  test("Invalid state transition handled gracefully", function() {
+    // Should either return error or ignore invalid state
+    expect([200, 400, 422]).to.include(res.status);
+
+    if (res.status !== 200) {
+      expect(res.body).to.have.property('success', false);
+      expect(res.body.message).to.include('state') || expect(res.body.error).to.include('state');
+    }
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -2,6 +2,8 @@ import {
   IsString,
   IsOptional,
   IsInt,
+  IsNotEmpty,
+  MinLength,
   MaxLength,
   Min,
   IsUrl,
@@ -21,6 +23,8 @@ export enum CategoryState {
 export class CreateCategoryDto {
   @ApiProperty({ example: 'Ropa', description: 'Nombre de la categoría' })
   @IsString()
+  @IsNotEmpty({ message: 'El nombre no puede estar vacío' })
+  @MinLength(4, { message: 'El nombre debe tener al menos 4 caracter' })
   @MaxLength(255)
   name: string;
 

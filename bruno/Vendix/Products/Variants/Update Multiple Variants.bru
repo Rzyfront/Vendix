@@ -1,0 +1,204 @@
+meta {
+  name: "Update Multiple Product Variants"
+  type: http
+  seq: 15
+}
+
+# First, create additional variants for testing
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPHONE15PRO-PINK-256GB",
+    "price_override": 1199.99,
+    "stock_quantity": 15
+  }
+}
+
+tests {
+  test("Additional variant created for batch update testing", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("variantId2", res.body.data.id);
+  }
+}
+
+# Create another variant
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPHONE15PRO-GREEN-256GB",
+    "price_override": 1249.99,
+    "stock_quantity": 20
+  }
+}
+
+tests {
+  test("Third variant created for batch update testing", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("variantId3", res.body.data.id);
+  }
+}
+
+# Test 1: Update first variant - increase price and stock
+patch {
+  url: http://{{url}}/products/{{productId}}/variants/{{variantId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "price_override": 1099.99,
+    "stock_quantity": 30
+  }
+}
+
+tests {
+  test("First variant updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const variant = res.body.data;
+    expect(variant.price_override).to.equal(1099.99);
+    expect(variant.stock_quantity).to.equal(30);
+  });
+}
+
+# Test 2: Update second variant - decrease price and stock
+patch {
+  url: http://{{url}}/products/{{productId}}/variants/{{variantId2}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "price_override": 1149.99,
+    "stock_quantity": 10
+  }
+}
+
+tests {
+  test("Second variant updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const variant = res.body.data;
+    expect(variant.price_override).to.equal(1149.99);
+    expect(variant.stock_quantity).to.equal(10);
+  });
+}
+
+# Test 3: Update third variant - change SKU only
+patch {
+  url: http://{{url}}/products/{{productId}}/variants/{{variantId3}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPHONE15PRO-FOREST-GREEN-256GB"
+  }
+}
+
+tests {
+  test("Third variant SKU updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const variant = res.body.data;
+    expect(variant.sku).to.equal('IPHONE15PRO-FOREST-GREEN-256GB');
+    // Other fields should remain unchanged
+    expect(variant.price_override).to.equal(1249.99);
+    expect(variant.stock_quantity).to.equal(20);
+  });
+}
+
+# Test 4: Verify all variants are associated with correct product
+get {
+  url: http://{{url}}/products/{{productId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("All variants correctly associated with product", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const product = res.body.data;
+    expect(product).to.have.property('variants');
+    expect(product.variants).to.be.an('array');
+
+    // Should have at least 3 variants now (original + 2 new)
+    expect(product.variants.length).to.be.at.least(3);
+
+    // Verify all variants belong to this product
+    product.variants.forEach(variant => {
+      expect(variant.product_id).to.equal(parseInt({{productId}}));
+    });
+  });
+
+  test("Variant updates are reflected in product data", function() {
+    const product = res.body.data;
+    const variants = product.variants;
+
+    // Check if our updated variants are present with correct values
+    const variant1 = variants.find(v => v.sku === 'IPHONE15PRO-BLUE-256GB');
+    const variant2 = variants.find(v => v.sku === 'IPHONE15PRO-PINK-256GB');
+    const variant3 = variants.find(v => v.sku === 'IPHONE15PRO-FOREST-GREEN-256GB');
+
+    if (variant1) {
+      expect(variant1.price_override).to.equal(1099.99);
+      expect(variant1.stock_quantity).to.equal(30);
+    }
+    if (variant2) {
+      expect(variant2.price_override).to.equal(1149.99);
+      expect(variant2.stock_quantity).to.equal(10);
+    }
+    if (variant3) {
+      expect(variant3.sku).to.equal('IPHONE15PRO-FOREST-GREEN-256GB');
+      expect(variant3.price_override).to.equal(1249.99);
+    }
+  });
+}
+
+# Test 5: Calculate total stock across all variants
+tests {
+  test("Total stock calculation includes all variants", function() {
+    const product = res.body.data;
+    const variants = product.variants;
+
+    const totalVariantStock = variants.reduce((sum, variant) => sum + (variant.stock_quantity || 0), 0);
+
+    // Should have at least 60 units (30 + 10 + 20 from our updates)
+    expect(totalVariantStock).to.be.at.least(60);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

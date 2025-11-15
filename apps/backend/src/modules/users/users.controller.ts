@@ -117,6 +117,24 @@ export class UsersController {
     }
   }
 
+  @Get(':id/settings')
+  @Permissions('users:read')
+  async findUserSettings(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const user = await this.usersService.findUserSettings(id);
+      return this.responseService.success(
+        user,
+        'Configuración de usuario obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la configuración del usuario',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id')
   @Permissions('users:update')
   async update(

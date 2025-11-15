@@ -775,24 +775,17 @@ export class AuthService {
       );
     }
 
-    // Buscar usuario con rol y permisos
+    // Buscar usuario con rol (sin permisos para token optimizado)
     const user = await this.prismaService.users.findFirst({
       where: { email },
       include: {
         user_roles: {
           include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
-                },
-              },
-            },
+            roles: true,
           },
         },
         organizations: true,
+        addresses: true,  // Agregar direcciones para consistencia con switch environment
       },
     });
 
@@ -800,6 +793,22 @@ export class AuthService {
       await this.logLoginAttempt(null, false, email);
       throw new UnauthorizedException('Credenciales inválidas');
     }
+
+    // Transformar user_roles a roles array simple para compatibilidad con frontend
+    const { user_roles, ...userWithoutRoles } = user;
+    const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+
+    console.log('🔍 LOGIN - Transformación de roles:', {
+      user_id: user.id,
+      email: user.email,
+      original_user_roles_count: user_roles?.length || 0,
+      transformed_roles: roles,
+    });
+
+    const userWithRolesArray = {
+      ...userWithoutRoles,
+      roles, // Array simple: ["owner", "admin"]
+    };
 
     // ✅ Validar que el usuario no esté suspended o archived
     if (user.state === 'suspended' || user.state === 'archived') {
@@ -902,7 +911,7 @@ export class AuthService {
       });
     }
 
-    // Generar tokens
+    // Generar tokens (con usuario sin permisos para payload optimizado)
     const tokens = await this.generateTokens(user, {
       organization_id: target_organization_id!,
       store_id: target_store_id,
@@ -944,10 +953,10 @@ export class AuthService {
     });
 
     // Remover password del response
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
     return {
-      user: userWithoutPassword,
+      user: userWithRolesAndPassword,  // Usar usuario con roles array simple
       user_settings: userSettings,
       ...tokens,
     };
@@ -2281,14 +2290,13 @@ export class AuthService {
   }> {
     const payload = {
       sub: user.id,
-      email: user.email,
-      roles: user.user_roles.map((r) => r.roles.name),
-      permissions: this.getPermissionsFromRoles(user.user_roles),
       organization_id: scope.organization_id,
       store_id: scope.store_id,
     };
 
-    const accessToken = this.jwtService.sign(payload);
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
+    });
     const refreshToken = this.jwtService.sign(payload, {
       secret:
         this.configService.get<string>('JWT_REFRESH_SECRET') ||
@@ -2836,5 +2844,153 @@ export class AuthService {
     }
 
     return Array.from(permissions);
+  }
+
+  // ===== MÉTODOS DE CAMBIO DE ENTORNO =====
+
+  async switchEnvironment(
+    userId: number,
+    targetEnvironment: 'STORE_ADMIN' | 'ORG_ADMIN',
+    storeSlug?: string,
+  ) {
+    // Validar que el usuario exista
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+
+    // Validar el entorno objetivo
+    if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
+      throw new BadRequestException(
+        'Se requiere el slug de la tienda para cambiar a STORE_ADMIN',
+      );
+    }
+
+    // Verificar que el usuario tenga los roles necesarios
+    const userRoles = user.user_roles.map((ur) => ur.roles.name);
+
+    let storeId = null;
+    if (targetEnvironment === 'STORE_ADMIN') {
+      const hasStoreRole =
+        userRoles.includes('store_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('manager');
+
+      if (!hasStoreRole) {
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de tienda',
+        );
+      }
+
+      // Verificar que la tienda exista y el usuario tenga acceso
+      const store = await this.prismaService.stores.findFirst({
+        where: {
+          slug: storeSlug,
+          organization_id: user.organization_id,
+        },
+        include: {
+          organizations: true,
+        },
+      });
+
+      if (!store) {
+        throw new NotFoundException('Tienda no encontrada');
+      }
+
+      // Verificar que el usuario pertenezca a la organización de la tienda
+      const hasAccess =
+        userRoles.includes('super_admin') ||
+        userRoles.includes('owner') ||
+        store.organizations.owner_id === userId;
+
+      if (!hasAccess) {
+        throw new UnauthorizedException('No tienes acceso a esta tienda');
+      }
+
+      storeId = store.id;
+    }
+
+    if (targetEnvironment === 'ORG_ADMIN') {
+      const hasOrgRole =
+        userRoles.includes('org_admin') ||
+        userRoles.includes('owner') ||
+        userRoles.includes('super_admin');
+
+      if (!hasOrgRole) {
+        throw new UnauthorizedException(
+          'No tienes permisos para acceder al entorno de organización',
+        );
+      }
+    }
+
+    // Generar tokens simples para el cambio de entorno
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      environment: targetEnvironment,
+      storeSlug: storeSlug,
+    };
+
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+    });
+
+    const tokens = {
+      accessToken,
+      refreshToken,
+    };
+
+    // Obtener permisos y roles actualizados
+    const permissions = this.getPermissionsFromRoles(user.user_roles);
+    const roles = userRoles;
+
+    // Registrar el cambio de entorno en auditoría
+    await this.auditService.log({
+      userId: userId,
+      action: AuditAction.UPDATE,
+      resource: AuditResource.USERS,
+      metadata: {
+        action: 'environment_switch',
+        targetEnvironment,
+        storeSlug: storeSlug || null,
+      },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        roles,
+        permissions,
+      },
+      tokens,
+      permissions,
+      roles,
+      updatedEnvironment: targetEnvironment,
+    };
   }
 }

@@ -1,0 +1,265 @@
+<div *ngIf="isVisible" class="fixed inset-0 z-50 overflow-y-auto">
+  <!-- Backdrop -->
+  <div class="fixed inset-0 bg-black bg-opacity-50 transition-opacity" (click)="onClose()"></div>
+
+  <!-- Modal -->
+  <div class="flex items-center justify-center min-h-screen p-4">
+    <div class="relative bg-surface rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden shadow-xl">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 border-b border-border">
+        <div class="flex items-center justify-between">
+          <h2 class="text-xl font-semibold text-text-primary">Edit Store</h2>
+          <button
+            (click)="onClose()"
+            class="text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="px-6 py-4 overflow-y-auto max-h-[calc(90vh-140px)]">
+        <div class="space-y-6">
+          <!-- Store Information -->
+          <div>
+            <h3 class="text-lg font-medium text-text-primary mb-4">Store Information</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Store Name -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Store Name *</label>
+                <input
+                  type="text"
+                  formControlName="name"
+                  [class]="isFieldInvalid('name') ? 'border-red-500' : 'border-border'"
+                  class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="Enter store name"
+                />
+                <div *ngIf="isFieldInvalid('name')" class="mt-1 text-sm text-red-600">
+                  {{ getErrorMessage('name') }}
+                </div>
+              </div>
+
+              <!-- Domain -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Domain *</label>
+                <input
+                  type="text"
+                  formControlName="domain"
+                  [class]="isFieldInvalid('domain') ? 'border-red-500' : 'border-border'"
+                  class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="store-domain"
+                />
+                <div *ngIf="isFieldInvalid('domain')" class="mt-1 text-sm text-red-600">
+                  {{ getErrorMessage('domain') }}
+                </div>
+              </div>
+
+              <!-- Email -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Email *</label>
+                <input
+                  type="email"
+                  formControlName="email"
+                  [class]="isFieldInvalid('email') ? 'border-red-500' : 'border-border'"
+                  class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="contact@store.com"
+                />
+                <div *ngIf="isFieldInvalid('email')" class="mt-1 text-sm text-red-600">
+                  {{ getErrorMessage('email') }}
+                </div>
+              </div>
+
+              <!-- Phone -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Phone</label>
+                <input
+                  type="tel"
+                  formControlName="phone"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="+1 (555) 000-0000"
+                />
+              </div>
+
+              <!-- Status -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Status</label>
+                <select
+                  formControlName="status"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="maintenance">Maintenance</option>
+                </select>
+              </div>
+
+              <!-- Description -->
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-text-primary mb-2">Description</label>
+                <textarea
+                  formControlName="description"
+                  rows="3"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="Brief description of your store"
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Address Information -->
+          <div>
+            <h3 class="text-lg font-medium text-text-primary mb-4">Address Information</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Street -->
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-text-primary mb-2">Street Address</label>
+                <input
+                  type="text"
+                  formControlName="address.street"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="123 Main St"
+                />
+              </div>
+
+              <!-- City -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">City</label>
+                <input
+                  type="text"
+                  formControlName="address.city"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="New York"
+                />
+              </div>
+
+              <!-- State -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">State</label>
+                <input
+                  type="text"
+                  formControlName="address.state"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="NY"
+                />
+              </div>
+
+              <!-- ZIP Code -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">ZIP Code</label>
+                <input
+                  type="text"
+                  formControlName="address.zipCode"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="10001"
+                />
+              </div>
+
+              <!-- Country -->
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Country</label>
+                <input
+                  type="text"
+                  formControlName="address.country"
+                  class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  placeholder="United States"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Store Settings -->
+          <div>
+            <h3 class="text-lg font-medium text-text-primary mb-4">Store Settings</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <!-- General Settings -->
+              <div class="space-y-4">
+                <h4 class="text-sm font-medium text-text-primary">General</h4>
+
+                <!-- Guest Checkout -->
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-text-primary">Allow Guest Checkout</label>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" formControlName="allowGuestCheckout" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+
+                <!-- Email Verification -->
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-text-primary">Require Email Verification</label>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" formControlName="requireEmailVerification" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+
+                <!-- Currency -->
+                <div>
+                  <label class="block text-sm font-medium text-text-primary mb-2">Currency</label>
+                  <select
+                    formControlName="currency"
+                    class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="USD">USD - US Dollar</option>
+                    <option value="EUR">EUR - Euro</option>
+                    <option value="GBP">GBP - British Pound</option>
+                    <option value="CAD">CAD - Canadian Dollar</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Inventory Settings -->
+              <div class="space-y-4">
+                <h4 class="text-sm font-medium text-text-primary">Inventory</h4>
+
+                <!-- Inventory Tracking -->
+                <div class="flex items-center justify-between">
+                  <label class="text-sm text-text-primary">Enable Inventory Tracking</label>
+                  <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" formControlName="enableInventoryTracking" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                  </label>
+                </div>
+
+                <!-- Low Stock Threshold -->
+                <div>
+                  <label class="block text-sm font-medium text-text-primary mb-2">Low Stock Threshold</label>
+                  <input
+                    type="number"
+                    formControlName="lowStockThreshold"
+                    min="0"
+                    class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                    placeholder="10"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t border-border bg-gray-50">
+        <div class="flex justify-end space-x-3">
+          <button
+            (click)="onClose()"
+            class="px-4 py-2 text-text-primary bg-white border border-border rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            (click)="onSave()"
+            [disabled]="!editForm.valid || !settingsForm.valid || isLoading"
+            class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span *ngIf="!isLoading">Save Changes</span>
+            <span *ngIf="isLoading">Saving...</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

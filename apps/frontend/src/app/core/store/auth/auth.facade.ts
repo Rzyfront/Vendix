@@ -15,6 +15,7 @@ export class AuthFacade {
 
   // State observables
   readonly user$ = this.store.select(AuthSelectors.selectUser);
+  readonly userSettings$ = this.store.select(AuthSelectors.selectUserSettings);
   readonly tokens$ = this.store.select(AuthSelectors.selectTokens);
   readonly isAuthenticated$ = this.store.select(
     AuthSelectors.selectIsAuthenticated,
@@ -66,6 +67,15 @@ export class AuthFacade {
   readonly userOrganizationSlug$ = this.store.select(
     AuthSelectors.selectUserOrganizationSlug,
   );
+
+  // Organization onboarding observables
+  readonly organizationOnboarding$ = this.store.select(
+    AuthSelectors.selectOrganizationOnboarding,
+  );
+  readonly needsOrganizationOnboarding$ = this.store.select(
+    AuthSelectors.selectNeedsOrganizationOnboarding,
+  );
+
   readonly userStore$ = this.store.select(AuthSelectors.selectUserStore);
   readonly userStoreName$ = this.store.select(
     AuthSelectors.selectUserStoreName,
@@ -111,9 +121,10 @@ export class AuthFacade {
     tokens: { accessToken: string; refreshToken: string },
     permissions?: string[],
     roles?: string[],
+    user_settings?: any,
   ): void {
     this.store.dispatch(
-      AuthActions.restoreAuthState({ user, tokens, permissions, roles }),
+      AuthActions.restoreAuthState({ user, user_settings, tokens, permissions, roles }),
     );
   }
 
@@ -144,6 +155,12 @@ export class AuthFacade {
     return result;
   }
 
+  getUserSettings(): any {
+    let result: any = null;
+    this.userSettings$.pipe(take(1)).subscribe((userSettings) => (result = userSettings));
+    return result;
+  }
+
   getCurrentUserRole(): string | null {
     let result: string | null = null;
     this.userRole$.pipe(take(1)).subscribe((role) => (result = role));
@@ -159,6 +176,12 @@ export class AuthFacade {
   isAdmin(): boolean {
     let result = false;
     this.isAdmin$.pipe(take(1)).subscribe((admin) => (result = admin));
+    return result;
+  }
+
+  isOwner(): boolean {
+    let result = false;
+    this.isOwner$.pipe(take(1)).subscribe((owner) => (result = owner));
     return result;
   }
 

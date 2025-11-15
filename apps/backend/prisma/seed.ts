@@ -1567,7 +1567,7 @@ async function main() {
         email_verified: user.email_verified,
         state: user.state as any,
         organizations: {
-          connect: { id: createdOrganizations[0]?.id || 1 },
+          connect: { id: user.organization_id },
         },
       },
     });
@@ -2183,7 +2183,65 @@ async function main() {
     },
   });
 
-  // 11. Crear categorías
+  // 11. Crear categorías de impuestos
+  console.log('💰 Creando categorías de impuestos...');
+  const taxCategories = [
+    {
+      name: 'IVA General',
+      description: 'Impuesto al valor agregado general 19%',
+      rate: 0.19,
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      name: 'IVA Reducido',
+      description: 'Impuesto al valor agregado reducido 5%',
+      rate: 0.05,
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      name: 'Exento de IVA',
+      description: 'Productos exentos de IVA',
+      rate: 0,
+      organization_id: techSolutionsOrg.id,
+    },
+    {
+      name: 'IVA General Fashion',
+      description: 'Impuesto al valor agregado general 19%',
+      rate: 0.19,
+      organization_id: fashionRetailOrg.id,
+    },
+  ];
+
+  const createdTaxCategories: any[] = [];
+  for (const taxCategory of taxCategories) {
+    const createdTaxCategory = await prisma.tax_categories.upsert({
+      where: { name: taxCategory.name },
+      update: {},
+      create: {
+        name: taxCategory.name,
+        description: taxCategory.description,
+        store_id: taxCategory.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
+      },
+    });
+    createdTaxCategories.push(createdTaxCategory);
+  }
+
+  // Crear tax rates
+  console.log('💰 Creando tasas de impuestos...');
+  const createdTaxRates: any[] = [];
+  for (const taxCategory of taxCategories) {
+    const createdTaxRate = await prisma.tax_rates.create({
+      data: {
+        tax_category_id: createdTaxCategories.find(t => t.name === taxCategory.name)?.id || 0,
+        store_id: taxCategory.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
+        rate: taxCategory.rate,
+        name: taxCategory.name,
+      },
+    });
+    createdTaxRates.push(createdTaxRate);
+  }
+
+  // 12. Crear categorías
   console.log('📂 Creando categorías...');
   const categories = [
     // Categorías para Tech Solutions
@@ -2247,6 +2305,7 @@ async function main() {
         name: category.name,
         slug: category.slug,
         description: category.description,
+        store_id: category.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
       },
     });
     createdCategories.push(createdCategory);
@@ -2625,25 +2684,118 @@ async function main() {
         sku: product.sku,
         base_price: product.base_price,
         slug: product.name.toLowerCase().replace(/\s+/g, '-'),
-        stores: {
-          connect: { id: product.store_id },
-        },
-        categories: product.category_id
-          ? {
-              connect: { id: product.category_id },
-            }
-          : undefined,
-        brands: product.brand_id
-          ? {
-              connect: { id: product.brand_id },
-            }
-          : undefined,
+        store_id: product.store_id,
+        category_id: product.category_id,
+        brand_id: product.brand_id,
       },
     });
     createdProducts.push(createdProduct);
   }
 
-  // 15. Crear variantes de productos
+  // Asignar categorías de impuestos a productos
+  console.log('💰 Asignando categorías de impuestos a productos...');
+  for (const product of products) {
+    const createdProduct = createdProducts.find(p => p.sku === product.sku);
+    if (createdProduct) {
+      const taxCategory = createdTaxCategories.find(t =>
+        product.organization_id === techSolutionsOrg.id
+          ? t.name === 'IVA General'
+          : t.name === 'IVA General Fashion'
+      );
+      if (taxCategory) {
+        await prisma.product_tax_assignments.upsert({
+          where: {
+            product_id_tax_category_id: {
+              product_id: createdProduct.id,
+              tax_category_id: taxCategory.id,
+            },
+          },
+          update: {},
+          create: {
+            product_id: createdProduct.id,
+            tax_category_id: taxCategory.id,
+          },
+        });
+      }
+    }
+  }
+
+  // 15. Crear imágenes de productos
+  console.log('🖼️ Creando imágenes de productos...');
+  const productImages = [
+    // Imágenes para MacBook Pro
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      image_url: 'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-space-gray__d7tfgy9fh0om_large.jpg',
+      alt_text: 'MacBook Pro 14" Space Gray',
+      is_main: true,
+      sort_order: 1,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      image_url: 'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-silver__b5ys8q2q0y2a_large.jpg',
+      alt_text: 'MacBook Pro 14" Silver',
+      is_main: false,
+      sort_order: 2,
+    },
+
+    // Imágenes para iPhone 15 Pro
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      image_url: 'https://www.apple.com/newsroom/images/2023/09/Apple-unveils-iPhone-15-pro-and-iPhone-15-pro-max/article/Apple-iPhone-15-Pro-lineup-hero-230912.jpg.landing-medium.jpg',
+      alt_text: 'iPhone 15 Pro Black Titanium',
+      is_main: true,
+      sort_order: 1,
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      image_url: 'https://store.storeimages.c-apple.com/8756/as-images.apple.com/is/iphone-15-pro-finish-select-202309-6-1inch-blue-titanium?wid=5120&hei=2880&fmt=webp&qlt=70&.v=1692923777972',
+      alt_text: 'iPhone 15 Pro Blue Titanium',
+      is_main: false,
+      sort_order: 2,
+    },
+
+    // Imágenes para Samsung Galaxy S24
+    {
+      product_id: createdProducts.find((p) => p.sku === 'SGS24-256-BLU')?.id,
+      image_url: 'https://images.samsung.com/is/image/samsung/p6pim/latin/feature/sm-s906bzkaxto/feature-large-539503735?$FB_TYPE_B_PNG$',
+      alt_text: 'Samsung Galaxy S24 Blue',
+      is_main: true,
+      sort_order: 1,
+    },
+
+    // Imágenes para Nike Air Max
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      image_url: 'https://static.nike.com/a/images/t_PDP_864_v1/f_auto,b_rgb:f5f5f5/8a44cbe5-e4a2-435e-a54c-87e269eb2b0e/air-max-90-shoes-5KqXQW.png',
+      alt_text: 'Nike Air Max 90 Black',
+      is_main: true,
+      sort_order: 1,
+    },
+
+    // Imágenes para Camiseta Adidas
+    {
+      product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
+      image_url: 'https://assets.adidas.com/images/w_600,f_auto,q_auto/5d2b0b7c53674c6daaa9af1c0111e8f1_9366/Camiseta-Clasica-Negro_HQ2421_01_standard.jpg',
+      alt_text: 'Camiseta Adidas Clasica Negra',
+      is_main: true,
+      sort_order: 1,
+    },
+  ];
+
+  for (const image of productImages) {
+    if (image.product_id) {
+      await prisma.product_images.create({
+        data: {
+          product_id: image.product_id,
+          image_url: image.image_url,
+          is_main: image.is_main,
+        },
+      });
+    }
+  }
+
+  // 16. Crear variantes de productos
   console.log('🎨 Creando variantes de productos...');
   const productVariants = [
     // Variantes para MacBook Pro
@@ -2879,8 +3031,9 @@ async function main() {
           location_id: stockLevel.location_id,
           quantity_available: stockLevel.quantity_available,
           quantity_reserved: stockLevel.quantity_reserved,
+          quantity_on_hand: stockLevel.quantity_available + stockLevel.quantity_reserved,
 
-          reorder_point: stockLevel.min_stock_level,
+          reorder_point: stockLevel.reorder_point,
           max_stock: stockLevel.max_stock_level,
         },
       });
@@ -3028,7 +3181,143 @@ async function main() {
     });
   }
 
-  // 19. Crear transacciones de inventario iniciales
+  // 19. Crear órdenes de prueba
+  console.log('🛒 Crear órdenes de prueba...');
+
+  // Primero crear las direcciones para las órdenes
+  const orderAddresses = [
+    {
+      address_line1: 'Carrera 7 # 125-30',
+      address_line2: 'Apartamento 501',
+      city: 'Bogotá',
+      state_province: 'Bogotá D.C.',
+      country_code: 'COL',
+      postal_code: '110111',
+      phone_number: '+57-300-1234567',
+      type: 'home',
+      is_primary: true,
+      user_id: customer1.id,
+    },
+    {
+      address_line1: 'Calle 85 # 12-45',
+      address_line2: 'Apartamento 202',
+      city: 'Medellín',
+      state_province: 'Antioquia',
+      country_code: 'COL',
+      postal_code: '050022',
+      phone_number: '+57-301-9876543',
+      type: 'home',
+      is_primary: true,
+      user_id: customer2.id,
+    },
+  ];
+
+  const createdOrderAddresses: any[] = [];
+  for (const address of orderAddresses) {
+    const createdAddress = await prisma.addresses.create({
+      data: {
+        address_line1: address.address_line1,
+        address_line2: address.address_line2,
+        city: address.city,
+        state_province: address.state_province,
+        country_code: address.country_code,
+        postal_code: address.postal_code,
+        phone_number: address.phone_number,
+        type: address.type as any,
+        is_primary: address.is_primary,
+        user_id: address.user_id,
+      },
+    });
+    createdOrderAddresses.push(createdAddress);
+  }
+
+  const orders = [
+    {
+      order_number: 'ORD-2024-001',
+      customer_id: customer1.id,
+      organization_id: techSolutionsOrg.id,
+      status: 'shipped',
+      shipping_address_id: createdOrderAddresses[0]?.id,
+      approved_by_user_id: techAdmin.id,
+      created_by_user_id: techAdmin.id,
+    },
+    {
+      order_number: 'ORD-2024-002',
+      customer_id: customer2.id,
+      organization_id: fashionRetailOrg.id,
+      status: 'confirmed',
+      shipping_address_id: createdOrderAddresses[1]?.id,
+      approved_by_user_id: fashionAdmin.id,
+      created_by_user_id: fashionAdmin.id,
+    },
+    {
+      order_number: 'ORD-2024-003',
+      customer_id: customer1.id,
+      organization_id: techSolutionsOrg.id,
+      status: 'draft',
+      shipping_address_id: createdOrderAddresses[0]?.id,
+      approved_by_user_id: techAdmin.id,
+      created_by_user_id: techAdmin.id,
+    },
+  ];
+
+  const createdOrders: any[] = [];
+  for (const order of orders) {
+    const createdOrder = await prisma.sales_orders.create({
+      data: {
+        order_number: order.order_number,
+        customer_id: order.customer_id,
+        organization_id: order.organization_id,
+        status: order.status as any,
+        shipping_address_id: order.shipping_address_id,
+        approved_by_user_id: order.approved_by_user_id,
+        created_by_user_id: order.created_by_user_id,
+      },
+    });
+    createdOrders.push(createdOrder);
+  }
+
+  // Crear reseñas de productos
+  console.log('⭐ Creando reseñas de productos...');
+  const reviews = [
+    {
+      product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
+      user_id: customer1.id,
+      rating: 5,
+      comment: 'El iPhone 15 Pro es increíble, la cámara es fantástica y la batería dura todo el día. Totalmente recomendado.',
+      state: 'approved',
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
+      user_id: customer2.id,
+      rating: 4,
+      comment: 'Muy cómodas y de buena calidad. El único detalle es que son un poco pequeñas para la talla indicada.',
+      state: 'approved',
+    },
+    {
+      product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
+      user_id: customer1.id,
+      rating: 5,
+      comment: 'Rendimiento excepcional, pantalla brillante y teclado cómodo. Perfecta para trabajo y creatividad.',
+      state: 'approved',
+    },
+  ];
+
+  for (const review of reviews) {
+    if (review.product_id && review.user_id) {
+      await prisma.reviews.create({
+        data: {
+          product_id: review.product_id,
+          user_id: review.user_id,
+          rating: review.rating,
+          comment: review.comment,
+          state: review.state as any,
+        },
+      });
+    }
+  }
+
+  // 20. Crear transacciones de inventario iniciales
   console.log('📋 Creando transacciones de inventario iniciales...');
   const inventoryTransactions = [
     {
@@ -3119,20 +3408,24 @@ async function main() {
 
   console.log('🎉 Seed mejorado completado exitosamente!');
   console.log('');
-  console.log('📊 RESUMEN DEL SEED:');
+  console.log('📊 RESUMEN DEL SEED MEJORADO:');
   console.log(`🏢 Organizaciones creadas: ${createdOrganizations.length}`);
   console.log(`🏬 Tiendas creadas: ${createdStores.length}`);
   console.log(`👤 Usuarios creados: ${createdUsers.length}`);
   console.log(`🔗 Relaciones store_users: ${storeUsers.length}`);
   console.log(`🌐 Dominios configurados: ${domainSettings.length}`);
   console.log(`📍 Direcciones creadas: ${addresses.length}`);
+  console.log(`💰 Categorías de impuestos: ${createdTaxCategories.length}`);
   console.log(`📂 Categorías creadas: ${createdCategories.length}`);
   console.log(`🏷️ Marcas creadas: ${createdBrands.length}`);
   console.log(`📍 Ubicaciones de inventario: ${createdLocations.length}`);
   console.log(`📦 Productos creados: ${createdProducts.length}`);
+  console.log(`🖼️ Imágenes de productos: ${productImages.length}`);
   console.log(`🎨 Variantes de productos: ${createdVariants.length}`);
   console.log(`🏷️ Lotes de inventario: ${createdBatches.length}`);
   console.log(`🔢 Números de serie: ${serialNumbers.length}`);
+  console.log(`🛒 Órdenes de prueba: ${createdOrders.length}`);
+  console.log(`⭐ Reseñas de productos: ${reviews.length}`);
   console.log(
     `📋 Transacciones de inventario: ${inventoryTransactions.length}`,
   );

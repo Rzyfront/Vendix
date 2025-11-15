@@ -82,6 +82,7 @@ export class ProductsService {
         tax_category_ids,
         image_urls,
         stock_quantity,
+        stock_by_location,
         ...productData
       } = createProductDto;
 
@@ -127,9 +128,23 @@ export class ProductsService {
           });
         }
 
-        // Inicializar stock levels si se proporciona stock_quantity
-        if (stock_quantity && stock_quantity > 0) {
-          // Obtener ubicación default para el store
+        // Inicializar stock levels para múltiples ubicaciones
+        if (stock_by_location && stock_by_location.length > 0) {
+          // Usar las ubicaciones especificadas en el DTO
+          for (const stockLocation of stock_by_location) {
+            await this.stockLevelManager.updateStock({
+              productId: product.id,
+              locationId: stockLocation.location_id,
+              quantityChange: stockLocation.quantity,
+              movementType: 'initial',
+              reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+              userId: 1, // Use default user ID as fallback
+              createMovement: true,
+              validateAvailability: false,
+            });
+          }
+        } else if (stock_quantity && stock_quantity > 0) {
+          // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
           const defaultLocation =
             await this.inventoryLocationsService.getDefaultLocation(
               product.store_id,
@@ -140,7 +155,7 @@ export class ProductsService {
             locationId: defaultLocation.id,
             quantityChange: stock_quantity,
             movementType: 'initial',
-            reason: 'Initial stock on product creation',
+            reason: 'Initial stock on product creation (legacy)',
             userId: 1, // Use default user ID as fallback
             createMovement: true,
             validateAvailability: false,
@@ -180,19 +195,31 @@ export class ProductsService {
       category_id,
       brand_id,
       include_inactive,
+      pos_optimized,
+      barcode,
+      include_stock,
     } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.productsWhereInput = {
-      // Solo productos activos por defecto (borrado lógico)
-      state: include_inactive ? undefined : ProductState.ACTIVE,
-      ...(search && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
+      // Para POS optimizado, siempre incluir activos
+      state: pos_optimized
+        ? ProductState.ACTIVE
+        : include_inactive
+          ? undefined
+          : ProductState.ACTIVE,
+      ...(barcode && {
+        // Búsqueda exacta por código de barras para POS
+        OR: [{ sku: { equals: barcode, mode: 'insensitive' } }],
       }),
+      ...(search &&
+        !barcode && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
       ...(state && { state }),
       ...(store_id && { store_id }),
       ...(brand_id && { brand_id }),
@@ -236,6 +263,21 @@ export class ProductsService {
             where: { is_main: true },
             take: 1,
           },
+          ...(include_stock && {
+            stock_levels: {
+              select: {
+                quantity_available: true,
+                quantity_reserved: true,
+                inventory_locations: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                  },
+                },
+              },
+            },
+          }),
           _count: {
             select: {
               product_variants: true,
@@ -249,8 +291,52 @@ export class ProductsService {
       this.prisma.products.count({ where }),
     ]);
 
+    // Para POS optimizado, retornar productos directamente sin cálculos complejos
+    if (pos_optimized) {
+      return {
+        data: products,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    }
+
+    // Calcular stock totals dinámicamente para cada producto
+    const productsWithStock = products.map((product) => {
+      const totalStockAvailable =
+        product.stock_levels?.reduce(
+          (sum, stock) => sum + stock.quantity_available,
+          0,
+        ) || 0;
+      const totalStockReserved =
+        product.stock_levels?.reduce(
+          (sum, stock) => sum + stock.quantity_reserved,
+          0,
+        ) || 0;
+
+      return {
+        ...product,
+        // Mantener compatibilidad con el campo existente pero basado en stock_levels
+        stock_quantity: totalStockAvailable,
+        // Nuevos campos agregados para mayor claridad
+        total_stock_available: totalStockAvailable,
+        total_stock_reserved: totalStockReserved,
+        stock_by_location:
+          product.stock_levels?.map((stock) => ({
+            location_id: stock.inventory_locations.id,
+            location_name: stock.inventory_locations.name,
+            location_type: stock.inventory_locations.type,
+            available: stock.quantity_available,
+            reserved: stock.quantity_reserved,
+          })) || [],
+      };
+    });
+
     return {
-      data: products,
+      data: productsWithStock,
       meta: {
         total,
         page,
@@ -308,6 +394,20 @@ export class ProductsService {
           orderBy: { created_at: 'desc' },
           take: 10,
         },
+        stock_levels: {
+          select: {
+            quantity_available: true,
+            quantity_reserved: true,
+            reorder_point: true,
+            inventory_locations: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+              },
+            },
+          },
+        },
         _count: {
           select: {
             product_variants: true,
@@ -322,7 +422,33 @@ export class ProductsService {
       throw new NotFoundException('Producto no encontrado');
     }
 
-    return product;
+    // Calcular stock totals dinámicamente
+    const totalStockAvailable = product.stock_levels.reduce(
+      (sum, stock) => sum + stock.quantity_available,
+      0,
+    );
+    const totalStockReserved = product.stock_levels.reduce(
+      (sum, stock) => sum + stock.quantity_reserved,
+      0,
+    );
+
+    // Retornar producto con información de stock enriquecida
+    return {
+      ...product,
+      // Mantener compatibilidad con el campo existente pero basado en stock_levels
+      stock_quantity: totalStockAvailable,
+      // Nuevos campos agregados para mayor claridad
+      total_stock_available: totalStockAvailable,
+      total_stock_reserved: totalStockReserved,
+      stock_by_location: product.stock_levels.map((stock) => ({
+        location_id: stock.inventory_locations.id,
+        location_name: stock.inventory_locations.name,
+        location_type: stock.inventory_locations.type,
+        available: stock.quantity_available,
+        reserved: stock.quantity_reserved,
+        reorder_point: stock.reorder_point,
+      })),
+    };
   }
 
   async findBySlug(storeId: number, slug: string) {
@@ -397,6 +523,7 @@ export class ProductsService {
         tax_category_ids,
         image_urls,
         stock_quantity,
+        stock_by_location,
         ...productData
       } = updateProductDto;
 
@@ -459,8 +586,39 @@ export class ProductsService {
           }
         }
 
-        // Si cambió el stock, actualizar stock levels
-        if (stock_quantity !== undefined) {
+        // Actualizar stock levels para múltiples ubicaciones
+        if (stock_by_location !== undefined && stock_by_location.length > 0) {
+          // Actualizar stock en las ubicaciones especificadas
+          for (const stockLocation of stock_by_location) {
+            // Obtener stock actual en esta ubicación
+            const currentStockLevel = await prisma.stock_levels.findUnique({
+              where: {
+                product_id_location_id_product_variant_id: {
+                  product_id: id,
+                  location_id: stockLocation.location_id,
+                  product_variant_id: null,
+                },
+              },
+            });
+
+            const currentQuantity = currentStockLevel?.quantity_available || 0;
+            const quantityChange = stockLocation.quantity - currentQuantity;
+
+            if (quantityChange !== 0) {
+              await this.stockLevelManager.updateStock({
+                productId: id,
+                locationId: stockLocation.location_id,
+                quantityChange: quantityChange,
+                movementType: 'adjustment',
+                reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                userId: 1, // Use default user ID as fallback
+                createMovement: true,
+                validateAvailability: false,
+              });
+            }
+          }
+        } else if (stock_quantity !== undefined) {
+          // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
           const stockDifference =
             stock_quantity - existingProduct.stock_quantity;
 
@@ -475,7 +633,7 @@ export class ProductsService {
               locationId: defaultLocation.id,
               quantityChange: stockDifference,
               movementType: 'adjustment',
-              reason: 'Stock quantity updated from product edit',
+              reason: 'Stock quantity updated from product edit (legacy)',
               userId: 1, // Use default user ID as fallback
               createMovement: true,
               validateAvailability: false,
@@ -579,7 +737,7 @@ export class ProductsService {
 
   // Obtener productos por tienda (solo activos)
   async getProductsByStore(storeId: number) {
-    return await this.prisma.products.findMany({
+    const products = await this.prisma.products.findMany({
       where: {
         store_id: storeId,
         state: ProductState.ACTIVE,
@@ -590,6 +748,19 @@ export class ProductsService {
           where: { is_main: true },
           take: 1,
         },
+        stock_levels: {
+          select: {
+            quantity_available: true,
+            quantity_reserved: true,
+            inventory_locations: {
+              select: {
+                id: true,
+                name: true,
+                type: true,
+              },
+            },
+          },
+        },
         _count: {
           select: {
             product_variants: true,
@@ -598,6 +769,34 @@ export class ProductsService {
         },
       },
       orderBy: { created_at: 'desc' },
+    });
+
+    // Calcular stock totals dinámicamente
+    return products.map((product) => {
+      const totalStockAvailable = product.stock_levels.reduce(
+        (sum, stock) => sum + stock.quantity_available,
+        0,
+      );
+      const totalStockReserved = product.stock_levels.reduce(
+        (sum, stock) => sum + stock.quantity_reserved,
+        0,
+      );
+
+      return {
+        ...product,
+        // Mantener compatibilidad con el campo existente pero basado en stock_levels
+        stock_quantity: totalStockAvailable,
+        // Nuevos campos agregados para mayor claridad
+        total_stock_available: totalStockAvailable,
+        total_stock_reserved: totalStockReserved,
+        stock_by_location: product.stock_levels.map((stock) => ({
+          location_id: stock.inventory_locations.id,
+          location_name: stock.inventory_locations.name,
+          location_type: stock.inventory_locations.type,
+          available: stock.quantity_available,
+          reserved: stock.quantity_reserved,
+        })),
+      };
     });
   }
 

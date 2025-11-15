@@ -8,6 +8,7 @@ import { saveAuthState, clearAuthState } from '../persistence';
 
 export interface AuthState {
   user: any | null;
+  user_settings: any | null;
   tokens: { accessToken: string; refreshToken: string } | null;
   permissions: string[];
   roles: string[];
@@ -21,6 +22,7 @@ export interface AuthState {
 
 export const initialAuthState: AuthState = {
   user: null,
+  user_settings: null,
   tokens: null,
   permissions: [],
   roles: [],
@@ -42,10 +44,11 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.loginSuccess,
-    (state, { user, tokens, permissions, roles }) => {
+    (state, { user, user_settings, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
+        user_settings,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -148,10 +151,11 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.restoreAuthState,
-    (state, { user, tokens, permissions, roles }) => {
+    (state, { user, user_settings, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
+        user_settings,
         tokens,
         permissions: permissions || [],
         roles: roles || [],

@@ -18,6 +18,7 @@ export class AuthInitService {
         this.store.dispatch(
           AuthActions.restoreAuthState({
             user: parsed.user,
+            user_settings: parsed.user_settings,
             tokens: parsed.tokens,
             permissions: parsed.permissions || [],
             roles: parsed.roles || []

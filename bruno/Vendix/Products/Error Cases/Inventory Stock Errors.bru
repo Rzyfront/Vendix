@@ -1,0 +1,86 @@
+meta {
+  name: "Inventory Stock Errors"
+  type: http
+  seq: 22
+}
+
+# Test 1: Validate stock for non-existent product
+post {
+  url: http://{{url}}/inventory/validate-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "product_id": 999999,
+  "quantity": 10,
+  "organization_id": 16
+}
+
+tests {
+  test("Stock validation fails for non-existent product", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('product') || expect(res.body.message).to.include('not found');
+  });
+}
+
+# Test 2: Request more stock than available
+post {
+  url: http://{{url}}/inventory/validate-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "product_id": {{productId}},
+  "quantity": 999999,
+  "organization_id": 16
+}
+
+tests {
+  test("Insufficient stock returns correct response", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('isAvailable', false);
+    expect(result.totalAvailable).to.be.lessThan(999999);
+  });
+}
+
+# Test 3: Invalid quantity in stock validation
+post {
+  url: http://{{url}}/inventory/validate-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "product_id": {{productId}},
+  "quantity": -5,
+  "organization_id": 16
+}
+
+tests {
+  test("Invalid quantity is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('quantity') || expect(res.body.message).to.include('must be greater');
+  });
+}
+
+# Test 4: Get consolidated stock for non-existent product
+get {
+  url: http://{{url}}/inventory/consolidated-stock/product/999999
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Consolidated stock query fails for non-existent product", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('product') || expect(res.body.message).to.include('not found');
+  });
+}

@@ -1,0 +1,25 @@
+meta {
+  name: Switch Environment - Store Not Found
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/auth/switch-environment
+  body: json
+  auth: bearer
+}
+
+body:json {
+  {
+    "target_environment": "STORE_ADMIN",
+    "store_slug": "non-existent-store"
+  }
+}
+
+tests {
+  test("Error when store does not exist", function() {
+    expect(res.status).to.equal(404);
+    expect(res.body.message).to.include('Tienda no encontrada');
+  });
+}

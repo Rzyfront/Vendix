@@ -133,7 +133,6 @@ export class HeaderComponent implements OnInit, OnDestroy {
   ngOnInit() {
     // Suscribirse a cambios en el breadcrumb para actualizar dinámicamente
     this.subscription = this.breadcrumb$.subscribe((breadcrumb) => {
-      console.log('Header breadcrumb received:', breadcrumb);
       // Opcional: Puedes agregar lógica adicional aquí si necesitas
       // reaccionar a cambios en el breadcrumb
     });

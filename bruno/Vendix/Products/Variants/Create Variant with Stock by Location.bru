@@ -1,0 +1,49 @@
+meta {
+  name: "Create Product Variant"
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "sku": "LP-GAM-PRO-MAX-RTX4080",
+  "price_override": 1599.99,
+  "stock_quantity": 13
+}
+
+tests {
+  test("Product variant created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const variant = res.body.data;
+    expect(variant).to.have.property('id');
+    expect(variant).to.have.property('product_id');
+    expect(variant).to.have.property('sku', 'LP-GAM-PRO-MAX-RTX4080');
+    expect(variant).to.have.property('price_override', 1599.99);
+    expect(variant).to.have.property('stock_quantity', 13);
+  });
+
+  test("Variant stock is properly set", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property('stock_quantity', 13);
+  });
+
+  test("Product relationship is correctly established", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property('product_id');
+    expect(variant.product_id).to.equal(parseInt({{productId}}));
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("variantId", res.body.data.id);
+  }
+}

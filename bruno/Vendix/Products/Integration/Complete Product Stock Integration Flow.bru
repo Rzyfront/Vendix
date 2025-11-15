@@ -1,0 +1,249 @@
+meta {
+  name: "Complete Product Stock Integration Flow"
+  type: http
+  seq: 10
+}
+
+# Step 1: Create Product with Stock by Location
+post {
+  url: http://{{baseUrl}}/products
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "store_id": 1,
+  "category_id": 1,
+  "brand_id": 1,
+  "name": "Smartwatch Pro Ultra",
+  "slug": "smartwatch-pro-ultra",
+  "description": "Advanced smartwatch with health monitoring and GPS",
+  "base_price": 399.99,
+  "sku": "SW-PRO-ULTRA-001",
+  "state": "active",
+  "stock_by_location": [
+    {
+      "location_id": 1,
+      "quantity": 15,
+      "notes": "Stock principal en bodega"
+    },
+    {
+      "location_id": 2,
+      "quantity": 8,
+      "notes": "Unidades en showroom"
+    }
+  ]
+}
+
+tests {
+  test("Integration Step 1: Product created with stock", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+
+    const product = res.body.data;
+    expect(product.total_stock_available).to.equal(23); // 15 + 8
+    expect(product.stock_by_location).to.have.length(2);
+  });
+
+  test("Integration Step 1: Stock levels created correctly", function() {
+    const product = res.body.data;
+    expect(product.stock_by_location[0].available).to.equal(15);
+    expect(product.stock_by_location[1].available).to.equal(8);
+  });
+}
+
+script {
+  post-response: {
+    if (res.status === 201 && res.body.success) {
+      bru.setEnvVar('integrationProductId', res.body.data.id.toString());
+    }
+  }
+}
+
+---
+
+# Step 2: Create Variant with Stock
+post {
+  url: http://{{baseUrl}}/products/variants
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "product_id": {{integrationProductId}},
+  "name": "Smartwatch Pro Ultra - Gold Edition",
+  "sku": "SW-PRO-ULTRA-GOLD-001",
+  "base_price": 499.99,
+  "attributes": {
+    "color": "Gold",
+    "band": "Leather",
+    "screen": "AMOLED"
+  },
+  "stock_by_location": [
+    {
+      "location_id": 1,
+      "quantity": 5,
+      "notes": "Edición oro limitada"
+    },
+    {
+      "location_id": 2,
+      "quantity": 2,
+      "notes": "Demo units"
+    }
+  ]
+}
+
+tests {
+  test("Integration Step 2: Variant created with stock", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+
+    const variant = res.body.data;
+    expect(variant.total_stock_available).to.equal(7); // 5 + 2
+    expect(variant.stock_by_location).to.have.length(2);
+  });
+
+  test("Integration Step 2: Variant stock distributed correctly", function() {
+    const variant = res.body.data;
+    expect(variant.stock_by_location[0].available).to.equal(5);
+    expect(variant.stock_by_location[1].available).to.equal(2);
+  });
+}
+
+script {
+  post-response: {
+    if (res.status === 201 && res.body.success) {
+      bru.setEnvVar('integrationVariantId', res.body.data.id.toString());
+    }
+  }
+}
+
+---
+
+# Step 3: Verify Consolidated Stock
+get {
+  url: http://{{baseUrl}}/products/{{integrationProductId}}
+  body: none
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Integration Step 3: Consolidated stock calculated correctly", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+
+    const product = res.body.data;
+
+    // Base: 23 (15+8) + Variant: 7 (5+2) = 30 total
+    expect(product.total_stock_available).to.equal(30);
+    expect(product.stock_quantity).to.equal(30);
+    expect(product.product_variants).to.have.length(1);
+  });
+
+  test("Integration Step 3: Product includes variant stock", function() {
+    const product = res.body.data;
+    const variant = product.product_variants[0];
+    expect(variant.total_stock_available).to.equal(7);
+    expect(variant.stock_by_location).to.have.length(2);
+  });
+}
+
+---
+
+# Step 4: Cross-Location Validation
+post {
+  url: http://{{baseUrl}}/inventory/validate-consolidated-stock
+  body: json
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  "product_id": {{integrationProductId}},
+  "quantity": 20,
+  "organization_id": 16
+}
+
+tests {
+  test("Integration Step 4: Cross-location validation successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+
+    const result = res.body.data;
+    expect(result.isAvailable).to.be.true; // 20 <= 30
+    expect(result.totalAvailable).to.equal(30);
+  });
+
+  test("Integration Step 4: Location breakdown provided", function() {
+    const result = res.body.data;
+    expect(result.locations).to.be.an('array');
+    expect(result.locations.length).to.equal(2);
+
+    // Location 1: 15 (base) + 5 (variant) = 20
+    const location1 = result.locations.find(l => l.locationId === 1);
+    expect(location1.available).to.equal(20);
+
+    // Location 2: 8 (base) + 2 (variant) = 10
+    const location2 = result.locations.find(l => l.locationId === 2);
+    expect(location2.available).to.equal(10);
+  });
+
+  test("Integration Step 4: Suggested allocation is optimal", function() {
+    const result = res.body.data;
+    if (result.suggestedAllocation) {
+      const totalAllocated = result.suggestedAllocation
+        .reduce((sum, item) => sum + item.quantity, 0);
+      expect(totalAllocated).to.equal(20);
+    }
+  });
+}
+
+---
+
+# Step 5: Stock Levels Verification
+get {
+  url: http://{{baseUrl}}/inventory/stock-levels/product/{{integrationProductId}}
+  body: none
+  headers: {
+    Authorization: Bearer {{adminToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Integration Step 5: Stock levels reflect product + variant", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+
+    const stockLevels = res.body.data;
+    expect(stockLevels).to.be.an('array');
+
+    // Debe tener 4 registros: 2 para base product + 2 para variant
+    expect(stockLevels.length).to.equal(4);
+  });
+
+  test("Integration Step 5: Stock quantities are consistent", function() {
+    const stockLevels = res.body.data;
+
+    // Filtrar por producto base
+    const baseStock = stockLevels.filter(sl => sl.product_id === parseInt({{integrationProductId}}) && !sl.product_variant_id);
+    const baseTotal = baseStock.reduce((sum, sl) => sum + sl.quantity_available, 0);
+    expect(baseTotal).to.equal(23); // 15 + 8
+
+    // Filtrar por variante
+    const variantStock = stockLevels.filter(sl => sl.product_variant_id === parseInt({{integrationVariantId}}));
+    const variantTotal = variantStock.reduce((sum, sl) => sum + sl.quantity_available, 0);
+    expect(variantTotal).to.equal(7); // 5 + 2
+  });
+}

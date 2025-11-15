@@ -5,11 +5,10 @@ meta {
 }
 
 get {
-  url: http://{{url}}/admin/domains/dashboard
+  url: http://{{url}}/domains/stats
   body: none
   auth: inherit
 }
-
 
 tests {
   test("Get dashboard stats successful", function() {

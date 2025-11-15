@@ -1,0 +1,230 @@
+meta {
+  name: "Business Logic Validation Errors"
+  type: http
+  seq: 16
+}
+
+# Test 1: Create product with extremely short name
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "X",
+    "base_price": 99.99,
+    "sku": "SHORT-NAME-TEST-001"
+  }
+}
+
+tests {
+  test("Product creation rejected for extremely short name", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('name') || expect(res.body.error).to.include('name');
+  });
+}
+
+# Test 2: Create product with extremely long name
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 1,
+  "name": "This is an extremely long product name that exceeds the maximum length allowed by the system validation rules and should be rejected by the API with an appropriate error message explaining the length limitation for product names in the system",
+  "base_price": 99.99,
+  "sku": "LONG-NAME-TEST-001"
+}
+
+tests {
+  test("Product creation rejected for extremely long name", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('name') || expect(res.body.error).to.include('length') || expect(res.body.error).to.include('long');
+  });
+}
+
+# Test 3: Create product with negative base price
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 1,
+  "name": "Test Product Negative Price",
+  "base_price": -99.99,
+  "sku": "NEGATIVE-PRICE-TEST-001"
+}
+
+tests {
+  test("Product creation rejected for negative price", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('price') || expect(res.body.error).to.include('price') || expect(res.body.error).to.include('negative');
+  });
+}
+
+# Test 4: Create product with zero price (should be allowed or rejected based on business rules)
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 1,
+  "name": "Free Test Product",
+  "base_price": 0,
+  "sku": "ZERO-PRICE-TEST-001"
+}
+
+tests {
+  test("Product creation with zero price handled appropriately", function() {
+    // This test depends on business rules - zero price might be allowed or rejected
+    if (res.status === 400) {
+      expect(res.body).to.have.property('success', false);
+      expect(res.body.message).to.include('price') || expect(res.body.error).to.include('price');
+    } else if (res.status === 201) {
+      expect(res.body).to.have.property('success', true);
+      expect(res.body.data.base_price).to.equal(0);
+    } else {
+      // Any other status is unexpected
+      expect.fail(`Unexpected status: ${res.status}`);
+    }
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("freeProductId", res.body.data.id);
+  }
+}
+
+# Test 5: Create product with excessive stock quantity
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 1,
+  "name": "Excessive Stock Test Product",
+  "base_price": 99.99,
+  "sku": "EXCESSIVE-STOCK-TEST-001",
+  "stock_quantity": 999999999
+}
+
+tests {
+  test("Product creation rejected for excessive stock quantity", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('stock') || expect(res.body.error).to.include('stock') || expect(res.body.error).to.include('quantity');
+  });
+}
+
+# Test 6: Create product with invalid SKU format (special characters)
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 1,
+  "name": "Invalid SKU Test Product",
+  "base_price": 99.99,
+  "sku": "INVALID@SKU#TEST$001"
+}
+
+tests {
+  test("Product creation rejected for invalid SKU format", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('sku') || expect(res.body.error).to.include('sku') || expect(res.body.error).to.include('format');
+  });
+}
+
+# Test 7: Attempt to update existing product with invalid data (assuming freeProductId was created)
+patch {
+  url: http://{{url}}/products/{{freeProductId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "base_price": -50.00
+  }
+}
+
+tests {
+  test("Product update rejected for negative price change", function() {
+    if (res.status === 400) {
+      expect(res.body).to.have.property('success', false);
+      expect(res.body.message).to.include('price') || expect(res.body.error).to.include('price');
+    } else if (res.status === 404) {
+      // Product might not exist, that's ok for this test
+      expect(res.status).to.equal(404);
+    } else {
+      // Any other status should be investigated
+      expect.fail(`Unexpected status for negative price update: ${res.status}`);
+    }
+  });
+}
+
+# Test 8: Create product without required store_id
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "name": "Missing Store Test Product",
+  "base_price": 99.99,
+  "sku": "MISSING-STORE-TEST-001"
+}
+
+tests {
+  test("Product creation rejected for missing required fields", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('store') || expect(res.body.error).to.include('store') || expect(res.body.error).to.include('required');
+  });
+}
+
+# Test 9: Create product with invalid store_id
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "store_id": 999999999,
+  "name": "Invalid Store Test Product",
+  "base_price": 99.99,
+  "sku": "INVALID-STORE-TEST-001"
+}
+
+tests {
+  test("Product creation rejected for invalid store", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body.message).to.include('store') || expect(res.body.error).to.include('store');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

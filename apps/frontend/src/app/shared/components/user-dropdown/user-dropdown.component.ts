@@ -1,17 +1,29 @@
-import { Component, Output, EventEmitter, HostListener, inject, OnInit } from '@angular/core';
+import {
+  Component,
+  Output,
+  EventEmitter,
+  HostListener,
+  inject,
+  OnInit,
+  OnDestroy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { Observable } from 'rxjs';
+import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
+import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
+import { EnvironmentContextService } from '../../../core/services/environment-context.service';
+import { FullscreenService } from '../../services/fullscreen.service';
 
 export interface UserMenuOption {
   label: string;
   icon: string;
   action: () => void;
   type?: 'default' | 'danger';
+  condition?: () => boolean;
 }
 
 @Component({
@@ -24,7 +36,8 @@ export interface UserMenuOption {
         class="user-trigger"
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
-        aria-label="Menú de usuario">
+        aria-label="Menú de usuario"
+      >
         <div class="user-info">
           <span class="user-name">{{ user.name || 'Usuario' }}</span>
           <span class="user-role">{{ user.role || 'Administrador' }}</span>
@@ -36,7 +49,8 @@ export interface UserMenuOption {
           name="chevron"
           [size]="16"
           class="chevron-icon"
-          [class.rotate]="isOpen">
+          [class.rotate]="isOpen"
+        >
         </app-icon>
       </button>
 
@@ -53,28 +67,38 @@ export interface UserMenuOption {
 
         <div class="dropdown-content">
           <button
-            *ngFor="let option of menuOptions"
+            *ngFor="let option of visibleMenuOptions"
             class="dropdown-item"
             [class.danger]="option.type === 'danger'"
-            (click)="handleOptionClick(option)">
-            <app-icon [name]="option.icon" [size]="18" class="item-icon"></app-icon>
+            (click)="handleOptionClick(option)"
+          >
+            <app-icon
+              [name]="option.icon"
+              [size]="18"
+              class="item-icon"
+            ></app-icon>
             <span class="item-label">{{ option.label }}</span>
           </button>
         </div>
       </div>
     </div>
   `,
-  styleUrls: ['./user-dropdown.component.scss']
+  styleUrls: ['./user-dropdown.component.scss'],
 })
-export class UserDropdownComponent implements OnInit {
+export class UserDropdownComponent implements OnInit, OnDestroy {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
-  
+  isFullscreen = false;
+  private destroy$ = new Subject<void>();
+
   private router = inject(Router);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
-  
+  private environmentSwitchService = inject(EnvironmentSwitchService);
+  private environmentContextService = inject(EnvironmentContextService);
+  private fullscreenService = inject(FullscreenService);
+
   userContext$: Observable<{
     user?: any;
     organization?: any;
@@ -91,7 +115,18 @@ export class UserDropdownComponent implements OnInit {
   }
 
   ngOnInit() {
-    // El observable ya está inicializado en el constructor
+    // Suscribirse a cambios de fullscreen
+    this.fullscreenService.isFullscreen
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isFullscreen => {
+        this.isFullscreen = isFullscreen;
+        this.updateFullscreenOption();
+      });
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   get user() {
@@ -101,7 +136,7 @@ export class UserDropdownComponent implements OnInit {
         name: 'Usuario',
         email: 'user@example.com',
         role: 'Administrador',
-        initials: 'US'
+        initials: 'US',
       };
     }
 
@@ -113,7 +148,7 @@ export class UserDropdownComponent implements OnInit {
       name,
       email: user.email || 'user@example.com',
       role: this.getRoleDisplay(context),
-      initials
+      initials,
     };
   }
 
@@ -121,20 +156,50 @@ export class UserDropdownComponent implements OnInit {
     {
       label: 'Mi Perfil',
       icon: 'user',
-      action: () => this.goToProfile()
+      action: () => this.goToProfile(),
     },
     {
       label: 'Configuración',
       icon: 'settings',
-      action: () => this.goToSettings()
+      action: () => this.goToSettings(),
+    },
+    {
+      label: 'Pantalla Completa',
+      icon: 'fullscreen-enter',
+      action: () => this.toggleFullscreen(),
+      condition: () => this.fullscreenService.isFullscreenSupported() && !this.isFullscreen,
+    },
+    {
+      label: 'Salir de Pantalla Completa',
+      icon: 'fullscreen-exit',
+      action: () => this.exitFullscreen(),
+      condition: () => this.isFullscreen,
+    },
+    {
+      label: 'Administrar Organización',
+      icon: 'building',
+      action: () => this.switchToOrganization(),
+      condition: () => this.canSwitchToOrganization(),
+    },
+    {
+      label: 'Ir a Tienda',
+      icon: 'store',
+      action: () => this.switchToStore(),
+      condition: () => this.canSwitchToStore(),
     },
     {
       label: 'Cerrar Sesión',
       icon: 'logout',
       action: () => this.logout(),
-      type: 'danger'
-    }
+      type: 'danger',
+    },
   ];
+
+  get visibleMenuOptions(): UserMenuOption[] {
+    return this.menuOptions.filter(
+      (option) => !option.condition || option.condition(),
+    );
+  }
 
   @HostListener('document:click', ['$event'])
   onClickOutside(event: MouseEvent) {
@@ -185,15 +250,15 @@ export class UserDropdownComponent implements OnInit {
       error: (error) => {
         console.error('Error en logout:', error);
         this.router.navigate(['/auth/login']);
-      }
+      },
     });
   }
 
   private generateInitials(name: string): string {
     return name
       .split(' ')
-      .filter(word => word.length > 0)
-      .map(word => word[0].toUpperCase())
+      .filter((word) => word.length > 0)
+      .map((word) => word[0].toUpperCase())
       .slice(0, 2)
       .join('');
   }
@@ -217,5 +282,80 @@ export class UserDropdownComponent implements OnInit {
     }
 
     return user.roles?.[0] || 'Usuario';
+  }
+
+  private canSwitchToOrganization(): boolean {
+    return this.environmentContextService.canSwitchToOrganization();
+  }
+
+  private async switchToOrganization(): Promise<void> {
+    try {
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'ORG_ADMIN',
+        );
+
+      if (success) {
+        // El éxito se maneja en el servicio con la redirección
+        console.log('Switched to organization environment');
+      } else {
+        console.error('Failed to switch to organization environment');
+      }
+    } catch (error) {
+      console.error('Error switching to organization environment:', error);
+    }
+  }
+
+  private async switchToStore(): Promise<void> {
+    try {
+      // Obtener la primera tienda disponible del usuario
+      const user = this.globalFacade.getUserContext()?.user;
+      const availableStores = user?.stores || [];
+
+      if (availableStores.length === 0) {
+        console.warn('No stores available for switching');
+        return;
+      }
+
+      const firstStore = availableStores[0];
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'STORE_ADMIN',
+          firstStore.slug,
+        );
+
+      if (success) {
+        console.log('Switched to store environment');
+      } else {
+        console.error('Failed to switch to store environment');
+      }
+    } catch (error) {
+      console.error('Error switching to store environment:', error);
+    }
+  }
+
+  private canSwitchToStore(): boolean {
+    return this.environmentContextService.canSwitchToStore();
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.toggleFullscreen();
+    } catch (error) {
+      console.error('Error toggling fullscreen:', error);
+    }
+  }
+
+  private async exitFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.exitFullscreen();
+    } catch (error) {
+      console.error('Error exiting fullscreen:', error);
+    }
+  }
+
+  private updateFullscreenOption(): void {
+    // Las opciones se actualizan automáticamente mediante las condiciones
+    // Esto asegura que el menú se actualice cuando cambia el estado de fullscreen
   }
 }

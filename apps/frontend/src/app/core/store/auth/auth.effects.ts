@@ -37,6 +37,7 @@ export class AuthEffects {
             if (!response.data) throw new Error('Invalid response data');
             return AuthActions.loginSuccess({
               user: response.data.user,
+              user_settings: response.data.user_settings,
               tokens: { accessToken: response.data.access_token, refreshToken: response.data.refresh_token },
               permissions: response.data.permissions || [],
               roles: response.data.user.roles || [],

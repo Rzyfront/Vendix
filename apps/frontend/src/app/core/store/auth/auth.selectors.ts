@@ -8,6 +8,11 @@ export const selectUser = createSelector(
   (state: AuthState) => state.user,
 );
 
+export const selectUserSettings = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.user_settings,
+);
+
 export const selectPermissions = createSelector(
   selectAuthState,
   (state: AuthState) => state.permissions,
@@ -174,6 +179,17 @@ export const selectUserOrganizationName = createSelector(
 export const selectUserOrganizationSlug = createSelector(
   selectUserOrganization,
   (organization: any) => organization?.slug || null,
+);
+
+// Organization onboarding selectors
+export const selectOrganizationOnboarding = createSelector(
+  selectUserOrganization,
+  (organization: any) => organization?.onboarding || false,
+);
+
+export const selectNeedsOrganizationOnboarding = createSelector(
+  selectOrganizationOnboarding,
+  (onboarding: boolean) => !onboarding,
 );
 
 export const selectUserStore = createSelector(

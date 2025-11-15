@@ -275,6 +275,7 @@ export class InventoryIntegrationService {
 
   /**
    * Check stock availability across multiple locations
+   * Returns individual location availability
    */
   async checkStockAvailability(
     organizationId: number,
@@ -307,6 +308,114 @@ export class InventoryIntegrationService {
       available: stock.quantity_available,
       locationName: stock.inventory_locations.name,
     }));
+  }
+
+  /**
+   * Validate consolidated stock availability across ALL locations
+   * Returns whether the required quantity can be fulfilled from total stock
+   */
+  async validateConsolidatedStockAvailability(
+    organizationId: number,
+    productId: number,
+    requiredQuantity: number,
+    productVariantId?: number,
+  ): Promise<{
+    isAvailable: boolean;
+    totalAvailable: number;
+    locations: Array<{
+      locationId: number;
+      locationName: string;
+      available: number;
+      type: string;
+    }>;
+    suggestedAllocation?: Array<{
+      locationId: number;
+      quantity: number;
+    }>;
+  }> {
+    // Get ALL stock levels for this product across all locations
+    const stockLevels = await this.prisma.stock_levels.findMany({
+      where: {
+        organization_id: organizationId,
+        product_id: productId,
+        product_variant_id: productVariantId,
+      },
+      include: {
+        inventory_locations: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
+      orderBy: {
+        quantity_available: 'desc', // Prioritize locations with more stock
+      },
+    });
+
+    const totalAvailable = stockLevels.reduce(
+      (sum, stock) => sum + stock.quantity_available,
+      0,
+    );
+
+    const locations = stockLevels.map((stock) => ({
+      locationId: stock.location_id,
+      locationName: stock.inventory_locations.name,
+      available: stock.quantity_available,
+      type: stock.inventory_locations.type,
+    }));
+
+    // Generate suggested allocation if stock is available
+    let suggestedAllocation:
+      | Array<{ locationId: number; quantity: number }>
+      | undefined;
+
+    if (totalAvailable >= requiredQuantity) {
+      suggestedAllocation = this.generateOptimalAllocation(
+        stockLevels,
+        requiredQuantity,
+      );
+    }
+
+    return {
+      isAvailable: totalAvailable >= requiredQuantity,
+      totalAvailable,
+      locations,
+      suggestedAllocation,
+    };
+  }
+
+  /**
+   * Generate optimal stock allocation across locations to fulfill an order
+   * Prioritizes locations with more stock to minimize number of locations used
+   */
+  private generateOptimalAllocation(
+    stockLevels: Array<{ location_id: number; quantity_available: number }>,
+    requiredQuantity: number,
+  ): Array<{ locationId: number; quantity: number }> {
+    const allocation: Array<{ locationId: number; quantity: number }> = [];
+    let remainingQuantity = requiredQuantity;
+
+    for (const stockLevel of stockLevels) {
+      if (remainingQuantity <= 0) break;
+
+      if (stockLevel.quantity_available > 0) {
+        const allocatedQuantity = Math.min(
+          remainingQuantity,
+          stockLevel.quantity_available,
+        );
+
+        allocation.push({
+          locationId: stockLevel.location_id,
+          quantity: allocatedQuantity,
+        });
+
+        remainingQuantity -= allocatedQuantity;
+      }
+    }
+
+    return allocation;
   }
 
   /**
