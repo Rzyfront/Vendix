@@ -5,6 +5,7 @@ import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto'
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
 import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
 import { SelectAppTypeDto } from './dto/select-app-type.dto';
+import { DomainConfigService } from '../../common/config/domain.config';
 
 interface ColorPalette {
   primary: string;
@@ -707,19 +708,17 @@ export class OnboardingWizardService {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
 
-    const suffix = customSuffix || 'vendix';
     const maxAttempts = 10;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let subdomain: string;
 
       if (attempt === 1) {
-        // First attempt: direct slug
-        subdomain = `${baseName}.${suffix}`;
+        // First attempt: direct slug using configured base domain
+        subdomain = DomainConfigService.generateSubdomain(baseName, false);
       } else {
         // Subsequent attempts: append random string
-        const randomString = this.generateRandomString(4);
-        subdomain = `${baseName}-${randomString}.${suffix}`;
+        subdomain = DomainConfigService.generateSubdomain(baseName, true);
       }
 
       // Check if subdomain is available
@@ -734,7 +733,7 @@ export class OnboardingWizardService {
 
     // Fallback to timestamp-based generation
     const timestamp = Date.now().toString(36);
-    return `${baseName}-${timestamp}.${suffix}`;
+    return `${baseName}-${timestamp}.${DomainConfigService.getBaseDomain()}`;
   }
 
   /**
@@ -799,7 +798,7 @@ export class OnboardingWizardService {
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
     const timestamp = Date.now().toString(36);
-    return `${cleanName}-${timestamp}.vendix.com`;
+    return `${cleanName}-${timestamp}.${DomainConfigService.getBaseDomain()}`;
   }
 
   /**

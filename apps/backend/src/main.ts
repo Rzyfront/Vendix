@@ -4,9 +4,13 @@ import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { DomainConfigService } from './common/config/domain.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Initialize domain configuration
+  DomainConfigService.initialize();
 
   // Apply the global exception filter
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -21,28 +25,29 @@ async function bootstrap() {
         enableImplicitConversion: true,
       },
     }),
-  ); // CORS configuration
+  ); // Build dynamic CORS origins based on base domain configuration
+  const baseDomain = DomainConfigService.getBaseDomain();
+  const corsOrigins = process.env.CORS_ORIGIN?.split(',') || [
+    'http://localhost:4200',
+    'http://localhost',
+    // Production origins for base domain
+    `https://${baseDomain}`,
+    `https://www.${baseDomain}`,
+    `https://api.${baseDomain}`,
+    // CloudFront distributions
+    'https://d10fsx06e3z6rc.cloudfront.net',
+    'https://d1y0m1duatgngc.cloudfront.net',
+    // Allow any subdomain for multi-tenant (dynamic based on base domain)
+    new RegExp(
+      `^https://([a-zA-Z0-9-]+\\.)?${baseDomain.replace('.', '\\.')}$`,
+    ),
+    // Allow any CloudFront distribution
+    /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
+  ];
+
+  // CORS configuration
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(',') || [
-      'http://localhost:4200',
-      'http://localhost',
-      // Production origins for vendix.online
-      'https://vendix.online',
-      'https://www.vendix.online',
-      'https://api.vendix.online',
-      // Production origins for vendix.com
-      'https://vendix.com',
-      'https://www.vendix.com',
-      'https://api.vendix.com',
-      // CloudFront distributions
-      'https://d10fsx06e3z6rc.cloudfront.net',
-      'https://d1y0m1duatgngc.cloudfront.net',
-      // Allow any subdomain for multi-tenant (both domains)
-      /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.online$/,
-      /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.com$/,
-      // Allow any CloudFront distribution
-      /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
-    ],
+    origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [

@@ -91,10 +91,10 @@ export class StockLevelManager {
       // 4. Actualizar stock levels
       const updatedStock = await prisma.stock_levels.update({
         where: {
-          product_id_location_id_product_variant_id: {
+          product_id_product_variant_id_location_id: {
             product_id: params.productId,
-            location_id: params.locationId,
             product_variant_id: params.variantId || null,
+            location_id: params.locationId,
           },
         },
         data: {
@@ -197,10 +197,10 @@ export class StockLevelManager {
       // 4. Actualizar stock level
       await prisma.stock_levels.update({
         where: {
-          product_id_location_id_product_variant_id: {
+          product_id_product_variant_id_location_id: {
             product_id: productId,
-            location_id: locationId,
             product_variant_id: variantId || null,
+            location_id: locationId,
           },
         },
         data: {
@@ -263,10 +263,10 @@ export class StockLevelManager {
       // 3. Actualizar stock level
       const stockLevel = await prisma.stock_levels.findUnique({
         where: {
-          product_id_location_id_product_variant_id: {
+          product_id_product_variant_id_location_id: {
             product_id: productId,
-            location_id: locationId,
             product_variant_id: variantId || null,
+            location_id: locationId,
           },
         },
       });
@@ -274,10 +274,10 @@ export class StockLevelManager {
       if (stockLevel) {
         await prisma.stock_levels.update({
           where: {
-            product_id_location_id_product_variant_id: {
+            product_id_product_variant_id_location_id: {
               product_id: productId,
-              location_id: locationId,
               product_variant_id: variantId || null,
+              location_id: locationId,
             },
           },
           data: {
@@ -305,10 +305,10 @@ export class StockLevelManager {
   ): Promise<any> {
     let stockLevel = await prisma.stock_levels.findUnique({
       where: {
-        product_id_location_id_product_variant_id: {
+        product_id_product_variant_id_location_id: {
           product_id: productId,
-          location_id: locationId,
           product_variant_id: variantId || null,
+          location_id: locationId,
         },
       },
     });

@@ -20,6 +20,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { LocationsService } from '../inventory/locations/locations.service';
 import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { RequestContextService } from '../../common/context/request-context.service';
 
 @Injectable()
 export class ProductsService {
@@ -33,25 +34,15 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto) {
     try {
-      // Verificar que la tienda existe y está activa
-      const store = await this.prisma.stores.findFirst({
-        where: {
-          id: createProductDto.store_id,
-          is_active: true,
-        },
-      });
-
-      if (!store) {
-        throw new BadRequestException('Tienda no encontrada o inactiva');
-      }
+      // store_id se infiere automáticamente del contexto del token
+      // No necesitamos verificar la tienda manualmente
 
       // Generar slug si no se proporciona
       const slug = createProductDto.slug || generateSlug(createProductDto.name);
 
-      // Verificar que el slug sea único dentro de la tienda
+      // Verificar que el slug sea único (el contexto de Prisma ya filtra por store_id)
       const existingProduct = await this.prisma.products.findFirst({
         where: {
-          store_id: createProductDto.store_id,
           slug: slug,
           state: { not: ProductState.ARCHIVED },
         },
@@ -163,10 +154,14 @@ export class ProductsService {
         }
 
         // Inicializar stock levels para todas las ubicaciones de la organización
-        await this.stockLevelManager.initializeStockLevelsForProduct(
-          product.id,
-          store.organization_id,
-        );
+        // Obtenemos el organization_id del contexto
+        const context = RequestContextService.getContext();
+        if (context?.organization_id) {
+          await this.stockLevelManager.initializeStockLevelsForProduct(
+            product.id,
+            context.organization_id,
+          );
+        }
 
         return product;
       });
@@ -207,7 +202,7 @@ export class ProductsService {
         ? ProductState.ACTIVE
         : include_inactive
           ? undefined
-          : ProductState.ACTIVE,
+          : { not: 'archived' }, // Excluir archivados por defecto
       ...(barcode && {
         // Búsqueda exacta por código de barras para POS
         OR: [{ sku: { equals: barcode, mode: 'insensitive' } }],
@@ -680,55 +675,24 @@ export class ProductsService {
     });
   }
 
-  // Borrado físico solo para roles superiores
+  // Eliminación lógica - archivar producto
   async remove(id: number) {
     try {
       // Verificar que el producto existe
       await this.findOne(id);
 
-      // Verificar si tiene stock en alguna ubicación
-      const stockLevels = await this.prisma.stock_levels.findMany({
-        where: { product_id: id },
-      });
-
-      const hasStock = stockLevels.some(
-        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
-      );
-
-      if (hasStock) {
-        throw new BadRequestException(
-          'No se puede eliminar el producto porque tiene stock existente. Elimine el stock primero.',
-        );
-      }
-
-      // Verificar si tiene órdenes relacionadas
-      const relatedOrders = await this.prisma.order_items.count({
-        where: { product_id: id },
-      });
-
-      if (relatedOrders > 0) {
-        throw new BadRequestException(
-          'No se puede eliminar el producto porque tiene órdenes relacionadas. Use borrado lógico.',
-        );
-      }
-
-      return await this.prisma.$transaction(async (prisma) => {
-        // Eliminar stock levels
-        await prisma.stock_levels.deleteMany({
-          where: { product_id: id },
-        });
-
-        // Eliminar producto
-        return await prisma.products.delete({
-          where: { id },
-        });
+      // Eliminación lógica: cambiar estado a archived
+      return await this.prisma.products.update({
+        where: { id },
+        data: {
+          state: 'archived',
+          updated_at: new Date(),
+        },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2003') {
-          throw new BadRequestException(
-            'No se puede eliminar el producto porque tiene datos relacionados',
-          );
+        if (error.code === 'P2025') {
+          throw new NotFoundException('Producto no encontrado');
         }
       }
       throw error;
@@ -801,12 +765,15 @@ export class ProductsService {
   }
 
   // Gestión de variantes
-  async createVariant(createVariantDto: CreateProductVariantDto) {
+  async createVariant(
+    productId: number,
+    createVariantDto: CreateProductVariantDto,
+  ) {
     try {
       // Verificar que el producto existe y está activo
       const product = await this.prisma.products.findFirst({
         where: {
-          id: createVariantDto.product_id,
+          id: productId,
           state: ProductState.ACTIVE,
         },
       });
@@ -828,8 +795,9 @@ export class ProductsService {
         // Crear variante
         const variant = await prisma.product_variants.create({
           data: {
-            product_id: createVariantDto.product_id || product.id,
+            product_id: product.id, // Se infiere del contexto
             sku: createVariantDto.sku,
+            name: createVariantDto.name,
             price_override:
               createVariantDto.price_override || createVariantDto.price,
             stock_quantity: 0, // Se inicializará via stock_levels
@@ -849,7 +817,7 @@ export class ProductsService {
             );
 
           await this.stockLevelManager.updateStock({
-            productId: createVariantDto.product_id || product.id,
+            productId: product.id,
             variantId: variant.id,
             locationId: defaultLocation.id,
             quantityChange: createVariantDto.stock_quantity || 0,
@@ -984,15 +952,8 @@ export class ProductsService {
         );
       }
 
-      // Eliminar stock levels
-      await prisma.stock_levels.deleteMany({
-        where: {
-          product_id: existingVariant.product_id,
-          product_variant_id: variantId,
-        },
-      });
-
-      // Eliminar variante
+      // Eliminación lógica: archivar variante (si tuviera estado)
+      // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
       return await prisma.product_variants.delete({
         where: { id: variantId },
       });
@@ -1038,6 +999,8 @@ export class ProductsService {
       throw new NotFoundException('Imagen no encontrada');
     }
 
+    // Las imágenes no tienen estado, pero podríamos agregar un campo deleted_at
+    // Por ahora, eliminamos físicamente
     return await this.prisma.product_images.delete({
       where: { id: imageId },
     });

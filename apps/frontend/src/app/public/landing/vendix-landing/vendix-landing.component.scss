@@ -477,3 +477,409 @@ section {
     text-align: center;
   }
 }
+
+// Enhanced Mobile Optimizations
+@media (max-width: 640px) {
+  // Mobile-first improvements
+  .vendix-landing {
+    // Optimize text sizes for mobile readability
+    h1 {
+      font-size: 1.5rem !important;
+      line-height: 1.2;
+    }
+
+    h2 {
+      font-size: 1.75rem !important;
+      line-height: 1.3;
+      margin-bottom: 1rem;
+    }
+
+    h3 {
+      font-size: 1.25rem !important;
+      line-height: 1.4;
+    }
+
+    p {
+      font-size: 0.95rem !important;
+      line-height: 1.6;
+    }
+  }
+
+  // Touch-friendly spacing
+  section {
+    padding: 3rem 0 !important;
+
+    .container {
+      padding: 0 1rem;
+    }
+  }
+
+  // Optimize hero section for mobile
+  .hero-section {
+    min-height: 90vh !important;
+
+    .hero-title {
+      font-size: 2rem !important;
+      margin-bottom: 1rem;
+    }
+
+    .hero-description {
+      font-size: 1rem !important;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-actions {
+      .btn-large {
+        padding: 1rem 1.5rem;
+        font-size: 1rem;
+        min-height: 48px; // Touch target size
+      }
+    }
+  }
+
+  // Feature cards optimization
+  .features-section,
+  .solutions-section {
+    .grid {
+      grid-template-columns: 1fr !important;
+      gap: 1rem !important;
+    }
+
+    .group {
+      padding: 1.5rem !important;
+
+      .w-12 {
+        width: 3rem !important;
+        height: 3rem !important;
+      }
+
+      h3 {
+        font-size: 1.125rem !important;
+        margin-bottom: 0.75rem;
+      }
+
+      p {
+        font-size: 0.875rem !important;
+      }
+    }
+  }
+
+  // Pricing section mobile optimization - COMPLETELY REWRITTEN
+  #pricing {
+    min-height: auto !important;
+    padding: 3rem 0 !important;
+    overflow: visible !important;
+
+    .container {
+      padding: 0 1rem !important;
+    }
+
+    // Remove problematic h-screen and flex centering
+    &.min-h-screen {
+      min-height: auto !important;
+    }
+
+    // Better mobile header spacing
+    .text-center {
+      margin-bottom: 2rem !important;
+
+      h2 {
+        font-size: 1.75rem !important;
+        line-height: 1.3;
+        margin-bottom: 1rem !important;
+      }
+
+      p {
+        font-size: 1rem !important;
+        line-height: 1.6;
+      }
+    }
+
+    // Mobile-first pricing cards
+    .space-y-6 {
+      gap: 1.5rem !important;
+    }
+
+    .relative.bg-white {
+      padding: 1.5rem !important;
+      border-radius: 1rem !important;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+      margin-bottom: 0 !important;
+
+      // Remove problematic transforms on mobile
+      &.ring-2 {
+        transform: none !important;
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15) !important;
+      }
+
+      // Better spacing for highlighted plan
+      .absolute.-top-4 {
+        top: -1rem !important;
+
+        span {
+          padding: 0.5rem 1rem !important;
+          font-size: 0.75rem !important;
+        }
+      }
+
+      // Price display
+      .text-4xl {
+        font-size: 2.5rem !important;
+        line-height: 1.1;
+      }
+
+      .text-base {
+        font-size: 1rem !important;
+      }
+
+      // Feature list improvements
+      ul.space-y-3 {
+        gap: 0.75rem !important;
+
+        li {
+          align-items: flex-start !important;
+          padding: 0.25rem 0 !important;
+
+          span {
+            font-size: 0.875rem !important;
+            line-height: 1.5;
+            flex: 1;
+            word-break: break-word;
+          }
+        }
+      }
+
+      // CTA button improvements
+      .py-3 {
+        padding-top: 0.875rem !important;
+        padding-bottom: 0.875rem !important;
+        min-height: 52px !important;
+        font-size: 1rem !important;
+        font-weight: 600 !important;
+      }
+
+      // Terms link
+      .text-sm {
+        font-size: 0.875rem !important;
+        line-height: 1.4;
+      }
+    }
+
+    // Mobile additional info box
+    .mt-12 {
+      margin-top: 3rem !important;
+
+      > div {
+        padding: 1.5rem !important;
+        text-align: left !important;
+
+        h3 {
+          font-size: 1.125rem !important;
+          margin-bottom: 0.75rem !important;
+        }
+
+        p {
+          font-size: 0.875rem !important;
+          margin-bottom: 1rem !important;
+        }
+
+        a {
+          font-size: 0.875rem !important;
+          align-self: flex-start !important;
+        }
+      }
+    }
+  }
+
+  // CTA Section mobile optimization
+  section[class*="bg-[var(--color-primary)]"] {
+    min-height: 80vh !important;
+    padding: 4rem 0 !important;
+
+    h2 {
+      font-size: 2rem !important;
+      margin-bottom: 1rem;
+    }
+
+    p {
+      font-size: 1rem !important;
+      margin-bottom: 2rem;
+    }
+
+    .flex-col {
+      gap: 1rem !important;
+
+      .px-8 {
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+      }
+
+      .py-4 {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        min-height: 48px; // Touch target
+      }
+    }
+  }
+
+  // Footer mobile optimization
+  footer {
+    padding: 3rem 0 1rem !important;
+
+    .grid {
+      grid-template-columns: 1fr !important;
+      gap: 2rem !important;
+      text-align: center;
+
+      .md\\:col-span-1 {
+        grid-column: span 1;
+      }
+
+      .space-y-3 {
+        a {
+          padding: 0.5rem 0;
+          display: block;
+        }
+      }
+    }
+
+    .flex {
+      &.md\\:flex-row {
+        flex-direction: column !important;
+        text-align: center;
+        gap: 1rem;
+      }
+    }
+  }
+
+  // Modal mobile optimization
+  .fixed.inset-0 {
+    padding: 1rem !important;
+
+    .max-w-2xl {
+      max-width: 100% !important;
+      max-height: 90vh !important;
+    }
+
+    .modal-content {
+      max-height: 50vh !important;
+    }
+  }
+
+  // Improved touch targets for mobile
+  button,
+  a {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  // Better spacing for mobile cards
+  .rounded-2xl {
+    border-radius: 0.75rem !important;
+  }
+
+  // Optimize navigation header for mobile
+  header {
+    .h-16 {
+      height: 3.5rem !important; // Slightly taller for better touch
+    }
+
+    .px-4 {
+      padding-left: 1rem !important;
+      padding-right: 1rem !important;
+    }
+  }
+
+  // Ensure text is readable on small screens
+  .text-xs {
+    font-size: 0.75rem !important;
+  }
+
+  .text-sm {
+    font-size: 0.875rem !important;
+  }
+
+  // Mobile-specific transitions
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  // Hide scrollbars for cleaner mobile experience
+  ::-webkit-scrollbar {
+    width: 0px;
+    background: transparent;
+  }
+}
+
+// Tablet optimizations (between mobile and desktop)
+@media (min-width: 641px) and (max-width: 1024px) {
+  .vendix-landing {
+    .container {
+      padding: 0 2rem;
+    }
+  }
+
+  section {
+    padding: 4rem 0;
+  }
+
+  .features-section,
+  .solutions-section {
+    .grid {
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 1.5rem !important;
+    }
+  }
+
+  // Enhanced pricing section tablet optimization
+  #pricing {
+    padding: 4rem 0 !important;
+
+    .container {
+      padding: 0 2rem !important;
+    }
+
+    .text-center {
+      margin-bottom: 3rem !important;
+
+      h2 {
+        font-size: 2.25rem !important;
+      }
+
+      p {
+        font-size: 1.125rem !important;
+      }
+    }
+
+    // Two-column layout on tablets
+    .space-y-6 {
+      display: grid !important;
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 2rem !important;
+      space-y: 0 !important;
+    }
+
+    .relative.bg-white {
+      padding: 2rem !important;
+
+      .text-4xl {
+        font-size: 3rem !important;
+      }
+
+      ul.space-y-3 {
+        li {
+          span {
+            font-size: 0.925rem !important;
+          }
+        }
+      }
+    }
+
+    .mt-12 {
+      > div {
+        padding: 2rem !important;
+        text-align: center !important;
+      }
+    }
+  }
+}

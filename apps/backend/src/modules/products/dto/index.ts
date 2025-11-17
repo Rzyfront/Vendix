@@ -26,8 +26,9 @@ export enum ProductState {
 }
 
 export class CreateProductDto {
-  @IsInt()
-  store_id: number;
+  // store_id se infiere automáticamente del contexto del token
+  // @IsInt()
+  // store_id: number;
 
   @IsOptional()
   @IsInt()
@@ -67,6 +68,65 @@ export class CreateProductDto {
   @Type(() => Number)
   @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number = 0;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Type(() => Number)
+  @Min(0, { message: 'El precio de costo no puede ser negativo' })
+  cost_price?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0, { message: 'El peso no puede ser negativo' })
+  weight?: number;
+
+  @IsOptional()
+  @IsObject()
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0, { message: 'El stock mínimo no puede ser negativo' })
+  min_stock_level?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0, { message: 'El stock máximo no puede ser negativo' })
+  max_stock_level?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0, { message: 'El punto de reorden no puede ser negativo' })
+  reorder_point?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0, { message: 'La cantidad de reorden no puede ser negativa' })
+  reorder_quantity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_serial_numbers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_batch_tracking?: boolean;
 
   @IsOptional()
   @IsEnum(ProductState)
@@ -235,13 +295,19 @@ export class ProductQueryDto {
 
 // Product Variants DTOs
 export class CreateProductVariantDto {
-  @IsOptional()
-  @IsInt()
-  product_id?: number;
+  // product_id se infiere automáticamente del contexto
+  // @IsOptional()
+  // @IsInt()
+  // product_id?: number;
 
   @IsString()
   @MaxLength(100)
   sku: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -260,6 +326,10 @@ export class CreateProductVariantDto {
   @Type(() => Number)
   @Min(0, { message: 'La cantidad en stock no puede ser negativa' })
   stock_quantity?: number = 0;
+
+  @IsOptional()
+  @IsObject()
+  attributes?: Record<string, any>;
 
   @IsOptional()
   @IsInt()
@@ -297,4 +367,15 @@ export class ProductImageDto {
   @IsOptional()
   @IsBoolean()
   is_main?: boolean = false;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  alt_text?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(0)
+  sort_order?: number;
 }

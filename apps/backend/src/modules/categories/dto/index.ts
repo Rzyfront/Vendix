@@ -54,14 +54,11 @@ export class CreateCategoryDto {
   @IsUrl()
   image_url?: string;
 
-  @ApiPropertyOptional({
-    example: 1,
-    description: 'ID de la tienda (opcional)',
-  })
-  @IsInt()
-  @IsOptional()
-  @Min(1)
-  store_id?: number;
+  // store_id se infiere automáticamente del contexto del token
+  // @IsInt()
+  // @IsOptional()
+  // @Min(1)
+  // store_id?: number;
 
   @ApiPropertyOptional({
     example: CategoryState.ACTIVE,

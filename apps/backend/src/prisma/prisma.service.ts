@@ -190,15 +190,17 @@ export class PrismaService implements OnModuleInit {
   get categories() {
     return this.client.categories;
   }
-  get customers() {
-    return this.client.customers;
-  }
+  // El modelo customers no existe en el schema, comentado temporalmente
+  // get customers() {
+  //   return this.client.customers;
+  // }
   get inventory_movements() {
     return this.client.inventory_movements;
   }
-  get inventory_snapshots() {
-    return this.client.inventory_snapshots;
-  }
+  // El modelo inventory_snapshots no existe en el schema, comentado temporalmente
+  // get inventory_snapshots() {
+  //   return this.client.inventory_snapshots;
+  // }
   get inventory_transactions() {
     return this.client.inventory_transactions;
   }
@@ -259,9 +261,10 @@ export class PrismaService implements OnModuleInit {
   get tax_rates() {
     return this.client.tax_rates;
   }
-  get taxes() {
-    return this.client.taxes;
-  }
+  // El modelo taxes no existe en el schema, comentado temporalmente
+  // get taxes() {
+  //   return this.client.taxes;
+  // }
   get email_verification_tokens() {
     return this.client.email_verification_tokens;
   }

@@ -203,9 +203,11 @@ export class ProductsController {
     @Body() createVariantDto: CreateProductVariantDto,
   ) {
     try {
-      // Set the product_id in the variant DTO
-      createVariantDto.product_id = productId;
-      const result = await this.productsService.createVariant(createVariantDto);
+      // Pass productId directly to service
+      const result = await this.productsService.createVariant(
+        productId,
+        createVariantDto,
+      );
       return this.responseService.created(
         result,
         'Variante de producto creada exitosamente',

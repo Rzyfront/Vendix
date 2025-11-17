@@ -54,7 +54,7 @@ export class SetupAppConfigWizardDto {
   custom_domain?: string;
 
   @ApiPropertyOptional({
-    example: 'mi-empresa-123.vendix.com',
+    example: 'mi-empresa.vendix.com',
     description: 'Auto-generated subdomain',
   })
   @IsOptional()

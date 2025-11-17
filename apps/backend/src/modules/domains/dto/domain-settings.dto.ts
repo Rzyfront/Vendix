@@ -423,7 +423,11 @@ export class CreateDomainConfigDto {
 }
 
 export class CreateDomainSettingDto {
-  @ApiProperty({ example: 'tienda.ejemplo.com' })
+  @ApiProperty({
+    example: 'mi-empresa.vendix.com',
+    description:
+      'Hostname for the domain (e.g., mi-empresa.vendix.com or mi-empresa.localhost:3000 for development)',
+  })
   @IsString()
   @IsNotEmpty()
   hostname: string;
@@ -517,14 +521,21 @@ export class UpdateDomainSettingDto {
 }
 
 export class ValidateHostnameDto {
-  @ApiProperty({ example: 'tienda.ejemplo.com' })
+  @ApiProperty({
+    example: 'mi-empresa.vendix.com',
+    description:
+      'Hostname to validate (e.g., mi-empresa.vendix.com or mi-empresa.localhost:3000 for development)',
+  })
   @IsString()
   @IsNotEmpty()
   hostname: string;
 }
 
 export class DuplicateDomainDto {
-  @ApiProperty({ example: 'nueva-tienda.ejemplo.com' })
+  @ApiProperty({
+    example: 'nueva-tienda.vendix.com',
+    description: 'New hostname for the duplicated domain configuration',
+  })
   @IsString()
   @IsNotEmpty()
   new_hostname: string;
@@ -542,7 +553,11 @@ export class VerifyDomainDto {
   @IsBoolean()
   force?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'edge.vendix.com',
+    description:
+      'Expected CNAME target for DNS verification (defaults to edge.{BASE_DOMAIN})',
+  })
   @IsOptional()
   @IsString()
   expectedCname?: string;

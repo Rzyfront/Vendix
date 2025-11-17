@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { DomainConfigService } from '../../common/config/domain.config';
 import * as dns from 'node:dns/promises';
 import {
   CreateDomainSettingDto,
@@ -648,7 +649,7 @@ export class DomainsService implements OnModuleInit {
 
     // Expected values
     const expectedCname = (
-      body.expectedCname || 'edge.vendix.com'
+      body.expectedCname || DomainConfigService.getEdgeDomain()
     ).toLowerCase();
     const expectedAList = (
       body.expectedA && body.expectedA.length
@@ -823,7 +824,7 @@ export class DomainsService implements OnModuleInit {
     provided?: string,
   ): string {
     if (provided) return provided;
-    if (hostname.endsWith('.vendix.com')) {
+    if (DomainConfigService.isPlatformSubdomain(hostname)) {
       const parts = hostname.split('.');
       if (parts.length === 3) return hasStore ? 'ecommerce' : 'organization';
       if (parts.length === 4) return 'ecommerce';
@@ -833,8 +834,8 @@ export class DomainsService implements OnModuleInit {
   }
 
   private inferOwnership(hostname: string, domainType?: string): string {
-    // Si es un subdominio de vendix
-    if (hostname.endsWith('.vendix.com')) {
+    // Si es un subdominio de la plataforma configurada
+    if (DomainConfigService.isPlatformSubdomain(hostname)) {
       const parts = hostname.split('.');
       if (parts.length === 2) return 'vendix_core'; // vendix.com
       if (parts.length === 3) return 'vendix_subdomain'; // tienda.vendix.com

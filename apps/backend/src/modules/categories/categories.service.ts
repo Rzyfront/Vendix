@@ -22,23 +22,26 @@ export class CategoriesService {
   ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
-    if (!createCategoryDto.store_id) {
-      throw new BadRequestException('store_id is required');
-    }
+    // store_id se infiere automáticamente del contexto del token
+    // if (!createCategoryDto.store_id) {
+    //   throw new BadRequestException('store_id is required');
+    // }
 
-    await this.accessValidation.validateStoreAccess(
-      createCategoryDto.store_id,
-      user,
-    );
+    // await this.accessValidation.validateStoreAccess(
+    //   createCategoryDto.store_id,
+    //   user,
+    // );
     const slug = slugify(createCategoryDto.name, { lower: true, strict: true });
-    await this.validateUniqueSlug(slug, createCategoryDto.store_id);
+    // El store_id se infiere automáticamente del contexto, no necesitamos validar slug único manualmente
+    // await this.validateUniqueSlug(slug, createCategoryDto.store_id);
 
     // Solo usar los campos que existen en el schema de Prisma
+    // store_id se inyecta automáticamente por el contexto de Prisma
     const categoryData: any = {
       name: createCategoryDto.name,
       slug: slug,
       description: createCategoryDto.description,
-      store_id: createCategoryDto.store_id,
+      // store_id: createCategoryDto.store_id, // Se inyecta automáticamente
       image_url: createCategoryDto.image_url,
       state: 'active', // Usar 'state' en lugar de 'status'
     };
@@ -63,7 +66,7 @@ export class CategoriesService {
     const where: any = {};
 
     if (state) where.state = state;
-    else where.state = 'active'; // Default to active categories
+    else where.state = { not: 'archived' }; // Excluir archivados por defecto
 
     if (search)
       where.OR = [
@@ -125,9 +128,10 @@ export class CategoriesService {
     if (updateCategoryDto.image_url !== undefined) {
       updateData.image_url = updateCategoryDto.image_url;
     }
-    if (updateCategoryDto.store_id !== undefined) {
-      updateData.store_id = updateCategoryDto.store_id;
-    }
+    // store_id se gestiona automáticamente por el contexto de Prisma
+    // if (updateCategoryDto.store_id !== undefined) {
+    //   updateData.store_id = updateCategoryDto.store_id;
+    // }
 
     return this.prisma.categories.update({
       where: { id },
@@ -149,7 +153,14 @@ export class CategoriesService {
         'Cannot delete category with assigned products',
       );
 
-    await this.prisma.categories.delete({ where: { id } });
+    // Eliminación lógica: cambiar estado a archived
+    await this.prisma.categories.update({
+      where: { id },
+      data: {
+        state: 'archived',
+        updated_at: new Date(),
+      },
+    });
   }
 
   private async validateUniqueSlug(

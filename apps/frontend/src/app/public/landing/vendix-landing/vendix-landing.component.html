@@ -13,7 +13,7 @@
           </h1>
         </div>
 
-        <!-- Navigation -->
+        <!-- Desktop Navigation -->
         <nav class="hidden md:flex items-center space-x-8">
           <a href="#features" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-200 font-medium">
             Características
@@ -32,9 +32,96 @@
             Comenzar Gratis
           </a>
         </nav>
+
+        <!-- Mobile Menu Button -->
+        <button class="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="toggleMobileMenu()">
+          <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
+        </button>
       </div>
     </div>
   </header>
+
+  <!-- Mobile Menu Overlay -->
+  @if (mobileMenuOpen) {
+    <div class="fixed inset-0 z-40 md:hidden">
+      <!-- Backdrop -->
+      <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
+
+      <!-- Mobile Menu Panel -->
+      <div class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-white shadow-xl transform transition-transform duration-300 ease-in-out">
+        <div class="flex flex-col h-full">
+          <!-- Mobile Menu Header -->
+          <div class="flex items-center justify-between p-4 border-b border-gray-200">
+            <div class="flex items-center space-x-3">
+              <div class="w-8 h-8 bg-[var(--color-primary)] rounded-lg flex items-center justify-center">
+                <app-icon name="cart" [size]="20" color="white"></app-icon>
+              </div>
+              <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
+                {{ tenantConfig?.branding?.name || 'Vendix' }}
+              </h2>
+            </div>
+            <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
+              <app-icon name="x" [size]="20" color="var(--color-text-primary)"></app-icon>
+            </button>
+          </div>
+
+          <!-- Mobile Menu Content -->
+          <div class="flex-1 overflow-y-auto p-4">
+            <div class="space-y-2">
+              <a href="#features"
+                 class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+                 (click)="closeMobileMenu()">
+                <app-icon name="check-circle" [size]="20" color="var(--color-text-secondary)" class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+                <span class="text-[var(--color-text-primary)] font-medium">Características</span>
+              </a>
+
+              <a href="#solutions"
+                 class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+                 (click)="closeMobileMenu()">
+                <app-icon name="settings" [size]="20" color="var(--color-text-secondary)" class="mr-3 group-hover:text-[var(--color-accent)]"></app-icon>
+                <span class="text-[var(--color-text-primary)] font-medium">Soluciones</span>
+              </a>
+
+              <a href="#pricing"
+                 class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+                 (click)="closeMobileMenu()">
+                <app-icon name="credit-card" [size]="20" color="var(--color-text-secondary)" class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+                <span class="text-[var(--color-text-primary)] font-medium">Precios</span>
+              </a>
+
+              <div class="border-t border-gray-200 my-4"></div>
+
+              <a routerLink="/auth/login"
+                 class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+                 (click)="closeMobileMenu()">
+                <app-icon name="user" [size]="20" color="var(--color-text-secondary)" class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+                <span class="text-[var(--color-text-primary)] font-medium">Iniciar Sesión</span>
+              </a>
+
+              <a routerLink="/auth/register"
+                 class="flex items-center p-3 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] transition-colors duration-200 group mt-4"
+                 (click)="closeMobileMenu()">
+                <app-icon name="plus" [size]="20" color="white" class="mr-3"></app-icon>
+                <span class="font-medium">Comenzar Gratis</span>
+              </a>
+            </div>
+
+            <!-- Mobile Menu Footer -->
+            <div class="border-t border-gray-200 mt-6 pt-4">
+              <div class="text-center">
+                <p class="text-sm text-[var(--color-text-secondary)] mb-4">¿Necesitas ayuda?</p>
+                <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
+                   class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-medium">
+                  <app-icon name="mail-check" [size]="16" color="currentColor" class="mr-2"></app-icon>
+                  Contactar Soporte
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
 
   <!-- Hero Section with Carousel -->
   <section class="relative h-screen">
@@ -64,7 +151,7 @@
           <!-- Predicción de Ventas -->
           <div class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="trending-up" [size]="24" color="var(--color-primary)"></app-icon>
+              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
             </div>
             <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Predicción de Ventas</h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -75,7 +162,7 @@
           <!-- Recomendaciones Inteligentes -->
           <div class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="brain" [size]="24" color="var(--color-accent)"></app-icon>
+              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
             </div>
             <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">Recomendaciones IA</h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -129,7 +216,7 @@
           <!-- Punto de Venta POS -->
           <div class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 hover:shadow-lg transition-all duration-300">
             <div class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="cash-register" [size]="24" color="var(--color-accent)"></app-icon>
+              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
             </div>
             <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Punto de Venta POS</h3>
             <ul class="space-y-3 text-[var(--color-text-secondary)]">
@@ -234,66 +321,94 @@
     </section>
 
     <!-- Pricing Section -->
-    <section id="pricing" class="h-screen bg-[var(--color-surface)] flex items-center overflow-hidden">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 h-full flex flex-col justify-center">
-        <div class="text-center mb-10">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary-light)] px-3 py-1 rounded-full mb-3">
+    <section id="pricing" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
+      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="text-center mb-12 md:mb-16">
+          <div class="inline-flex items-center gap-2 bg-[var(--color-primary-light)] px-4 py-2 rounded-full mb-6">
             <span class="w-2 h-2 bg-[var(--color-primary)] rounded-full"></span>
             <span class="text-sm font-medium text-[var(--color-primary)]">Planes y Precios</span>
           </div>
-          <h2 class="text-3xl md:text-4xl font-bold text-[var(--color-text-primary)] mb-3 tracking-tight">
+          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
             Planes para <span class="text-[var(--color-primary)]">Tu Negocio</span>
           </h2>
-          <p class="text-lg text-[var(--color-text-secondary)] max-w-2xl mx-auto">
-            Elige el plan perfecto según tus necesidades.
+          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
+            Elige el plan perfecto según tus necesidades. Cancela cuando quieras.
           </p>
         </div>
 
-        <div class="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <!-- Mobile-First Pricing Cards -->
+        <div class="space-y-6 md:space-y-0 md:grid md:grid-cols-3 lg:grid-cols-3 gap-6 md:gap-8 max-w-7xl mx-auto">
           @for (plan of plans; track plan.name) {
-            <div class="relative bg-white rounded-2xl border border-[var(--color-border)] {{ plan.highlighted ? 'ring-2 ring-[var(--color-primary)]/50 shadow-xl scale-105' : 'shadow-lg' }} transition-all duration-300 hover:shadow-xl">
+            <div class="relative bg-white rounded-2xl border border-[var(--color-border)] {{ plan.highlighted ? 'ring-2 ring-[var(--color-primary)]/50 shadow-xl' : 'shadow-lg' }} transition-all duration-300 hover:shadow-xl hover:scale-[1.02] overflow-hidden">
               @if (plan.highlighted) {
-                <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                  <span class="bg-[var(--color-primary)] text-white px-6 py-2 rounded-full text-sm font-semibold shadow-lg">
+                <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
+                  <span class="bg-[var(--color-primary)] text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg">
                     Más Popular
                   </span>
                 </div>
               }
 
-              <div class="p-5">
-                <div class="text-center mb-5">
-                  <h3 class="text-xl font-bold text-[var(--color-text-primary)] mb-2">{{ plan.name }}</h3>
-                  <p class="text-sm text-[var(--color-text-secondary)] mb-4">{{ plan.description }}</p>
-                  <div class="flex items-baseline justify-center">
-                    <span class="text-3xl font-bold text-[var(--color-text-primary)]">{{ plan.price }}</span>
-                    <span class="text-[var(--color-text-secondary)] ml-1 text-sm">{{ plan.period }}</span>
+              <!-- Mobile Header -->
+              <div class="p-6 md:p-8">
+                <!-- Plan Name and Price Header -->
+                <div class="text-center mb-6 md:mb-8">
+                  <h3 class="text-xl md:text-2xl font-bold text-[var(--color-text-primary)] mb-3">{{ plan.name }}</h3>
+                  <p class="text-sm md:text-base text-[var(--color-text-secondary)] mb-6 leading-relaxed">{{ plan.description }}</p>
+                  <div class="flex items-baseline justify-center mb-2">
+                    <span class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)]">{{ plan.price }}</span>
+                    <span class="text-[var(--color-text-secondary)] ml-2 text-base md:text-lg">{{ plan.period }}</span>
                   </div>
                 </div>
 
-                <ul class="space-y-2 mb-5">
-                  @for (feature of plan.features; track feature) {
-                    <li class="flex items-start text-sm">
-                      <app-icon name="check" [size]="14" color="var(--color-success)" class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                      <span class="text-[var(--color-text-secondary)]">{{ feature }}</span>
-                    </li>
-                  }
-                </ul>
+                <!-- Features List -->
+                <div class="mb-8">
+                  <ul class="space-y-3 md:space-y-4">
+                    @for (feature of plan.features; track feature) {
+                      <li class="flex items-start group">
+                        <app-icon name="check" [size]="18" color="var(--color-success)" class="mr-3 mt-1 flex-shrink-0 group-hover:scale-110 transition-transform duration-200"></app-icon>
+                        <span class="text-sm md:text-base text-[var(--color-text-secondary)] leading-relaxed group-hover:text-[var(--color-text-primary)] transition-colors duration-200">{{ feature }}</span>
+                      </li>
+                    }
+                  </ul>
+                </div>
 
-                <div class="space-y-2">
-                  <a routerLink="/auth/register" class="block w-full py-2.5 rounded-lg text-sm font-semibold text-center transition-all duration-300 {{ plan.highlighted ? 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)]' : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border border-[var(--color-border)] hover:bg-[var(--color-primary)] hover:text-white' }}">
+                <!-- CTA Button and Terms -->
+                <div class="space-y-4">
+                  <a routerLink="/auth/register"
+                     class="block w-full py-3 md:py-4 px-6 rounded-xl text-base md:text-lg font-semibold text-center transition-all duration-300 min-h-[52px] flex items-center justify-center {{ plan.highlighted ? 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl' : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border-2 border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white' }}">
                     {{ plan.cta_text }}
                   </a>
 
                   <!-- Términos y condiciones -->
-                  <p class="text-center text-xs text-[var(--color-text-secondary)]">
-                    <a href="#" (click)="showTermsAndConditions()" class="hover:text-[var(--color-primary)] underline">
+                  <p class="text-center text-sm text-[var(--color-text-secondary)]">
+                    <a href="#" (click)="showTermsAndConditions()" class="hover:text-[var(--color-primary)] underline transition-colors duration-200">
                       Términos y condiciones
                     </a>
                   </p>
                 </div>
               </div>
+
+              <!-- Mobile Highlight Border -->
+              @if (plan.highlighted) {
+                <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]"></div>
+              }
             </div>
           }
+        </div>
+
+        <!-- Mobile Additional Info -->
+        <div class="mt-12 md:mt-16 text-center">
+          <div class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20">
+            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">¿No estás seguro qué plan elegir?</h3>
+            <p class="text-[var(--color-text-secondary)] mb-4 leading-relaxed">
+              Contáctanos para una asesoría personalizada y encuentra el plan perfecto para tu negocio.
+            </p>
+            <a href="mailto:quicks.dev@gmail.com?subject=Consulta%20de%20Planes%20Vendix"
+               class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
+              <app-icon name="mail-check" [size]="18" color="currentColor" class="mr-2"></app-icon>
+              Hablar con un experto
+            </a>
+          </div>
         </div>
       </div>
     </section>

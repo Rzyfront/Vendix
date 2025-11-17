@@ -21,6 +21,9 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
   // Tenant configuration for branding
   tenantConfig: any = null;
 
+  // Mobile menu state
+  mobileMenuOpen = false;
+
   // Dynamic data from backend
   plans: any[] = [];
   features: any[] = [];
@@ -257,5 +260,22 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
 
   closeTermsModal() {
     this.showTermsModal = false;
+  }
+
+  // Mobile menu methods
+  toggleMobileMenu() {
+    this.mobileMenuOpen = !this.mobileMenuOpen;
+
+    // Prevent body scroll when menu is open
+    if (this.mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+  }
+
+  closeMobileMenu() {
+    this.mobileMenuOpen = false;
+    document.body.style.overflow = '';
   }
 }
