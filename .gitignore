@@ -4,12 +4,10 @@ dist/
 .env*
 .DS_Store
 npm-debug.log
-logs/
 # Docker
 *.local
 *.pid
 *.seed
-*.log
 # VSCode
 .vscode/
 # Certificados locales
