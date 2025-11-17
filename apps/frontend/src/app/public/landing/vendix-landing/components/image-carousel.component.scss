@@ -74,7 +74,7 @@
   text-shadow: 1px 1px 6px rgba(0, 0, 0, 0.7);
   margin-bottom: 2.5rem;
   line-height: 1.4;
-  max-width: 800px;
+  max-width: 50rem;  /* 800px */
   margin-left: auto;
   margin-right: auto;
   animation: fadeInDown 0.8s 0.2s ease-in-out both;
@@ -233,7 +233,7 @@
 }
 
 // Responsive Design
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .carousel-content {
     padding: 1rem;
   }
@@ -261,7 +261,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 30em) {  /* 480px */
   .carousel-overlay {
     background: linear-gradient(
       to top,

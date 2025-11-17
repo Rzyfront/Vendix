@@ -251,13 +251,13 @@
   }
 
   &:active::after {
-    width: 40px;
-    height: 40px;
+    width: var(--logo-md);
+    height: var(--logo-md);
   }
 }
 
 // Responsive design mejorado
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .modal-size-lg,
   .modal-size-md,
   .modal-size-sm {
@@ -270,7 +270,7 @@
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 40em) {  /* 640px */
   .modal-content {
     margin: 0.5rem;
     max-width: 98vw;
@@ -288,7 +288,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 30em) {  /* 480px */
   .modal-header,
   .modal-footer {
     padding: 0.75rem;

@@ -43,8 +43,8 @@
   }
   
   &:hover::before {
-    width: 300px;
-    height: 300px;
+    width: 18.75rem;   /* 300px */
+    height: 18.75rem;  /* 300px */
   }
 }
 
@@ -98,9 +98,9 @@ section {
 }
 
 .container {
-  max-width: 1200px;
+  max-width: 75rem;  /* 1200px */
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 1.25rem;  /* 20px */
 }
 
 // Header Styles
@@ -124,7 +124,7 @@ section {
     gap: 1rem;
 
     .logo {
-      height: 40px;
+      height: var(--logo-md);
       width: auto;
     }
 
@@ -295,7 +295,7 @@ section {
 
   .features-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(18.75rem, 1fr));  /* 300px */
     gap: 2rem;
   }
 
@@ -345,7 +345,7 @@ section {
 
   .environments-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(18.75rem, 1fr));  /* 300px */
     gap: 2rem;
   }
 
@@ -435,7 +435,7 @@ section {
 }
 
 // Responsive Design
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .landing-header {
     .header-content {
       flex-direction: column;
@@ -479,7 +479,7 @@ section {
 }
 
 // Enhanced Mobile Optimizations
-@media (max-width: 640px) {
+@media (max-width: 40em) {  /* 640px */
   // Mobile-first improvements
   .vendix-landing {
     // Optimize text sizes for mobile readability
@@ -812,7 +812,7 @@ section {
 }
 
 // Tablet optimizations (between mobile and desktop)
-@media (min-width: 641px) and (max-width: 1024px) {
+@media (min-width: 40.0625em) and (max-width: 64em) {  /* 641px - 1024px */
   .vendix-landing {
     .container {
       padding: 0 2rem;

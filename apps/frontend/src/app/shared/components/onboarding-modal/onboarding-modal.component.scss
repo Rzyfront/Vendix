@@ -3,7 +3,7 @@ app-onboarding-modal {
   // Main modal container with larger size
   app-modal {
     .modal-content {
-      max-width: 800px;
+      max-width: 50rem;  /* 800px */
       width: 90vw;
       max-height: 90vh;
     }
@@ -11,12 +11,12 @@ app-onboarding-modal {
 
   // Step content area
   .step-content {
-    min-height: 400px;
+    min-height: 25rem;  /* 400px */
     padding: 2rem 0;
 
     // Common styles for step containers
     .step-container {
-      max-width: 600px;
+      max-width: 37.5rem;  /* 600px */
       margin: 0 auto;
       text-align: center;
     }
@@ -24,8 +24,8 @@ app-onboarding-modal {
     // Welcome step
     &.welcome-step {
       .welcome-icon {
-        width: 80px;
-        height: 80px;
+        width: 5rem;   /* 80px */
+        height: 5rem;  /* 80px */
         margin: 0 auto 1.5rem;
         background: linear-gradient(135deg, var(--color-primary), var(--color-primary-dark));
         border-radius: 50%;
@@ -79,7 +79,7 @@ app-onboarding-modal {
 
         .form-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          grid-template-columns: repeat(auto-fit, minmax(15.625rem, 1fr));  /* 250px */
           gap: 1.5rem;
 
           .form-field {
@@ -113,7 +113,7 @@ app-onboarding-modal {
 
             textarea.field-input {
               resize: vertical;
-              min-height: 100px;
+              min-height: 6.25rem;  /* 100px */
             }
           }
         }
@@ -124,7 +124,7 @@ app-onboarding-modal {
     &.app-config-step {
       .app-type-selection {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));  /* 200px */
         gap: 1rem;
         margin-bottom: 2rem;
 
@@ -150,8 +150,8 @@ app-onboarding-modal {
           }
 
           .option-icon {
-            width: 48px;
-            height: 48px;
+            width: var(--logo-lg);
+            height: var(--logo-lg);
             margin: 0 auto 1rem;
             background: linear-gradient(135deg, var(--color-primary), var(--color-secondary));
             border-radius: var(--radius-lg);
@@ -178,7 +178,7 @@ app-onboarding-modal {
 
       .color-picker-section {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));  /* 200px */
         gap: 1.5rem;
         margin-bottom: 2rem;
 
@@ -189,8 +189,8 @@ app-onboarding-modal {
             gap: 0.75rem;
 
             .color-input {
-              width: 60px;
-              height: 40px;
+              width: 3.75rem;
+              height: var(--logo-md);
               border: 2px solid var(--color-border);
               border-radius: var(--radius-md);
               cursor: pointer;
@@ -215,8 +215,8 @@ app-onboarding-modal {
       text-align: center;
 
       .completion-icon {
-        width: 100px;
-        height: 100px;
+        width: 6.25rem;   /* 100px */
+        height: 6.25rem;  /* 100px */
         margin: 0 auto 2rem;
         background: linear-gradient(135deg, var(--color-success), var(--color-success-dark));
         border-radius: 50%;
@@ -295,8 +295,8 @@ app-onboarding-modal {
     border-radius: var(--radius-lg);
 
     .loading-spinner {
-      width: 40px;
-      height: 40px;
+      width: var(--logo-md);
+      height: var(--logo-md);
       border: 3px solid var(--color-border);
       border-top: 3px solid var(--color-primary);
       border-radius: 50%;
@@ -331,7 +331,7 @@ app-onboarding-modal {
 }
 
 // Responsive adjustments
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   app-onboarding-modal {
     app-modal {
       .modal-content {
@@ -343,7 +343,7 @@ app-onboarding-modal {
 
     .step-content {
       padding: 1rem 0;
-      min-height: 300px;
+      min-height: 18.75rem;  /* 300px */
 
       .form-grid {
         grid-template-columns: 1fr;

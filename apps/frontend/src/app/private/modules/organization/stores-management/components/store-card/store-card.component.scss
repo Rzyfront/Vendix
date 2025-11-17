@@ -137,7 +137,7 @@
 }
 
 // Responsive adjustments
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .stats-grid {
     grid-template-columns: repeat(3, 1fr);
     gap: 0.75rem;

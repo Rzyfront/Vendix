@@ -136,14 +136,14 @@ input:checked + .slider:before {
   display: grid;
   gap: 1rem;
 
-  @media (min-width: 768px) {
+  @media (min-width: 48em) {  /* 768px */
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 .form-field {
   &.full-width {
-    @media (min-width: 768px) {
+    @media (min-width: 48em) {  /* 768px */
       grid-column: span 2;
     }
   }
