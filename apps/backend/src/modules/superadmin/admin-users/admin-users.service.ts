@@ -4,8 +4,8 @@ import {
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from '../users/dto';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { CreateUserDto, UpdateUserDto, UserQueryDto } from 'src/modules/users/dto';
 import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 

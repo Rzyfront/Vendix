@@ -3,11 +3,11 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateDomainSettingDto,
   UpdateDomainSettingDto,
-} from '../domains/dto/domain-settings.dto';
+} from 'src/modules/domains/dto/domain-settings.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()

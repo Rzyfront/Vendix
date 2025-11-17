@@ -15,13 +15,13 @@ import {
   UpdateRoleDto,
   AssignPermissionsDto,
   RemovePermissionsDto,
-} from '../roles/dto/role.dto';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UserRole } from '../auth/enums/user-role.enum';
+} from 'src/modules/roles/dto/role.dto';
+import { Roles } from 'src/modules/auth/decorators/roles.decorator';
+import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
+import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
+import { UserRole } from 'src/modules/auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { ResponseService } from '../../common/responses';
+import { ResponseService } from 'src/common/responses';
 
 @ApiTags('Admin Roles')
 @Controller('admin/roles')

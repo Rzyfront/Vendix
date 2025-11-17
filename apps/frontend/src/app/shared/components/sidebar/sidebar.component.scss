@@ -1,11 +1,7 @@
 /* Sidebar styles with shadcn-inspired design */
-:host {
-  --sidebar-width: 15rem; /* 240px */
-  --sidebar-width-collapsed: 4rem; /* 64px */
-}
 
 .sidebar {
-  transition: width 0.3s ease-in-out;
+  transition: width 0.3s ease-in-out, transform 0.3s ease-in-out;
   width: var(--sidebar-width);
   background-color: var(--color-background);
   display: flex;
@@ -269,4 +265,130 @@
   background-color: var(--color-secondary);
   color: var(--color-text-on-primary);
   font-weight: 500;
+}
+
+/* Mobile Responsive Styles */
+@media (max-width: 768px) {
+  :host {
+    position: relative;
+  }
+
+  /* Hide desktop sidebar by default on mobile */
+  .sidebar:not(.sidebar-mobile) {
+    display: none;
+  }
+
+  /* Mobile overlay sidebar - always visible but off-screen when closed */
+  .sidebar.sidebar-mobile {
+    display: flex;
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    width: min(var(--sidebar-width-mobile), 320px);
+    background-color: var(--color-surface);
+    border-right: 1px solid var(--color-border);
+    z-index: var(--sidebar-mobile-z-index); /* 55 - above header */
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+    box-shadow: var(--shadow-lg);
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Show mobile sidebar when active */
+  .sidebar.sidebar-mobile.sidebar-mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Mobile backdrop */
+  .sidebar-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, var(--sidebar-backdrop-opacity));
+    z-index: 54; /* Just below sidebar mobile (55) */
+    opacity: 1;
+    visibility: visible;
+  }
+
+  /* Mobile close button */
+  .sidebar-mobile-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    padding: 0.5rem;
+    border-radius: var(--radius-md);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sidebar-mobile-close:hover {
+    background-color: var(--color-accent);
+    color: var(--color-text-primary);
+  }
+
+  /* Prevent body scroll when sidebar is open */
+  body.sidebar-mobile-open {
+    overflow: hidden;
+  }
+
+  /* Mobile-specific menu adjustments */
+  .sidebar.sidebar-mobile {
+    /* Don't collapse mobile sidebar - always show full width */
+    &.collapsed {
+      width: min(var(--sidebar-width-mobile), 320px);
+    }
+
+    /* Ensure all text and elements are visible in mobile */
+    &.collapsed .menu-text,
+    &.collapsed .logo-text,
+    &.collapsed .submenu,
+    &.collapsed .badge,
+    &.collapsed .chevron,
+    &.collapsed .vlink-container {
+      opacity: 1;
+      width: auto;
+      visibility: visible;
+    }
+
+    &.collapsed .chevron {
+      display: block;
+    }
+
+    &.collapsed .sidebar-header {
+      justify-content: flex-start;
+      padding: 1rem;
+    }
+
+    &.collapsed .menu-item {
+      justify-content: flex-start;
+      padding: 0.625rem 0.75rem;
+      gap: 0.75rem;
+    }
+
+    &.collapsed .logo-container {
+      margin: 0;
+    }
+  }
+
+  /* Mobile menu item adjustments */
+  .sidebar.sidebar-mobile .menu-item {
+    min-height: 44px; /* Touch-friendly size */
+    padding: 0.75rem;
+  }
+
+  /* Ensure mobile close button doesn't interfere with collapsed state */
+  .sidebar.sidebar-mobile .sidebar-mobile-close {
+    display: flex;
+  }
 }

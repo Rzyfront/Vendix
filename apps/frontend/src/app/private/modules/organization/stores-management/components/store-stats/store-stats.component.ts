@@ -1,13 +1,14 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StoreStats } from '../../interfaces/store.interface';
+import { IconComponent } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-stats',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   templateUrl: './store-stats.component.html',
-  styleUrls: ['./store-stats.component.scss']
+  styleUrls: ['./store-stats.component.scss'],
 })
 export class StoreStatsComponent {
   @Input() stats: StoreStats | null = null;
@@ -26,7 +27,7 @@ export class StoreStatsComponent {
   formatCurrency(amount: number): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
+      currency: 'USD',
     }).format(amount);
   }
 

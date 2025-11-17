@@ -3,13 +3,13 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateRoleDto,
   UpdateRoleDto,
   AssignPermissionsDto,
   RemovePermissionsDto,
-} from '../roles/dto/role.dto';
+} from 'src/modules/roles/dto/role.dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()

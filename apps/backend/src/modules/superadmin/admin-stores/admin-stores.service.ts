@@ -3,13 +3,13 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from 'src/prisma/prisma.service';
 import {
   CreateStoreDto,
   UpdateStoreDto,
   AdminStoreQueryDto,
   StoreType,
-} from '../stores/dto';
+} from 'src/modules/stores/dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 

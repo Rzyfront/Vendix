@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ViewChild, Renderer2, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -17,6 +17,7 @@ import { Observable } from 'rxjs';
     <div class="flex">
       <!-- Sidebar -->
       <app-sidebar
+        #sidebarRef
         [menuItems]="menuItems"
         [title]="(organizationName$ | async) || platformTitle"
         subtitle="Super Admin"
@@ -27,8 +28,9 @@ import { Observable } from 'rxjs';
 
       <!-- Main Content -->
       <div
-        class="flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
-        [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
+        [class.margin-desktop]="!sidebarRef?.isMobile"
+        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
       >
         <!-- Header (Fixed) -->
         <app-header
@@ -52,7 +54,9 @@ import { Observable } from 'rxjs';
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
-export class SuperAdminLayoutComponent implements OnInit {
+export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
+  @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
+
   sidebarCollapsed = false;
   currentPageTitle = 'Super Admin Dashboard';
   currentVlink = 'super-admin';
@@ -61,6 +65,7 @@ export class SuperAdminLayoutComponent implements OnInit {
   // Dynamic user data
   organizationName$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
+  private resizeListener?: () => void;
 
   constructor(private authFacade: AuthFacade) {
     console.log('[DEBUG] SuperAdminLayoutComponent has been constructed!');
@@ -175,6 +180,18 @@ export class SuperAdminLayoutComponent implements OnInit {
   ];
 
   toggleSidebar() {
-    this.sidebarCollapsed = !this.sidebarCollapsed;
+    // If mobile, delegate to sidebar component
+    if (this.sidebarRef?.isMobile) {
+      this.sidebarRef.toggleSidebar();
+    } else {
+      // Desktop: toggle collapsed state
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+    }
+  }
+
+  ngOnDestroy() {
+    if (this.resizeListener) {
+      this.resizeListener();
+    }
   }
 }

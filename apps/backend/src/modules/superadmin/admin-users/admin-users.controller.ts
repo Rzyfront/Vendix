@@ -10,13 +10,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminUsersService } from './admin-users.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from '../users/dto';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { UserRole } from '../auth/enums/user-role.enum';
+import { CreateUserDto, UpdateUserDto, UserQueryDto } from 'src/modules/users/dto';
+import { Roles } from 'src/modules/auth/decorators/roles.decorator';
+import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
+import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
+import { UserRole } from 'src/modules/auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { ResponseService } from '../../common/responses/response.service';
+import { ResponseService } from 'src/common/responses/response.service';
 
 @ApiTags('Admin Users')
 @Controller('admin/users')

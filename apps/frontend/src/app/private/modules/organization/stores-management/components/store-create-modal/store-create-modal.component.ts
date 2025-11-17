@@ -3,7 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
-import { CreateStoreDto, StoreType, OperatingHours } from '../../interfaces/store.interface';
+import {
+  CreateStoreDto,
+  StoreType,
+  OperatingHours,
+} from '../../interfaces/store.interface';
 import { OrganizationStoresService } from '../../services/organization-stores.service';
 
 // App shared components
@@ -11,7 +15,7 @@ import {
   ModalComponent,
   InputComponent,
   ButtonComponent,
-  IconComponent
+  IconComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
@@ -24,7 +28,7 @@ import {
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    IconComponent
+    IconComponent,
   ],
   template: `
     <app-modal
@@ -37,7 +41,11 @@ import {
       <form [formGroup]="storeForm" class="space-y-6">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Información Básica</h3>
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Información Básica
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -46,7 +54,11 @@ import {
               placeholder="Ej: Tienda Central"
               [required]="true"
               [control]="storeForm.get('name')"
-              [error]="storeForm.get('name')?.invalid && storeForm.get('name')?.touched ? 'El nombre es requerido' : ''"
+              [error]="
+                storeForm.get('name')?.invalid && storeForm.get('name')?.touched
+                  ? 'El nombre es requerido'
+                  : ''
+              "
             >
               <app-icon slot="prefix" name="building" [size]="16" />
             </app-input>
@@ -58,7 +70,9 @@ import {
               [control]="storeForm.get('slug')"
             >
               <app-icon slot="prefix" name="link" [size]="16" />
-              <div class="text-xs text-text-secondary mt-1">Se generará automáticamente si no se especifica</div>
+              <div class="text-xs text-text-secondary mt-1">
+                Se generará automáticamente si no se especifica
+              </div>
             </app-input>
 
             <app-input
@@ -67,7 +81,12 @@ import {
               placeholder="TC001"
               [required]="true"
               [control]="storeForm.get('store_code')"
-              [error]="storeForm.get('store_code')?.invalid && storeForm.get('store_code')?.touched ? 'El código es requerido' : ''"
+              [error]="
+                storeForm.get('store_code')?.invalid &&
+                storeForm.get('store_code')?.touched
+                  ? 'El código es requerido'
+                  : ''
+              "
             >
               <app-icon slot="prefix" name="hash" [size]="16" />
             </app-input>
@@ -79,7 +98,12 @@ import {
               placeholder="tienda@ejemplo.com"
               [required]="true"
               [control]="storeForm.get('email')"
-              [error]="storeForm.get('email')?.invalid && storeForm.get('email')?.touched ? 'Email inválido' : ''"
+              [error]="
+                storeForm.get('email')?.invalid &&
+                storeForm.get('email')?.touched
+                  ? 'Email inválido'
+                  : ''
+              "
             >
               <app-icon slot="prefix" name="mail" [size]="16" />
             </app-input>
@@ -95,19 +119,33 @@ import {
             </app-input>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Tipo de Tienda</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Tipo de Tienda</label
+              >
               <select
                 formControlName="store_type"
                 class="w-full h-[var(--height-md)] px-3 py-2 border border-border rounded-[var(--radius-md)] bg-white text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
-                [class]="{'border-[var(--color-destructive)]': storeForm.get('store_type')?.invalid && storeForm.get('store_type')?.touched}"
+                [class]="{
+                  'border-[var(--color-destructive)]':
+                    storeForm.get('store_type')?.invalid &&
+                    storeForm.get('store_type')?.touched,
+                }"
               >
                 <option value="">Seleccionar tipo</option>
-                <option *ngFor="let option of storeTypeOptions" [value]="option.value">
+                <option
+                  *ngFor="let option of storeTypeOptions"
+                  [value]="option.value"
+                >
                   {{ option.label }}
                 </option>
               </select>
-              <div *ngIf="storeForm.get('store_type')?.invalid && storeForm.get('store_type')?.touched"
-                   class="text-[var(--color-destructive)] text-xs mt-1">
+              <div
+                *ngIf="
+                  storeForm.get('store_type')?.invalid &&
+                  storeForm.get('store_type')?.touched
+                "
+                class="text-[var(--color-destructive)] text-xs mt-1"
+              >
                 El tipo es requerido
               </div>
             </div>
@@ -116,7 +154,11 @@ import {
 
         <!-- Store Configuration -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Configuración de la Tienda</h3>
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Configuración de la Tienda
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -139,52 +181,70 @@ import {
             </app-input>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Zona Horaria</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Zona Horaria</label
+              >
               <select
                 formControlName="timezone"
                 class="w-full h-[var(--height-md)] px-3 py-2 border border-border rounded-[var(--radius-md)] bg-white text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
               >
                 <option value="">Seleccionar zona horaria</option>
-                <option *ngFor="let option of timezoneOptions" [value]="option.value">
+                <option
+                  *ngFor="let option of timezoneOptions"
+                  [value]="option.value"
+                >
                   {{ option.label }}
                 </option>
               </select>
             </div>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Moneda</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Moneda</label
+              >
               <select
                 formControlName="currency_code"
                 class="w-full h-[var(--height-md)] px-3 py-2 border border-border rounded-[var(--radius-md)] bg-white text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-transparent"
               >
                 <option value="">Seleccionar moneda</option>
-                <option *ngFor="let option of currencyOptions" [value]="option.value">
+                <option
+                  *ngFor="let option of currencyOptions"
+                  [value]="option.value"
+                >
                   {{ option.label }}
                 </option>
               </select>
             </div>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Color Primario</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Color Primario</label
+              >
               <div class="flex items-center space-x-3">
                 <input
                   type="color"
                   formControlName="color_primary"
                   class="h-10 w-20 px-2 py-1 border border-border rounded-[var(--radius-md)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                >
-                <span class="text-sm text-text-secondary">{{ storeForm.value.color_primary }}</span>
+                />
+                <span class="text-sm text-text-secondary">{{
+                  storeForm.value.color_primary
+                }}</span>
               </div>
             </div>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Color Secundario</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Color Secundario</label
+              >
               <div class="flex items-center space-x-3">
                 <input
                   type="color"
                   formControlName="color_secondary"
                   class="h-10 w-20 px-2 py-1 border border-border rounded-[var(--radius-md)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                >
-                <span class="text-sm text-text-secondary">{{ storeForm.value.color_secondary }}</span>
+                />
+                <span class="text-sm text-text-secondary">{{
+                  storeForm.value.color_secondary
+                }}</span>
               </div>
             </div>
           </div>
@@ -192,7 +252,11 @@ import {
 
         <!-- Address Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Dirección</h3>
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Dirección
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="md:col-span-2">
@@ -228,7 +292,11 @@ import {
 
         <!-- Additional Settings -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Configuración Adicional</h3>
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Configuración Adicional
+          </h3>
 
           <div class="space-y-4">
             <div class="flex items-center">
@@ -236,14 +304,16 @@ import {
                 type="checkbox"
                 formControlName="is_active"
                 class="h-4 w-4 text-[var(--color-primary)] focus:ring-[var(--color-primary)] border-border rounded"
-              >
+              />
               <label class="ml-2 block text-sm text-text-primary">
                 Tienda activa (puede recibir pedidos)
               </label>
             </div>
 
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">Descripción</label>
+              <label class="block text-sm font-medium text-text-primary"
+                >Descripción</label
+              >
               <textarea
                 formControlName="description"
                 placeholder="Descripción breve de la tienda..."
@@ -255,59 +325,60 @@ import {
         </div>
       </form>
 
-      <ng-template #footer>
-        <div class="flex justify-end space-x-3">
-          <app-button
-            (click)="closeModal()"
-            variant="outline"
-            size="md"
-            [disabled]="isSubmitting"
-          >
-            Cancelar
+      <div slot="footer" class="flex justify-between items-center">
+        <div class="text-sm text-text-secondary">
+          <span class="text-red-500">*</span> Required fields
+        </div>
+        <div class="flex gap-3">
+          <app-button variant="outline" (clicked)="onCancel()">
+            Cancel
           </app-button>
           <app-button
-            (click)="onSubmit()"
             variant="primary"
-            size="md"
+            (clicked)="onSubmit()"
             [disabled]="storeForm.invalid || isSubmitting"
             [loading]="isSubmitting"
           >
-            <ng-container *ngIf="!isSubmitting">
-              <app-icon name="plus" [size]="16" class="mr-2" />
-              Crear Tienda
-            </ng-container>
-            <ng-container *ngIf="isSubmitting">
-              <app-icon name="loader-2" [size]="16" class="mr-2 animate-spin" />
-              Creando...
-            </ng-container>
+            Crear Tienda
           </app-button>
         </div>
-      </ng-template>
+      </div>
     </app-modal>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class StoreCreateModalComponent implements OnInit {
   @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() storeCreated = new EventEmitter<any>();
+  @Input() isSubmitting = false;
+
+  @Output() openChange = new EventEmitter<boolean>();
+  @Output() submit = new EventEmitter<any>();
+  @Output() cancel = new EventEmitter<void>();
 
   storeForm: FormGroup;
-  isSubmitting = false;
   storeTypeOptions: Array<{ value: StoreType; label: string }> = [];
   timezoneOptions: Array<{ value: string; label: string }> = [];
   currencyOptions: Array<{ value: string; label: string }> = [];
 
   constructor(
     private fb: FormBuilder,
-    private storesService: OrganizationStoresService
+    private storesService: OrganizationStoresService,
   ) {
     this.storeForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(255)]],
+      name: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.maxLength(255),
+        ],
+      ],
       slug: [''],
       store_code: ['', [Validators.required, Validators.maxLength(20)]],
       email: ['', [Validators.required, Validators.email]],
@@ -325,13 +396,14 @@ export class StoreCreateModalComponent implements OnInit {
       is_active: [true],
       description: [''],
       operating_hours: [null],
-      manager_user_id: [null]
+      manager_user_id: [null],
     });
 
     // Auto-generate slug from name
-    this.storeForm.get('name')?.valueChanges.subscribe(name => {
+    this.storeForm.get('name')?.valueChanges.subscribe((name) => {
       if (name && !this.storeForm.get('slug')?.value) {
-        const slug = name.toLowerCase()
+        const slug = name
+          .toLowerCase()
           .replace(/[^a-z0-9\s-]/g, '')
           .replace(/\s+/g, '-')
           .replace(/-+/g, '-')
@@ -348,16 +420,14 @@ export class StoreCreateModalComponent implements OnInit {
   }
 
   onModalChange(isOpen: boolean): void {
+    this.openChange.emit(isOpen);
     if (!isOpen) {
-      this.closeModal();
+      this.resetForm();
     }
-    this.isOpenChange.emit(isOpen);
   }
 
-  closeModal(): void {
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
-    this.resetForm();
+  onCancel(): void {
+    this.cancel.emit();
   }
 
   onSubmit(): void {
@@ -366,25 +436,12 @@ export class StoreCreateModalComponent implements OnInit {
       return;
     }
 
-    this.isSubmitting = true;
-
     const storeData: Omit<CreateStoreDto, 'organization_id'> = {
       ...this.storeForm.value,
       is_active: this.storeForm.value.is_active || false,
     };
 
-    this.storesService.createStore(storeData).subscribe({
-      next: (response) => {
-        this.isSubmitting = false;
-        this.storeCreated.emit(response.data);
-        this.closeModal();
-      },
-      error: (error) => {
-        this.isSubmitting = false;
-        console.error('Error creating store:', error);
-        // Handle error display
-      }
-    });
+    this.submit.emit(storeData);
   }
 
   private resetForm(): void {
@@ -407,7 +464,7 @@ export class StoreCreateModalComponent implements OnInit {
       is_active: true,
       description: '',
       operating_hours: null,
-      manager_user_id: null
+      manager_user_id: null,
     });
   }
 }

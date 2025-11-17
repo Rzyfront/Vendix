@@ -1,5 +1,12 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
 import {
@@ -8,190 +15,194 @@ import {
   Store,
   StoreStats,
   StoreFilters,
+  StoreType,
 } from './interfaces/store.interface';
 import { OrganizationStoresService } from './services/organization-stores.service';
-import { StoreListComponent } from './components/store-list/store-list.component';
-import { StoreFiltersComponent } from './components/store-filters/store-filters.component';
-import { StoreCreateModalComponent } from './components/store-create-modal/store-create-modal.component';
-import { StoreStatsComponent } from './components/store-stats/store-stats.component';
-import { StoreEmptyStateComponent } from './components/store-empty-state/store-empty-state.component';
-import { StoreEditModalComponent } from './components/store-edit-modal/store-edit-modal.component';
-import { StoreCardComponent } from './components/store-card/store-card.component';
-import { StorePaginationComponent } from './components/store-pagination/store-pagination.component';
+
+// Import new components
+import {
+  StoreStatsComponent,
+  StoreEmptyStateComponent,
+  StoreCreateModalComponent,
+  StoreEditModalComponent,
+} from './components/index';
+
+import { StoreSettingsModalComponent } from './components/store-settings-modal/store-settings-modal.component';
+
 import { EnvironmentSwitchService } from '../../../../core/services/environment-switch.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 
-// App shared components
+// Import shared components
 import {
-  SpinnerComponent,
+  InputsearchComponent,
+  IconComponent,
+  TableComponent,
   ButtonComponent,
-  ModalComponent,
   ToastService,
 } from '../../../../shared/components/index';
+import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-stores-management',
   standalone: true,
   imports: [
     CommonModule,
-    StoreListComponent,
-    StoreFiltersComponent,
-    StoreCreateModalComponent,
+    FormsModule,
+    ReactiveFormsModule,
     StoreStatsComponent,
     StoreEmptyStateComponent,
+    StoreCreateModalComponent,
     StoreEditModalComponent,
-    StoreCardComponent,
-    StorePaginationComponent,
-    // App shared components
-    SpinnerComponent,
+    StoreSettingsModalComponent,
+    InputsearchComponent,
+    IconComponent,
+    TableComponent,
+    ButtonComponent,
   ],
   template: `
-    <div class="min-h-screen bg-[var(--color-background)]">
-      <!-- Header -->
-      <div class="bg-surface border-b border-border">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div class="py-6">
-            <div class="flex items-center justify-between">
-              <div>
-                <h1 class="text-2xl font-semibold text-text-primary">
-                  Stores Management
-                </h1>
-                <p class="mt-1 text-sm text-text-secondary">
-                  Manage all stores in your organization
-                </p>
-              </div>
+    <div class="space-y-6">
+      <!-- Stats Cards -->
+      <app-store-stats [stats]="stats"></app-store-stats>
 
-              <!-- View Toggle -->
-              <div class="flex items-center space-x-3">
-                <div class="bg-gray-100 rounded-lg p-1 flex">
-                  <button
-                    (click)="viewMode = 'table'"
-                    [class]="viewMode === 'table' ? 'bg-white shadow-sm' : ''"
-                    class="px-3 py-1.5 text-sm font-medium rounded-md transition-all"
-                  >
-                    <svg
-                      class="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                      ></path>
-                    </svg>
-                  </button>
-                  <button
-                    (click)="viewMode = 'card'"
-                    [class]="viewMode === 'card' ? 'bg-white shadow-sm' : ''"
-                    class="px-3 py-1.5 text-sm font-medium rounded-md transition-all"
-                  >
-                    <svg
-                      class="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
-                      ></path>
-                    </svg>
-                  </button>
-                </div>
+      <!-- Stores List -->
+      <div class="bg-surface rounded-card shadow-card border border-border">
+        <div class="px-6 py-4 border-b border-border">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-semibold text-text-primary">
+                All Stores ({{ stores.length }})
+              </h2>
+            </div>
+
+            <div
+              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            >
+              <!-- Input de búsqueda compacto -->
+              <app-inputsearch
+                class="w-full sm:w-64"
+                size="sm"
+                placeholder="Search stores..."
+                [debounceTime]="1000"
+                (searchChange)="onSearchChange($event)"
+              ></app-inputsearch>
+
+              <!-- Filtro de tipo de tienda -->
+              <select
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onStoreTypeChange($event)"
+                [value]="selectedStoreType"
+              >
+                <option value="">All Types</option>
+                <option value="physical">Physical</option>
+                <option value="online">Online</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="popup">Popup</option>
+                <option value="kiosko">Kiosko</option>
+              </select>
+
+              <!-- Filtro de estado -->
+              <select
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onStateChange($event)"
+                [value]="selectedState"
+              >
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+
+              <div class="flex gap-2 items-center">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="refreshStores()"
+                  [disabled]="isLoading"
+                  title="Refresh"
+                >
+                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+                </app-button>
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="openCreateStoreModal()"
+                  title="New Store"
+                >
+                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  <span class="hidden sm:inline">New Store</span>
+                </app-button>
               </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- Main Content -->
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <!-- Store Statistics Dashboard -->
-        <app-store-stats [stats]="stats"></app-store-stats>
-
-        <!-- Filters -->
-        <app-store-filters
-          [loading]="loading"
-          (filterChange)="onFilterChange($event)"
-          (refresh)="loadStores()"
-          (createStore)="openCreateModal()"
-        ></app-store-filters>
 
         <!-- Loading State -->
-        <div *ngIf="loading" class="flex justify-center items-center py-12">
-          <app-spinner size="lg" />
+        <div *ngIf="isLoading" class="p-8 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Loading stores...</p>
         </div>
 
         <!-- Empty State -->
         <app-store-empty-state
-          *ngIf="!loading && stores.length === 0"
-          (createStore)="openCreateModal()"
-        ></app-store-empty-state>
+          *ngIf="!isLoading && stores.length === 0"
+          [title]="getEmptyStateTitle()"
+          [description]="getEmptyStateDescription()"
+          [showAdditionalActions]="hasFilters"
+          (actionClick)="openCreateStoreModal()"
+          (refreshClick)="refreshStores()"
+          (clearFiltersClick)="clearFilters()"
+        >
+        </app-store-empty-state>
 
-        <!-- Content when not loading and has data -->
-        <div *ngIf="!loading && stores.length > 0">
-          <!-- Table View -->
-          <div *ngIf="viewMode === 'table'">
-            <app-store-list
-              [stores]="stores"
-              [loading]="loading"
-              [pagination]="pagination"
-              (createStore)="openCreateModal()"
-              (viewStore)="viewStore($event)"
-              (editStore)="editStore($event)"
-              (deleteStore)="deleteStore($event)"
-              (pageChange)="onPageChange($event)"
-              (sortChange)="onSortChange($event)"
-            ></app-store-list>
-          </div>
-
-          <!-- Card View -->
-          <div *ngIf="viewMode === 'card'">
-            <div
-              class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6"
-            >
-              <app-store-card
-                *ngFor="let store of stores"
-                [store]="store"
-                [isSelected]="selectedStores.has(store.id)"
-                (select)="selectStore($event)"
-                (edit)="editStore($event)"
-                (delete)="deleteStore($event)"
-                (toggleStatus)="toggleStoreStatus($event)"
-                (viewStore)="viewStore($event)"
-              ></app-store-card>
-            </div>
-          </div>
-
-          <!-- Pagination -->
-          <app-store-pagination
-            [pagination]="paginationInfo"
-            [disabled]="loading"
-            (pageChange)="onPageChange($event)"
-            (pageSizeChange)="onPageSizeChange($event)"
-          ></app-store-pagination>
+        <!-- Stores Table -->
+        <div *ngIf="!isLoading && stores.length > 0" class="p-6">
+          <app-table
+            [data]="stores"
+            [columns]="tableColumns"
+            [actions]="tableActions"
+            [loading]="isLoading"
+            [sortable]="true"
+            [hoverable]="true"
+            [striped]="true"
+            size="md"
+            (sort)="onTableSort($event)"
+            (rowClick)="viewStore($event)"
+          >
+          </app-table>
         </div>
       </div>
 
       <!-- Create Store Modal -->
       <app-store-create-modal
-        [(isOpen)]="showCreateModal"
-        (storeCreated)="onStoreCreated($event)"
+        [isOpen]="isCreateModalOpen"
+        [isSubmitting]="isCreatingStore"
+        (openChange)="onCreateModalChange($event)"
+        (submit)="createStore($event)"
+        (cancel)="onCreateModalCancel()"
       ></app-store-create-modal>
 
       <!-- Edit Store Modal -->
       <app-store-edit-modal
+        [isOpen]="isEditModalOpen"
+        [isSubmitting]="isUpdatingStore"
         [store]="selectedStore"
-        [isVisible]="showEditModal"
-        [isLoading]="editLoading"
-        (close)="closeEditModal()"
-        (save)="onStoreUpdate($event)"
+        (openChange)="onEditModalChange($event)"
+        (submit)="updateStore($event)"
+        (cancel)="onEditModalCancel()"
       ></app-store-edit-modal>
+
+      <!-- Settings Store Modal -->
+      <app-store-settings-modal
+        [isOpen]="isSettingsModalOpen"
+        [isSubmitting]="isUpdatingSettings"
+        [settings]="selectedStoreForSettings?.settings || null"
+        (openChange)="onSettingsModalChange($event)"
+        (submit)="updateStoreSettings($event)"
+        (cancel)="onSettingsModalCancel()"
+      ></app-store-settings-modal>
     </div>
   `,
   styles: [
@@ -204,47 +215,154 @@ import {
 })
 export class StoresManagementComponent implements OnInit, OnDestroy {
   stores: StoreListItem[] = [];
-  loading = false;
-  showCreateModal = false;
-  showEditModal = false;
-  editLoading = false;
+  isLoading = false;
+  searchTerm = '';
+  selectedState = '';
+  selectedStoreType = '';
+  selectedOrganization = '';
 
-  // View management
-  viewMode: 'table' | 'card' = 'table';
-  selectedStores = new Set<number>();
-  selectedStore: Store | null = null;
+  // Table configuration
+  tableColumns: TableColumn[] = [
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
+    { key: 'slug', label: 'Slug', sortable: true, width: '150px' },
+    {
+      key: 'organizations.name',
+      label: 'Organización',
+      sortable: true,
+      width: '180px',
+      defaultValue: 'N/A',
+    },
+    {
+      key: 'addresses',
+      label: 'Dirección',
+      sortable: false,
+      width: '200px',
+      transform: (value: any[]) => {
+        if (!value || value.length === 0) return 'N/A';
+        const primaryAddress = value.find((addr: any) => addr.is_primary);
+        if (primaryAddress) {
+          return `${primaryAddress.city}, ${primaryAddress.state_province}`;
+        }
+        return `${value[0].city}, ${value[0].state_province}`;
+      },
+    },
+    {
+      key: 'store_type',
+      label: 'Tipo',
+      sortable: true,
+      width: '120px',
+      align: 'center',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: {
+          physical: '#22c55e',
+          online: '#3b82f6',
+          hybrid: '#8b5cf6',
+          popup: '#f59e0b',
+          kiosko: '#ef4444',
+        },
+      },
+      transform: (value: StoreType) => this.formatStoreType(value),
+    },
+    {
+      key: '_count.store_users',
+      label: 'Usuarios',
+      sortable: false,
+      width: '100px',
+      align: 'center',
+      defaultValue: '0',
+    },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      sortable: true,
+      width: '100px',
+      align: 'center',
+      badge: true,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm',
+      },
+      transform: (value: boolean) => this.formatActiveStatus(value),
+    },
+  ];
 
-  pagination = {
-    page: 1,
-    limit: 10,
-    total: 0,
-    total_pages: 0,
-  };
+  tableActions: TableAction[] = [
+    {
+      label: 'Editar',
+      icon: 'edit',
+      action: (store) => this.editStore(store),
+      variant: 'primary',
+    },
+    {
+      label: 'Configuración',
+      icon: 'settings',
+      action: (store) => this.openSettingsModal(store),
+      variant: 'secondary',
+    },
+    {
+      label: 'Eliminar',
+      icon: 'trash-2',
+      action: (store) => this.deleteStore(store),
+      variant: 'danger',
+    },
+  ];
 
-  // Enhanced pagination info
-  get paginationInfo() {
-    return {
-      currentPage: this.pagination.page,
-      totalPages: this.pagination.total_pages,
-      totalItems: this.pagination.total,
-      itemsPerPage: this.pagination.limit,
-      hasNextPage: this.pagination.page < this.pagination.total_pages,
-      hasPreviousPage: this.pagination.page > 1,
-    };
-  }
-
-  currentFilters: Omit<StoreQueryDto, 'organization_id'> = {};
-  currentSort = { column: '', direction: 'asc' as 'asc' | 'desc' };
   stats: StoreStats | null = null;
+
+  // Modal state
+  isCreateModalOpen = false;
+  isCreatingStore = false;
+  createStoreForm!: FormGroup;
+
+  // Edit Modal state
+  isEditModalOpen = false;
+  isUpdatingStore = false;
+  selectedStore?: StoreListItem;
+
+  // Settings Modal state
+  isSettingsModalOpen = false;
+  isUpdatingSettings = false;
+  selectedStoreForSettings?: StoreListItem;
 
   private destroy$ = new Subject<void>();
 
   constructor(
     private storesService: OrganizationStoresService,
+    private fb: FormBuilder,
+    private dialogService: DialogService,
     private toastService: ToastService,
     private environmentSwitchService: EnvironmentSwitchService,
-    private dialogService: DialogService,
-  ) {}
+  ) {
+    this.initializeCreateForm();
+  }
+
+  private initializeCreateForm(): void {
+    this.createStoreForm = this.fb.group({
+      name: ['', [Validators.required, Validators.minLength(2)]],
+      slug: ['', [Validators.required, Validators.minLength(2)]],
+      email: ['', [Validators.required, Validators.email]],
+      phone: [''],
+      website: [''],
+      description: [''],
+      address: [''],
+      city: [''],
+      country: [''],
+      organization_id: [null, [Validators.required]],
+      state: ['active'],
+    });
+  }
+
+  get hasFilters(): boolean {
+    return !!(
+      this.searchTerm ||
+      this.selectedState ||
+      this.selectedStoreType ||
+      this.selectedOrganization
+    );
+  }
 
   ngOnInit(): void {
     this.loadStores();
@@ -256,59 +374,148 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  loadStores(): void {
-    this.loading = true;
+  openCreateStoreModal(): void {
+    this.isCreateModalOpen = true;
+    this.createStoreForm.reset({
+      name: '',
+      slug: '',
+      email: '',
+      phone: '',
+      website: '',
+      description: '',
+      address: '',
+      city: '',
+      country: '',
+      organization_id: null,
+      state: 'active',
+    });
+  }
 
-    const queryParams: Omit<StoreQueryDto, 'organization_id'> = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
-      ...this.currentFilters,
-    };
+  onCreateModalChange(isOpen: boolean): void {
+    this.isCreateModalOpen = isOpen;
+    if (!isOpen) {
+      this.createStoreForm.reset();
+    }
+  }
+
+  onCreateModalCancel(): void {
+    this.isCreateModalOpen = false;
+    this.createStoreForm.reset();
+  }
+
+  createStore(storeData?: any | Event): void {
+    if (!storeData || storeData instanceof Event) {
+      if (this.createStoreForm.invalid) {
+        Object.keys(this.createStoreForm.controls).forEach((key) => {
+          this.createStoreForm.get(key)?.markAsTouched();
+        });
+        return;
+      }
+
+      const formData = this.createStoreForm.value;
+      storeData = {
+        name: formData.name,
+        slug: formData.slug,
+        store_code: formData.name.toLowerCase().replace(/\s+/g, '-'),
+        email: formData.email,
+        phone: formData.phone || undefined,
+        website: formData.website || undefined,
+        description: formData.description || undefined,
+        address: formData.address || undefined,
+        city: formData.city || undefined,
+        country: formData.country || undefined,
+        organization_id: formData.organization_id,
+        is_active: formData.state === 'active' ? true : false,
+        store_type: StoreType.PHYSICAL,
+      };
+    }
+
+    this.isCreatingStore = true;
 
     this.storesService
-      .getStores(queryParams)
+      .createStore(storeData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (response: any) => {
-          console.log('API Response:', response);
-
-          // Handle the response data
-          if (response && Array.isArray(response.data)) {
-            this.stores = response.data.map((store: StoreListItem) => ({
-              ...store,
-              // Add UI-specific fields
-              status: store.is_active ? 'active' : 'inactive',
-              email: `${store.name.toLowerCase().replace(/\s+/g, '.')}@${store.organizations.slug}.com`,
-              stats: {
-                productsCount: store._count?.products || 0,
-                ordersCount: store._count?.orders || 0,
-                revenue: Math.floor(Math.random() * 10000), // Mock data for now
-                customersCount: Math.floor(Math.random() * 1000), // Mock data for now
-                averageOrderValue: Math.floor(Math.random() * 200), // Mock data for now
-                conversionRate: Math.random() * 5, // Mock data for now
-              },
-              // Ensure organization object matches expected format
-              organization: store.organizations,
-            }));
+        next: (response) => {
+          console.log('Create store response:', response);
+          if (response.success && response.data) {
+            this.isCreateModalOpen = false;
+            this.loadStores();
+            this.loadStats();
+            this.toastService.success('Tienda creada exitosamente');
+            console.log('Store created successfully:', response.data);
           } else {
-            console.error('Unexpected response structure:', response);
-            this.stores = [];
+            console.warn('Invalid create store response:', response);
+            this.toastService.error('Respuesta inválida al crear la tienda');
           }
-
-          this.pagination = {
-            page: response?.meta?.page || 1,
-            limit: response?.meta?.limit || 10,
-            total: response?.meta?.total || 0,
-            total_pages: response?.meta?.totalPages || 0,
-          };
-          this.loading = false;
+          this.isCreatingStore = false;
         },
         error: (error) => {
-          console.error('Error loading stores:', error);
-          this.loading = false;
-          this.toastService.error('Failed to load stores');
+          console.error('Error creating store:', error);
+          this.toastService.error('Error al crear la tienda');
+          this.isCreatingStore = false;
         },
       });
+  }
+
+  loadStores(): void {
+    this.isLoading = true;
+
+    const query = {
+      ...(this.searchTerm && { search: this.searchTerm }),
+      ...(this.selectedState && {
+        is_active:
+          this.selectedState === 'active'
+            ? true
+            : this.selectedState === 'inactive'
+              ? false
+              : undefined,
+      }),
+      ...(this.selectedStoreType && {
+        store_type: this.selectedStoreType as StoreType,
+      }),
+      ...(this.selectedOrganization && {
+        organization_id: parseInt(this.selectedOrganization),
+      }),
+    };
+
+    this.storesService.getStores(query).subscribe({
+      next: (response) => {
+        console.log('Stores response:', response);
+        if (response.success && response.data) {
+          this.stores = response.data.map((store: any) => ({
+            id: store.id,
+            name: store.name,
+            slug: store.slug,
+            store_code: store.store_code || '',
+            store_type: store.store_type || StoreType.PHYSICAL,
+            timezone: store.timezone || 'America/Bogota',
+            is_active: store.is_active !== undefined ? store.is_active : true,
+            manager_user_id: store.manager_user_id,
+            organization_id: store.organization_id,
+            created_at: store.created_at || new Date().toISOString(),
+            updated_at: store.updated_at || new Date().toISOString(),
+            onboarding: store.onboarding || false,
+            organizations: store.organizations || {
+              id: store.organization_id,
+              name: 'Unknown',
+              slug: 'unknown',
+            },
+            addresses: store.addresses || [],
+            _count: store._count || { products: 0, orders: 0, store_users: 0 },
+          }));
+          console.log('Processed stores:', this.stores);
+        } else {
+          console.warn('Invalid response structure:', response);
+          this.stores = [];
+        }
+        this.isLoading = false;
+      },
+      error: (error) => {
+        console.error('Error loading stores:', error);
+        this.isLoading = false;
+      },
+    });
   }
 
   loadStats(): void {
@@ -343,88 +550,102 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
       });
   }
 
-  onFilterChange(filters: any): void {
-    this.currentFilters = filters;
-    this.pagination.page = 1; // Reset to first page when filtering
+  refreshStores(): void {
     this.loadStores();
   }
 
-  onPageChange(page: number): void {
-    this.pagination.page = page;
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.selectedState = '';
+    this.selectedStoreType = '';
+    this.selectedOrganization = '';
     this.loadStores();
   }
 
-  onPageSizeChange(pageSize: number): void {
-    this.pagination.limit = pageSize;
-    this.pagination.page = 1; // Reset to first page when changing page size
+  onSearchChange(searchTerm: string): void {
+    this.searchTerm = searchTerm;
     this.loadStores();
   }
 
-  onSortChange(sort: { column: string; direction: 'asc' | 'desc' }): void {
-    this.currentSort = sort;
-    // Apply sorting logic here if backend supports it
+  onStoreTypeChange(event: any): void {
+    this.selectedStoreType = event.target.value;
     this.loadStores();
   }
 
-  // Store selection for card view
-  selectStore(store: StoreListItem): void {
-    if (this.selectedStores.has(store.id)) {
-      this.selectedStores.delete(store.id);
-    } else {
-      this.selectedStores.add(store.id);
-    }
-  }
-
-  // Modal management
-  openCreateModal(): void {
-    this.showCreateModal = true;
-  }
-
-  onStoreCreated(store: StoreListItem): void {
+  onStateChange(event: any): void {
+    this.selectedState = event.target.value;
     this.loadStores();
-    this.loadStats();
-    this.toastService.success('Store created successfully');
+  }
+
+  onTableSort(sortEvent: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
+    console.log('Sort event:', sortEvent);
+    this.loadStores();
   }
 
   editStore(store: StoreListItem): void {
+    this.selectedStore = store;
+    this.isEditModalOpen = true;
+  }
+
+  onEditModalChange(isOpen: boolean): void {
+    this.isEditModalOpen = isOpen;
+    if (!isOpen) {
+      this.selectedStore = undefined;
+    }
+  }
+
+  onEditModalCancel(): void {
+    this.isEditModalOpen = false;
+    this.selectedStore = undefined;
+  }
+
+  updateStore(storeData: any): void {
+    if (!this.selectedStore) return;
+
+    this.isUpdatingStore = true;
+
+    const updateData = {
+      name: storeData.name,
+      slug: storeData.slug,
+      description: storeData.description,
+      email: storeData.email,
+      phone: storeData.phone,
+      website: storeData.website,
+      address: storeData.address,
+      city: storeData.city,
+      country: storeData.country,
+      is_active: storeData.state === 'active' ? true : false,
+      store_type: storeData.store_type || StoreType.PHYSICAL,
+    };
+
     this.storesService
-      .getStore(store.id)
+      .updateStore(this.selectedStore.id, updateData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.selectedStore = response.data;
-          this.showEditModal = true;
+          console.log('Update store response:', response);
+          if (response.success && response.data) {
+            this.isEditModalOpen = false;
+            this.selectedStore = undefined;
+            this.loadStores();
+            this.loadStats();
+            this.toastService.success('Tienda actualizada exitosamente');
+            console.log('Store updated successfully:', response.data);
+          } else {
+            console.warn('Invalid update store response:', response);
+            this.toastService.error(
+              'Respuesta inválida al actualizar la tienda',
+            );
+          }
+          this.isUpdatingStore = false;
         },
         error: (error) => {
-          console.error('Error loading store details:', error);
-          this.toastService.error('Failed to load store details');
-        },
-      });
-  }
-
-  closeEditModal(): void {
-    this.showEditModal = false;
-    this.selectedStore = null;
-  }
-
-  onStoreUpdate(updatedStore: StoreListItem): void {
-    this.editLoading = true;
-
-    this.storesService
-      .updateStore(updatedStore.id, updatedStore)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (response) => {
-          this.editLoading = false;
-          this.closeEditModal();
-          this.loadStores();
-          this.loadStats();
-          this.toastService.success('Store updated successfully');
-        },
-        error: (error) => {
-          this.editLoading = false;
           console.error('Error updating store:', error);
-          this.toastService.error('Failed to update store');
+          this.toastService.error('Error al actualizar la tienda');
+          this.isUpdatingStore = false;
         },
       });
   }
@@ -480,6 +701,85 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     }
   }
 
+  openSettingsModal(store: StoreListItem): void {
+    this.selectedStoreForSettings = store;
+    this.isSettingsModalOpen = true;
+  }
+
+  onSettingsModalChange(isOpen: boolean): void {
+    this.isSettingsModalOpen = isOpen;
+    if (!isOpen) {
+      this.selectedStoreForSettings = undefined;
+    }
+  }
+
+  onSettingsModalCancel(): void {
+    this.isSettingsModalOpen = false;
+    this.selectedStoreForSettings = undefined;
+  }
+
+  updateStoreSettings(settingsData: any): void {
+    if (!this.selectedStoreForSettings) return;
+
+    this.isUpdatingSettings = true;
+
+    this.storesService
+      .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          console.log('Update store settings response:', response);
+          if (response.success && response.data) {
+            this.isSettingsModalOpen = false;
+            this.selectedStoreForSettings = undefined;
+            this.toastService.success('Configuración actualizada exitosamente');
+            console.log('Store settings updated successfully:', response.data);
+          } else {
+            console.warn('Invalid update store settings response:', response);
+            this.toastService.error(
+              'Respuesta inválida al actualizar la configuración',
+            );
+          }
+          this.isUpdatingSettings = false;
+        },
+        error: (error) => {
+          console.error('Error updating store settings:', error);
+          this.toastService.error('Error al actualizar la configuración');
+          this.isUpdatingSettings = false;
+        },
+      });
+  }
+
+  // Helper methods for table display
+  formatStoreType(type: StoreType): string {
+    const typeMap: { [key in StoreType]: string } = {
+      [StoreType.PHYSICAL]: 'Física',
+      [StoreType.ONLINE]: 'Online',
+      [StoreType.HYBRID]: 'Híbrida',
+      [StoreType.POPUP]: 'Temporal',
+      [StoreType.KIOSKO]: 'Kiosco',
+    };
+    return typeMap[type] || type;
+  }
+
+  formatActiveStatus(isActive: boolean): string {
+    return isActive ? 'active' : 'inactive';
+  }
+
+  getEmptyStateTitle(): string {
+    if (this.hasFilters) {
+      return 'No stores match your filters';
+    }
+    return 'No stores found';
+  }
+
+  getEmptyStateDescription(): string {
+    if (this.hasFilters) {
+      return 'Try adjusting your search terms or filters';
+    }
+    return 'Get started by creating your first store.';
+  }
+
   private async switchToStoreEnvironment(store: StoreListItem): Promise<void> {
     try {
       const confirmed = await this.dialogService.confirm({
@@ -494,7 +794,7 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
         const success =
           await this.environmentSwitchService.performEnvironmentSwitch(
             'STORE_ADMIN',
-            store.slug, // ✅ Corregido: store.slug en lugar de store.domain
+            store.slug,
           );
 
         if (success) {

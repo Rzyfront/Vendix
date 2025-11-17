@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -26,6 +26,7 @@ import { takeUntil } from 'rxjs/operators';
     <div class="flex">
       <!-- Sidebar -->
       <app-sidebar
+        #sidebarRef
         [menuItems]="menuItems"
         [title]="(storeName$ | async) || storeName"
         subtitle="Store Admin"
@@ -36,8 +37,9 @@ import { takeUntil } from 'rxjs/operators';
 
       <!-- Main Content -->
       <div
-        class="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
-        [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
+        class="main-content flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        [class.margin-desktop]="!sidebarRef?.isMobile"
+        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
       >
         <!-- Header -->
         <app-header
@@ -68,6 +70,8 @@ import { takeUntil } from 'rxjs/operators';
   styleUrls: ['./store-admin-layout.component.scss'],
 })
 export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
+  @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
+
   sidebarCollapsed = false;
   currentPageTitle = 'Store Dashboard';
   currentVlink = 'store-admin';
@@ -270,7 +274,13 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   ];
 
   toggleSidebar() {
-    this.sidebarCollapsed = !this.sidebarCollapsed;
+    // If mobile, delegate to sidebar component
+    if (this.sidebarRef?.isMobile) {
+      this.sidebarRef.toggleSidebar();
+    } else {
+      // Desktop: toggle collapsed state
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+    }
   }
 
   onOnboardingCompleted(event: any): void {

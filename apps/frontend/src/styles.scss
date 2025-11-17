@@ -110,6 +110,13 @@
   --z-toast: 70;
   --z-maximum: 100;
 
+  /* Sidebar Variables */
+  --sidebar-width: 15rem; /* 240px */
+  --sidebar-width-collapsed: 4rem; /* 64px */
+  --sidebar-width-mobile: 80vw; /* Maximum width for mobile overlay */
+  --sidebar-backdrop-opacity: 0.5;
+  --sidebar-mobile-z-index: 55; /* Above header (50), below notifications (60) */
+
   /* Misc */
   --border-width: 1px;
   --control-padding: 0.625rem 0.75rem; /* 10px 12px */
