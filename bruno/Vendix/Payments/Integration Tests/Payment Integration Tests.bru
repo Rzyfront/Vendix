@@ -1,0 +1,89 @@
+meta {
+  name: "Payment Integration Tests",
+  type: "http",
+  seq: 9,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/payments/with-order",
+  headers: {
+    "Authorization": "Bearer {{authToken}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "orderId": 1,
+    "customerId": 1,
+    "amount": 250.00,
+    "currency": "USD",
+    "paymentMethodId": 1,
+    "storeId": 1,
+    "customerEmail": "integration@test.com",
+    "customerName": "Integration Test User",
+    "items": [
+      {
+        "productId": 1,
+        "productName": "Integration Test Product 1",
+        "quantity": 2,
+        "unitPrice": 75.00,
+        "totalPrice": 150.00,
+        "taxRate": 0.08,
+        "taxAmountItem": 12.00
+      },
+      {
+        "productId": 2,
+        "productName": "Integration Test Product 2",
+        "quantity": 1,
+        "unitPrice": 88.00,
+        "totalPrice": 88.00,
+        "taxRate": 0.08,
+        "taxAmountItem": 7.04
+      }
+    ],
+    "metadata": {
+      "test": "integration",
+      "environment": "test"
+    }
+  }
+}
+
+tests {
+  test("Should complete full payment flow", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('success', true);
+    expect(res.body.data).to.have.property('transactionId');
+    expect(res.body.data).to.have.property('orderId');
+    expect(res.body.data).to.have.property('orderNumber');
+  });
+
+  test("Should validate order calculations", function() {
+    expect(res.body.data).to.have.property('subtotalAmount', 238.00);
+    expect(res.body.data).to.have.property('taxAmount', 19.04);
+    expect(res.body.data).to.have.property('grandTotal', 257.04);
+  });
+
+  test("Should validate payment processor integration", function() {
+    expect(res.body.data).to.have.property('transactionId').that.is.a('string');
+    expect(res.body.data).to.have.property('status');
+    expect(res.body.data).to.have.property('gatewayResponse');
+  });
+
+  test("Should validate order creation", function() {
+    expect(res.body.data).to.have.property('orderId');
+    expect(res.body.data).to.have.property('orderNumber');
+    expect(res.body.data.orderNumber).to.match(/^ORD/);
+    expect(res.body.data).to.have.property('orderItems');
+    expect(res.body.data.orderItems).to.have.length(2);
+  });
+
+  test("Should validate customer information", function() {
+    expect(res.body.data).to.have.property('customer');
+    expect(res.body.data.customer).to.have.property('email', 'integration@test.com');
+    expect(res.body.data.customer).to.have.property('name', 'Integration Test User');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(10000);
+  });
+}

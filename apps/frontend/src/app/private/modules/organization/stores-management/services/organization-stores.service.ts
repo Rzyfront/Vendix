@@ -1,0 +1,231 @@
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../../../../environments/environment';
+
+import {
+  Store,
+  StoreListItem,
+  CreateStoreDto,
+  UpdateStoreDto,
+  StoreQueryDto,
+  StoreStats,
+  PaginatedStoresResponse,
+  StoreSettings,
+  StoreSettingsUpdateDto,
+  StoreFilters,
+  StoreDashboardDto,
+  StoreDashboardResponse,
+  StoreType,
+  StoreState,
+} from '../interfaces/store.interface';
+
+// All interfaces now available locally
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  message?: string;
+}
+
+export interface PaginatedResponse<T> {
+  success: boolean;
+  message: string;
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
+
+@Injectable({
+  providedIn: 'root',
+})
+export class OrganizationStoresService {
+  private readonly apiUrl = environment.apiUrl;
+
+  constructor(private http: HttpClient) {}
+
+  /**
+   * Get current organization ID from auth service or localStorage
+   */
+  private getCurrentOrganizationId(): number {
+    // This should get the current organization ID from auth service
+    // For now, we'll implement a basic version
+    const userOrg = localStorage.getItem('currentOrganizationId');
+    return userOrg ? parseInt(userOrg, 10) : 1; // Fallback to 1 for testing
+  }
+
+  /**
+   * Get all stores for current organization with pagination and filtering
+   */
+  getStores(
+    query?: Omit<StoreQueryDto, 'organization_id'>,
+  ): Observable<PaginatedResponse<StoreListItem[]>> {
+    const organizationId = this.getCurrentOrganizationId();
+    let params = new HttpParams();
+
+    if (query) {
+      Object.entries(query).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          params = params.set(key, value.toString());
+        }
+      });
+    }
+
+    // Always filter by current organization
+    params = params.set('organization_id', organizationId.toString());
+
+    return this.http.get<PaginatedResponse<StoreListItem[]>>(
+      `${this.apiUrl}/stores`,
+      { params }
+    );
+  }
+
+  /**
+   * Get store by ID (only if belongs to current organization)
+   */
+  getStore(id: number): Observable<ApiResponse<Store>> {
+    return this.http.get<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`);
+  }
+
+  /**
+   * Create a new store for the current organization
+   */
+  createStore(storeData: Omit<CreateStoreDto, 'organization_id'>): Observable<ApiResponse<Store>> {
+    const organizationId = this.getCurrentOrganizationId();
+    const createData: CreateStoreDto = {
+      ...storeData,
+      organization_id: organizationId,
+    };
+
+    return this.http.post<ApiResponse<Store>>(`${this.apiUrl}/stores`, createData);
+  }
+
+  /**
+   * Update a store (only if belongs to current organization)
+   */
+  updateStore(id: number, storeData: UpdateStoreDto): Observable<ApiResponse<Store>> {
+    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`, storeData);
+  }
+
+  /**
+   * Delete a store (only if belongs to current organization)
+   */
+  deleteStore(id: number): Observable<ApiResponse<void>> {
+    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/stores/${id}`);
+  }
+
+  /**
+   * Get store dashboard statistics
+   */
+  getStoreDashboard(id: number, dashboardQuery?: StoreDashboardDto): Observable<ApiResponse<StoreDashboardResponse>> {
+    let params = new HttpParams();
+
+    if (dashboardQuery) {
+      if (dashboardQuery.start_date) {
+        params = params.set('start_date', dashboardQuery.start_date);
+      }
+      if (dashboardQuery.end_date) {
+        params = params.set('end_date', dashboardQuery.end_date);
+      }
+    }
+
+    return this.http.get<ApiResponse<StoreDashboardResponse>>(
+      `${this.apiUrl}/stores/${id}/stats`,
+      { params }
+    );
+  }
+
+  /**
+   * Get global store statistics for current organization
+   */
+  getOrganizationStoreStats(): Observable<ApiResponse<StoreStats>> {
+    const organizationId = this.getCurrentOrganizationId();
+    return this.http.get<ApiResponse<StoreStats>>(`${this.apiUrl}/stores/stats`);
+  }
+
+  /**
+   * Update store settings
+   */
+  updateStoreSettings(id: number, settings: StoreSettingsUpdateDto): Observable<ApiResponse<any>> {
+    return this.http.patch<ApiResponse<any>>(
+      `${this.apiUrl}/stores/${id}/settings`,
+      settings
+    );
+  }
+
+  /**
+   * Activate store
+   */
+  activateStore(id: number): Observable<ApiResponse<Store>> {
+    return this.updateStore(id, { is_active: true });
+  }
+
+  /**
+   * Deactivate store
+   */
+  deactivateStore(id: number): Observable<ApiResponse<Store>> {
+    return this.updateStore(id, { is_active: false });
+  }
+
+  /**
+   * Store type options for dropdown
+   */
+  getStoreTypeOptions(): Array<{ value: StoreType; label: string }> {
+    return [
+      { value: StoreType.PHYSICAL, label: 'Tienda Física' },
+      { value: StoreType.ONLINE, label: 'Tienda Online' },
+      { value: StoreType.HYBRID, label: 'Tienda Híbrida' },
+      { value: StoreType.POPUP, label: 'Tienda Popup' },
+      { value: StoreType.KIOSKO, label: 'Kiosko' },
+    ];
+  }
+
+  /**
+   * Store state options for dropdown
+   */
+  getStoreStateOptions(): Array<{ value: StoreState; label: string }> {
+    return [
+      { value: StoreState.ACTIVE, label: 'Activa' },
+      { value: StoreState.INACTIVE, label: 'Inactiva' },
+      { value: StoreState.DRAFT, label: 'Borrador' },
+      { value: StoreState.SUSPENDED, label: 'Suspendida' },
+      { value: StoreState.ARCHIVED, label: 'Archivada' },
+    ];
+  }
+
+  /**
+   * Common timezones for dropdown
+   */
+  getTimezoneOptions(): Array<{ value: string; label: string }> {
+    return [
+      { value: 'America/Mexico_City', label: 'Ciudad de México' },
+      { value: 'America/New_York', label: 'Nueva York' },
+      { value: 'America/Los_Angeles', label: 'Los Ángeles' },
+      { value: 'America/Chicago', label: 'Chicago' },
+      { value: 'Europe/Madrid', label: 'Madrid' },
+      { value: 'Europe/Paris', label: 'París' },
+      { value: 'Asia/Tokyo', label: 'Tokio' },
+      { value: 'Australia/Sydney', label: 'Sídney' },
+    ];
+  }
+
+  /**
+   * Common currency codes for dropdown
+   */
+  getCurrencyOptions(): Array<{ value: string; label: string }> {
+    return [
+      { value: 'MXN', label: 'Peso Mexicano (MXN)' },
+      { value: 'USD', label: 'Dólar Americano (USD)' },
+      { value: 'EUR', label: 'Euro (EUR)' },
+      { value: 'GBP', label: 'Libra Esterlina (GBP)' },
+      { value: 'CAD', label: 'Dólar Canadiense (CAD)' },
+      { value: 'AUD', label: 'Dólar Australiano (AUD)' },
+    ];
+  }
+}

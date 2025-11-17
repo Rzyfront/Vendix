@@ -1,0 +1,231 @@
+meta {
+  name: "Multi-Product Stock Allocation Integration Test"
+  type: http
+  seq: 31
+}
+
+# Step 1: Create first product with stock
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "Multi-Test Product Alpha",
+    "base_price": 199.99,
+    "sku": "MULTI-ALPHA-001",
+    "stock_by_location": [
+      {
+        "location_id": 1,
+        "quantity": 25
+      },
+      {
+        "location_id": 2,
+        "quantity": 15
+      }
+    ]
+  }
+}
+
+tests {
+  test("Multi-test product Alpha created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data.total_stock_available).to.equal(40);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("alphaProductId", res.body.data.id);
+  }
+}
+
+# Step 2: Create second product with stock
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "name": "Multi-Test Product Beta",
+    "base_price": 149.99,
+    "sku": "MULTI-BETA-001",
+    "stock_by_location": [
+      {
+        "location_id": 1,
+        "quantity": 20
+      },
+      {
+        "location_id": 3,
+        "quantity": 10
+      }
+    ]
+  }
+}
+
+tests {
+  test("Multi-test product Beta created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data.total_stock_available).to.equal(30);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("betaProductId", res.body.data.id);
+  }
+}
+
+# Step 3: Create variant for first product
+post {
+  url: http://{{url}}/products/{{alphaProductId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "MULTI-ALPHA-VARIANT-001",
+    "price_override": 229.99,
+    "stock_quantity": 12
+  }
+}
+
+tests {
+  test("Alpha variant created for multi-test", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("alphaVariantId", res.body.data.id);
+  }
+}
+
+# Step 4: Validate multi-product stock allocation - Feasible scenario
+post {
+  url: http://{{url}}/inventory/validate-multiple-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "products": [
+    {
+      "product_id": {{alphaProductId}},
+      "quantity": 35
+    },
+    {
+      "product_id": {{betaProductId}},
+      "quantity": 25
+    }
+  ],
+  "organization_id": 16
+}
+
+tests {
+  test("Multi-product stock validation - feasible scenario", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('orderFeasible', true);
+    expect(result.products).to.have.length(2);
+
+    // Alpha: 35 <= 52 (40 base + 12 variant)
+    const alpha = result.products.find(p => p.product_id === parseInt({{alphaProductId}}));
+    expect(alpha.isAvailable).to.be.true;
+    expect(alpha.totalAvailable).to.equal(52);
+
+    // Beta: 25 <= 30
+    const beta = result.products.find(p => p.product_id === parseInt({{betaProductId}}));
+    expect(beta.isAvailable).to.be.true;
+    expect(beta.totalAvailable).to.equal(30);
+  });
+
+  test("Summary statistics calculated correctly", function() {
+    const result = res.body.data;
+    expect(result.summary).to.exist;
+    expect(result.summary.totalProductsRequested).to.equal(2);
+    expect(result.summary.totalQuantityRequested).to.equal(60); // 35 + 25
+    expect(result.summary.totalQuantityAvailable).to.equal(82); // 52 + 30
+  });
+}
+
+# Step 5: Validate multi-product stock allocation - Non-feasible scenario
+post {
+  url: http://{{url}}/inventory/validate-multiple-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "products": [
+    {
+      "product_id": {{alphaProductId}},
+      "quantity": 60
+    },
+    {
+      "product_id": {{betaProductId}},
+      "quantity": 35
+    }
+  ],
+  "organization_id": 16
+}
+
+tests {
+  test("Multi-product stock validation - non-feasible scenario", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('orderFeasible', false);
+
+    // Alpha: 60 > 52 (not available)
+    const alpha = result.products.find(p => p.product_id === parseInt({{alphaProductId}}));
+    expect(alpha.isAvailable).to.be.false;
+
+    // Beta: 35 > 30 (not available)
+    const beta = result.products.find(p => p.product_id === parseInt({{betaProductId}}));
+    expect(beta.isAvailable).to.be.false;
+  });
+}
+
+# Step 6: Test optimal allocation suggestions
+post {
+  url: http://{{url}}/inventory/validate-consolidated-stock
+  body: json
+  auth: inherit
+}
+
+body:json {
+  "product_id": {{alphaProductId}},
+  "quantity": 45,
+  "organization_id": 16
+}
+
+tests {
+  test("Optimal allocation suggestions provided", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+
+    const result = res.body.data;
+    expect(result).to.have.property('suggestedAllocation');
+    expect(result.suggestedAllocation).to.be.an('array');
+    expect(result.suggestedAllocation.length).to.be.at.least(1);
+
+    // Sum of suggested allocation should equal requested quantity
+    const totalAllocated = result.suggestedAllocation.reduce((sum, item) => sum + item.quantity, 0);
+    expect(totalAllocated).to.equal(45);
+  });
+}

@@ -1,0 +1,74 @@
+meta {
+  name: Create Store
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/stores
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "organization_id": 16,
+    "name": "Test Store API",
+    "slug": "test-store-api",
+    "store_code": "TST001",
+    "logo_url": "https://example.com/logo.png",
+    "color_primary": "#FF0000",
+    "color_secondary": "#00FF00",
+    "domain": "teststore.example.com",
+    "timezone": "America/New_York",
+    "currency_code": "USD",
+    "operating_hours": "{\"monday\": {\"open\": \"09:00\", \"close\": \"18:00\"}, \"tuesday\": {\"open\": \"09:00\", \"close\": \"18:00\"}}",
+    "store_type": "physical",
+    "is_active": true,
+    "manager_user_id": 57
+  }
+}
+
+vars:post-response {
+  created_store_id: res.body.data.id
+  created_store_slug: res.body.data.slug
+}
+
+tests {
+  test("Create store successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('creada exitosamente');
+  });
+
+  test("Store data is complete", function() {
+    expect(res.body).to.have.property('data');
+    const store = res.body.data;
+    expect(store).to.have.property('id');
+    expect(store).to.have.property('name', 'Test Store API');
+    expect(store).to.have.property('slug', 'test-store-api');
+    expect(store).to.have.property('store_code', 'TST001');
+    expect(store).to.have.property('logo_url', 'https://example.com/logo.png');
+    expect(store).to.have.property('color_primary', '#FF0000');
+    expect(store).to.have.property('color_secondary', '#00FF00');
+    expect(store).to.have.property('domain', 'teststore.example.com');
+    expect(store).to.have.property('timezone', 'America/New_York');
+    expect(store).to.have.property('currency_code', 'USD');
+    expect(store).to.have.property('store_type', 'physical');
+    expect(store).to.have.property('is_active', true);
+    expect(store).to.have.property('organization_id', 16);
+    expect(store).to.have.property('manager_user_id', 57);
+  });
+
+  test("Store ID and slug extracted correctly", function() {
+    expect(bru.getEnvVar('created_store_id')).to.be.a('number');
+    expect(bru.getEnvVar('created_store_slug')).to.equal('test-store-api');
+  });
+
+  test("Store has metadata", function() {
+    expect(res.body.data).to.have.property('created_at');
+    expect(res.body.data).to.have.property('updated_at');
+  });
+}

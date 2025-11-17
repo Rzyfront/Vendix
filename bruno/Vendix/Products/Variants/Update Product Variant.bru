@@ -5,7 +5,7 @@ meta {
 }
 
 patch {
-  url: http://{{url}}/products/variants/{{variantId}}
+  url: http://{{url}}/products/{{productId}}/variants/{{variantId}}
   body: json
   auth: inherit
 }
@@ -17,6 +17,28 @@ body:json {
     "stock_quantity": 30,
     "image_id": 2
   }
+}
+
+tests {
+  test("Product variant updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+
+    const variant = res.body.data;
+    expect(variant).to.have.property('id');
+    expect(variant).to.have.property('sku', 'IPHONE15PRO-DEEP-BLUE-256GB');
+    expect(variant).to.have.property('price_override', 1149.99);
+    expect(variant).to.have.property('stock_quantity', 30);
+  });
+
+  test("Only specified fields are updated", function() {
+    const variant = res.body.data;
+    // Verificar que los campos especificados se actualizaron
+    expect(variant.sku).to.not.equal('IPHONE15PRO-BLUE-256GB');
+    expect(variant.price_override).to.not.equal(1099.99);
+    expect(variant.stock_quantity).to.not.equal(25);
+  });
 }
 
 settings {

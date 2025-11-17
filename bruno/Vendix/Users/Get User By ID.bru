@@ -1,0 +1,44 @@
+meta {
+  name: Get User By ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/users/109
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get user by ID successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('obtenido exitosamente');
+  });
+  
+  test("User data is complete", function() {
+    expect(res.body).to.have.property('data');
+    const user = res.body.data;
+    expect(user).to.have.property('id');
+    expect(user).to.have.property('first_name');
+    expect(user).to.have.property('last_name');
+    expect(user).to.have.property('username');
+    expect(user).to.have.property('email');
+    expect(user).to.have.property('state');
+    expect(user).to.have.property('organization_id');
+    expect(user).to.have.property('created_at');
+    expect(user).to.not.have.property('password');
+  });
+  
+  test("User ID matches requested ID", function() {
+    expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_user_id')));
+  });
+  
+  test("User has required permissions data", function() {
+    expect(res.body.data).to.have.property('user_roles');
+    expect(res.body.data.user_roles).to.be.an('array');
+  });
+}

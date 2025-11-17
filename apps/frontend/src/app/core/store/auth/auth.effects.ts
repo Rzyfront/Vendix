@@ -37,6 +37,7 @@ export class AuthEffects {
             if (!response.data) throw new Error('Invalid response data');
             return AuthActions.loginSuccess({
               user: response.data.user,
+              user_settings: response.data.user_settings,
               tokens: { accessToken: response.data.access_token, refreshToken: response.data.refresh_token },
               permissions: response.data.permissions || [],
               roles: response.data.user.roles || [],
@@ -143,5 +144,5 @@ export class AuthEffects {
     )
   );
   resetOwnerPasswordSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.resetOwnerPasswordSuccess), tap(() => { this.toast.success('Contraseña restablecida con éxito.'); this.router.navigateByUrl('/auth/login'); })), { dispatch: false });
-  failureToast$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.loginFailure, AuthActions.forgotOwnerPasswordFailure, AuthActions.resetOwnerPasswordFailure, AuthActions.verifyEmailFailure, AuthActions.resendVerificationEmailFailure), tap(({ error }) => { const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error); this.toast.error(errorMessage, 'Error'); })), { dispatch: false });
+  failureToast$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.forgotOwnerPasswordFailure, AuthActions.resetOwnerPasswordFailure, AuthActions.verifyEmailFailure, AuthActions.resendVerificationEmailFailure), tap(({ error }) => { const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error); this.toast.error(errorMessage, 'Error'); })), { dispatch: false });
 }

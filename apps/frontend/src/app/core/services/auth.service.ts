@@ -13,7 +13,29 @@ import { AppEnvironment } from '../models/domain-config.interface';
 
 // Interfaces...
 export interface LoginDto { email: string; password: string; store_slug?: string; organization_slug?: string; }
-export interface User { id: number; first_name: string; last_name: string; username: string; email: string; state: string; roles?: string[]; }
+export interface UserRole {
+  id: number;
+  user_id: number;
+  role_id: number;
+  roles: {
+    id: number;
+    name: string;
+    description: string;
+    is_system_role: boolean;
+    created_at: string;
+    updated_at: string;
+  };
+}
+export interface User {
+  id: number;
+  first_name: string;
+  last_name: string;
+  username: string;
+  email: string;
+  state: string;
+  roles?: string[];
+  user_roles?: UserRole[];
+}
 export interface UserSettings { id: number; user_id: number; config: { app: AppEnvironment; panel_ui: { [key: string]: boolean }; }; }
 export interface AuthResponse { success: boolean; message: string; data: { user: User; user_settings: UserSettings; access_token: string; refresh_token: string; token_type: 'Bearer'; expires_in: number; permissions?: string[]; } | null; error?: string; meta?: any; }
 export interface RegisterOwnerDto { organization_name: string; email: string; password: string; first_name: string; last_name: string; phone?: string; }
@@ -57,7 +79,8 @@ export class AuthService {
           }
 
           const decodedToken = this.decodeJwtToken(access_token);
-          user.roles = decodedToken?.roles || [];
+          // Los roles ahora vienen directamente como array de strings desde la API
+          user.roles = user.roles || [];
 
           if (!this.validateUserEnvironmentAccess(user.roles || [], (user_settings.config.app || '').toUpperCase())) {
             this.clearTokens();
@@ -66,7 +89,7 @@ export class AuthService {
 
           return {
             ...response,
-            data: { ...response.data, user, permissions: decodedToken?.permissions || [] },
+            data: { ...response.data, user, user_settings, permissions: decodedToken?.permissions || [] },
             updatedEnvironment: (user_settings.config.app || '').toUpperCase()
           };
         })

@@ -1,0 +1,50 @@
+meta {
+  name: "Refund Payment",
+  type: "http",
+  seq: 5,
+  enabled: true
+}
+
+post {
+  url: "http://localhost:3000/api/payments/{{paymentId}}/refund",
+  headers: {
+    "Authorization": "Bearer {{authToken}}",
+    "Content-Type": "application/json"
+  },
+  body: {
+    "amount": 50.00,
+    "reason": "Customer requested refund due to product defect"
+  }
+}
+
+tests {
+  test("Should process refund successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('success', true);
+    expect(res.body.data).to.have.property('refundId');
+    expect(res.body.data).to.have.property('amount', 50.00);
+    expect(res.body.data).to.have.property('status', 'succeeded');
+    expect(res.body.data).to.have.property('message');
+  });
+
+  test("Should validate refund response structure", function() {
+    expect(res.body.data).to.have.property('refundId').that.is.a('string');
+    expect(res.body.data.refundId).to.match(/^(refund_|re_)/);
+    expect(res.body.data).to.have.property('gatewayResponse');
+  });
+
+  test("Should validate refund amount", function() {
+    expect(res.body.data.amount).to.be.a('number');
+    expect(res.body.data.amount).to.equal(50.00);
+  });
+
+  test("Should include refund reason", function() {
+    expect(res.body.data).to.have.property('reason', 'Customer requested refund due to product defect');
+  });
+
+  test("Should have reasonable response time", function() {
+    expect(res.responseTime).to.be.below(5000);
+  });
+}

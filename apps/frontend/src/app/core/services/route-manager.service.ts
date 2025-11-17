@@ -37,10 +37,6 @@ export class RouteManagerService implements OnDestroy {
 
     const finalRoutes = this.buildFinalRoutes(appConfig);
     this.router.resetConfig(finalRoutes);
-    console.log(
-      '[RouteManager] Dynamic routes configured.',
-      this.router.config,
-    );
 
     // Notificar que las rutas están listas
     this.routesConfigured.next(true);
@@ -104,15 +100,7 @@ export class RouteManagerService implements OnDestroy {
               ).then((c) => c.EmailVerificationComponent),
           },
         ],
-      },
-      // Onboarding wizard route removed - now handled by modal
-      // {
-      //   path: 'onboarding-wizard',
-      //   loadComponent: () =>
-      //     import(
-      //       '../../private/modules/onboarding-wizard/onboarding-wizard.component'
-      //     ).then((c) => c.OnboardingWizardComponent),
-      // },
+      }
     ];
   }
 

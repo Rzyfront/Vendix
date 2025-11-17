@@ -47,6 +47,19 @@ import {
   List,
   FileText,
   HelpCircle,
+  DollarSign,
+  BarChart3,
+  Warehouse,
+  Truck,
+  FileCheck,
+  HardDrive,
+  Megaphone,
+  Circle,
+  UserPlus,
+  Barcode,
+  Save,
+  Maximize,
+  Minimize,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -107,6 +120,36 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'globe-2': Globe,
   list: List,
   'file-text': FileText,
+
+  // Marketing and communication icons
+  megaphone: Megaphone,
+  bullhorn: Megaphone, // Alternative name for backward compatibility
+
+  // UI elements
+  circle: Circle,
+
+  // User action icons
+  'user-plus': UserPlus,
+
+  // POS and product icons
+  barcode: Barcode,
+
+  // Action icons
+  save: Save,
+
+  // Fullscreen icons
+  maximize: Maximize,
+  minimize: Minimize,
+  'fullscreen-enter': Maximize,
+  'fullscreen-exit': Minimize,
+
+  // Financial and business icons
+  'dollar-sign': DollarSign,
+  'bar-chart': BarChart3,
+  warehouse: Warehouse,
+  truck: Truck,
+  'file-check': FileCheck,
+  backup: HardDrive,
 
   // Default fallback icon
   default: HelpCircle,

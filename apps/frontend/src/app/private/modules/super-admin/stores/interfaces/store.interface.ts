@@ -77,6 +77,7 @@ export interface StoreListItem {
   is_active: boolean;
   manager_user_id?: number;
   organization_id: number;
+  logo_url?: string;
   created_at: string;
   updated_at: string;
   organizations?: {

@@ -4,16 +4,18 @@ dist/
 .env*
 .DS_Store
 npm-debug.log
-logs/
 # Docker
 *.local
 *.pid
 *.seed
-*.log
 # VSCode
 .vscode/
 # Certificados locales
 certs/
+ssl/ca/
+ssl/certs/
+ssl/private/
+ssl/cert.conf
 # OS
 Thumbs.db
 # Documentation
