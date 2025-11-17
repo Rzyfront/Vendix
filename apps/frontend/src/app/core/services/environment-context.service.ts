@@ -66,9 +66,6 @@ export class EnvironmentContextService {
       return false;
     }
 
-    const hasStoreRole = currentUser.roles?.some((role: string) =>
-      ['store_admin', 'owner', 'manager'].includes(role),
-    );
     const hasOrgRole = currentUser.roles?.some((role: string) =>
       ['org_admin', 'owner', 'super_admin'].includes(role),
     );

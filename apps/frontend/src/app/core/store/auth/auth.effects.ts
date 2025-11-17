@@ -144,5 +144,5 @@ export class AuthEffects {
     )
   );
   resetOwnerPasswordSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.resetOwnerPasswordSuccess), tap(() => { this.toast.success('Contraseña restablecida con éxito.'); this.router.navigateByUrl('/auth/login'); })), { dispatch: false });
-  failureToast$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.loginFailure, AuthActions.forgotOwnerPasswordFailure, AuthActions.resetOwnerPasswordFailure, AuthActions.verifyEmailFailure, AuthActions.resendVerificationEmailFailure), tap(({ error }) => { const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error); this.toast.error(errorMessage, 'Error'); })), { dispatch: false });
+  failureToast$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.forgotOwnerPasswordFailure, AuthActions.resetOwnerPasswordFailure, AuthActions.verifyEmailFailure, AuthActions.resendVerificationEmailFailure), tap(({ error }) => { const errorMessage = typeof error === 'string' ? error : extractApiErrorMessage(error); this.toast.error(errorMessage, 'Error'); })), { dispatch: false });
 }

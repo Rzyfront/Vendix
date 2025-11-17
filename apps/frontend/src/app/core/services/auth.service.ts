@@ -79,7 +79,8 @@ export class AuthService {
           }
 
           const decodedToken = this.decodeJwtToken(access_token);
-          user.roles = user.user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+          // Los roles ahora vienen directamente como array de strings desde la API
+          user.roles = user.roles || [];
 
           if (!this.validateUserEnvironmentAccess(user.roles || [], (user_settings.config.app || '').toUpperCase())) {
             this.clearTokens();

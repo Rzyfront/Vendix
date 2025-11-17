@@ -125,14 +125,14 @@ export class ToastContainerComponent {
     pathData: string,
   ): string {
     const colors: Record<string, string> = {
-      success: 'text-green-600',
-      warning: 'text-amber-600',
-      error: 'text-red-600',
-      info: 'text-blue-600',
-      default: 'text-gray-600',
+      success: '#16a34a',
+      warning: '#d97706',
+      error: '#dc2626',
+      info: '#2563eb',
+      default: '#4b5563',
     };
 
     const color = colors[variant] || colors['default'];
-    return `<svg class="${baseClass} ${color}" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="${pathData}" clip-rule="evenodd"/></svg>`;
+    return `<svg class="${baseClass}" fill="${color}" viewBox="0 0 20 20"><path d="${pathData}"/></svg>`;
   }
 }
