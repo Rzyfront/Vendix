@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Output } from '@angular/core';
+import { Component, Input, EventEmitter, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -13,7 +13,7 @@ import {
   InputType,
   ToastService,
   IconComponent,
-} from '../../../../shared/components';
+} from '../../../../../shared/components';
 import { CreateProductDto } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 
@@ -32,7 +32,7 @@ import { ProductsService } from '../services/products.service';
     <app-modal
       [size]="'lg'"
       [title]="'Create New Product'"
-      [show]="show"
+      [isOpen]="show"
       (closed)="onClose()"
     >
       <form [formGroup]="productForm" class="space-y-6">
@@ -55,7 +55,7 @@ import { ProductsService } from '../services/products.service';
               placeholder="Enter SKU (optional)"
               formControlName="sku"
               [error]="getErrorMessage('sku')"
-              [helpText]="'Leave empty to auto-generate'"
+              [helperText]="'Leave empty to auto-generate'"
             >
             </app-input>
           </div>
@@ -65,7 +65,7 @@ import { ProductsService } from '../services/products.service';
             placeholder="Enter slug (optional)"
             formControlName="slug"
             [error]="getErrorMessage('slug')"
-            [helpText]="'URL-friendly version of the name'"
+            [helperText]="'URL-friendly version of the name'"
           >
           </app-input>
 
@@ -98,7 +98,7 @@ import { ProductsService } from '../services/products.service';
               formControlName="base_price"
               [error]="getErrorMessage('base_price')"
               [required]="true"
-              [helpText]="'Base price without taxes'"
+              [helperText]="'Base price without taxes'"
             >
             </app-input>
 
@@ -108,7 +108,7 @@ import { ProductsService } from '../services/products.service';
               placeholder="0"
               formControlName="stock_quantity"
               [error]="getErrorMessage('stock_quantity')"
-              [helpText]="'Initial stock quantity'"
+              [helperText]="'Initial stock quantity'"
             >
             </app-input>
           </div>
@@ -125,7 +125,7 @@ import { ProductsService } from '../services/products.service';
               placeholder="Enter category ID"
               formControlName="category_id"
               [error]="getErrorMessage('category_id')"
-              [helpText]="'Primary category'"
+              [helperText]="'Primary category'"
             >
             </app-input>
 
@@ -135,7 +135,7 @@ import { ProductsService } from '../services/products.service';
               placeholder="Enter brand ID"
               formControlName="brand_id"
               [error]="getErrorMessage('brand_id')"
-              [helpText]="'Brand (optional)'"
+              [helperText]="'Brand (optional)'"
             >
             </app-input>
           </div>
@@ -171,10 +171,9 @@ import { ProductsService } from '../services/products.service';
   ],
 })
 export class ProductCreateModalComponent {
+  @Input() show = false;
   @Output() closed = new EventEmitter<void>();
   @Output() created = new EventEmitter<void>();
-
-  show = false;
   isSubmitting = false;
   productForm: FormGroup;
 

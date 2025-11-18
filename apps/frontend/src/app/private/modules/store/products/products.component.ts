@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
 import {
@@ -8,7 +9,7 @@ import {
   ProductQueryDto,
   ProductState,
   PaginatedResponse,
-} from '../interfaces/product.interface';
+} from './interfaces';
 import {
   TableComponent,
   TableColumn,
@@ -21,24 +22,25 @@ import {
   IconComponent,
   SelectorComponent,
   SelectorOption,
-} from '../../../../shared/components/index';
+} from '../../../../shared/components';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
-import { ProductCreateModalComponent } from './components/product-create-modal.component';
+import { ProductCreateModalComponent } from './components';
 
 // Import service directly to avoid bundling issues
-import { ProductsService } from '../services/products.service';
+import { ProductsService } from './services/products.service';
 
 @Component({
   selector: 'app-products',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     TableComponent,
     ButtonComponent,
     InputsearchComponent,
     IconComponent,
     SelectorComponent,
-    ModalComponent,
+
     ProductCreateModalComponent,
   ],
   template: `
@@ -197,10 +199,8 @@ import { ProductsService } from '../services/products.service';
           [columns]="tableColumns"
           [actions]="tableActions"
           [loading]="loading"
-          [emptyState]="emptyStateConfig"
-          [pagination]="paginationConfig"
-          (pageChanged)="onPageChange($event)"
-          (sortChanged)="onSortChange($event)"
+          [emptyMessage]="emptyMessage"
+          (sort)="onSortChange($event)"
         >
         </app-table>
       </div>
@@ -237,25 +237,35 @@ export class ProductsComponent implements OnInit, OnDestroy {
   searchTerm = '';
   selectedState: ProductState | '' = '';
 
-  // Service instance
-  productsService: ProductsService;
-
   // Pagination
   currentPage = 1;
   pageSize = 10;
   totalItems = 0;
 
+  private toastService = inject(ToastService);
+  private productsService = inject(ProductsService);
+
   // Sorting
   sortField = 'created_at';
   sortDirection: 'asc' | 'desc' = 'desc';
 
+  // Selector options
+  stateOptions: SelectorOption[] = [
+    { label: 'All States', value: '' },
+    { label: 'Active', value: 'active' },
+    { label: 'Inactive', value: 'inactive' },
+    { label: 'Archived', value: 'archived' },
+  ];
+
   // Table Configuration
+  emptyMessage = 'No products found';
+
   tableColumns: TableColumn[] = [
     {
       key: 'name',
       label: 'Product Name',
       sortable: true,
-      minWidth: '200px',
+      width: '200px',
     },
     {
       key: 'sku',
@@ -282,11 +292,17 @@ export class ProductsComponent implements OnInit, OnDestroy {
       label: 'Status',
       sortable: true,
       width: '120px',
-      badge: {
-        active: { variant: 'success', text: 'Active' },
-        inactive: { variant: 'warning', text: 'Inactive' },
-        archived: { variant: 'danger', text: 'Archived' },
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          active: 'green',
+          inactive: 'yellow',
+          archived: 'red',
+        },
       },
+      transform: (value: string) =>
+        value.charAt(0).toUpperCase() + value.slice(1),
     },
     {
       key: 'created_at',
@@ -317,11 +333,14 @@ export class ProductsComponent implements OnInit, OnDestroy {
       variant: 'secondary',
     },
     {
-      label: (product: Product) => product.state === 'active' ? 'Deactivate' : 'Activate',
-      icon: (product: Product) => product.state === 'active' ? 'pause' : 'play',
+      label: (product: Product) =>
+        product.state === 'active' ? 'Deactivate' : 'Activate',
+      icon: (product: Product) =>
+        product.state === 'active' ? 'pause' : 'play',
       action: (product: Product) => this.toggleProductState(product),
-      variant: 'danger'
-    }
+      variant: 'danger',
+    },
+  ];
 
   ngOnInit() {
     this.loadInitialData();
@@ -340,7 +359,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
           this.stats = stats;
         },
         error: (error: any) => {
-          this.toastService?.error('Error loading products data');
+          this.toastService.error('Error loading products data');
           console.error('Error loading initial data:', error);
         },
       });
@@ -375,9 +394,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.refreshProducts();
   }
 
-  onSortChange(event: { field: string; direction: 'asc' | 'desc' }) {
-    this.sortField = event.field;
-    this.sortDirection = event.direction;
+  onSortChange(event: { column: string; direction: 'asc' | 'desc' | null }) {
+    this.sortField = event.column;
+    this.sortDirection = event.direction || 'desc';
     this.refreshProducts();
   }
 
@@ -458,9 +477,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
             product.state === 'active'
               ? 'Product deactivated'
               : 'Product activated';
-          if (this.toastService) {
-            this.toastService.success(message);
-          }
+          this.toastService.success(message);
           this.refreshProducts();
         },
         error: (error: any) => {
@@ -468,7 +485,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
             this.toastService.error(`Error ${action}ing product`);
           }
           console.error(`Error ${action}ing product:`, error);
-        }
+        },
       });
     }
   }

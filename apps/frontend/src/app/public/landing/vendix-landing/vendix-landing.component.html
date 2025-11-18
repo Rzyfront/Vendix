@@ -42,8 +42,8 @@
   </header>
 
   <!-- Mobile Menu Overlay -->
-  @if (mobileMenuOpen) {
-    <div class="fixed inset-0 z-40 md:hidden">
+  @if (mobileMenuOpen) {  
+    <div class="fixed inset-0 z-[60] md:hidden">
       <!-- Backdrop -->
       <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
 
@@ -57,11 +57,11 @@
                 <app-icon name="cart" [size]="20" color="white"></app-icon>
               </div>
               <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-                {{ tenantConfig?.branding?.name || 'Vendix' }}
+                {{ tenantConfig?.branding?.name || 'Vendix' }}    
               </h2>
             </div>
             <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
-              <app-icon name="x" [size]="20" color="var(--color-text-primary)"></app-icon>
+              <app-icon name="menu" [size]="20" color="var(--color-text-primary)"></app-icon>
             </button>
           </div>
 

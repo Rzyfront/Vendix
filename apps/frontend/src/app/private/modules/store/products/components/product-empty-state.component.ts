@@ -1,6 +1,9 @@
 import { Component, Input, EventEmitter, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent, IconComponent } from '../../../../shared/components';
+import {
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../shared/components';
 
 @Component({
   selector: 'app-product-empty-state',
