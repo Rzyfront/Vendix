@@ -850,7 +850,6 @@ export class AuthService {
   ) {
     const { email, password, organization_slug, store_slug } = loginDto;
 
-    
     // Buscar usuario con rol para auto-detección de contexto
     const user = await this.prismaService.users.findFirst({
       where: { email },
@@ -1249,17 +1248,16 @@ export class AuthService {
   async logout(
     user_id: number,
     refresh_token?: string,
-    all_sessions: boolean = false,
+    all_sessions: boolean = true, // Por defecto cerrar todas las sesiones para mayor seguridad
   ) {
     const now = new Date();
 
     if (all_sessions) {
-      // Cerrar todas las sesiones activas del usuario
+      // Cerrar TODAS las sesiones activas del usuario (máxima seguridad)
       const result = await this.prismaService.refresh_tokens.updateMany({
         where: {
           user_id: user_id,
           revoked: false,
-          expires_at: { gt: now },
         },
         data: {
           revoked: true,
@@ -1267,15 +1265,33 @@ export class AuthService {
         },
       });
 
-      // Registrar auditoría
+      // También eliminar cualquier refresh token expirado (limpieza completa)
+      await this.prismaService.refresh_tokens.deleteMany({
+        where: {
+          user_id: user_id,
+          expires_at: { lt: now },
+        },
+      });
+
+      // Registrar auditoría completa
       await this.auditService.logAuth(user_id, AuditAction.LOGOUT, {
         action: 'logout_all_sessions',
         sessions_revoked: result.count,
+        security_level: 'maximum',
+        all_tokens_invalidated: true,
       });
 
+      console.log(
+        `🔒 LOGOUT COMPLETO: Usuario ${user_id} - ${result.count} sesiones revocadas`,
+      );
+
       return {
-        message: `Se cerraron ${result.count} sesiones activas.`,
-        data: { sessions_revoked: result.count },
+        message: `Todas las sesiones han sido cerradas por seguridad.`,
+        data: {
+          sessions_revoked: result.count,
+          security_level: 'maximum',
+          all_sessions_closed: true,
+        },
       };
     }
 
@@ -1283,36 +1299,59 @@ export class AuthService {
       // Hashear el refresh token para comparación
       const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
 
-      // Revocar solo el token específico de la sesión actual
+      // Revocar el token específico Y todos los demás del usuario (seguridad mejorada)
       try {
-        const result = await this.prismaService.refresh_tokens.updateMany({
-          where: {
-            user_id: user_id,
-            token: hashedRefreshToken,
-            revoked: false,
-          },
-          data: {
-            revoked: true,
-            revoked_at: now,
-          },
-        });
+        // Primero revocar el token específico
+        const specificResult =
+          await this.prismaService.refresh_tokens.updateMany({
+            where: {
+              user_id: user_id,
+              token: hashedRefreshToken,
+              revoked: false,
+            },
+            data: {
+              revoked: true,
+              revoked_at: now,
+            },
+          });
 
-        if (result.count === 0) {
-          return {
-            message: 'Sesión no encontrada o ya revocada.',
-            data: { sessions_revoked: 0 },
-          };
-        }
+        // Luego revocar todos los demás tokens del usuario (previene session hijacking)
+        const otherTokensResult =
+          await this.prismaService.refresh_tokens.updateMany({
+            where: {
+              user_id: user_id,
+              id: { not: undefined }, // No podemos excluir por hash porque es diferente cada vez
+              revoked: false,
+            },
+            data: {
+              revoked: true,
+              revoked_at: now,
+            },
+          });
 
-        // Registrar auditoría
+        const totalRevoked = specificResult.count + otherTokensResult.count;
+
+        // Registrar auditoría de seguridad mejorada
         await this.auditService.logAuth(user_id, AuditAction.LOGOUT, {
-          action: 'logout_single_session',
-          sessions_revoked: result.count,
+          action: 'logout_with_security_cleanup',
+          specific_token_revoked: specificResult.count,
+          other_tokens_revoked: otherTokensResult.count,
+          total_sessions_revoked: totalRevoked,
+          security_level: 'enhanced',
         });
+
+        console.log(
+          `🔒 LOGOUT SEGURO: Usuario ${user_id} - ${totalRevoked} sesiones revocadas`,
+        );
 
         return {
-          message: 'Logout exitoso.',
-          data: { sessions_revoked: result.count },
+          message:
+            'Sesión cerrada exitosamente. Todas las sesiones han sido invalidadas por seguridad.',
+          data: {
+            sessions_revoked: totalRevoked,
+            security_level: 'enhanced',
+            all_sessions_invalidated: true,
+          },
         };
       } catch (error) {
         console.error('Error during logout:', error);
@@ -1322,10 +1361,27 @@ export class AuthService {
       }
     }
 
+    // Si no hay token específico ni all_sessions, cerrar todo por defecto (fallback seguro)
+    const fallbackResult = await this.prismaService.refresh_tokens.updateMany({
+      where: {
+        user_id: user_id,
+        revoked: false,
+      },
+      data: {
+        revoked: true,
+        revoked_at: now,
+      },
+    });
+
+    await this.auditService.logAuth(user_id, AuditAction.LOGOUT, {
+      action: 'logout_fallback_security',
+      sessions_revoked: fallbackResult.count,
+      reason: 'no_token_provided',
+    });
+
     return {
-      message:
-        'No se proporcionó refresh token. Use all_sessions: true para cerrar todas las sesiones.',
-      data: { sessions_revoked: 0 },
+      message: 'Por seguridad, todas las sesiones han sido cerradas.',
+      data: { sessions_revoked: fallbackResult.count },
     };
   }
 

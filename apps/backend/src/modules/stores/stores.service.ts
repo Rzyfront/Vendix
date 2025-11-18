@@ -14,28 +14,25 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
+import { RequestContextService } from '../../common/context/request-context.service';
 
 @Injectable()
 export class StoresService {
   constructor(private prisma: PrismaService) {}
 
   async create(createStoreDto: CreateStoreDto) {
-    if (createStoreDto.organization_id) {
-      const organization = await this.prisma.organizations.findUnique({
-        where: { id: createStoreDto.organization_id },
-      });
-      if (!organization) {
-        throw new BadRequestException('Organization not found');
-      }
+    // Obtener organization_id del contexto
+    const organizationId = RequestContextService.getOrganizationId();
+
+    if (!organizationId) {
+      throw new BadRequestException('Organization context is required');
     }
 
     const slug = slugify(createStoreDto.name, { lower: true, strict: true });
     const existingStore = await this.prisma.stores.findFirst({
       where: {
         slug,
-        ...(createStoreDto.organization_id && {
-          organization_id: createStoreDto.organization_id,
-        }),
+        organization_id: organizationId,
       },
     });
     if (existingStore) {
@@ -44,11 +41,17 @@ export class StoresService {
       );
     }
 
-    return this.prisma.stores.create({
+    // Extract settings from DTO and remove from main store data
+    const { settings, ...storeData } = createStoreDto;
+
+    const store = await this.prisma.stores.create({
       data: {
-        ...createStoreDto,
+        ...storeData,
         slug,
         updated_at: new Date(),
+        organizations: {
+          connect: { id: organizationId },
+        },
       },
       include: {
         organizations: { select: { id: true, name: true, slug: true } },
@@ -57,6 +60,31 @@ export class StoresService {
         _count: { select: { products: true, orders: true, store_users: true } },
       },
     });
+
+    // Create store settings if provided
+    if (settings && Object.keys(settings).length > 0) {
+      await this.prisma.store_settings.create({
+        data: {
+          store_id: store.id,
+          settings,
+        },
+      });
+
+      // Refetch to include settings
+      return this.prisma.stores.findUnique({
+        where: { id: store.id },
+        include: {
+          organizations: { select: { id: true, name: true, slug: true } },
+          addresses: true,
+          store_settings: true,
+          _count: {
+            select: { products: true, orders: true, store_users: true },
+          },
+        },
+      });
+    }
+
+    return store;
   }
 
   async findAll(query: StoreQueryDto) {
@@ -124,9 +152,22 @@ export class StoresService {
 
   async update(id: number, updateStoreDto: UpdateStoreDto) {
     await this.findOne(id);
+
+    // Extract settings from DTO and remove from main store data
+    const { settings, ...storeData } = updateStoreDto;
+
+    // Update store settings if provided
+    if (settings) {
+      await this.prisma.store_settings.upsert({
+        where: { store_id: id },
+        update: { settings },
+        create: { store_id: id, settings },
+      });
+    }
+
     return this.prisma.stores.update({
       where: { id },
-      data: { ...updateStoreDto, updated_at: new Date() },
+      data: { ...storeData, updated_at: new Date() },
       include: { organizations: true, addresses: true, store_settings: true },
     });
   }

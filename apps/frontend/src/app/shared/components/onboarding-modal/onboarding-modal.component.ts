@@ -29,6 +29,7 @@ import { CompletionStepComponent } from './steps/completion-step.component';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ToastService } from '../toast/toast.service';
+import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { Subject, takeUntil } from 'rxjs';
 
 interface WizardStep {
@@ -396,6 +397,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     private authFacade: AuthFacade,
     private cdr: ChangeDetectorRef,
     private toastService: ToastService,
+    private envSwitchService: EnvironmentSwitchService,
   ) {
     this.initializeForms();
   }
@@ -873,59 +875,73 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     });
   }
 
-  completeWizard(): void {
+  async completeWizard(): Promise<void> {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.isSubmitting = true;
     this.cdr.markForCheck();
 
-    this.wizardService.completeWizard().subscribe({
-      next: (response) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        if (response.success) {
-          this.toastService.success(
-            '¡Configuración completada! Bienvenido a Vendix',
-            'Éxito',
-          );
-          this.completed.emit();
-          this.close();
-        } else {
-          this.toastService.error(
-            response.message || 'No se pudo completar la configuración',
-            'Error',
-          );
-        }
-        this.cdr.markForCheck();
-      },
-      error: (error) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        console.error('Error completing wizard:', error);
+    try {
+      const response = await this.wizardService.completeWizard().toPromise();
 
-        // More detailed error message
-        const errorMsg =
-          error?.error?.message ||
-          error?.message ||
-          'Error al completar la configuración';
-        this.toastService.error(errorMsg, 'Error');
+      if (response?.success) {
+        const app_type = this.wizardService.getAppType();
 
-        // If it's a validation error, show which steps are missing
-        if (error?.error?.error && typeof error.error.error === 'string') {
-          const missingStepsMatch =
-            error.error.error.match(/Missing steps: (.+)/);
-          if (missingStepsMatch) {
-            this.toastService.warning(
-              `Faltan algunos pasos: ${missingStepsMatch[1]}`,
-              'Atención',
-              5000,
-            );
+        if (app_type === 'STORE_ADMIN') {
+          const store_slug = this.wizardService.getCreatedStoreSlug();
+
+          if (store_slug) {
+            try {
+              await this.envSwitchService.performEnvironmentSwitch(
+                'STORE_ADMIN',
+                store_slug,
+              );
+            } catch (switchError) {
+              console.error('Error switching environment:', switchError);
+              this.toastService.error('Error al cambiar al entorno de tienda');
+            }
+          } else {
+            console.error('No se encontró slug de store');
+            this.toastService.error('Error al completar el onboarding');
           }
         }
 
-        this.cdr.markForCheck();
-      },
-    });
+        this.toastService.success(
+          '¡Configuración completada! Bienvenido a Vendix',
+          'Éxito',
+        );
+        this.completed.emit();
+        this.close();
+      } else {
+        this.toastService.error(
+          response?.message || 'No se pudo completar la configuración',
+          'Error',
+        );
+      }
+    } catch (error: any) {
+      console.error('Error completing wizard:', error);
+      const errorMsg =
+        error?.error?.message ||
+        error?.message ||
+        'Error al completar la configuración';
+      this.toastService.error(errorMsg, 'Error');
+
+      if (error?.error?.error && typeof error.error.error === 'string') {
+        const missingStepsMatch =
+          error.error.error.match(/Missing steps: (.+)/);
+        if (missingStepsMatch) {
+          this.toastService.warning(
+            `Faltan algunos pasos: ${missingStepsMatch[1]}`,
+            'Atención',
+            5000,
+          );
+        }
+      }
+    } finally {
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.cdr.markForCheck();
+    }
   }
 
   close(): void {

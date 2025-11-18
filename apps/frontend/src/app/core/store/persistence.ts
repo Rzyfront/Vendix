@@ -9,65 +9,70 @@ import { User } from '../services/auth.service';
  */
 export function hydrateAuthState(): Partial<AuthState> {
   try {
-    const unifiedAuthState = localStorage.getItem('vendix_auth_state');
-    if (unifiedAuthState) {
-      const parsedState = JSON.parse(unifiedAuthState);
-      if (parsedState.user && parsedState.tokens?.accessToken) {
-        console.log(
-          '[HYDRATE] OK unified with user_settings',
-          parsedState.user.email,
-        );
+    // Verificar si el usuario hizo logout recientemente
+    const loggedOutRecently = localStorage.getItem('vendix_logged_out_recently');
+    if (loggedOutRecently) {
+      const logoutTime = parseInt(loggedOutRecently);
+      const currentTime = Date.now();
+      if (currentTime - logoutTime < 5 * 60 * 1000) {
+        console.log('[HYDRATE] Logout reciente detectado, omitiendo hidratación');
         return {
-          user: parsedState.user,
-          user_settings: parsedState.user_settings,
-          tokens: parsedState.tokens,
-          roles: parsedState.user.roles || parsedState.roles || [],
-          permissions: parsedState.permissions || [],
+          user: null,
+          user_settings: null,
+          tokens: null,
+          roles: [],
+          permissions: [],
           loading: false,
           error: null,
-          isAuthenticated: true,
+          isAuthenticated: false,
         };
       }
     }
-    const userJson = localStorage.getItem('vendix_user_info');
-    const accessToken = localStorage.getItem('access_token');
-    const refreshToken = localStorage.getItem('refresh_token');
-    const userEnvironment = localStorage.getItem('vendix_user_environment');
 
-    if (userJson && accessToken && refreshToken) {
-      const user: User = JSON.parse(userJson);
+    // Solo usar el estado unificado - eliminar lógica de fallback peligrosa
+    const unifiedAuthState = localStorage.getItem('vendix_auth_state');
+    if (unifiedAuthState) {
+      const parsedState = JSON.parse(unifiedAuthState);
 
-      // Create user_settings from environment for backward compatibility
-      const user_settings = userEnvironment
-        ? { config: { app: userEnvironment } }
-        : undefined;
+      // Validaciones estrictas para prevenir restauración de datos corruptos
+      if (!parsedState || !parsedState.user || !parsedState.tokens) {
+        console.warn('[HYDRATE] Estado de autenticación inválido o incompleto');
+        localStorage.removeItem('vendix_auth_state');
+        return getCleanAuthState();
+      }
 
-      const unifiedState = {
-        user,
-        user_settings,
-        tokens: { accessToken, refreshToken },
-        roles: user.roles || [],
-        permissions: [],
-      };
-      localStorage.setItem('vendix_auth_state', JSON.stringify(unifiedState));
+      if (!parsedState.tokens.accessToken) {
+        console.warn('[HYDRATE] Token de acceso no encontrado');
+        localStorage.removeItem('vendix_auth_state');
+        return getCleanAuthState();
+      }
+
+      console.log('[HYDRATE] Restaurando estado unificado para:', parsedState.user.email);
       return {
-        user: user,
-        user_settings,
-        tokens: { accessToken, refreshToken },
-        roles: user.roles || [],
-        permissions: [],
+        user: parsedState.user,
+        user_settings: parsedState.user_settings,
+        tokens: parsedState.tokens,
+        roles: parsedState.user.roles || parsedState.roles || [],
+        permissions: parsedState.permissions || [],
         loading: false,
         error: null,
         isAuthenticated: true,
       };
     }
   } catch (error) {
-    console.warn(
-      '[HYDRATE] ERROR, no se puede parsear vendix_auth_state, retornando estado inicial ',
-      error,
-    );
+    console.warn('[HYDRATE] Error parsing auth state, limpiando datos corruptos:', error);
+    // Limpiar cualquier dato corrupto
+    localStorage.removeItem('vendix_auth_state');
+    localStorage.removeItem('vendix_logged_out_recently');
   }
-  console.warn('[HYDRATE] DEFAULT, no auth state');
+
+  return getCleanAuthState();
+}
+
+/**
+ * Returns a clean, non-authenticated state
+ */
+function getCleanAuthState(): Partial<AuthState> {
   return {
     user: null,
     user_settings: null,
@@ -119,12 +124,26 @@ export function saveAuthState(state: AuthState): void {
 export function clearAuthState(): void {
   try {
     console.warn('[CLEAR AUTH STATE]');
-    localStorage.removeItem('vendix_auth_state');
-    localStorage.removeItem('vendix_user_info');
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+
+    // Eliminar todas las claves relacionadas con autenticación
+    const keysToRemove = [
+      'vendix_auth_state',
+      'vendix_user_info',
+      'access_token',
+      'refresh_token',
+      'user_settings',
+      'permissions',
+      'roles',
+      'vendix_user_environment'
+    ];
+
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+    });
+
+    console.log('[CLEAR AUTH STATE] Todas las claves de autenticación eliminadas');
   } catch (error) {
-    // Silenciar otros logs
+    console.warn('[CLEAR AUTH STATE] Error limpiando estado:', error);
   }
 }
 

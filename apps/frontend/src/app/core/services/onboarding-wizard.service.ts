@@ -95,7 +95,7 @@ export interface WizardCompletionResult {
 })
 export class OnboardingWizardService {
   private readonly apiUrl = `${environment.apiUrl}/onboarding-wizard`;
-  
+
   // Wizard state management
   private currentStepSubject = new BehaviorSubject<number>(1);
   public currentStep$ = this.currentStepSubject.asObservable();
@@ -108,7 +108,24 @@ export class OnboardingWizardService {
   });
   public wizardData$ = this.wizardDataSubject.asObservable();
 
+  private _created_store_slug: string | null = null;
+  private _app_type: 'STORE_ADMIN' | 'ORG_ADMIN' | null = null;
+
   constructor(private http: HttpClient) {}
+
+  /**
+   * Get created store slug
+   */
+  getCreatedStoreSlug(): string | null {
+    return this._created_store_slug;
+  }
+
+  /**
+   * Get app type
+   */
+  getAppType(): 'STORE_ADMIN' | 'ORG_ADMIN' | null {
+    return this._app_type;
+  }
 
   /**
    * Get wizard status
@@ -127,7 +144,7 @@ export class OnboardingWizardService {
           // Only update step if it's different to avoid loops
           const backendStep = response.data.current_step;
           const currentStep = this.currentStepSubject.value;
-          
+
           if (backendStep !== currentStep) {
             this.currentStepSubject.next(backendStep);
           }
@@ -147,17 +164,19 @@ export class OnboardingWizardService {
    * Select application type for the user
    */
   selectAppType(data: SelectAppTypeData): Observable<SelectAppTypeResponse> {
-    return this.http.post<SelectAppTypeResponse>(`${this.apiUrl}/select-app-type`, data).pipe(
-      tap((response: SelectAppTypeResponse) => {
-        if (response.success) {
-          // Update local wizard data
-          this.updateWizardData('app_type', {
-            selected_app_type: response.app_type,
-            selected_at: new Date().toISOString()
-          });
-        }
-      })
-    );
+    return this.http
+      .post<SelectAppTypeResponse>(`${this.apiUrl}/select-app-type`, data)
+      .pipe(
+        tap((response: SelectAppTypeResponse) => {
+          if (response.success) {
+            this._app_type = response.app_type;
+            this.updateWizardData('app_type', {
+              selected_app_type: response.app_type,
+              selected_at: new Date().toISOString(),
+            });
+          }
+        }),
+      );
   }
 
   /**
@@ -217,7 +236,9 @@ export class OnboardingWizardService {
             ...currentData,
             store: data,
           });
-          // Auto-advance to next step
+          if (response.data?.slug) {
+            this._created_store_slug = response.data.slug;
+          }
           this.nextStep();
         }
       }),

@@ -86,8 +86,11 @@ export class ProductsService {
       } = createProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
+        // Usar base client para evitar scoping issues
+        const basePrisma = (prisma as any)._baseClient || prisma;
+
         // Crear producto
-        const product = await prisma.products.create({
+        const product = await basePrisma.products.create({
           data: {
             ...productData,
             store_id: storeId, // Agregar el store_id del contexto

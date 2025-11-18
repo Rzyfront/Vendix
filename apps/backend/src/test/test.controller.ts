@@ -68,7 +68,12 @@ export class TestController {
   @Public()
   @Post('email-verification-test')
   async testVerificationEmail(
-    @Body() body: { email: string; username: string; organizationSlug?: string },
+    @Body()
+    body: {
+      email: string;
+      username: string;
+      organizationSlug?: string;
+    },
   ) {
     // Buscar usuario por email
     const user = await this.prismaService.users.findFirst({

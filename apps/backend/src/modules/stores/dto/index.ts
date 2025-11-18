@@ -58,16 +58,6 @@ export class CreateStoreDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
-  color_primary?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_secondary?: string;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(255)
   domain?: string;
 
@@ -75,11 +65,6 @@ export class CreateStoreDto {
   @IsString()
   @MaxLength(50)
   timezone?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency_code?: string;
 
   @IsOptional()
   @IsJSON()
@@ -96,6 +81,15 @@ export class CreateStoreDto {
   @IsOptional()
   @IsInt()
   manager_user_id?: number;
+
+  @IsOptional()
+  @IsObject()
+  settings?: {
+    currency_code?: string;
+    color_primary?: string;
+    color_secondary?: string;
+    [key: string]: any;
+  };
 }
 
 export class UpdateStoreDto {
@@ -122,16 +116,6 @@ export class UpdateStoreDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(20)
-  color_primary?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  color_secondary?: string;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(255)
   domain?: string;
 
@@ -139,11 +123,6 @@ export class UpdateStoreDto {
   @IsString()
   @MaxLength(50)
   timezone?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(3)
-  currency_code?: string;
 
   @IsOptional()
   @IsJSON()
@@ -160,6 +139,15 @@ export class UpdateStoreDto {
   @IsOptional()
   @IsInt()
   manager_user_id?: number;
+
+  @IsOptional()
+  @IsObject()
+  settings?: {
+    currency_code?: string;
+    color_primary?: string;
+    color_secondary?: string;
+    [key: string]: any;
+  };
 }
 
 export class StoreQueryDto {

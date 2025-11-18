@@ -275,7 +275,7 @@ export class DomainsService implements OnModuleInit {
     );
 
     // Handle primary domain logic
-    let is_primary = data.is_primary || false;
+    const is_primary = data.is_primary || false;
     if (is_primary) {
       await this.clearExistingPrimary(
         data.organization_id,

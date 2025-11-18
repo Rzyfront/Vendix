@@ -463,8 +463,8 @@ export class ProductCreateModalComponent {
         formValue.stock_quantity > 0
           ? Number(formValue.stock_quantity)
           : undefined,
-      category_id: formValue.category_id || undefined,
-      brand_id: formValue.brand_id || undefined,
+      category_id: formValue.category_id || null,
+      brand_id: formValue.brand_id || null,
       images: images.length > 0 ? images : undefined,
     };
 

@@ -67,7 +67,9 @@ export class ConsoleProvider implements EmailProvider {
     // Log del vlink para debugging
     if (organizationSlug) {
       this.logger.log(`🏢 ORGANIZATION SLUG (vLink): ${organizationSlug}`);
-      this.logger.log(`🌐 LOGIN URL: https://${organizationSlug}.vendix.online`);
+      this.logger.log(
+        `🌐 LOGIN URL: https://${organizationSlug}.vendix.online`,
+      );
     } else {
       this.logger.log(`⚠️ NO ORGANIZATION SLUG PROVIDED - Using default URL`);
     }

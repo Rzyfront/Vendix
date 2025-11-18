@@ -2,6 +2,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { InventoryTransactionsService } from '../../transactions/inventory-transactions.service';
@@ -89,13 +90,25 @@ export class StockLevelManager {
       }
 
       // 4. Actualizar stock levels
-      const updatedStock = await prisma.stock_levels.update({
+      // Use base client to avoid scoping issues
+      const basePrisma = prisma._baseClient || prisma;
+
+      // First find the stock level record
+      const existingStockLevel = await basePrisma.stock_levels.findFirst({
         where: {
-          product_id_product_variant_id_location_id: {
-            product_id: params.productId,
-            product_variant_id: params.variantId || null,
-            location_id: params.locationId,
-          },
+          product_id: params.productId,
+          product_variant_id: params.variantId || null,
+          location_id: params.locationId,
+        },
+      });
+
+      if (!existingStockLevel) {
+        throw new BadRequestException('Stock level not found');
+      }
+
+      const updatedStock = await basePrisma.stock_levels.update({
+        where: {
+          id: existingStockLevel.id,
         },
         data: {
           quantity_on_hand: Math.max(0, newQuantityOnHand),
@@ -303,21 +316,23 @@ export class StockLevelManager {
     variantId: number | undefined,
     locationId: number,
   ): Promise<any> {
-    let stockLevel = await prisma.stock_levels.findUnique({
+    // Use base client to avoid scoping issues
+    const basePrisma = prisma._baseClient || prisma;
+
+    // Use findFirst to avoid issues with unique constraint and null values
+    let stockLevel = await basePrisma.stock_levels.findFirst({
       where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: variantId || null,
-          location_id: locationId,
-        },
+        product_id: productId,
+        product_variant_id: variantId || null,
+        location_id: locationId,
       },
     });
 
     if (!stockLevel) {
-      stockLevel = await prisma.stock_levels.create({
+      stockLevel = await basePrisma.stock_levels.create({
         data: {
           product_id: productId,
-          product_variant_id: variantId,
+          product_variant_id: variantId || null,
           location_id: locationId,
           quantity_on_hand: 0,
           quantity_reserved: 0,
@@ -416,13 +431,16 @@ export class StockLevelManager {
     productId: number,
     organizationId: number,
   ): Promise<void> {
-    const locations = await this.prisma.inventory_locations.findMany({
+    // Use base client to avoid scoping issues
+    const basePrisma = (this.prisma as any)._baseClient || this.prisma;
+
+    const locations = await basePrisma.inventory_locations.findMany({
       where: { organization_id: organizationId },
     });
 
     for (const location of locations) {
       await this.getOrCreateStockLevel(
-        this.prisma,
+        basePrisma,
         productId,
         undefined,
         location.id,

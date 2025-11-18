@@ -32,7 +32,6 @@ export class PrismaService implements OnModuleInit {
     'store_users',
     'store_settings',
     'inventory_locations',
-    'stock_levels',
     'inventory_batches',
     'inventory_serial_numbers',
     'stock_reservations',
@@ -133,7 +132,7 @@ export class PrismaService implements OnModuleInit {
     }
 
     const scopedArgs = { ...args };
-    let securityFilter: Record<string, any> = {};
+    const securityFilter: Record<string, any> = {};
 
     // Aplicar scoping por organización
     if (this.orgScopedModels.includes(model) && context.organization_id) {

@@ -112,8 +112,27 @@ export class AuthService {
   }
 
   // === MÉTODOS RESTAURADOS PARA LOS EFFECTS ===
-  registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> { return this.http.post<AuthResponse>(`${this.API_URL}/register-owner`, registerData); }
-  logout(): Observable<any> { const refreshToken = this.getRefreshToken(); return this.http.post(`${this.API_URL}/logout`, { refresh_token: refreshToken }); }
+  registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> {
+    // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
+    this.checkAndCleanAuthResidues();
+
+    console.log('🔐 Iniciando registro de owner con estado limpio');
+
+    return this.http.post<AuthResponse>(`${this.API_URL}/register-owner`, registerData);
+  }
+  logout(): Observable<any> {
+    const refreshToken = this.getRefreshToken();
+    return this.http.post(`${this.API_URL}/logout`, { refresh_token: refreshToken });
+  }
+
+  registerCustomer(registerData: any): Observable<AuthResponse> {
+    // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
+    this.checkAndCleanAuthResidues();
+
+    console.log('🔐 Iniciando registro de customer con estado limpio');
+
+    return this.http.post<AuthResponse>(`${this.API_URL}/register-customer`, registerData);
+  }
   refreshToken(): Observable<any> { const refreshToken = this.getRefreshToken(); return this.http.post(`${this.API_URL}/refresh`, { refresh_token: refreshToken }); }
   verifyEmail(token: string): Observable<any> { return this.http.post(`${this.API_URL}/verify-email`, { token }); }
   resendVerification(email: string): Observable<any> { return this.http.post(`${this.API_URL}/resend-verification`, { email }); }
@@ -124,5 +143,55 @@ export class AuthService {
   getToken(): string | null { return this.authFacade.getTokens()?.accessToken || null; }
   getRefreshToken(): string | null { return this.authFacade.getTokens()?.refreshToken || null; }
   private clearTokens(): void { if(typeof localStorage !== 'undefined') { localStorage.removeItem('access_token'); localStorage.removeItem('refresh_token'); } }
+
+  /**
+   * Limpia COMPLETAMENTE todos los datos de autenticación del localStorage
+   * Usar antes de registro para evitar mezclar datos de sesiones anteriores
+   */
+  clearAllAuthData(): void {
+    if (typeof localStorage !== 'undefined') {
+      // Eliminar TODAS las claves relacionadas con autenticación
+      const keysToRemove = [
+        'vendix_auth_state',
+        'access_token',
+        'refresh_token',
+        'vendix_user_info',
+        'user_settings',
+        'permissions',
+        'roles',
+        'vendix_user_environment',
+        'vendix_logged_out_recently' // También limpiar banderas de logout
+      ];
+
+      keysToRemove.forEach(key => {
+        localStorage.removeItem(key);
+      });
+
+      console.log('🧹 Limpieza completa de datos de autenticación realizada');
+    }
+  }
+
+  /**
+   * Verifica si hay residuos de autenticación y los limpia
+   * Retorna true si se limpiaron datos, false si no había residuos
+   */
+  checkAndCleanAuthResidues(): boolean {
+    if (typeof localStorage === 'undefined') return false;
+
+    const hasResidues = [
+      'vendix_auth_state',
+      'access_token',
+      'refresh_token',
+      'vendix_user_info'
+    ].some(key => localStorage.getItem(key) !== null);
+
+    if (hasResidues) {
+      console.log('🔍 Detectados residuos de autenticación, limpiando...');
+      this.clearAllAuthData();
+      return true;
+    }
+
+    return false;
+  }
   private decodeJwtToken(token: string): any { try { return JSON.parse(atob(token.split('.')[1])); } catch (error) { return null; } }
 }

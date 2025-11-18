@@ -197,14 +197,21 @@ export class OrganizationStoresService {
    */
   getTimezoneOptions(): Array<{ value: string; label: string }> {
     return [
-      { value: 'America/Mexico_City', label: 'Ciudad de México' },
-      { value: 'America/New_York', label: 'Nueva York' },
-      { value: 'America/Los_Angeles', label: 'Los Ángeles' },
-      { value: 'America/Chicago', label: 'Chicago' },
-      { value: 'Europe/Madrid', label: 'Madrid' },
-      { value: 'Europe/Paris', label: 'París' },
-      { value: 'Asia/Tokyo', label: 'Tokio' },
-      { value: 'Australia/Sydney', label: 'Sídney' },
+      { value: 'America/Bogota', label: 'Bogotá (UTC-5)' },
+      { value: 'America/Medellin', label: 'Medellín (UTC-5)' },
+      { value: 'America/Cali', label: 'Cali (UTC-5)' },
+      { value: 'America/Barranquilla', label: 'Barranquilla (UTC-5)' },
+      { value: 'America/Cartagena', label: 'Cartagena (UTC-5)' },
+      { value: 'America/Bucaramanga', label: 'Bucaramanga (UTC-5)' },
+      { value: 'America/Pereira', label: 'Pereira (UTC-5)' },
+      { value: 'America/Cucuta', label: 'Cúcuta (UTC-5)' },
+      { value: 'America/Santa_Marta', label: 'Santa Marta (UTC-5)' },
+      { value: 'America/Ibague', label: 'Ibagué (UTC-5)' },
+      { value: 'America/Mexico_City', label: 'Ciudad de México (UTC-6)' },
+      { value: 'America/New_York', label: 'Nueva York (UTC-5)' },
+      { value: 'America/Los_Angeles', label: 'Los Ángeles (UTC-8)' },
+      { value: 'Europe/Madrid', label: 'Madrid (UTC+1)' },
+      { value: 'Europe/Paris', label: 'París (UTC+1)' },
     ];
   }
 
@@ -213,12 +220,16 @@ export class OrganizationStoresService {
    */
   getCurrencyOptions(): Array<{ value: string; label: string }> {
     return [
-      { value: 'MXN', label: 'Peso Mexicano (MXN)' },
+      { value: 'COP', label: 'Peso Colombiano (COP)' },
       { value: 'USD', label: 'Dólar Americano (USD)' },
       { value: 'EUR', label: 'Euro (EUR)' },
       { value: 'GBP', label: 'Libra Esterlina (GBP)' },
+      { value: 'MXN', label: 'Peso Mexicano (MXN)' },
+      { value: 'BRL', label: 'Real Brasileño (BRL)' },
       { value: 'CAD', label: 'Dólar Canadiense (CAD)' },
       { value: 'AUD', label: 'Dólar Australiano (AUD)' },
+      { value: 'JPY', label: 'Yen Japonés (JPY)' },
+      { value: 'CNY', label: 'Yuan Chino (CNY)' },
     ];
   }
 }

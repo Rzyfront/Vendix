@@ -139,7 +139,7 @@ export class EnvironmentSwitchService {
     const payload = {
       sub: user.id,
       organization_id: organization_id, // ✅ snake_case como en auth.service.ts
-      store_id: store_id,               // ✅ snake_case como en auth.service.ts
+      store_id: store_id, // ✅ snake_case como en auth.service.ts
     };
 
     const accessToken = this.jwtService.sign(payload, {

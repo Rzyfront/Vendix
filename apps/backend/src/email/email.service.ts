@@ -151,7 +151,12 @@ export class EmailService {
     organizationSlug?: string,
   ): Promise<EmailResult> {
     this.logger.log(`Sending verification email to ${to}`);
-    return this.provider.sendVerificationEmail(to, token, username, organizationSlug);
+    return this.provider.sendVerificationEmail(
+      to,
+      token,
+      username,
+      organizationSlug,
+    );
   }
 
   async sendPasswordResetEmail(

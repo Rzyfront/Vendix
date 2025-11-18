@@ -112,7 +112,30 @@ export class AuthEffects {
   );
 
   logout$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.logout), mergeMap(() => this.authService.logout().pipe(map(() => AuthActions.logoutSuccess()), catchError(() => of(AuthActions.logoutSuccess()))))));
-  logoutSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.logoutSuccess), tap(() => { if (typeof localStorage !== 'undefined') { localStorage.clear(); } this.router.navigateByUrl('/auth/login'); })), { dispatch: false });
+  logoutSuccess$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.logoutSuccess), tap(() => {
+    // Limpiar específicamente todas las claves de autenticación
+    if (typeof localStorage !== 'undefined') {
+      // Eliminar todas las claves de autenticación específicas
+      const keysToRemove = [
+        'vendix_auth_state',
+        'access_token',
+        'refresh_token',
+        'vendix_user_info',
+        'user_settings',
+        'permissions',
+        'roles'
+      ];
+
+      keysToRemove.forEach(key => localStorage.removeItem(key));
+
+      // Establecer bandera temporal para prevenir restauración automática
+      localStorage.setItem('vendix_logged_out_recently', Date.now().toString());
+
+      // Limpiar estado del store completamente
+      this.store.dispatch(AuthActions.clearAuthState());
+    }
+    this.router.navigateByUrl('/auth/login');
+  })), { dispatch: false });
   refreshToken$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.refreshToken), mergeMap(() => this.authService.refreshToken().pipe(map(response => { const accessToken = response.data?.access_token || response.access_token; const refreshToken = response.data?.refresh_token || response.refresh_token; if (!accessToken) throw new Error('Invalid token response'); return AuthActions.refreshTokenSuccess({ tokens: { accessToken, refreshToken: refreshToken || this.authFacade.getTokens()?.refreshToken || '' } }); }), catchError(error => of(AuthActions.refreshTokenFailure({ error: normalizeApiPayload(error) })))))));
   loadUser$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.loadUser), map(() => { const user = this.authFacade.getCurrentUser(); if (user) { return AuthActions.loadUserSuccess({ user }); } else { return AuthActions.loadUserFailure({ error: 'No user found in state' }); } })));
   checkAuthStatus$ = createEffect(() => this.actions$.pipe(ofType(AuthActions.checkAuthStatus), map(() => { try { const authState = localStorage.getItem('vendix_auth_state'); if (authState) { const parsedState = JSON.parse(authState); if (parsedState.user && parsedState.tokens?.accessToken) { return AuthActions.restoreAuthState({ user: parsedState.user, tokens: parsedState.tokens, permissions: parsedState.permissions || [], roles: parsedState.roles || [] }); } } } catch (error) { localStorage.removeItem('vendix_auth_state'); } return AuthActions.clearAuthState(); })));
