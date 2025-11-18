@@ -1,0 +1,138 @@
+<div class="space-y-6">
+  <!-- Stats Cards -->
+  <app-product-stats [stats]="stats"></app-product-stats>
+
+  <!-- Products List -->
+  <div class="bg-surface rounded-card shadow-card border border-border">
+    <div class="px-6 py-4 border-b border-border">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            All Products ({{ products.length }})
+          </h2>
+        </div>
+
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
+          <!-- Input de búsqueda compacto -->
+          <app-inputsearch
+            class="w-full sm:w-64"
+            size="sm"
+            placeholder="Search products..."
+            [debounceTime]="1000"
+            (searchChange)="onSearchChange($event)"
+          ></app-inputsearch>
+
+          <!-- Filtro de estado -->
+          <select
+            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+            (change)="onStateChange($event)"
+            [value]="selectedState"
+          >
+            <option value="">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="archived">Archived</option>
+          </select>
+
+          <!-- Filtro de categoría -->
+          <select
+            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+            (change)="onCategoryChange($event)"
+            [value]="selectedCategory"
+          >
+            <option value="">All Categories</option>
+            <option *ngFor="let category of categories" [value]="category.id">
+              {{ category.name }}
+            </option>
+          </select>
+
+          <!-- Filtro de marca -->
+          <select
+            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+            (change)="onBrandChange($event)"
+            [value]="selectedBrand"
+          >
+            <option value="">All Brands</option>
+            <option *ngFor="let brand of brands" [value]="brand.id">
+              {{ brand.name }}
+            </option>
+          </select>
+
+          <div class="flex gap-2 items-center">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshProducts()"
+              [disabled]="isLoading"
+              title="Refresh"
+            >
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="openCreateProductModal()"
+              title="New Product"
+            >
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <span class="hidden sm:inline">New Product</span>
+            </app-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="p-8 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Loading products...</p>
+    </div>
+
+    <!-- Empty State -->
+    <app-product-empty-state
+      *ngIf="!isLoading && products.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      [showAdditionalActions]="hasFilters"
+      (actionClick)="openCreateProductModal()"
+      (refreshClick)="refreshProducts()"
+      (clearFiltersClick)="clearFilters()"
+    >
+    </app-product-empty-state>
+
+    <!-- Products Table -->
+    <div *ngIf="!isLoading && products.length > 0" class="p-6">
+      <app-table
+        [data]="products"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [loading]="isLoading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onTableSort($event)"
+        (rowClick)="viewProduct($event)"
+      >
+      </app-table>
+    </div>
+  </div>
+
+  <!-- Create Product Modal -->
+  <app-product-create-modal
+    [isOpen]="isCreateModalOpen"
+    [isSubmitting]="isCreatingProduct"
+    (openChange)="onCreateModalChange($event)"
+    (submit)="createProduct($event)"
+    (cancel)="onCreateModalCancel()"
+  ></app-product-create-modal>
+
+  <!-- Edit Product Modal -->
+  <!-- TODO: Create edit modal component when needed -->
+</div>

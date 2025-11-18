@@ -6,8 +6,8 @@ import { PrismaService } from '../../../prisma/prisma.service';
 
 export interface JwtPayload {
   sub: number; // user id
-  organizationId: number; // ✅ Scope de organización del token
-  storeId?: number | null; // ✅ Scope de tienda del token (opcional)
+  organization_id: number; // ✅ Scope de organización del token
+  store_id?: number | null; // ✅ Scope de tienda del token (opcional)
 }
 
 @Injectable()
@@ -76,8 +76,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         first_name: user.first_name,
         last_name: user.last_name,
         fullName: `${user.first_name} ${user.last_name}`,
-        organization_id: payload.organizationId, // ✅ Del TOKEN
-        store_id: payload.storeId || null, // ✅ Del TOKEN
+        organization_id: payload.organization_id, // ✅ Del TOKEN - Corregido
+        store_id: payload.store_id || null, // ✅ Del TOKEN - Corregido
         user_roles: user.user_roles, // ✅ Mantener para el middleware
         roles: user.user_roles.map((ur) => ur.roles?.name || ''),
         permissions: user.user_roles.flatMap(

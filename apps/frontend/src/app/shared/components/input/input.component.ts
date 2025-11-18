@@ -65,6 +65,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [disabled]="disabled"
           [readonly]="readonly"
           [value]="value"
+          [step]="step"
           [class]="inputClasses"
           (input)="onInput($event)"
           (blur)="onBlur()"
@@ -115,6 +116,7 @@ export class InputComponent implements ControlValueAccessor {
   @Input() suffixClickable = false;
   @Input() customClasses = '';
   @Input() control?: AbstractControl | null;
+  @Input() step?: string;
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();

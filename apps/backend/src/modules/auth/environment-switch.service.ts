@@ -61,7 +61,7 @@ export class EnvironmentSwitchService {
     // Verificar que el usuario tenga los roles necesarios
     const userRoles = user.user_roles.map((ur) => ur.roles.name);
 
-    let storeId = null;
+    let store_id = null;
     if (targetEnvironment === 'STORE_ADMIN') {
       const hasStoreRole =
         userRoles.includes('store_admin') ||
@@ -105,7 +105,7 @@ export class EnvironmentSwitchService {
         throw new UnauthorizedException('No tienes acceso a esta tienda');
       }
 
-      storeId = store.id;
+      store_id = store.id;
     }
 
     if (targetEnvironment === 'ORG_ADMIN') {
@@ -122,20 +122,24 @@ export class EnvironmentSwitchService {
     }
 
     // Generar tokens con scope específico para el cambio de entorno
+    // Usar el MISMO formato que auth.service.ts para que el JwtStrategy funcione correctamente
+    let organization_id: number;
+    if (store_id) {
+      // Switch a STORE_ADMIN: usar la org del store seleccionado
+      const store = await this.prismaService.stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id || user.organization_id;
+    } else {
+      // Switch a ORG_ADMIN: volver a la org original del usuario
+      organization_id = user.organization_id;
+    }
+
     const payload = {
       sub: user.id,
-      email: user.email,
-      environment: targetEnvironment,
-      storeSlug: storeSlug,
-      organizationId: storeId
-        ? (
-            await this.prismaService.stores.findUnique({
-              where: { id: storeId },
-              select: { organization_id: true },
-            })
-          )?.organization_id || user.organization_id
-        : user.organization_id,
-      storeId: storeId,
+      organization_id: organization_id, // ✅ snake_case como en auth.service.ts
+      store_id: store_id,               // ✅ snake_case como en auth.service.ts
     };
 
     const accessToken = this.jwtService.sign(payload, {

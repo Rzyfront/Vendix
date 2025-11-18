@@ -4,22 +4,31 @@ import { AuthGuard } from '../../core/guards/auth.guard';
 export const storeAdminRoutes: Routes = [
   {
     path: 'admin',
-    loadComponent: () => import('../../private/layouts/store-admin/store-admin-layout.component').then(c => c.StoreAdminLayoutComponent),
+    loadComponent: () =>
+      import(
+        '../../private/layouts/store-admin/store-admin-layout.component'
+      ).then((c) => c.StoreAdminLayoutComponent),
     canActivate: [AuthGuard],
     children: [
       {
         path: '',
         pathMatch: 'full',
-        redirectTo: 'dashboard'
+        redirectTo: 'dashboard',
       },
       {
         path: 'dashboard',
-        loadComponent: () => import('../../private/modules/store/dashboard/dashboard.component').then(c => c.DashboardComponent)
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/dashboard/dashboard.component'
+          ).then((c) => c.DashboardComponent),
       },
-        // POS Routes
+      // POS Routes
       {
         path: 'pos',
-        loadComponent: () => import('../../private/modules/store/pos/pos.component').then(c => c.PosComponent)
+        loadComponent: () =>
+          import('../../private/modules/store/pos/pos.component').then(
+            (c) => c.PosComponent,
+          ),
       },
       // Products Routes
       {
@@ -28,21 +37,19 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            loadComponent: () => import('../../private/modules/store/products/products.component').then(c => c.ProductsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/components/product-list/product-list.component'
+              ).then((c) => c.ProductListComponent),
           },
           {
-            path: 'all',
-            loadComponent: () => import('../../private/modules/store/products/all/all-products.component').then(c => c.AllProductsComponent)
+            path: ':id',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/components/product-details/product-details.component'
+              ).then((c) => c.ProductDetailsComponent),
           },
-          {
-            path: 'categories',
-            loadComponent: () => import('../../private/modules/store/products/categories/categories.component').then(c => c.CategoriesComponent)
-          },
-          {
-            path: 'inventory',
-            loadComponent: () => import('../../private/modules/store/products/inventory/inventory.component').then(c => c.InventoryComponent)
-          }
-        ]
+        ],
       },
       // Orders Routes
       {
@@ -51,17 +58,23 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'list'
+            redirectTo: 'list',
           },
           {
             path: 'list',
-            loadComponent: () => import('../../private/modules/store/orders/list/orders-list.component').then(c => c.OrdersListComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/list/orders-list.component'
+              ).then((c) => c.OrdersListComponent),
           },
           {
             path: ':id',
-            loadComponent: () => import('../../private/modules/store/orders/details/order-details.component').then(c => c.OrderDetailsComponent)
-          }
-        ]
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/details/order-details.component'
+              ).then((c) => c.OrderDetailsComponent),
+          },
+        ],
       },
       // Customers Routes
       {
@@ -70,21 +83,30 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'all'
+            redirectTo: 'all',
           },
           {
             path: 'all',
-            loadComponent: () => import('../../private/modules/store/customers/all/all-customers.component').then(c => c.AllCustomersComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/customers/all/all-customers.component'
+              ).then((c) => c.AllCustomersComponent),
           },
           {
             path: ':id',
-            loadComponent: () => import('../../private/modules/store/customers/details/customer-details.component').then(c => c.CustomerDetailsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/customers/details/customer-details.component'
+              ).then((c) => c.CustomerDetailsComponent),
           },
           {
             path: 'reviews',
-            loadComponent: () => import('../../private/modules/store/customers/reviews/reviews.component').then(c => c.ReviewsComponent)
-          }
-        ]
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/customers/reviews/reviews.component'
+              ).then((c) => c.ReviewsComponent),
+          },
+        ],
       },
       // Marketing Routes
       {
@@ -93,17 +115,23 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'promotions'
+            redirectTo: 'promotions',
           },
           {
             path: 'promotions',
-            loadComponent: () => import('../../private/modules/store/marketing/promotions/promotions.component').then(c => c.PromotionsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/marketing/promotions/promotions.component'
+              ).then((c) => c.PromotionsComponent),
           },
           {
             path: 'coupons',
-            loadComponent: () => import('../../private/modules/store/marketing/coupons/coupons.component').then(c => c.CouponsComponent)
-          }
-        ]
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/marketing/coupons/coupons.component'
+              ).then((c) => c.CouponsComponent),
+          },
+        ],
       },
       // Analytics Routes
       {
@@ -112,21 +140,30 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'sales'
+            redirectTo: 'sales',
           },
           {
             path: 'sales',
-            loadComponent: () => import('../../private/modules/store/analytics/sales/sales-analytics.component').then(c => c.SalesAnalyticsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/analytics/sales/sales-analytics.component'
+              ).then((c) => c.SalesAnalyticsComponent),
           },
           {
             path: 'traffic',
-            loadComponent: () => import('../../private/modules/store/analytics/traffic/traffic-analytics.component').then(c => c.TrafficAnalyticsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/analytics/traffic/traffic-analytics.component'
+              ).then((c) => c.TrafficAnalyticsComponent),
           },
           {
             path: 'performance',
-            loadComponent: () => import('../../private/modules/store/analytics/performance/performance-analytics.component').then(c => c.PerformanceAnalyticsComponent)
-          }
-        ]
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/analytics/performance/performance-analytics.component'
+              ).then((c) => c.PerformanceAnalyticsComponent),
+          },
+        ],
       },
       // Settings Routes
       {
@@ -135,23 +172,31 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'general'
+            redirectTo: 'general',
           },
           {
             path: 'general',
-            loadComponent: () => import('../../private/modules/store/settings/general/general-settings.component').then(c => c.GeneralSettingsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/general/general-settings.component'
+              ).then((c) => c.GeneralSettingsComponent),
           },
           {
             path: 'appearance',
-            loadComponent: () => import('../../private/modules/store/settings/appearance/appearance-settings.component').then(c => c.AppearanceSettingsComponent)
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/appearance/appearance-settings.component'
+              ).then((c) => c.AppearanceSettingsComponent),
           },
           {
             path: 'security',
-            loadComponent: () => import('../../private/modules/store/settings/security/security-settings.component').then(c => c.SecuritySettingsComponent)
-          }
-        ]
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/security/security-settings.component'
+              ).then((c) => c.SecuritySettingsComponent),
+          },
+        ],
       },
-    
-    ]
-  }
+    ],
+  },
 ];

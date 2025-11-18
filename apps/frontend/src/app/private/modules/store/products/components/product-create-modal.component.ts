@@ -5,17 +5,26 @@ import {
   FormGroup,
   ReactiveFormsModule,
   Validators,
+  FormArray,
 } from '@angular/forms';
 import {
   ModalComponent,
   ButtonComponent,
   InputComponent,
-  InputType,
   ToastService,
   IconComponent,
+  SelectorComponent,
+  SelectorOption,
 } from '../../../../../shared/components';
-import { CreateProductDto } from '../interfaces';
+import {
+  CreateProductDto,
+  CreateProductImageDto,
+  ProductCategory,
+  Brand,
+} from '../interfaces';
 import { ProductsService } from '../services/products.service';
+import { CategoriesService } from '../services/categories.service';
+import { BrandsService } from '../services/brands.service';
 
 @Component({
   selector: 'app-product-create-modal',
@@ -27,18 +36,24 @@ import { ProductsService } from '../services/products.service';
     ButtonComponent,
     InputComponent,
     IconComponent,
+    SelectorComponent,
   ],
   template: `
     <app-modal
       [size]="'lg'"
       [title]="'Create New Product'"
-      [isOpen]="show"
-      (closed)="onClose()"
+      [isOpen]="isOpen"
+      (closed)="onCancel()"
     >
       <form [formGroup]="productForm" class="space-y-6">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-medium text-gray-900">Basic Information</h3>
+          <h3
+            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
+          >
+            <app-icon name="package" [size]="20" class="mr-2"></app-icon>
+            Basic Information
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -70,13 +85,13 @@ import { ProductsService } from '../services/products.service';
           </app-input>
 
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2"
-              >Description</label
-            >
+            <label class="block text-sm font-medium text-gray-700 mb-2">
+              Description
+            </label>
             <textarea
               formControlName="description"
-              rows="3"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows="4"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
               placeholder="Enter product description"
             >
             </textarea>
@@ -88,7 +103,12 @@ import { ProductsService } from '../services/products.service';
 
         <!-- Pricing and Inventory -->
         <div class="space-y-4">
-          <h3 class="text-lg font-medium text-gray-900">Pricing & Inventory</h3>
+          <h3
+            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
+          >
+            <app-icon name="dollar-sign" [size]="20" class="mr-2"></app-icon>
+            Pricing & Inventory
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -99,6 +119,7 @@ import { ProductsService } from '../services/products.service';
               [error]="getErrorMessage('base_price')"
               [required]="true"
               [helperText]="'Base price without taxes'"
+              [step]="'0.01'"
             >
             </app-input>
 
@@ -114,51 +135,157 @@ import { ProductsService } from '../services/products.service';
           </div>
         </div>
 
-        <!-- Categories -->
+        <!-- Categories and Brand -->
         <div class="space-y-4">
-          <h3 class="text-lg font-medium text-gray-900">Categories</h3>
+          <h3
+            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
+          >
+            <app-icon name="tag" [size]="20" class="mr-2"></app-icon>
+            Categories & Brand
+          </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Category ID"
-              type="number"
-              placeholder="Enter category ID"
+            <app-selector
+              label="Primary Category"
+              placeholder="Select a category"
+              [options]="categoryOptions"
               formControlName="category_id"
-              [error]="getErrorMessage('category_id')"
-              [helperText]="'Primary category'"
+              [helpText]="'Primary product category'"
+              [errorText]="getErrorMessage('category_id')"
             >
-            </app-input>
+            </app-selector>
 
-            <app-input
-              label="Brand ID"
-              type="number"
-              placeholder="Enter brand ID"
+            <app-selector
+              label="Brand"
+              placeholder="Select a brand"
+              [options]="brandOptions"
               formControlName="brand_id"
-              [error]="getErrorMessage('brand_id')"
-              [helperText]="'Brand (optional)'"
+              [helpText]="'Product brand (optional)'"
+              [errorText]="getErrorMessage('brand_id')"
             >
-            </app-input>
+            </app-selector>
+          </div>
+        </div>
+
+        <!-- Product Images -->
+        <div class="space-y-4">
+          <h3
+            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
+          >
+            <app-icon name="image" [size]="20" class="mr-2"></app-icon>
+            Product Images
+          </h3>
+
+          <div class="space-y-4">
+            <!-- Image URL Input -->
+            <div class="flex gap-2">
+              <app-input
+                label="Add Image URL"
+                placeholder="https://example.com/image.jpg"
+                formControlName="newImageUrl"
+                [helperText]="'Enter image URL or use the file upload below'"
+                class="flex-1"
+              >
+              </app-input>
+              <app-button
+                variant="outline"
+                (clicked)="addImageUrl()"
+                [disabled]="!productForm.get('newImageUrl')?.value"
+                class="mt-6"
+              >
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                Add
+              </app-button>
+            </div>
+
+            <!-- File Upload -->
+            <div
+              class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors"
+            >
+              <app-icon
+                name="upload"
+                [size]="48"
+                class="mx-auto text-gray-400 mb-4"
+              ></app-icon>
+              <p class="text-sm text-gray-600 mb-2">
+                Drag and drop images here, or click to select files
+              </p>
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                (change)="onFileSelect($event)"
+                class="hidden"
+                #fileInput
+              />
+              <app-button
+                variant="outline"
+                (clicked)="fileInput.click()"
+                type="button"
+              >
+                <app-icon name="folder-open" [size]="16" slot="icon"></app-icon>
+                Select Files
+              </app-button>
+            </div>
+
+            <!-- Image Preview -->
+            @if (imageUrls.length > 0) {
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                @for (imageUrl of imageUrls; track imageUrl; let i = $index) {
+                  <div class="relative group">
+                    <img
+                      [src]="imageUrl"
+                      [alt]="'Product image ' + (i + 1)"
+                      class="w-full h-32 object-cover rounded-lg border border-gray-200"
+                      (error)="onImageError($event)"
+                    />
+                    <button
+                      type="button"
+                      (click)="removeImage(i)"
+                      class="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <app-icon name="x" [size]="16"></app-icon>
+                    </button>
+                    @if (i === 0) {
+                      <div
+                        class="absolute bottom-2 left-2 bg-blue-500 text-white text-xs px-2 py-1 rounded"
+                      >
+                        Main
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
           </div>
         </div>
       </form>
 
-      <div class="flex justify-end space-x-3 pt-6 border-t">
-        <app-button
-          variant="outline"
-          (clicked)="onClose()"
-          [disabled]="isSubmitting"
-        >
-          Cancel
-        </app-button>
-        <app-button
-          variant="primary"
-          (clicked)="onSubmit()"
-          [loading]="isSubmitting"
-          [disabled]="productForm.invalid"
-        >
-          <app-icon name="save" [size]="16" slot="icon"></app-icon>
-          Create Product
-        </app-button>
+      <div
+        class="flex justify-between items-center pt-6 border-t border-gray-200"
+      >
+        <div class="text-sm text-gray-500">
+          <app-icon name="info" [size]="14" class="mr-1"></app-icon>
+          Required fields are marked with *
+        </div>
+        <div class="flex space-x-3">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isSubmitting"
+          >
+            Cancel
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
+            [loading]="isSubmitting"
+            [disabled]="productForm.invalid"
+          >
+            <app-icon name="save" [size]="16" slot="icon"></app-icon>
+            Create Product
+          </app-button>
+        </div>
       </div>
     </app-modal>
   `,
@@ -171,18 +298,25 @@ import { ProductsService } from '../services/products.service';
   ],
 })
 export class ProductCreateModalComponent {
-  @Input() show = false;
-  @Output() closed = new EventEmitter<void>();
-  @Output() created = new EventEmitter<void>();
-  isSubmitting = false;
+  @Input() isOpen = false;
+  @Input() isSubmitting = false;
+  @Output() openChange = new EventEmitter<boolean>();
+  @Output() submit = new EventEmitter<any>();
+  @Output() cancel = new EventEmitter<void>();
   productForm: FormGroup;
+  imageUrls: string[] = [];
+  categoryOptions: SelectorOption[] = [];
+  brandOptions: SelectorOption[] = [];
 
   constructor(
     private fb: FormBuilder,
     private productsService: ProductsService,
+    private categoriesService: CategoriesService,
+    private brandsService: BrandsService,
     private toastService: ToastService,
   ) {
     this.productForm = this.createForm();
+    this.loadCategoriesAndBrands();
   }
 
   private createForm(): FormGroup {
@@ -202,41 +336,123 @@ export class ProductCreateModalComponent {
       stock_quantity: [0, [Validators.min(0)]],
       category_id: [null],
       brand_id: [null],
+      newImageUrl: [''],
     });
   }
 
-  open() {
-    this.show = true;
-    this.productForm.reset({
-      name: '',
-      slug: '',
-      description: '',
-      base_price: 0,
-      sku: '',
-      stock_quantity: 0,
-      category_id: null,
-      brand_id: null,
+  private loadCategoriesAndBrands(): void {
+    // Load categories
+    this.categoriesService.getCategories().subscribe({
+      next: (categories: ProductCategory[]) => {
+        this.categoryOptions = categories.map((cat: ProductCategory) => ({
+          value: cat.id,
+          label: cat.name,
+          description: cat.description,
+        }));
+      },
+      error: (error: any) => {
+        console.error('Error loading categories:', error);
+        // Fallback options
+        this.categoryOptions = [
+          { value: 1, label: 'Electronics' },
+          { value: 2, label: 'Clothing' },
+          { value: 3, label: 'Food & Beverages' },
+        ];
+      },
+    });
+
+    // Load brands
+    this.brandsService.getBrands().subscribe({
+      next: (brands: Brand[]) => {
+        this.brandOptions = brands.map((brand: Brand) => ({
+          value: brand.id,
+          label: brand.name,
+          description: brand.description,
+        }));
+      },
+      error: (error: any) => {
+        console.error('Error loading brands:', error);
+        // Fallback options
+        this.brandOptions = [
+          { value: 1, label: 'Generic Brand' },
+          { value: 2, label: 'Premium Brand' },
+        ];
+      },
     });
   }
 
-  close() {
-    this.show = false;
-    this.productForm.reset();
+  onCancel() {
+    this.openChange.emit(false);
+    this.cancel.emit();
   }
 
-  onClose() {
-    this.close();
-    this.closed.emit();
+  addImageUrl(): void {
+    const urlControl = this.productForm.get('newImageUrl');
+    const url = urlControl?.value?.trim();
+
+    if (url && this.isValidUrl(url)) {
+      this.imageUrls.push(url);
+      urlControl?.setValue('');
+      this.toastService.success('Image added successfully');
+    } else {
+      this.toastService.error('Please enter a valid image URL');
+    }
+  }
+
+  onFileSelect(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+
+    if (files) {
+      Array.from(files).forEach((file) => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const result = e.target?.result as string;
+            this.imageUrls.push(result);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+      input.value = '';
+    }
+  }
+
+  removeImage(index: number): void {
+    this.imageUrls.splice(index, 1);
+  }
+
+  onImageError(event: Event): void {
+    const img = event.target as HTMLImageElement;
+    img.src =
+      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMiA2VjEwTDEwIDhMMTIgNlpNMTIgNlYxMEwxNCA4TDEyIDZaIiBmaWxsPSIjOUNBM0FGIi8+CjxwYXRoIGQ9Ik0xMiAxNFYxOEwxMCAxNkwxMiAxNFpNMTIgMTRWMThMMTQgMTZMMTIgMTRaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPgo=';
+  }
+
+  private isValidUrl(string: string): boolean {
+    try {
+      new URL(string);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   onSubmit() {
     if (this.productForm.invalid || this.isSubmitting) {
+      this.markFormGroupTouched(this.productForm);
       return;
     }
 
     this.isSubmitting = true;
 
     const formValue = this.productForm.value;
+    const images: CreateProductImageDto[] = this.imageUrls.map(
+      (url, index) => ({
+        image_url: url,
+        is_main: index === 0,
+      }),
+    );
+
     const createProductDto: CreateProductDto = {
       name: formValue.name,
       slug: formValue.slug || undefined,
@@ -249,20 +465,28 @@ export class ProductCreateModalComponent {
           : undefined,
       category_id: formValue.category_id || undefined,
       brand_id: formValue.brand_id || undefined,
+      images: images.length > 0 ? images : undefined,
     };
 
     this.productsService.createProduct(createProductDto).subscribe({
       next: () => {
         this.toastService.success('Product created successfully!');
-        this.isSubmitting = false;
-        this.close();
-        this.created.emit();
+        this.submit.emit(createProductDto);
+        this.openChange.emit(false);
       },
       error: (error) => {
-        this.isSubmitting = false;
         this.toastService.error(error || 'Error creating product');
         console.error('Error creating product:', error);
       },
+    });
+  }
+
+  private markFormGroupTouched(formGroup: FormGroup): void {
+    Object.values(formGroup.controls).forEach((control) => {
+      control.markAsTouched();
+      if (control instanceof FormGroup) {
+        this.markFormGroupTouched(control);
+      }
     });
   }
 
@@ -321,5 +545,8 @@ export class ProductCreateModalComponent {
   }
   get brand_id() {
     return this.productForm.get('brand_id');
+  }
+  get newImageUrl() {
+    return this.productForm.get('newImageUrl');
   }
 }

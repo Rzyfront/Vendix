@@ -2938,7 +2938,7 @@ export class AuthService {
     // Verificar que el usuario tenga los roles necesarios
     const userRoles = user.user_roles.map((ur) => ur.roles.name);
 
-    let storeId = null;
+    let store_id = null;
     if (targetEnvironment === 'STORE_ADMIN') {
       const hasStoreRole =
         userRoles.includes('store_admin') ||
@@ -2976,7 +2976,7 @@ export class AuthService {
         throw new UnauthorizedException('No tienes acceso a esta tienda');
       }
 
-      storeId = store.id;
+      store_id = store.id;
     }
 
     if (targetEnvironment === 'ORG_ADMIN') {
@@ -2992,12 +2992,25 @@ export class AuthService {
       }
     }
 
-    // Generar tokens simples para el cambio de entorno
+    // Generar tokens con el MISMO formato que el JwtStrategy espera
+    // Usar el MISMO formato que generateTokens para consistencia total
+    let organization_id: number;
+    if (store_id) {
+      // Switch a STORE_ADMIN: usar la org del store seleccionado
+      const store = await this.prismaService.stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id || user.organization_id;
+    } else {
+      // Switch a ORG_ADMIN: volver a la org original del usuario
+      organization_id = user.organization_id;
+    }
+
     const payload = {
       sub: user.id,
-      email: user.email,
-      environment: targetEnvironment,
-      storeSlug: storeSlug,
+      organization_id: organization_id, // ✅ snake_case como en generateTokens
+      store_id: store_id,               // ✅ snake_case como en generateTokens
     };
 
     const accessToken = this.jwtService.sign(payload, {

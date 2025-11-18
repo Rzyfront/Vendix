@@ -178,4 +178,9 @@ export interface ProductStats {
   total_value: number;
   categories_count: number;
   brands_count: number;
+  products_without_images?: number;
+  productsGrowthRate?: number;
+  activeProductsGrowthRate?: number;
+  lowStockGrowthRate?: number;
+  noImagesGrowthRate?: number;
 }

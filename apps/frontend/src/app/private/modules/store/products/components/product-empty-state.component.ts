@@ -1,28 +1,62 @@
-import { Component, Input, EventEmitter, Output } from '@angular/core';
+import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {
-  ButtonComponent,
-  IconComponent,
-} from '../../../../../shared/components';
+import { ButtonComponent } from '../../../../../shared/components';
 
 @Component({
   selector: 'app-product-empty-state',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent],
   template: `
     <div class="text-center py-12">
+      <!-- Icon -->
       <div
-        class="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4"
+        class="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6"
       >
-        <app-icon name="package" [size]="32" class="text-gray-400"></app-icon>
+        <svg
+          class="w-12 h-12 text-gray-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+          ></path>
+        </svg>
       </div>
-      <h3 class="text-lg font-medium text-gray-900 mb-2">{{ title }}</h3>
-      <p class="text-gray-600 mb-6 max-w-md mx-auto">{{ description }}</p>
 
-      <div class="flex justify-center space-x-3" *ngIf="showAction">
-        <app-button variant="primary" (clicked)="actionClicked.emit()">
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-          {{ actionText }}
+      <!-- Title -->
+      <h3 class="text-lg font-medium text-gray-900 mb-2">
+        {{ title }}
+      </h3>
+
+      <!-- Description -->
+      <p class="text-gray-500 mb-6 max-w-md mx-auto">
+        {{ description }}
+      </p>
+
+      <!-- Actions -->
+      <div class="flex flex-col sm:flex-row gap-3 justify-center">
+        <app-button variant="primary" (clicked)="actionClick.emit()">
+          Create First Product
+        </app-button>
+
+        <app-button
+          variant="outline"
+          (clicked)="refreshClick.emit()"
+          *ngIf="showRefreshButton"
+        >
+          Refresh
+        </app-button>
+
+        <app-button
+          variant="ghost"
+          (clicked)="clearFiltersClick.emit()"
+          *ngIf="showAdditionalActions"
+        >
+          Clear Filters
         </app-button>
       </div>
     </div>
@@ -31,16 +65,17 @@ import {
     `
       :host {
         display: block;
-        width: 100%;
       }
     `,
   ],
 })
 export class ProductEmptyStateComponent {
   @Input() title = 'No products found';
-  @Input() description = 'Get started by creating your first product';
-  @Input() showAction = true;
-  @Input() actionText = 'Create Product';
+  @Input() description = 'Get started by creating your first product.';
+  @Input() showAdditionalActions = false;
+  @Input() showRefreshButton = true;
 
-  actionClicked = new EventEmitter<void>();
+  @Output() actionClick = new EventEmitter<void>();
+  @Output() refreshClick = new EventEmitter<void>();
+  @Output() clearFiltersClick = new EventEmitter<void>();
 }

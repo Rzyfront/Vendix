@@ -39,7 +39,9 @@ import { takeUntil } from 'rxjs/operators';
       <div
         class="main-content flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
-        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
+        [style.margin-left]="
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+        "
       >
         <!-- Header -->
         <app-header
@@ -95,19 +97,19 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeSlug$ = this.authFacade.userStoreSlug$;
   }
 
-    ngOnInit(): void {
-      // Check onboarding status when component initializes
-      this.checkOnboardingWithRoleValidation();
+  ngOnInit(): void {
+    // Check onboarding status when component initializes
+    this.checkOnboardingWithRoleValidation();
 
-      // Subscribe to onboarding needs and show modal instead of redirecting
-      this.authFacade.needsOnboarding$
-        .pipe(takeUntil(this.destroy$))
-        .subscribe((needsOnboarding: any) => {
-          // this.needsOnboarding = needsOnboarding;
-           this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
-          this.updateOnboardingModal();
-        });
-    }
+    // Subscribe to onboarding needs and show modal instead of redirecting
+    this.authFacade.needsOnboarding$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((needsOnboarding: any) => {
+        // this.needsOnboarding = needsOnboarding;
+        this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+        this.updateOnboardingModal();
+      });
+  }
 
   private checkOnboardingWithRoleValidation(): void {
     // Only proceed with onboarding logic if user is owner
@@ -125,7 +127,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     // this.needsOnboarding = !storeOnboarding;
     this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
     this.updateOnboardingModal();
-  }   
+  }
 
   private updateOnboardingModal(): void {
     // Double-check owner role before showing modal
@@ -173,23 +175,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Products',
       icon: 'package',
-      children: [
-        {
-          label: 'All Products',
-          icon: 'circle',
-          route: '/admin/products/all',
-        },
-        {
-          label: 'Categories',
-          icon: 'circle',
-          route: '/admin/products/categories',
-        },
-        {
-          label: 'Inventory',
-          icon: 'circle',
-          route: '/admin/products/inventory',
-        },
-      ],
+      route: '/admin/products',
     },
     {
       label: 'Orders',

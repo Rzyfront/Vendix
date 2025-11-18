@@ -1,255 +1,255 @@
-# Contexto de la App Vendix
+# Vendix App Context
 
-## Infraestructura
+## Infrastructure
 
-- Corre en Docker con contenedores: `vendix_postgres` (PostgreSQL), `vendix_backend` (NestJS), `vendix_frontend` (Angular).
-- Modo desarrollo con watch hot reload activado.
-- Nginx para configuración de subdominios y SSL.
+- Runs in Docker with containers: `vendix_postgres` (PostgreSQL), `vendix_backend` (NestJS), `vendix_frontend` (Angular).
+- Development mode with watch hot reload enabled.
+- Nginx for subdomain configuration and SSL.
 
-## Documentación
+## Documentation
 
-- Carpetas `doc/` en cada proyecto (backend, frontend) con documentación específica, incluyendo ADRs, guías de arquitectura y archivos .http para pruebas de API.
-- **Pruebas de API con Bruno**: Colección local en `bruno/` para testing de endpoints con configuración centralizada de URL base `api.vendix.com` y health check disponible.
+- `doc/` folders in each project (backend, frontend) with specific documentation, including ADRs, architecture guides, and .http files for API testing.
+- **API Testing with Bruno**: Local collection in `bruno/` for endpoint testing with centralized base URL configuration `api.vendix.com` and available health check.
 
-## Tecnologías
+## Technologies
 
-- Backend: NestJS corriendo en Node.js con Prisma ORM.
-- Prisma: ORM para modelado de datos, migraciones, generación automática de tipos y consultas eficientes. Configuración centralizada en `prisma/schema.prisma` y uso de clientes generados para acceso seguro a la base de datos.
-- Base de datos: PostgreSQL con migraciones y seed data.
-- Lenguaje: TypeScript en todo el proyecto.
+- Backend: NestJS running on Node.js with Prisma ORM.
+- Prisma: ORM for data modeling, migrations, automatic type generation, and efficient queries. Centralized configuration in `prisma/schema.prisma` and use of generated clients for secure database access.
+- Database: PostgreSQL with migrations and seed data.
+- Language: TypeScript throughout the project.
 
-## Convenciones de Código
+## Code Conventions !!IMPORTANT!!
 
-- Funciones: CamelCase (ej. `getUserData`).
-- Variables: snake_case (ej. `user_name`).
-- Clases: PascalCase (ej. `UserService`).
+- Functions: CamelCase (e.g., `getUserData`).
+- Variables: snake_case (e.g., `user_name`).
+- Classes: PascalCase (e.g., `UserService`).
 
-## Arquitectura
+## Architecture
 
-- Modular y reutilizable.
-- Multi-tenant: Soporte para dominios dinámicos, organizaciones, tiendas y usuarios.
-- Herramientas específicas se crean reutilizables en carpetas `utils/`.
+- Modular and reusable.
+- Multi-tenant: Support for dynamic domains, organizations, stores, and users.
+- Specific tools are created reusable in `utils/` folders.
 
 ## Backend
 
-- Se puede ver el build en modo watch con el comando: docker logs --tail 40 vendix_backend
-- Se maneja authenticacion globales en JWT desde el app.module.ts y se expluyen rutas publicas con @Public
-- Se manejan contextos automaticos globales en prisma service para organization_id y store_id y desde el app.module.ts
-- Se registrar permisos para rutas granularmente con @Permissions
+- You can watch the build in watch mode with the command: docker logs --tail 40 vendix_backend
+- Global JWT authentication is handled from app.module.ts and public routes are exposed with @Public
+- Automatic global contexts are handled in prisma service for organization_id and store_id and from app.module.ts
+- Permissions are registered for routes granularly with @Permissions
 
-## Front
+## Frontend
 
-- Se puede ver el build en modo watch con el comando: docker logs --tail 40 vendix_frontend
-- Se maneja un punto e entrada que resuelve el dominio para configurar y decidir que vista mostrar.
-- Se setea la configuracion de branding resuelta por el dominio.
-- Se usa tokens para mantener un estandar de estilos generales en la app @apps/frontend/src/styles.scss.
-- Se usan componentes reutilizables para la construccion de vistar y componentes llamados desde el index.ts de @apps/frontend/src/app/shared/components.
-- Se usa un gestor de estados global centralizado.
-- Se usa un guard para direccionar a layout de aplicacion especificas por rol.
-- Se usa Lucide para los iconos, con un componente Icon para modularidad.
+- You can watch the build in watch mode with the command: docker logs --tail 40 vendix_frontend
+- An entry point is managed that resolves the domain to configure and decide which view to display.
+- Branding configuration resolved by the domain is set.
+- Tokens are used to maintain a standard of general styles in the app @apps/frontend/src/styles.scss.
+- Reusable components are used for building views and components called from the index.ts of @apps/frontend/src/app/shared/components.
+- A centralized global state manager is used.
+- A guard is used to direct to specific application layouts by role.
+- Lucide is used for icons, with an Icon component for modularity.
 
-### Patrón Estándar de Desarrollo de Módulos
+### Standard Module Development Pattern
 
-Los módulos del frontend siguen una estructura estandarizada para mantener consistencia y facilitar el desarrollo:
+Frontend modules follow a standardized structure to maintain consistency and facilitate development:
 
-#### Estructura de Carpetas
+#### Folder Structure
 
 ```
 modules/
-└── [nombre-modulo]/
-    ├── [nombre-modulo].component.ts      # Componente principal
-    ├── [nombre-modulo].component.html   # Template (opcional, puede ser inline)
-    ├── [nombre-modulo].component.css    # Estilos específicos del componente
-    ├── [nombre-modulo].routes.ts        # Definición de rutas (opcional)
-    ├── index.ts                          # Exportaciones públicas del módulo
-    ├── components/                       # Componentes específicos del módulo
-    │   ├── index.ts                      # Exportación de componentes
-    │   ├── [nombre]-stats.component.ts   # Componente de estadísticas
-    │   ├── [nombre]-create-modal.component.ts
-    │   ├── [nombre]-edit-modal.component.ts
-    │   ├── [nombre]-empty-state.component.ts
-    │   └── [nombre]-pagination.component.ts
-    ├── services/                         # Lógica de negocio y API
-    │   └── [nombre].service.ts
-    └── interfaces/                       # Tipos y contratos de datos
-        └── [nombre].interface.ts
+└── [module-name]/
+    ├── [module-name].component.ts      # Main component
+    ├── [module-name].component.html   # Template (optional, can be inline)
+    ├── [module-name].component.css    # Component-specific styles
+    ├── [module-name].routes.ts        # Route definition (optional)
+    ├── index.ts                          # Public module exports
+    ├── components/                       # Module-specific components
+    │   ├── index.ts                      # Component exports
+    │   ├── [name]-stats.component.ts   # Statistics component
+    │   ├── [name]-create-modal.component.ts
+    │   ├── [name]-edit-modal.component.ts
+    │   ├── [name]-empty-state.component.ts
+    │   └── [name]-pagination.component.ts
+    ├── services/                         # Business logic and API
+    │   └── [name].service.ts
+    └── interfaces/                       # Types and data contracts
+        └── [name].interface.ts
 ```
 
-#### Componentes Principales
+#### Main Components
 
-- **Componente Principal**: Gestiona el estado general, carga de datos y coordinación
-- **Componentes de Estadísticas**: Muestran métricas relevantes del módulo
-- **Componentes Modales**: Para creación y edición de entidades
-- **Componente Empty State**: Mensaje cuando no hay datos
-- **Componente Paginación**: Manejo de paginación de resultados
+- **Main Component**: Manages overall state, data loading, and coordination
+- **Statistics Components**: Display relevant module metrics
+- **Modal Components**: For entity creation and editing
+- **Empty State Component**: Message when there is no data
+- **Pagination Component**: Handle result pagination
 
-#### Servicios
+#### Services
 
-- **Comunicación API**: Centralizan todas las llamadas HTTP al backend
-- **Gestión de Estado**: Manejan estados de carga con BehaviorSubject
-- **Mapeo de Datos**: Transforman respuestas de API a interfaces del frontend
-- **Manejo de Errores**: Implementan catchError y manejo consistente de errores
+- **API Communication**: Centralize all HTTP calls to the backend
+- **State Management**: Handle loading states with BehaviorSubject
+- **Data Mapping**: Transform API responses to frontend interfaces
+- **Error Handling**: Implement catchError and consistent error handling
 
 #### Interfaces
 
-- **Entidades Principales**: Definen la estructura de datos principales
-- **DTOs**: Para operaciones de creación y actualización
-- **Query DTOs**: Para filtros y parámetros de búsqueda
-- **Respuestas Paginadas**: Estructura estándar para respuestas con paginación
-- **Estadísticas**: Estructura para métricas del dashboard
+- **Main Entities**: Define main data structure
+- **DTOs**: For creation and update operations
+- **Query DTOs**: For filters and search parameters
+- **Paginated Responses**: Standard structure for paginated responses
+- **Statistics**: Structure for dashboard metrics
 
-#### Patrones de Implementación
+#### Implementation Patterns
 
-- **Standalone Components**: Todos los componentes son standalone con imports explícitos
-- **Reactive Forms**: Uso de FormBuilder para formularios con validación
-- **Observables**: Manejo de operaciones asíncronas con RxJS
-- **Desuscripción**: Gestión propera de suscripciones con ngOnDestroy
-- **Componentes Reutilizables**: Uso extensivo de componentes compartidos (TableComponent, ButtonComponent, etc.)
+- **Standalone Components**: All components are standalone with explicit imports
+- **Reactive Forms**: Use FormBuilder for forms with validation
+- **Observables**: Handle async operations with RxJS
+- **Unsubscription**: Proper subscription management with ngOnDestroy
+- **Reusable Components**: Extensive use of shared components (TableComponent, ButtonComponent, etc.)
 
-#### Estándares de Código
+#### Code Standards
 
-- **Nomenclatura**: Prefijo consistente para componentes del módulo
-- **Exportaciones**: Uso de index.ts para exportaciones limpias
-- **Tipado Fuerte**: Uso de TypeScript para todas las interfaces
-- **Manejo de Carga**: Estados de isLoading para mejor UX
-- **Notificaciones**: Uso de ToastService para feedback al usuario
+- **Nomenclature**: Consistent prefix for module components
+- **Exports**: Use index.ts for clean exports
+- **Strong Typing**: Use TypeScript for all interfaces
+- **Loading Handling**: isLoading states for better UX
+- **Notifications**: Use ToastService for user feedback
 
-### Patrón Estándar de Desarrollo y Uso de Componentes
+### Standard Component Development and Usage Pattern
 
-Los componentes compartidos siguen una arquitectura consistente para garantizar reutilización y mantenibilidad:
+Shared components follow a consistent architecture to ensure reusability and maintainability:
 
-#### Estructura de Componentes Compartidos
+#### Shared Components Structure
 
 ```
 shared/components/
-├── index.ts                          # Exportación centralizada de componentes y tipos
-└── [nombre-componente]/
-    ├── [nombre-componente].component.ts
-    ├── [nombre-componente].component.html (opcional)
-    ├── [nombre-componente].component.scss (opcional)
-    └── [nombre-componente].service.ts (si aplica)
+├── index.ts                          # Centralized export of components and types
+└── [component-name]/
+    ├── [component-name].component.ts
+    ├── [component-name].component.html (optional)
+    ├── [component-name].component.scss (optional)
+    └── [component-name].service.ts (if applicable)
 ```
 
-#### Principios de Diseño de Componentes
+#### Component Design Principles
 
-**1. Componentes Standalone**
+**1. Standalone Components**
 
-- Todos los componentes son standalone con imports explícitos
-- Sin dependencias de módulos Angular tradicionales
-- Mejor tree-shaking y rendimiento
+- All components are standalone with explicit imports
+- No dependencies on traditional Angular modules
+- Better tree-shaking and performance
 
-**2. Tipado Fuerte**
+**2. Strong Typing**
 
-- Definición de tipos exportados para configuración
-- Interfaces claras para props y eventos
-- Uso de genéricos cuando es aplicable
+- Exported type definitions for configuration
+- Clear interfaces for props and events
+- Use of generics when applicable
 
-**3. Configuración Flexible**
+**3. Flexible Configuration**
 
-- Props opcionales con valores por defecto sensibles
-- Múltiples variantes (size, variant, type)
-- Soporte para clases personalizadas
+- Optional props with sensible default values
+- Multiple variants (size, variant, type)
+- Support for custom classes
 
-#### Componentes Principales y Patrones
+#### Main Components and Patterns
 
 **ButtonComponent**
 
-- Variantes: primary, secondary, outline, ghost, danger
-- Tamaños: sm, md, lg
-- Estados: loading, disabled
-- Slots para iconos y contenido personalizado
+- Variants: primary, secondary, outline, ghost, danger
+- Sizes: sm, md, lg
+- States: loading, disabled
+- Slots for icons and custom content
 
 **TableComponent**
 
-- Configuración mediante interfaces TableColumn y TableAction
-- Soporte para sorting, paginación, acciones personalizadas
-- Templates para celdas personalizadas
-- Badges con configuración flexible
+- Configuration via TableColumn and TableAction interfaces
+- Support for sorting, pagination, custom actions
+- Templates for custom cells
+- Badges with flexible configuration
 
 **ModalComponent**
 
-- Tamaños predefinidos: sm, md, lg
-- Control de backdrop y escape key
-- Slots para header, content y footer
-- Gestión automática de scroll del body
+- Predefined sizes: sm, md, lg
+- Backdrop and escape key control
+- Slots for header, content, and footer
+- Automatic body scroll management
 
 **InputComponent / InputsearchComponent**
 
-- Implementación de ControlValueAccessor
-- Validación integrada con Reactive Forms
-- Estados de error y ayuda
-- Soporte para iconos prefix/suffix
+- ControlValueAccessor implementation
+- Integrated validation with Reactive Forms
+- Error and help states
+- Support for prefix/suffix icons
 
 **IconComponent**
 
-- Iconos SVG inline sin dependencias externas
-- Tamaño y color configurables
-- Catálogo extenso de iconos comunes
+- Inline SVG icons without external dependencies
+- Configurable size and color
+- Extensive catalog of common icons
 
-#### Servicios Compartidos
+#### Shared Services
 
 **ToastService**
 
-- Sistema de notificaciones no intrusivo
-- Variantes: success, error, warning, info
-- Gestión automática de duración y animaciones
-- API simple con métodos helpers
+- Non-intrusive notification system
+- Variants: success, error, warning, info
+- Automatic duration and animation management
+- Simple API with helper methods
 
 **DialogService**
 
-- Creación dinámica de modales de confirmación
-- Promises para manejo asíncrono
-- Configuración flexible de textos y variantes
+- Dynamic creation of confirmation modals
+- Promises for async handling
+- Flexible configuration of texts and variants
 
-#### Patrones de Implementación
+#### Implementation Patterns
 
 **1. ControlValueAccessor**
 
-- Componentes de formulario implementan esta interfaz
-- Integración transparente con Reactive Forms
-- Manejo propero de estado y validación
+- Form components implement this interface
+- Transparent integration with Reactive Forms
+- Proper state and validation handling
 
-**2. Emisión de Eventos**
+**2. Event Emission**
 
-- Nomenclatura consistente: clicked, change, focus, blur
-- Uso de EventEmitter para comunicación padre-hijo
-- Eventos tipados para mejor autocompletado
+- Consistent nomenclature: clicked, change, focus, blur
+- Use of EventEmitter for parent-child communication
+- Typed events for better autocompletion
 
-**3. Gestión de Clases CSS**
+**3. CSS Class Management**
 
-- Métodos getter para clases dinámicas
-- Composición de clases base + estado + tamaño
-- Soporte para clases personalizadas
+- Getter methods for dynamic classes
+- Composition of base + state + size classes
+- Support for custom classes
 
-**4. Slots y Proyección de Contenido**
+**4. Slots and Content Projection**
 
-- Uso de ng-content para contenido flexible
-- Slots nombrados para estructuras complejas
-- Contenido por defecto con override opcional
+- Use of ng-content for flexible content
+- Named slots for complex structures
+- Default content with optional override
 
-#### Estándares de Nomenclatura
+#### Nomenclature Standards
 
-**Selectores**
+**Selectors**
 
-- Prefijo `app-` para todos los componentes
-- Nombres descriptivos en kebab-case
-- Ej: `app-button`, `app-inputsearch`, `app-table`
+- `app-` prefix for all components
+- Descriptive names in kebab-case
+- Example: `app-button`, `app-inputsearch`, `app-table`
 
-**Tipos Exportados**
+**Exported Types**
 
-- Nombres descriptivos con sufijo de tipo
-- Ej: `ButtonVariant`, `TableSize`, `ModalSize`
-- Agrupación lógica por componente
+- Descriptive names with type suffix
+- Example: `ButtonVariant`, `TableSize`, `ModalSize`
+- Logical grouping by component
 
-**Eventos**
+**Events**
 
-- Verbos en pasado para eventos completados
-- Ej: `clicked`, `changed`, `opened`, `closed`
-- Sustantivos para eventos de estado: `focus`, `blur`
+- Past tense verbs for completed events
+- Example: `clicked`, `changed`, `opened`, `closed`
+- Nouns for state events: `focus`, `blur`
 
-#### Uso en Módulos
+#### Usage in Modules
 
-**Importación**
+**Import**
 
 ```typescript
 import {
@@ -261,14 +261,14 @@ import {
 } from "../../../../shared/components/index";
 ```
 
-**Configuración Típica**
+**Typical Configuration**
 
 ```typescript
 // Table configuration
 tableColumns: TableColumn[] = [
   {
     key: 'name',
-    label: 'Nombre',
+    label: 'Name',
     sortable: true,
     transform: (value) => value.toUpperCase()
   }
@@ -281,20 +281,20 @@ tableColumns: TableColumn[] = [
   (clicked)="handleClick()"
   [loading]="isLoading">
   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-  Nuevo
+  New
 </app-button>
 ```
 
-#### Consideraciones de Accesibilidad
+#### Accessibility Considerations
 
-- Atributos ARIA en componentes interactivos
-- Navegación por teclado en modales y tablas
-- Contraste de colores según WCAG
-- Roles semánticos apropiados
+- ARIA attributes on interactive components
+- Keyboard navigation in modals and tables
+- Color contrast according to WCAG
+- Appropriate semantic roles
 
-#### Rendimiento y Optimización
+#### Performance and Optimization
 
-- ChangeDetectionStrategy.OnPush donde aplica
-- Evitar cálculos complejos en templates
-- Uso de trackBy en listas grandes
-- Lazy loading de componentes pesados
+- ChangeDetectionStrategy.OnPush where applicable
+- Avoid complex calculations in templates
+- Use trackBy on large lists
+- Lazy loading of heavy components
