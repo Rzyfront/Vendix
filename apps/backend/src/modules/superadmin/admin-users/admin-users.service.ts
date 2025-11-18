@@ -5,7 +5,11 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from 'src/modules/users/dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserQueryDto,
+} from 'src/modules/users/dto';
 import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 

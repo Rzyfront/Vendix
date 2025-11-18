@@ -51,22 +51,11 @@ export class OrganizationStoresService {
   constructor(private http: HttpClient) {}
 
   /**
-   * Get current organization ID from auth service or localStorage
-   */
-  private getCurrentOrganizationId(): number {
-    // This should get the current organization ID from auth service
-    // For now, we'll implement a basic version
-    const userOrg = localStorage.getItem('currentOrganizationId');
-    return userOrg ? parseInt(userOrg, 10) : 1; // Fallback to 1 for testing
-  }
-
-  /**
    * Get all stores for current organization with pagination and filtering
    */
   getStores(
     query?: Omit<StoreQueryDto, 'organization_id'>,
   ): Observable<PaginatedResponse<StoreListItem[]>> {
-    const organizationId = this.getCurrentOrganizationId();
     let params = new HttpParams();
 
     if (query) {
@@ -77,40 +66,37 @@ export class OrganizationStoresService {
       });
     }
 
-    // Always filter by current organization
-    params = params.set('organization_id', organizationId.toString());
-
+    // Organization scoping is handled automatically by backend
     return this.http.get<PaginatedResponse<StoreListItem[]>>(
       `${this.apiUrl}/stores`,
-      { params }
+      { params },
     );
-  }
-
-  /**
-   * Get store by ID (only if belongs to current organization)
-   */
-  getStore(id: number): Observable<ApiResponse<Store>> {
-    return this.http.get<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`);
   }
 
   /**
    * Create a new store for the current organization
    */
-  createStore(storeData: Omit<CreateStoreDto, 'organization_id'>): Observable<ApiResponse<Store>> {
-    const organizationId = this.getCurrentOrganizationId();
-    const createData: CreateStoreDto = {
-      ...storeData,
-      organization_id: organizationId,
-    };
-
-    return this.http.post<ApiResponse<Store>>(`${this.apiUrl}/stores`, createData);
+  createStore(
+    storeData: Omit<CreateStoreDto, 'organization_id'>,
+  ): Observable<ApiResponse<Store>> {
+    // Organization scoping is handled automatically by backend
+    return this.http.post<ApiResponse<Store>>(
+      `${this.apiUrl}/stores`,
+      storeData,
+    );
   }
 
   /**
    * Update a store (only if belongs to current organization)
    */
-  updateStore(id: number, storeData: UpdateStoreDto): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(`${this.apiUrl}/stores/${id}`, storeData);
+  updateStore(
+    id: number,
+    storeData: UpdateStoreDto,
+  ): Observable<ApiResponse<Store>> {
+    return this.http.patch<ApiResponse<Store>>(
+      `${this.apiUrl}/stores/${id}`,
+      storeData,
+    );
   }
 
   /**
@@ -123,7 +109,10 @@ export class OrganizationStoresService {
   /**
    * Get store dashboard statistics
    */
-  getStoreDashboard(id: number, dashboardQuery?: StoreDashboardDto): Observable<ApiResponse<StoreDashboardResponse>> {
+  getStoreDashboard(
+    id: number,
+    dashboardQuery?: StoreDashboardDto,
+  ): Observable<ApiResponse<StoreDashboardResponse>> {
     let params = new HttpParams();
 
     if (dashboardQuery) {
@@ -137,7 +126,7 @@ export class OrganizationStoresService {
 
     return this.http.get<ApiResponse<StoreDashboardResponse>>(
       `${this.apiUrl}/stores/${id}/stats`,
-      { params }
+      { params },
     );
   }
 
@@ -145,17 +134,21 @@ export class OrganizationStoresService {
    * Get global store statistics for current organization
    */
   getOrganizationStoreStats(): Observable<ApiResponse<StoreStats>> {
-    const organizationId = this.getCurrentOrganizationId();
-    return this.http.get<ApiResponse<StoreStats>>(`${this.apiUrl}/stores/stats`);
+    return this.http.get<ApiResponse<StoreStats>>(
+      `${this.apiUrl}/stores/stats`,
+    );
   }
 
   /**
    * Update store settings
    */
-  updateStoreSettings(id: number, settings: StoreSettingsUpdateDto): Observable<ApiResponse<any>> {
+  updateStoreSettings(
+    id: number,
+    settings: StoreSettingsUpdateDto,
+  ): Observable<ApiResponse<any>> {
     return this.http.patch<ApiResponse<any>>(
       `${this.apiUrl}/stores/${id}/settings`,
-      settings
+      settings,
     );
   }
 

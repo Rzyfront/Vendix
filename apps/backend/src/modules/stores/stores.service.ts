@@ -20,16 +20,23 @@ export class StoresService {
   constructor(private prisma: PrismaService) {}
 
   async create(createStoreDto: CreateStoreDto) {
-    const organization = await this.prisma.organizations.findUnique({
-      where: { id: createStoreDto.organization_id },
-    });
-    if (!organization) {
-      throw new BadRequestException('Organization not found');
+    if (createStoreDto.organization_id) {
+      const organization = await this.prisma.organizations.findUnique({
+        where: { id: createStoreDto.organization_id },
+      });
+      if (!organization) {
+        throw new BadRequestException('Organization not found');
+      }
     }
 
     const slug = slugify(createStoreDto.name, { lower: true, strict: true });
     const existingStore = await this.prisma.stores.findFirst({
-      where: { organization_id: createStoreDto.organization_id, slug },
+      where: {
+        slug,
+        ...(createStoreDto.organization_id && {
+          organization_id: createStoreDto.organization_id,
+        }),
+      },
     });
     if (existingStore) {
       throw new ConflictException(
@@ -53,14 +60,7 @@ export class StoresService {
   }
 
   async findAll(query: StoreQueryDto) {
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      store_type,
-      is_active,
-      organization_id,
-    } = query;
+    const { page = 1, limit = 10, search, store_type, is_active } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.storesWhereInput = {

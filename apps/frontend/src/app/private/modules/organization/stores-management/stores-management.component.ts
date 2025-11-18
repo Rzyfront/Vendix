@@ -219,7 +219,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
   searchTerm = '';
   selectedState = '';
   selectedStoreType = '';
-  selectedOrganization = '';
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -350,18 +349,12 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
       address: [''],
       city: [''],
       country: [''],
-      organization_id: [null, [Validators.required]],
       state: ['active'],
     });
   }
 
   get hasFilters(): boolean {
-    return !!(
-      this.searchTerm ||
-      this.selectedState ||
-      this.selectedStoreType ||
-      this.selectedOrganization
-    );
+    return !!(this.searchTerm || this.selectedState || this.selectedStoreType);
   }
 
   ngOnInit(): void {
@@ -386,7 +379,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
       address: '',
       city: '',
       country: '',
-      organization_id: null,
       state: 'active',
     });
   }
@@ -424,7 +416,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
         address: formData.address || undefined,
         city: formData.city || undefined,
         country: formData.country || undefined,
-        organization_id: formData.organization_id,
         is_active: formData.state === 'active' ? true : false,
         store_type: StoreType.PHYSICAL,
       };
@@ -473,9 +464,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
       }),
       ...(this.selectedStoreType && {
         store_type: this.selectedStoreType as StoreType,
-      }),
-      ...(this.selectedOrganization && {
-        organization_id: parseInt(this.selectedOrganization),
       }),
     };
 
@@ -558,7 +546,6 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     this.searchTerm = '';
     this.selectedState = '';
     this.selectedStoreType = '';
-    this.selectedOrganization = '';
     this.loadStores();
   }
 

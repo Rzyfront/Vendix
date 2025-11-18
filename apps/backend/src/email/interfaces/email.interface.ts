@@ -10,6 +10,7 @@ export interface EmailProvider {
     to: string,
     token: string,
     username: string,
+    organizationSlug?: string,
   ): Promise<EmailResult>;
   sendPasswordResetEmail(
     to: string,

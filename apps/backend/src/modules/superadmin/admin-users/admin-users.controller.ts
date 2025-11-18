@@ -10,7 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminUsersService } from './admin-users.service';
-import { CreateUserDto, UpdateUserDto, UserQueryDto } from 'src/modules/users/dto';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserQueryDto,
+} from 'src/modules/users/dto';
 import { Roles } from 'src/modules/auth/decorators/roles.decorator';
 import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
 import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';

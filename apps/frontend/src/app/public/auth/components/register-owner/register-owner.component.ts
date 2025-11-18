@@ -10,6 +10,7 @@ import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { passwordValidator } from '../../../../core/utils/validators';
 import {
   ButtonComponent,
   InputComponent,
@@ -119,6 +120,7 @@ interface RegistrationError {
                 [control]="registerForm.get('password')"
                 type="password"
                 placeholder="••••••••"
+                helperText="La contraseña debe tener al menos 8 caracteres, una letra mayúscula y un carácter especial."
               ></app-input>
             </div>
 
@@ -231,14 +233,7 @@ export class RegisterOwnerComponent {
     last_name: ['', [Validators.required]],
     email: ['', [Validators.required, Validators.email]],
     phone: [''],
-    password: [
-      '',
-      [
-        Validators.required,
-        Validators.minLength(8),
-        Validators.pattern(/^(?=.*[^A-Za-z0-9])(?=.*[A-Z]).*$/),
-      ],
-    ],
+    password: ['', [Validators.required, passwordValidator]],
   });
 
   onFieldBlur(fieldName: string): void {

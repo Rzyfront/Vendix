@@ -5,11 +5,6 @@ export class UsersDashboardDto {
   @IsOptional()
   @Transform(({ value }) => (value ? parseInt(value, 10) : undefined))
   @IsInt()
-  organization_id?: number;
-
-  @IsOptional()
-  @Transform(({ value }) => (value ? parseInt(value, 10) : undefined))
-  @IsInt()
   store_id?: number;
 
   @IsOptional()

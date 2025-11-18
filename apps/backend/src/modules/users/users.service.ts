@@ -32,7 +32,7 @@ export class UsersService {
     } = createUserDto;
 
     const existingUser = await this.prisma.users.findFirst({
-      where: { email, organization_id },
+      where: { email, ...(organization_id && { organization_id }) },
     });
     if (existingUser) {
       throw new ConflictException(
@@ -47,9 +47,9 @@ export class UsersService {
         ...rest,
         email,
         password: hashedPassword,
-        organizations: {
-          connect: { id: organization_id },
-        },
+        ...(organization_id && {
+          organizations: { connect: { id: organization_id } },
+        }),
         updated_at: new Date(),
       },
       select: {
@@ -118,9 +118,24 @@ export class UsersService {
       },
     });
 
+    // Obtener el slug de la organización para el vLink
+    let organizationSlug: string | undefined;
+    try {
+      if (user.organization_id) {
+        const organization = await this.prisma.organizations.findUnique({
+          where: { id: user.organization_id },
+          select: { slug: true }
+        });
+        organizationSlug = organization?.slug;
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo slug de organización:', error);
+      // Continuar sin organization slug si hay error
+    }
+
     // Send verification email after user creation
     const fullName = `${user.first_name} ${user.last_name}`.trim();
-    await this.emailService.sendVerificationEmail(user.email, token, fullName);
+    await this.emailService.sendVerificationEmail(user.email, token, fullName, organizationSlug);
 
     return user;
   }
@@ -264,8 +279,6 @@ export class UsersService {
   }
 
   async getDashboard(query: UsersDashboardDto) {
-    const { organization_id } = query;
-
     // Estadísticas generales de usuarios
     const [
       totalUsuarios,
@@ -278,15 +291,12 @@ export class UsersService {
       usuariosArchivados,
     ] = await Promise.all([
       // Total Usuarios
-      this.prisma.users.count({
-        where: organization_id ? { organization_id } : {},
-      }),
+      this.prisma.users.count(),
 
       // Activos
       this.prisma.users.count({
         where: {
           state: 'active',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -294,7 +304,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'pending_verification',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -302,7 +311,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           two_factor_enabled: true,
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -310,7 +318,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'inactive',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -318,7 +325,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'suspended',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -326,7 +332,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           email_verified: true,
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -334,7 +339,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'archived',
-          ...(organization_id && { organization_id }),
         },
       }),
     ]);

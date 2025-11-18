@@ -10,340 +10,305 @@ import { RequestContextService } from '../common/context/request-context.service
 @Injectable()
 export class PrismaService implements OnModuleInit {
   private readonly logger = new Logger(PrismaService.name);
-  public client: any; // Cliente extendido
+  public prisma: any; // Cliente con middleware
+  public client: any; // Alias for backward compatibility
+
+  private readonly orgScopedModels = [
+    'users',
+    'stores',
+    'suppliers',
+    'domains',
+    'brands',
+    'categories',
+    'products',
+    'taxes',
+    'orders',
+    'payments',
+    'refunds',
+    'inventory',
+    'audit',
+    'addresses',
+  ];
+
+  private readonly storeScopedModels = [
+    'store_users',
+    'store_settings',
+    'inventory_locations',
+    'stock_levels',
+    'inventory_batches',
+    'inventory_serial_numbers',
+    'stock_reservations',
+    'purchase_orders',
+    'purchase_order_items',
+    'sales_orders',
+    'sales_order_items',
+    'stock_transfers',
+    'stock_transfer_items',
+    'return_orders',
+    'return_order_items',
+  ];
 
   constructor() {
-    console.log(
-      '🚀 [PrismaService] Constructor llamado - creando cliente base',
-    );
-
-    const baseClient = new PrismaClient({
-      log: ['query', 'info', 'warn', 'error'],
+    this.prisma = new PrismaClient({
+      log:
+        process.env.NODE_ENV === 'development'
+          ? ['query', 'error', 'warn']
+          : ['error'],
     });
 
-    console.log('🚀 [PrismaService] Aplicando extensión de scope...');
+    // Store references for middleware
+    const orgScopedModels = this.orgScopedModels;
+    const storeScopedModels = this.storeScopedModels;
 
-    // Aplicar extensión con scope
-    this.client = baseClient.$extends({
-      name: 'organizationScope',
-      query: {
-        // Aplicar a TODOS los modelos
-        $allModels: {
-          // Intercept ALL operations
-          async $allOperations({ operation, model, args, query }: any) {
-            const context = RequestContextService.getContext();
-
-            // Schema-derived lists of models containing the respective keys
-            const orgScopedModels = [
-              'users',
-              'audit_logs',
-              'organization_settings',
-              'stores',
-              'domain_settings',
-              'addresses',
-              'inventory_locations',
-              'inventory_movements',
-              'inventory_adjustments',
-              'stock_reservations',
-              'purchase_orders',
-              'sales_orders',
-              'stock_transfers',
-              'return_orders',
-              'suppliers',
-            ];
-            const storeScopedModels = [
-              'store_users',
-              'login_attempts',
-              'domain_settings',
-              'addresses',
-              'categories',
-              'orders',
-              'payment_methods',
-              'products',
-              'store_settings',
-              'tax_categories',
-              'tax_rates',
-              'audit_logs',
-            ];
-
-            const isOrgScoped = orgScopedModels.includes(model);
-            const isStoreScoped = storeScopedModels.includes(model);
-
-            // If there is no context, or the model is not scoped at all, or the user is a super admin, bypass the logic.
-            if (
-              !context ||
-              (!isOrgScoped && !isStoreScoped) ||
-              context.is_super_admin
-            ) {
-              return query(args);
-            }
-
-            const { organization_id, store_id } = context;
-            const modifiedArgs = { ...args };
-
-            // --- WRITE OPERATIONS: INJECT IDs ---
-            if (operation === 'create') {
-              modifiedArgs.data = { ...modifiedArgs.data };
-              if (isOrgScoped)
-                modifiedArgs.data.organization_id = organization_id;
-              if (isStoreScoped && store_id)
-                modifiedArgs.data.store_id = store_id;
-            }
-
-            if (operation === 'createMany') {
-              if (Array.isArray(modifiedArgs.data)) {
-                modifiedArgs.data = modifiedArgs.data.map((item) => ({
-                  ...item,
-                  ...(isOrgScoped && { organization_id: organization_id }),
-                  ...(isStoreScoped && store_id && { store_id: store_id }),
-                }));
-              }
-            }
-
-            // --- READ/WRITE OPERATIONS: APPLY SECURITY FILTERS ---
-            const securityFilter = {};
-            if (isOrgScoped) {
-              securityFilter['organization_id'] = organization_id;
-            }
-            if (isStoreScoped && store_id) {
-              securityFilter['store_id'] = store_id;
-            }
-
-            if (Object.keys(securityFilter).length > 0) {
-              if (
-                [
-                  'findUnique',
-                  'findFirst',
-                  'findMany',
-                  'count',
-                  'update',
-                  'updateMany',
-                  'delete',
-                  'deleteMany',
-                ].includes(operation)
-              ) {
-                modifiedArgs.where = {
-                  ...modifiedArgs.where,
-                  ...securityFilter,
-                };
-              }
-
-              if (operation === 'upsert') {
-                modifiedArgs.where = {
-                  ...modifiedArgs.where,
-                  ...securityFilter,
-                };
-                // Also apply IDs to the create part of the upsert
-                modifiedArgs.create = {
-                  ...modifiedArgs.create,
-                  ...securityFilter,
-                };
-              }
-            }
-
-            return query(modifiedArgs);
-          },
-        },
-      },
-    });
-
-    console.log('🚀 [PrismaService] Extensión aplicada exitosamente');
+    this.client = this.prisma;
+    console.log('🚀 [PrismaService] PrismaClient initialized successfully');
   }
 
   async onModuleInit() {
-    await this.client.$connect();
+    await this.prisma.$connect();
     this.logger.log('✅ Prisma connected to database');
   }
 
   async enableShutdownHooks(app: INestApplication) {
     process.on('beforeExit', async () => {
-      await this.client.$disconnect();
+      await this.prisma.$disconnect();
       await app.close();
     });
   }
 
-  // Delegate all property access to the extended client
+  // Delegate all property access to the client
   get users() {
-    return this.client.users;
+    return this.prisma.users;
   }
   get organizations() {
-    return this.client.organizations;
+    return this.prisma.organizations;
   }
   get stores() {
-    return this.client.stores;
+    return this.prisma.stores;
   }
   get domain_settings() {
-    return this.client.domain_settings;
+    return this.prisma.domain_settings;
   }
   get addresses() {
-    return this.client.addresses;
+    return this.prisma.addresses;
   }
   get audit_logs() {
-    return this.client.audit_logs;
+    return this.prisma.audit_logs;
   }
   get organization_settings() {
-    return this.client.organization_settings;
+    return this.prisma.organization_settings;
   }
   get brands() {
-    return this.client.brands;
+    return this.prisma.brands;
   }
   get categories() {
-    return this.client.categories;
+    return this.prisma.categories;
   }
-  // El modelo customers no existe en el schema, comentado temporalmente
-  // get customers() {
-  //   return this.client.customers;
-  // }
   get inventory_movements() {
-    return this.client.inventory_movements;
+    return this.prisma.inventory_movements;
   }
-  // El modelo inventory_snapshots no existe en el schema, comentado temporalmente
-  // get inventory_snapshots() {
-  //   return this.client.inventory_snapshots;
-  // }
   get inventory_transactions() {
-    return this.client.inventory_transactions;
+    return this.prisma.inventory_transactions;
   }
   get login_attempts() {
-    return this.client.login_attempts;
+    return this.prisma.login_attempts;
   }
   get order_items() {
-    return this.client.order_items;
+    return this.prisma.order_items;
   }
   get order_item_taxes() {
-    return this.client.order_item_taxes;
+    return this.prisma.order_item_taxes;
   }
   get orders() {
-    return this.client.orders;
+    return this.prisma.orders;
   }
   get payment_methods() {
-    return this.client.payment_methods;
+    return this.prisma.payment_methods;
   }
   get payments() {
-    return this.client.payments;
+    return this.prisma.payments;
   }
   get product_categories() {
-    return this.client.product_categories;
+    return this.prisma.product_categories;
   }
   get product_images() {
-    return this.client.product_images;
+    return this.prisma.product_images;
   }
   get product_tax_assignments() {
-    return this.client.product_tax_assignments;
+    return this.prisma.product_tax_assignments;
   }
   get product_variants() {
-    return this.client.product_variants;
+    return this.prisma.product_variants;
   }
   get products() {
-    return this.client.products;
+    return this.prisma.products;
   }
   get refund_items() {
-    return this.client.refund_items;
+    return this.prisma.refund_items;
   }
   get refunds() {
-    return this.client.refunds;
+    return this.prisma.refunds;
   }
   get reviews() {
-    return this.client.reviews;
+    return this.prisma.reviews;
   }
   get store_settings() {
-    return this.client.store_settings;
+    return this.prisma.store_settings;
   }
   get user_settings() {
-    return this.client.user_settings;
+    return this.prisma.user_settings;
   }
   get store_users() {
-    return this.client.store_users;
+    return this.prisma.store_users;
   }
   get tax_categories() {
-    return this.client.tax_categories;
+    return this.prisma.tax_categories;
   }
   get tax_rates() {
-    return this.client.tax_rates;
+    return this.prisma.tax_rates;
   }
-  // El modelo taxes no existe en el schema, comentado temporalmente
-  // get taxes() {
-  //   return this.client.taxes;
-  // }
   get email_verification_tokens() {
-    return this.client.email_verification_tokens;
+    return this.prisma.email_verification_tokens;
   }
   get refresh_tokens() {
-    return this.client.refresh_tokens;
+    return this.prisma.refresh_tokens;
   }
   get roles() {
-    return this.client.roles;
+    return this.prisma.roles;
   }
   get user_roles() {
-    return this.client.user_roles;
+    return this.prisma.user_roles;
   }
   get password_reset_tokens() {
-    return this.client.password_reset_tokens;
+    return this.prisma.password_reset_tokens;
   }
   get permissions() {
-    return this.client.permissions;
+    return this.prisma.permissions;
   }
   get role_permissions() {
-    return this.client.role_permissions;
+    return this.prisma.role_permissions;
   }
   get inventory_locations() {
-    return this.client.inventory_locations;
+    return this.prisma.inventory_locations;
   }
   get stock_levels() {
-    return this.client.stock_levels;
+    return this.prisma.stock_levels;
   }
   get inventory_batches() {
-    return this.client.inventory_batches;
+    return this.prisma.inventory_batches;
   }
   get inventory_serial_numbers() {
-    return this.client.inventory_serial_numbers;
+    return this.prisma.inventory_serial_numbers;
   }
   get suppliers() {
-    return this.client.suppliers;
+    return this.prisma.suppliers;
   }
   get supplier_products() {
-    return this.client.supplier_products;
+    return this.prisma.supplier_products;
   }
   get inventory_adjustments() {
-    return this.client.inventory_adjustments;
+    return this.prisma.inventory_adjustments;
   }
   get stock_reservations() {
-    return this.client.stock_reservations;
+    return this.prisma.stock_reservations;
   }
   get purchase_orders() {
-    return this.client.purchase_orders;
+    return this.prisma.purchase_orders;
   }
   get purchase_order_items() {
-    return this.client.purchase_order_items;
+    return this.prisma.purchase_order_items;
   }
   get sales_orders() {
-    return this.client.sales_orders;
+    return this.prisma.sales_orders;
   }
   get sales_order_items() {
-    return this.client.sales_order_items;
+    return this.prisma.sales_order_items;
   }
   get stock_transfers() {
-    return this.client.stock_transfers;
+    return this.prisma.stock_transfers;
   }
   get stock_transfer_items() {
-    return this.client.stock_transfer_items;
+    return this.prisma.stock_transfer_items;
   }
   get return_orders() {
-    return this.client.return_orders;
+    return this.prisma.return_orders;
   }
   get return_order_items() {
-    return this.client.return_order_items;
+    return this.prisma.return_order_items;
   }
 
   // Delegate special methods
   $transaction(...args: any[]) {
-    return this.client.$transaction(...args);
+    return this.prisma.$transaction(...args);
   }
   $connect() {
-    return this.client.$connect();
+    return this.prisma.$connect();
   }
   $disconnect() {
-    return this.client.$disconnect();
+    return this.prisma.$disconnect();
+  }
+
+  /**
+   * Aplica filtros de seguridad a los argumentos de Prisma query
+   */
+  applySecurityFilter(params: any, context?: any): any {
+    const orgScopedModels = this.orgScopedModels;
+    const storeScopedModels = this.storeScopedModels;
+
+    const currentContext = context || RequestContextService.getContext();
+    const isOrgScoped = orgScopedModels.includes(params.model);
+    const isStoreScoped = storeScopedModels.includes(params.model);
+
+    // If there is no context, or the model is not scoped at all, or the user is a super admin without owner role, bypass the logic.
+    if (
+      !currentContext ||
+      (!isOrgScoped && !isStoreScoped) ||
+      (currentContext.is_super_admin && !currentContext.is_owner)
+    ) {
+      console.log(
+        `[PRISMA] Bypassing scope for ${params.model}.${params.action} - context: ${!!currentContext}, isOrgScoped: ${isOrgScoped}, isStoreScoped: ${isStoreScoped}, is_super_admin: ${currentContext?.is_super_admin}, is_owner: ${currentContext?.is_owner}, org_id: ${currentContext?.organization_id}`,
+      );
+      return params;
+    }
+
+    const securityFilter: Record<string, any> = {};
+
+    if (isOrgScoped && currentContext.organization_id) {
+      securityFilter.organization_id = currentContext.organization_id;
+    }
+
+    if (isStoreScoped && currentContext.store_id) {
+      securityFilter.store_id = currentContext.store_id;
+    }
+
+    if (Object.keys(securityFilter).length > 0) {
+      if (
+        [
+          'findUnique',
+          'findFirst',
+          'findMany',
+          'count',
+          'update',
+          'updateMany',
+          'delete',
+          'deleteMany',
+        ].includes(params.action)
+      ) {
+        if (params.args.where) {
+          params.args.where = {
+            ...params.args.where,
+            ...securityFilter,
+          };
+        } else {
+          params.args.where = securityFilter;
+        }
+        console.log(
+          `[PRISMA] Applying security filter for ${params.model}.${params.action}: ${JSON.stringify(securityFilter)}`,
+        );
+      }
+    }
+
+    return params;
   }
 
   /**

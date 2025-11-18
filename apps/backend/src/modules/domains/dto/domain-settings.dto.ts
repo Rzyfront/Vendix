@@ -463,10 +463,10 @@ export class CreateDomainSettingDto {
   ])
   ownership?: string;
 
-  @ApiProperty({ example: 1 })
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
   @IsNumber()
-  @IsNotEmpty()
-  organization_id: number;
+  organization_id?: number;
 
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()

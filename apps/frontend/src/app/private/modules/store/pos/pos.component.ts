@@ -33,11 +33,7 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
         <div class="header-content">
           <div class="header-brand">
             <div class="brand-icon-container">
-              <app-icon
-                name="store"
-                [size]="20"
-                color="white"
-              ></app-icon>
+              <app-icon name="store" [size]="20" color="white"></app-icon>
             </div>
             <div class="brand-text">
               <h1>Vendix POS</h1>
@@ -46,10 +42,7 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
           </div>
 
           <div class="header-actions">
-            <div
-              *ngIf="selectedCustomer"
-              class="customer-badge"
-            >
+            <div *ngIf="selectedCustomer" class="customer-badge">
               <app-icon name="user" [size]="16"></app-icon>
               <span>{{ selectedCustomer.name }}</span>
             </div>
@@ -96,16 +89,11 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
                 class="cart-empty-icon"
               ></app-icon>
               <p class="cart-empty-text">Carrito vacío</p>
-              <p class="cart-empty-subtext">
-                Agrega productos para comenzar
-              </p>
+              <p class="cart-empty-subtext">Agrega productos para comenzar</p>
             </div>
 
             <div *ngIf="!isEmpty" class="cart-items-container">
-              <div
-                *ngFor="let item of cartItems"
-                class="cart-item"
-              >
+              <div *ngFor="let item of cartItems" class="cart-item">
                 <div class="cart-item-info">
                   <p class="cart-item-name">
                     {{ item.product.name }}
@@ -115,9 +103,7 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
                   </p>
                 </div>
                 <div class="cart-item-actions">
-                  <span class="cart-item-price">{{
-                    item.totalPrice
-                  }}</span>
+                  <span class="cart-item-price">{{ item.totalPrice }}</span>
                   <app-button
                     variant="ghost"
                     size="sm"
@@ -339,12 +325,10 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    const storeId = 'store_001';
-    const organizationId = 'org_001';
     const createdBy = 'current_user';
 
     this.orderService
-      .createDraftOrder(this.cartState, storeId, organizationId, createdBy)
+      .createDraftOrder(this.cartState, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -364,12 +348,10 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    const storeId = 'store_001';
-    const organizationId = 'org_001';
     const createdBy = 'current_user';
 
     this.orderService
-      .createOrderFromCart(this.cartState, storeId, organizationId, createdBy)
+      .createOrderFromCart(this.cartState, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (order: any) => {

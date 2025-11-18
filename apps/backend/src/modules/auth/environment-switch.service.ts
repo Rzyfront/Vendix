@@ -183,7 +183,7 @@ export class EnvironmentSwitchService {
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = completeUser;
-    const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
     console.log('🔍 SWITCH - Transformación de roles:', {
       user_id: userId,
@@ -215,16 +215,17 @@ export class EnvironmentSwitchService {
     });
 
     // Remover password del response (igual que en login)
-    const { password, ...userWithRolesAndPassword } = userWithRolesArray || user;
+    const { password, ...userWithRolesAndPassword } =
+      userWithRolesArray || user;
 
     // Estructura idéntica a la del login: { user, user_settings, ...tokens }
     const response = {
-      user: userWithRolesAndPassword,  // Usar usuario con roles array simple
+      user: userWithRolesAndPassword, // Usar usuario con roles array simple
       user_settings: userSettings,
-      access_token: accessToken,  // Formato igual que login
-      refresh_token: refreshToken,  // Formato igual que login
-      token_type: 'Bearer',  // Igual que login
-      expires_in: 3600,  // Igual que login
+      access_token: accessToken, // Formato igual que login
+      refresh_token: refreshToken, // Formato igual que login
+      token_type: 'Bearer', // Igual que login
+      expires_in: 3600, // Igual que login
       updatedEnvironment: targetEnvironment, // Campo adicional específico del switch
     };
 

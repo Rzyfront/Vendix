@@ -16,8 +16,8 @@ export interface PosOrder {
   updatedAt: Date;
   completedAt?: Date;
   createdBy: string;
-  storeId: string;
-  organizationId: string;
+  storeId?: string;
+  organizationId?: string;
 }
 
 export interface PosOrderItem {
@@ -85,8 +85,8 @@ export interface CreatePosOrderRequest {
   summary: CartSummary;
   discounts: CartDiscount[];
   notes: string;
-  storeId: string;
-  organizationId: string;
+  storeId?: string;
+  organizationId?: string;
   createdBy: string;
 }
 

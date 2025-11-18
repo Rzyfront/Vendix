@@ -19,9 +19,11 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   app?: string;
-  @ApiProperty({ example: 1, description: 'ID de la organización' })
+
+  @ApiPropertyOptional({ example: 1, description: 'ID de la organización' })
+  @IsOptional()
   @IsInt()
-  organization_id: number;
+  organization_id?: number;
 
   @ApiProperty({ example: 'Juan', description: 'Nombre del usuario' })
   @IsString()

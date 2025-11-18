@@ -51,8 +51,6 @@ export class PosOrderService {
    */
   createOrderFromCart(
     cartState: CartState,
-    storeId: string,
-    organizationId: string,
     createdBy: string,
   ): Observable<PosOrder> {
     this.loading$.next(true);
@@ -72,7 +70,7 @@ export class PosOrderService {
       customer_name: cartState.customer?.name || 'Cliente General',
       customer_email: cartState.customer?.email || '',
       customer_phone: cartState.customer?.phone || '',
-      store_id: parseInt(storeId),
+      // store_id is handled automatically by backend scoping
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
         product_name: item.product.name,
@@ -123,8 +121,6 @@ export class PosOrderService {
    */
   createDraftOrder(
     cartState: CartState,
-    storeId: string,
-    organizationId: string,
     createdBy: string,
   ): Observable<PosOrder> {
     this.loading$.next(true);
@@ -135,8 +131,6 @@ export class PosOrderService {
       summary: cartState.summary,
       discounts: cartState.appliedDiscounts,
       notes: cartState.notes,
-      storeId,
-      organizationId,
       createdBy,
     };
 
@@ -201,7 +195,7 @@ export class PosOrderService {
       customer_name: request.customer?.name || 'Cliente General',
       customer_email: request.customer?.email || '',
       customer_phone: request.customer?.phone || '',
-      store_id: parseInt(request.storeId || '1'),
+      // store_id is handled automatically by backend scoping
       items: (request.items || []).map((item) => ({
         product_id: parseInt(item.productId),
         product_name: item.productName,
@@ -659,8 +653,8 @@ export class PosOrderService {
       updatedAt: new Date(),
       completedAt: status === 'confirmed' ? new Date() : undefined,
       createdBy: request.createdBy,
-      storeId: request.storeId,
-      organizationId: request.organizationId,
+      storeId: request.storeId || 'store_001',
+      organizationId: request.organizationId || 'org_001',
     };
   }
 

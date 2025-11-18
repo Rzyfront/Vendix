@@ -1,8 +1,25 @@
-import { Component, Input, Output, EventEmitter, forwardRef } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  forwardRef,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ControlValueAccessor, NG_VALUE_ACCESSOR, AbstractControl } from '@angular/forms';
+import {
+  ControlValueAccessor,
+  NG_VALUE_ACCESSOR,
+  AbstractControl,
+} from '@angular/forms';
 
-export type InputType = 'text' | 'email' | 'password' | 'number' | 'tel' | 'url' | 'search';
+export type InputType =
+  | 'text'
+  | 'email'
+  | 'password'
+  | 'number'
+  | 'tel'
+  | 'url'
+  | 'search';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({
@@ -13,26 +30,28 @@ export type InputSize = 'sm' | 'md' | 'lg';
     {
       provide: NG_VALUE_ACCESSOR,
       useExisting: forwardRef(() => InputComponent),
-      multi: true
-    }
+      multi: true,
+    },
   ],
   template: `
     <div class="w-full mt-4">
       <!-- Label -->
-      <label 
-        *ngIf="label" 
+      <label
+        *ngIf="label"
         [for]="inputId"
         class="block text-sm font-medium text-[var(--color-text-primary)] mb-2"
       >
         {{ label }}
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1">*</span>
+        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
+          >*</span
+        >
       </label>
 
       <!-- Input wrapper -->
       <div class="relative">
         <!-- Prefix icon -->
-        <div 
-          *ngIf="prefixIcon" 
+        <div
+          *ngIf="prefixIcon"
           class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
         >
           <ng-content select="[slot=prefix-icon]"></ng-content>
@@ -53,8 +72,8 @@ export type InputSize = 'sm' | 'md' | 'lg';
         />
 
         <!-- Suffix icon -->
-        <div 
-          *ngIf="suffixIcon" 
+        <div
+          *ngIf="suffixIcon"
           class="absolute inset-y-0 right-0 pr-3 flex items-center"
           [class.pointer-events-none]="!suffixClickable"
           (click)="onSuffixClick()"
@@ -64,22 +83,22 @@ export type InputSize = 'sm' | 'md' | 'lg';
       </div>
 
       <!-- Helper text -->
-      <p 
-        *ngIf="helperText && !getValidationError()" 
+      <p
+        *ngIf="helperText && !getValidationError()"
         class="mt-2 text-sm text-[var(--color-text-secondary)]"
       >
         {{ helperText }}
       </p>
 
       <!-- Error message -->
-      <p 
-        *ngIf="getValidationError()" 
+      <p
+        *ngIf="getValidationError()"
         class="mt-2 text-sm text-[var(--color-destructive)]"
       >
         {{ getValidationError() }}
       </p>
     </div>
-  `
+  `,
 })
 export class InputComponent implements ControlValueAccessor {
   @Input() label?: string;
@@ -96,7 +115,6 @@ export class InputComponent implements ControlValueAccessor {
   @Input() suffixClickable = false;
   @Input() customClasses = '';
   @Input() control?: AbstractControl | null;
-
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();
@@ -136,26 +154,45 @@ export class InputComponent implements ControlValueAccessor {
       'duration-200',
       'focus:outline-none',
       'focus:ring-2',
-      'placeholder:text-text-muted'
+      'placeholder:text-text-muted',
     ];
-  
+
     // Size classes
     const sizeClasses = {
       sm: ['px-3', 'py-1.5', 'text-sm'],
       md: ['px-4', 'py-2', 'text-base'],
-      lg: ['px-4', 'py-3', 'text-lg']
+      lg: ['px-4', 'py-3', 'text-lg'],
     };
-  
+
     // State classes based on control state
     let stateClasses: string[];
     if (this.control?.invalid && this.control?.touched) {
-      stateClasses = ['border-[var(--color-destructive)]', 'focus:border-[var(--color-destructive)]', 'focus:ring-[var(--color-destructive)]/30', 'bg-[rgba(239, 68, 68, 0.1)]'];
-    } else if (this.control?.valid && this.control?.touched && this.control?.value) {
-      stateClasses = ['border-[var(--color-primary)]', 'focus:border-[var(--color-primary)]', 'focus:ring-[var(--color-primary)]/30', 'bg-[rgba(126, 215, 165, 0.1)]'];
+      stateClasses = [
+        'border-[var(--color-destructive)]',
+        'focus:border-[var(--color-destructive)]',
+        'focus:ring-[var(--color-destructive)]/30',
+        'bg-[rgba(239, 68, 68, 0.1)]',
+      ];
+    } else if (
+      this.control?.valid &&
+      this.control?.touched &&
+      this.control?.value
+    ) {
+      stateClasses = [
+        'border-[var(--color-primary)]',
+        'focus:border-[var(--color-primary)]',
+        'focus:ring-[var(--color-primary)]/30',
+        'bg-[rgba(126, 215, 165, 0.1)]',
+      ];
     } else {
-      stateClasses = ['border-border', 'hover:border-border', 'focus:ring-primary/50', 'focus:border-primary'];
+      stateClasses = [
+        'border-border',
+        'hover:border-border',
+        'focus:ring-primary/50',
+        'focus:border-primary',
+      ];
     }
-  
+
     // Padding adjustments for icons
     const iconPadding = [];
     if (this.prefixIcon) {
@@ -164,18 +201,18 @@ export class InputComponent implements ControlValueAccessor {
     if (this.suffixIcon) {
       iconPadding.push('pr-10');
     }
-  
+
     const classes = [
       ...baseClasses,
       ...sizeClasses[this.size],
       ...stateClasses,
-      ...iconPadding
+      ...iconPadding,
     ];
-  
+
     if (this.customClasses) {
       classes.push(this.customClasses);
     }
-  
+
     return classes.join(' ');
   }
 
@@ -183,7 +220,7 @@ export class InputComponent implements ControlValueAccessor {
     if (!this.control || !this.control.errors || !this.control.touched) {
       return null;
     }
-  
+
     const errors = this.control.errors;
     if (errors['required']) {
       return 'Este campo es requerido.';
@@ -191,13 +228,19 @@ export class InputComponent implements ControlValueAccessor {
     if (errors['email']) {
       return 'Debe ser un email válido.';
     }
-    if (errors['minlength']) {
-      return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres.`;
+    if (errors['minLength']) {
+      return `La contraseña debe tener al menos ${errors['minLength'].requiredLength} caracteres.`;
+    }
+    if (errors['uppercase']) {
+      return 'La contraseña debe contener al menos una letra mayúscula.';
+    }
+    if (errors['specialChar']) {
+      return 'La contraseña debe contener al menos un carácter especial.';
     }
     if (errors['pattern']) {
       return 'El formato es inválido.';
     }
-  
+
     // Fallback for other errors
     return 'El valor es inválido.';
   }

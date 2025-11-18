@@ -32,8 +32,9 @@ export enum StoreState {
 }
 
 export class CreateStoreDto {
+  @IsOptional()
   @IsInt()
-  organization_id: number;
+  organization_id?: number;
 
   @IsString()
   @MinLength(2)
@@ -184,11 +185,6 @@ export class StoreQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_active?: boolean;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  organization_id?: number;
 }
 
 export class AddStaffToStoreDto {

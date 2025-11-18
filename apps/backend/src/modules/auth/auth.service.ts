@@ -302,14 +302,33 @@ export class AuthService {
       },
     });
 
+    // Obtener el slug de la organización para el vLink
+    let organizationSlug: string | undefined;
+    try {
+      if (userWithRoles.organization_id) {
+        const organization = await this.prismaService.organizations.findUnique({
+          where: { id: userWithRoles.organization_id },
+          select: { slug: true }
+        });
+        organizationSlug = organization?.slug;
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo slug de organización:', error);
+      // Continuar sin organization slug si hay error
+    }
+
     // Enviar email de verificación
     try {
       await this.emailService.sendVerificationEmail(
         userWithRoles.email,
         verificationToken,
         `${userWithRoles.first_name} ${userWithRoles.last_name}`,
+        organizationSlug,
       );
       console.log(`✅ Email de verificación enviado a: ${userWithRoles.email}`);
+      if (organizationSlug) {
+        console.log(`🏢 vLink (organization slug): ${organizationSlug}`);
+      }
     } catch (error) {
       console.error('❌ Error enviando email de verificación:', error);
       // No fallar el registro si el email no se puede enviar
@@ -507,12 +526,28 @@ export class AuthService {
       },
     });
 
+    // Obtener el slug de la organización para el vLink
+    let organizationSlug: string | undefined;
+    try {
+      if (userWithRoles.organization_id) {
+        const organization = await this.prismaService.organizations.findUnique({
+          where: { id: userWithRoles.organization_id },
+          select: { slug: true }
+        });
+        organizationSlug = organization?.slug;
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo slug de organización:', error);
+      // Continuar sin organization slug si hay error
+    }
+
     // Enviar email de bienvenida y verificación
     try {
       await this.emailService.sendVerificationEmail(
         userWithRoles.email,
         verificationToken,
         `${userWithRoles.first_name} ${userWithRoles.last_name}`,
+        organizationSlug,
       );
       await this.emailService.sendWelcomeEmail(
         userWithRoles.email,
@@ -785,7 +820,7 @@ export class AuthService {
           },
         },
         organizations: true,
-        addresses: true,  // Agregar direcciones para consistencia con switch environment
+        addresses: true, // Agregar direcciones para consistencia con switch environment
       },
     });
 
@@ -796,7 +831,7 @@ export class AuthService {
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
-    const roles = user_roles?.map(ur => ur.roles?.name).filter(Boolean) || [];
+    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
     console.log('🔍 LOGIN - Transformación de roles:', {
       user_id: user.id,
@@ -956,7 +991,7 @@ export class AuthService {
     const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
     return {
-      user: userWithRolesAndPassword,  // Usar usuario con roles array simple
+      user: userWithRolesAndPassword, // Usar usuario con roles array simple
       user_settings: userSettings,
       ...tokens,
     };
@@ -1216,11 +1251,27 @@ export class AuthService {
       },
     });
 
+    // Obtener el slug de la organización para el vLink
+    let organizationSlug: string | undefined;
+    try {
+      if (user.organization_id) {
+        const organization = await this.prismaService.organizations.findUnique({
+          where: { id: user.organization_id },
+          select: { slug: true }
+        });
+        organizationSlug = organization?.slug;
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo slug de organización:', error);
+      // Continuar sin organization slug si hay error
+    }
+
     // Enviar email de verificación
     await this.emailService.sendVerificationEmail(
       user.email,
       token,
       user.first_name,
+      organizationSlug,
     );
 
     // También enviamos email de bienvenida después del registro
