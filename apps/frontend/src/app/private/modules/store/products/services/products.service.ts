@@ -150,10 +150,8 @@ export class ProductsService {
   }
 
   // Estadísticas
-  getProductStats(storeId?: number): Observable<ProductStats> {
-    const url = storeId
-      ? `${this.apiUrl}/products/stats/store/${storeId}`
-      : `${this.apiUrl}/products/stats`;
+  getProductStats(storeId: number): Observable<ProductStats> {
+    const url = `${this.apiUrl}/products/stats/store/${storeId}`;
     return this.http.get<ProductStats>(url).pipe(catchError(this.handleError));
   }
 

@@ -1,0 +1,53 @@
+meta {
+  name: Get Product Stats
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/products/stats/store/{{storeId}}
+  body: none
+  auth: bearer
+  headers: {
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return product stats", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    expect(res.body.data).to.be.an('object');
+    
+    const stats = res.body.data;
+    expect(stats).to.have.property('total_products');
+    expect(stats).to.have.property('active_products');
+    expect(stats).to.have.property('inactive_products');
+    expect(stats).to.have.property('archived_products');
+    expect(stats).to.have.property('low_stock_products');
+    expect(stats).to.have.property('out_of_stock_products');
+    expect(stats).to.have.property('products_without_images');
+    expect(stats).to.have.property('total_value');
+    expect(stats).to.have.property('categories_count');
+    expect(stats).to.have.property('brands_count');
+    
+    // Verify data types
+    expect(stats.total_products).to.be.a('number');
+    expect(stats.active_products).to.be.a('number');
+    expect(stats.inactive_products).to.be.a('number');
+    expect(stats.archived_products).to.be.a('number');
+    expect(stats.low_stock_products).to.be.a('number');
+    expect(stats.out_of_stock_products).to.be.a('number');
+    expect(stats.products_without_images).to.be.a('number');
+    expect(stats.total_value).to.be.a('number');
+    expect(stats.categories_count).to.be.a('number');
+    expect(stats.brands_count).to.be.a('number');
+  });
+  
+  test("Should return 400 for invalid store ID", function() {
+    // This test would be run with an invalid storeId parameter
+    if (parseInt(res.request.url.split('/').pop()) !== parseInt(res.request.url.split('/').pop())) {
+      expect(res.status).to.equal(400);
+    }
+  });
+}

@@ -26,9 +26,10 @@ export enum ProductState {
 }
 
 export class CreateProductDto {
-  // store_id se infiere automáticamente del contexto del token
-  // @IsInt()
-  // store_id: number;
+  // store_id se infiere automáticamente del contexto del token, pero se permite en body para testing
+  @IsOptional()
+  @IsInt()
+  store_id?: number;
 
   @IsOptional()
   @IsInt()

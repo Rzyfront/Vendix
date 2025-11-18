@@ -124,7 +124,7 @@ export class UsersService {
       if (user.organization_id) {
         const organization = await this.prisma.organizations.findUnique({
           where: { id: user.organization_id },
-          select: { slug: true }
+          select: { slug: true },
         });
         organizationSlug = organization?.slug;
       }
@@ -135,13 +135,25 @@ export class UsersService {
 
     // Send verification email after user creation
     const fullName = `${user.first_name} ${user.last_name}`.trim();
-    await this.emailService.sendVerificationEmail(user.email, token, fullName, organizationSlug);
+    await this.emailService.sendVerificationEmail(
+      user.email,
+      token,
+      fullName,
+      organizationSlug,
+    );
 
     return user;
   }
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 10, search, state, organization_id } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      organization_id,
+      role,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.usersWhereInput = {
@@ -155,6 +167,15 @@ export class UsersService {
         ],
       }),
       ...(state && { state }),
+      ...(role && {
+        user_roles: {
+          some: {
+            roles: {
+              name: role,
+            },
+          },
+        },
+      }),
     };
 
     const [users, total] = await Promise.all([

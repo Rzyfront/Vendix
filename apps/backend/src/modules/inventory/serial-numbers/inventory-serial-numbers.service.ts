@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateInventorySerialNumberDto } from '../dto/create-inventory-serial-number.dto';
@@ -90,8 +91,17 @@ export class InventorySerialNumbersService {
       cost: batch.unitCost,
     }));
 
+    // Validate serialNumbersData before mapping to prevent transaction errors
+    const validSerialNumbersData = serialNumbersData.filter(
+      (data) => data != null && data.serialNumber,
+    );
+
+    if (validSerialNumbersData.length === 0) {
+      throw new BadRequestException('No valid serial numbers data provided');
+    }
+
     const createdSerials = await this.prisma.$transaction(
-      serialNumbersData.map((data) =>
+      validSerialNumbersData.map((data) =>
         this.prisma.inventory_serial_numbers.create({
           data,
         }),

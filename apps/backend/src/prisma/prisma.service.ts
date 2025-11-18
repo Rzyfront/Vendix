@@ -5,7 +5,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
-import { RequestContextService, RequestContext } from '../common/context/request-context.service';
+import {
+  RequestContextService,
+  RequestContext,
+} from '../common/context/request-context.service';
 
 @Injectable()
 export class PrismaService implements OnModuleInit {
@@ -13,29 +16,56 @@ export class PrismaService implements OnModuleInit {
   private readonly baseClient: PrismaClient;
   private readonly scopedClient: any;
 
-  // Modelos que requieren scoping por organización
+  // Modelos que requieren scoping por organización (tienen organization_id)
   private readonly orgScopedModels = [
-    'users', 'stores', 'suppliers', 'domains', 'brands', 'categories',
-    'products', 'taxes', 'orders', 'payments', 'refunds', 'inventory', 'audit', 'addresses'
+    'users',
+    'stores',
+    'suppliers',
+    'domains',
+    // 'organizations', // REMOVED: organizations is the root model, doesn't have organization_id
+    'addresses',
+    'audit_logs',
   ];
 
-  // Modelos que requieren scoping por tienda
+  // Modelos que requieren scoping por tienda (tienen store_id)
   private readonly storeScopedModels = [
-    'store_users', 'store_settings', 'inventory_locations', 'stock_levels',
-    'inventory_batches', 'inventory_serial_numbers', 'stock_reservations',
-    'purchase_orders', 'purchase_order_items', 'sales_orders', 'sales_order_items',
-    'stock_transfers', 'stock_transfer_items', 'return_orders', 'return_order_items'
+    'store_users',
+    'store_settings',
+    'inventory_locations',
+    'stock_levels',
+    'inventory_batches',
+    'inventory_serial_numbers',
+    'stock_reservations',
+    'purchase_orders',
+    'purchase_order_items',
+    'sales_orders',
+    'sales_order_items',
+    'stock_transfers',
+    'stock_transfer_items',
+    'return_orders',
+    'return_order_items',
+    // MODELOS CORREGIDOS: estos tienen store_id pero estaban mal categorizados
+    'categories',
+    'products',
+    'tax_rates',
+    'orders',
+    'payments',
   ];
 
   constructor() {
     this.baseClient = new PrismaClient({
-      log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+      log:
+        process.env.NODE_ENV === 'development'
+          ? ['query', 'error', 'warn']
+          : ['error'],
     });
 
     // Crear cliente extendido con scoping automático usando Client Extensions
     this.scopedClient = this.createScopedClient();
 
-    console.log('🚀 [PrismaService] PrismaClient initialized with automatic scoping');
+    console.log(
+      '🚀 [PrismaService] PrismaClient initialized with automatic scoping',
+    );
   }
 
   /**
@@ -65,7 +95,16 @@ export class PrismaService implements OnModuleInit {
     const extensions: any = {};
 
     // Operaciones que necesitan scoping
-    const operations = ['findUnique', 'findFirst', 'findMany', 'count', 'update', 'updateMany', 'delete', 'deleteMany'];
+    const operations = [
+      'findUnique',
+      'findFirst',
+      'findMany',
+      'count',
+      'update',
+      'updateMany',
+      'delete',
+      'deleteMany',
+    ];
 
     // Aplicar scoping a todos los modelos que lo requieren
     const scopedModels = [...this.orgScopedModels, ...this.storeScopedModels];
@@ -110,69 +149,177 @@ export class PrismaService implements OnModuleInit {
     if (Object.keys(securityFilter).length > 0) {
       scopedArgs.where = {
         ...scopedArgs.where,
-        ...securityFilter
+        ...securityFilter,
       };
 
-      console.log(`[PRISMA] 🔒 Applied security filter for ${model}: ${JSON.stringify(securityFilter)}`);
+      console.log(
+        `[PRISMA] 🔒 Applied security filter for ${model}: ${JSON.stringify(securityFilter)}`,
+      );
     }
 
     return query(scopedArgs);
   }
 
   // Delegar acceso a propiedades al cliente con scoping automático
-  get users() { return this.scopedClient.users; }
-  get organizations() { return this.scopedClient.organizations; }
-  get stores() { return this.scopedClient.stores; }
-  get domain_settings() { return this.scopedClient.domain_settings; }
-  get addresses() { return this.scopedClient.addresses; }
-  get audit_logs() { return this.scopedClient.audit_logs; }
-  get organization_settings() { return this.scopedClient.organization_settings; }
-  get brands() { return this.scopedClient.brands; }
-  get categories() { return this.scopedClient.categories; }
-  get inventory_movements() { return this.scopedClient.inventory_movements; }
-  get inventory_transactions() { return this.scopedClient.inventory_transactions; }
-  get login_attempts() { return this.scopedClient.login_attempts; }
-  get order_items() { return this.scopedClient.order_items; }
-  get order_item_taxes() { return this.scopedClient.order_item_taxes; }
-  get orders() { return this.scopedClient.orders; }
-  get payment_methods() { return this.scopedClient.payment_methods; }
-  get payments() { return this.scopedClient.payments; }
-  get product_categories() { return this.scopedClient.product_categories; }
-  get product_images() { return this.scopedClient.product_images; }
-  get product_tax_assignments() { return this.scopedClient.product_tax_assignments; }
-  get product_variants() { return this.scopedClient.product_variants; }
-  get products() { return this.scopedClient.products; }
-  get refund_items() { return this.scopedClient.refund_items; }
-  get refunds() { return this.scopedClient.refunds; }
-  get reviews() { return this.scopedClient.reviews; }
-  get store_settings() { return this.scopedClient.store_settings; }
-  get user_settings() { return this.scopedClient.user_settings; }
-  get store_users() { return this.scopedClient.store_users; }
-  get tax_categories() { return this.scopedClient.tax_categories; }
-  get tax_rates() { return this.scopedClient.tax_rates; }
-  get email_verification_tokens() { return this.scopedClient.email_verification_tokens; }
-  get refresh_tokens() { return this.scopedClient.refresh_tokens; }
-  get roles() { return this.scopedClient.roles; }
-  get user_roles() { return this.scopedClient.user_roles; }
-  get password_reset_tokens() { return this.scopedClient.password_reset_tokens; }
-  get permissions() { return this.scopedClient.permissions; }
-  get role_permissions() { return this.scopedClient.role_permissions; }
-  get inventory_locations() { return this.scopedClient.inventory_locations; }
-  get stock_levels() { return this.scopedClient.stock_levels; }
-  get inventory_batches() { return this.scopedClient.inventory_batches; }
-  get inventory_serial_numbers() { return this.scopedClient.inventory_serial_numbers; }
-  get suppliers() { return this.scopedClient.suppliers; }
-  get supplier_products() { return this.scopedClient.supplier_products; }
-  get inventory_adjustments() { return this.scopedClient.inventory_adjustments; }
-  get stock_reservations() { return this.scopedClient.stock_reservations; }
-  get purchase_orders() { return this.scopedClient.purchase_orders; }
-  get purchase_order_items() { return this.scopedClient.purchase_order_items; }
-  get sales_orders() { return this.scopedClient.sales_orders; }
-  get sales_order_items() { return this.scopedClient.sales_order_items; }
-  get stock_transfers() { return this.scopedClient.stock_transfers; }
-  get stock_transfer_items() { return this.scopedClient.stock_transfer_items; }
-  get return_orders() { return this.scopedClient.return_orders; }
-  get return_order_items() { return this.scopedClient.return_order_items; }
+  get users() {
+    return this.scopedClient.users;
+  }
+  get organizations() {
+    return this.baseClient.organizations; // Use base client - organizations is root model
+  }
+  get stores() {
+    return this.scopedClient.stores;
+  }
+  get domain_settings() {
+    return this.scopedClient.domain_settings;
+  }
+  get addresses() {
+    return this.scopedClient.addresses;
+  }
+  get audit_logs() {
+    return this.scopedClient.audit_logs;
+  }
+  get organization_settings() {
+    return this.scopedClient.organization_settings;
+  }
+  get brands() {
+    return this.baseClient.brands;
+  } // GLOBAL: sin scoping
+  get categories() {
+    return this.scopedClient.categories;
+  } // STORE-SCOPED
+  get inventory_movements() {
+    return this.scopedClient.inventory_movements;
+  }
+  get inventory_transactions() {
+    return this.scopedClient.inventory_transactions;
+  }
+  get login_attempts() {
+    return this.scopedClient.login_attempts;
+  }
+  get order_items() {
+    return this.scopedClient.order_items;
+  }
+  get order_item_taxes() {
+    return this.scopedClient.order_item_taxes;
+  }
+  get orders() {
+    return this.scopedClient.orders;
+  }
+  get payment_methods() {
+    return this.scopedClient.payment_methods;
+  }
+  get payments() {
+    return this.scopedClient.payments;
+  }
+  get product_categories() {
+    return this.scopedClient.product_categories;
+  }
+  get product_images() {
+    return this.scopedClient.product_images;
+  }
+  get product_tax_assignments() {
+    return this.scopedClient.product_tax_assignments;
+  }
+  get product_variants() {
+    return this.scopedClient.product_variants;
+  }
+  get products() {
+    return this.scopedClient.products;
+  }
+  get refund_items() {
+    return this.scopedClient.refund_items;
+  }
+  get refunds() {
+    return this.scopedClient.refunds;
+  }
+  get reviews() {
+    return this.scopedClient.reviews;
+  }
+  get store_settings() {
+    return this.scopedClient.store_settings;
+  }
+  get user_settings() {
+    return this.scopedClient.user_settings;
+  }
+  get store_users() {
+    return this.scopedClient.store_users;
+  }
+  get tax_categories() {
+    return this.scopedClient.tax_categories;
+  }
+  get tax_rates() {
+    return this.scopedClient.tax_rates;
+  }
+  get email_verification_tokens() {
+    return this.scopedClient.email_verification_tokens;
+  }
+  get refresh_tokens() {
+    return this.scopedClient.refresh_tokens;
+  }
+  get roles() {
+    return this.scopedClient.roles;
+  }
+  get user_roles() {
+    return this.scopedClient.user_roles;
+  }
+  get password_reset_tokens() {
+    return this.scopedClient.password_reset_tokens;
+  }
+  get permissions() {
+    return this.scopedClient.permissions;
+  }
+  get role_permissions() {
+    return this.scopedClient.role_permissions;
+  }
+  get inventory_locations() {
+    return this.scopedClient.inventory_locations;
+  }
+  get stock_levels() {
+    return this.scopedClient.stock_levels;
+  }
+  get inventory_batches() {
+    return this.scopedClient.inventory_batches;
+  }
+  get inventory_serial_numbers() {
+    return this.scopedClient.inventory_serial_numbers;
+  }
+  get suppliers() {
+    return this.scopedClient.suppliers;
+  }
+  get supplier_products() {
+    return this.scopedClient.supplier_products;
+  }
+  get inventory_adjustments() {
+    return this.scopedClient.inventory_adjustments;
+  }
+  get stock_reservations() {
+    return this.scopedClient.stock_reservations;
+  }
+  get purchase_orders() {
+    return this.scopedClient.purchase_orders;
+  }
+  get purchase_order_items() {
+    return this.scopedClient.purchase_order_items;
+  }
+  get sales_orders() {
+    return this.scopedClient.sales_orders;
+  }
+  get sales_order_items() {
+    return this.scopedClient.sales_order_items;
+  }
+  get stock_transfers() {
+    return this.scopedClient.stock_transfers;
+  }
+  get stock_transfer_items() {
+    return this.scopedClient.stock_transfer_items;
+  }
+  get return_orders() {
+    return this.scopedClient.return_orders;
+  }
+  get return_order_items() {
+    return this.scopedClient.return_order_items;
+  }
 
   // Métodos especiales - algunos delegados al baseClient para compatibilidad total
   $on: (...args: any[]) => any = (...args) => {
@@ -180,7 +327,7 @@ export class PrismaService implements OnModuleInit {
   };
 
   $transaction(...args: any[]): any {
-    return this.baseClient.$transaction(args);
+    return (this.baseClient as any).$transaction(...args);
   }
 
   $connect() {

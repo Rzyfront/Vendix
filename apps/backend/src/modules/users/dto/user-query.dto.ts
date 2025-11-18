@@ -27,4 +27,8 @@ export class UserQueryDto {
   @Transform(({ value }) => parseInt(value))
   @IsInt()
   organization_id?: number;
+
+  @IsOptional()
+  @IsString()
+  role?: string;
 }

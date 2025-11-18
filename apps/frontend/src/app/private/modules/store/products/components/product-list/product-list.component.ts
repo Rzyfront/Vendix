@@ -19,6 +19,8 @@ import {
   Brand,
 } from '../../interfaces';
 
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
+
 // Import existing components
 import {
   ProductStatsComponent,
@@ -191,6 +193,7 @@ export class ProductListComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private dialogService: DialogService,
     private toastService: ToastService,
+    private tenantFacade: TenantFacade,
   ) {
     this.initializeCreateForm();
   }
@@ -353,7 +356,22 @@ export class ProductListComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.productsService.getProductStats().subscribe({
+    const currentStore = this.tenantFacade.getCurrentStore();
+
+    if (!currentStore || !currentStore.id) {
+      console.error('No current store found, cannot load product stats');
+      this.updateStats();
+      return;
+    }
+
+    const storeId = parseInt(currentStore.id, 10);
+    if (isNaN(storeId)) {
+      console.error('Invalid store ID:', currentStore.id);
+      this.updateStats();
+      return;
+    }
+
+    const sub = this.productsService.getProductStats(storeId).subscribe({
       next: (response: any) => {
         console.log('Product stats response:', response);
         if (response) {

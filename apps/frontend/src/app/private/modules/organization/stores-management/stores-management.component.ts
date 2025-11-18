@@ -769,13 +769,19 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
 
   private async switchToStoreEnvironment(store: StoreListItem): Promise<void> {
     try {
-      const confirmed = await this.dialogService.confirm({
-        title: 'Cambiar al entorno de la tienda',
-        message: `¿Deseas cambiar al entorno de administración de la tienda <strong>${store.name}</strong>? Serás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
-        confirmText: 'Cambiar de entorno',
-        cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      });
+      const confirmed = await this.dialogService.confirm(
+        {
+          title: 'Cambiar al entorno de la tienda',
+          message: `¿Deseas cambiar al entorno de administración de la tienda <strong class="text-lg font-semibold text-[var(--color-primary)]">${store.name}</strong>?<br><br>Serás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
+          confirmText: 'Cambiar de entorno',
+          cancelText: 'Cancelar',
+          confirmVariant: 'primary',
+        },
+        {
+          size: 'md',
+          customClasses: 'store-switch-modal',
+        },
+      );
 
       if (confirmed) {
         const success =

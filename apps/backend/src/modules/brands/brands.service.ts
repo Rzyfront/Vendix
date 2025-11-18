@@ -95,12 +95,8 @@ export class BrandsService {
       ];
     }
 
-    // Add store-specific filtering via products
-    where.products = {
-      some: {
-        store_id: storeId,
-      },
-    };
+    // ✅ SIMPLIFICADO: Brands es global, no necesita filtrar por store
+    // Las marcas globales están disponibles para todos los stores
 
     const [brands, total] = await Promise.all([
       this.prisma.brands.findMany({

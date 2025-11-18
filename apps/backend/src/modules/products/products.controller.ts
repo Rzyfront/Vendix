@@ -300,4 +300,22 @@ export class ProductsController {
       );
     }
   }
+
+  @Get('stats/store/:storeId')
+  @Permissions('products:read')
+  async getProductStats(@Param('storeId', ParseIntPipe) storeId: number) {
+    try {
+      const result = await this.productsService.getProductStats(storeId);
+      return this.responseService.success(
+        result,
+        'Estadísticas de productos obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las estadísticas de productos',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
 }

@@ -8,51 +8,58 @@ datasource db {
 }
 
 model users {
-  id                        Int                         @id @default(autoincrement())
-  username                  String                      @unique @db.VarChar(50)
-  email                     String                      @db.VarChar(255)
-  password                  String
-  state                     user_state_enum             @default(pending_verification)
-  last_login                DateTime?                   @db.Timestamp(6)
-  failed_login_attempts     Int                         @default(0)
-  locked_until              DateTime?                   @db.Timestamp(6)
-  email_verified            Boolean                     @default(false)
-  two_factor_enabled        Boolean                     @default(false)
-  two_factor_secret         String?
-  created_at                DateTime?                   @default(now()) @db.Timestamp(6)
-  updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
-  first_name                String                      @db.VarChar(100)
-  last_name                 String                      @db.VarChar(100)
-  organization_id           Int
-  phone                     String?                     @db.VarChar(50)
-  addresses                 addresses[]                 @relation("user_addresses")
-  api_keys                  api_keys[]
-  audit_logs                audit_logs[]
-  email_verification_tokens email_verification_tokens[]
-  inventory_adjustments1    inventory_adjustments[]     @relation("inventory_adjustments_approved_by")
-  inventory_adjustments     inventory_adjustments[]     @relation("inventory_adjustments_created_by")
-  inventory_movements       inventory_movements[]
-  inventory_transactions    inventory_transactions[]
-  password_reset_tokens     password_reset_tokens[]
-  purchase_orders1          purchase_orders[]           @relation("purchase_orders_approved_by")
-  purchase_orders           purchase_orders[]           @relation("purchase_orders_created_by")
-  refresh_tokens            refresh_tokens[]
-  refunds                   refunds[]
-  reviews                   reviews[]
-  sales_orders1             sales_orders[]              @relation("sales_orders_approved_by")
-  sales_orders              sales_orders[]              @relation("sales_orders_created_by")
-  stock_reservations        stock_reservations[]
-  stock_transfers1          stock_transfers[]           @relation("stock_transfers_approved_by")
-  stock_transfers           stock_transfers[]           @relation("stock_transfers_created_by")
-  store_users               store_users[]
-  user_roles                user_roles[]
-  user_sessions             user_sessions[]
-  user_settings             user_settings?
-  organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+   id                        Int                         @id @default(autoincrement())
+   username                  String                      @unique @db.VarChar(50)
+   email                     String                      @db.VarChar(255)
+   password                  String
+   state                     user_state_enum             @default(pending_verification)
+   last_login                DateTime?                   @db.Timestamp(6)
+   failed_login_attempts     Int                         @default(0)
+   locked_until              DateTime?                   @db.Timestamp(6)
+   email_verified            Boolean                     @default(false)
+   two_factor_enabled        Boolean                     @default(false)
+   two_factor_secret         String?
+   created_at                DateTime?                   @default(now()) @db.Timestamp(6)
+   updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
+    first_name                String                      @db.VarChar(100)
+    last_name                 String                      @db.VarChar(100)
+    organization_id           Int
+    main_store_id             Int?
+    phone                     String?                     @db.VarChar(50)
+    document_type             String?                     @db.VarChar(50)
+    document_number           String?                     @db.VarChar(50)
+   addresses                 addresses[]                 @relation("user_addresses")
+   api_keys                  api_keys[]
+   audit_logs                audit_logs[]
+   email_verification_tokens email_verification_tokens[]
+   inventory_adjustments1    inventory_adjustments[]     @relation("inventory_adjustments_approved_by")
+   inventory_adjustments     inventory_adjustments[]     @relation("inventory_adjustments_created_by")
+   inventory_movements       inventory_movements[]
+   inventory_transactions    inventory_transactions[]
+   password_reset_tokens     password_reset_tokens[]
+   purchase_orders1          purchase_orders[]           @relation("purchase_orders_approved_by")
+   purchase_orders           purchase_orders[]           @relation("purchase_orders_created_by")
+   refresh_tokens            refresh_tokens[]
+   refunds                   refunds[]
+   reviews                   reviews[]
+   sales_orders1             sales_orders[]              @relation("sales_orders_approved_by")
+   sales_orders              sales_orders[]              @relation("sales_orders_created_by")
+   stock_reservations        stock_reservations[]
+   stock_transfers1          stock_transfers[]           @relation("stock_transfers_approved_by")
+   stock_transfers           stock_transfers[]           @relation("stock_transfers_created_by")
+   store_users               store_users[]
+   user_roles                user_roles[]
+   user_sessions             user_sessions[]
+   user_settings             user_settings?
+   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@index([email_verified])
-  @@index([state])
+   @@index([email_verified])
+   @@index([state])
+   @@index([document_number])
 }
+
+
 
 model user_settings {
   id         Int       @id @default(autoincrement())
@@ -278,6 +285,7 @@ model stores {
   store_settings      store_settings?
   store_users         store_users[]
   organizations       organizations         @relation(fields: [organization_id], references: [id])
+  main_store_users    users[]               @relation("main_store")
   tax_categories      tax_categories[]
   tax_rates           tax_rates[]
 

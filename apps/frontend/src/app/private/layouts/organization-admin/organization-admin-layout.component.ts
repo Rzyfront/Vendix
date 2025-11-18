@@ -170,6 +170,32 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/stores-management',
     },
     {
+      label: 'Users',
+      icon: 'users',
+      children: [
+        {
+          label: 'Global Users',
+          icon: 'user',
+          route: '/admin/users/global-users',
+        },
+        {
+          label: 'Roles & Permissions',
+          icon: 'shield',
+          route: '/admin/users/roles-permissions',
+        },
+        {
+          label: 'Store Assignments',
+          icon: 'building',
+          route: '/admin/users/store-assignments',
+        },
+        {
+          label: 'Access Audit',
+          icon: 'eye',
+          route: '/admin/users/access-audit',
+        },
+      ],
+    },
+    {
       label: 'Financial',
       icon: 'dollar-sign',
       children: [
@@ -208,32 +234,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Cross-Store Analysis',
           icon: 'store',
           route: '/admin/analytics/cross-store',
-        },
-      ],
-    },
-    {
-      label: 'Users',
-      icon: 'users',
-      children: [
-        {
-          label: 'Global Users',
-          icon: 'user',
-          route: '/admin/users/global-users',
-        },
-        {
-          label: 'Roles & Permissions',
-          icon: 'shield',
-          route: '/admin/users/roles-permissions',
-        },
-        {
-          label: 'Store Assignments',
-          icon: 'building',
-          route: '/admin/users/store-assignments',
-        },
-        {
-          label: 'Access Audit',
-          icon: 'eye',
-          route: '/admin/users/access-audit',
         },
       ],
     },

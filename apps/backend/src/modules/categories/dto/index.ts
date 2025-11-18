@@ -100,15 +100,8 @@ export class CategoryQueryDto {
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({
-    example: 1,
-    description: 'ID de la tienda (opcional)',
-  })
-  @IsOptional()
-  @Transform(({ value }) => parseInt(value))
-  @IsInt()
-  @Min(1)
-  store_id?: number;
+  // store_id eliminado - ahora usa scoping automático de PrismaService
+  // Los usuarios solo pueden ver categorías de su store actual
 
   @ApiPropertyOptional({
     example: CategoryState.ACTIVE,

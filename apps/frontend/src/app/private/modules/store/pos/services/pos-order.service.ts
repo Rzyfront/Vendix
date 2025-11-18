@@ -262,11 +262,13 @@ export class PosOrderService {
       orderNumber: backendOrder.order_number,
       customer: {
         id: backendOrder.customer_id?.toString() || '0',
+        first_name: backendOrder.customer_name || 'Cliente General',
+        last_name: backendOrder.customer_name?.split(' ')[1] || '',
         name: backendOrder.customer_name || 'Cliente General',
         email: backendOrder.customer_email || '',
         phone: backendOrder.customer_phone || '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
       },
       items:
         backendOrder.items?.map((item: any) => ({
@@ -350,7 +352,9 @@ export class PosOrderService {
           filteredOrders = filteredOrders.filter(
             (order) =>
               order.orderNumber.toLowerCase().includes(searchTerm) ||
-              order.customer?.name.toLowerCase().includes(searchTerm) ||
+              (order.customer?.first_name + ' ' + order.customer?.last_name)
+                .toLowerCase()
+                .includes(searchTerm) ||
               order.customer?.email.toLowerCase().includes(searchTerm),
           );
         }
@@ -372,7 +376,7 @@ export class PosOrderService {
         // Filter by customer
         if (customerId) {
           filteredOrders = filteredOrders.filter(
-            (order) => order.customer?.id === customerId,
+            (order) => order.customer?.id === parseInt(customerId),
           );
         }
 
@@ -747,12 +751,15 @@ export class PosOrderService {
         id: 'ORDER_001',
         orderNumber: 'ORD-2024-001',
         customer: {
-          id: 'CUST_001',
+          id: 1,
           email: 'juan.perez@email.com',
-          name: 'Juan Pérez',
+          first_name: 'Juan',
+          last_name: 'Pérez',
           phone: '+5491123456789',
-          createdAt: new Date('2024-01-15'),
-          updatedAt: new Date('2024-01-15'),
+          document_type: 'dni',
+          document_number: '12345678',
+          created_at: new Date('2024-01-15'),
+          updated_at: new Date('2024-01-15'),
         },
         items: [
           {

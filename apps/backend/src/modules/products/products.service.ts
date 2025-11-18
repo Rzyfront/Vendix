@@ -34,15 +34,21 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto) {
     try {
-      // store_id se infiere automáticamente del contexto del token
-      // No necesitamos verificar la tienda manualmente
+      // Obtener store_id del DTO o del contexto del token
+      const context = RequestContextService.getContext();
+      const storeId = createProductDto.store_id || context?.store_id;
+
+      if (!storeId) {
+        throw new BadRequestException('No se pudo determinar la tienda actual');
+      }
 
       // Generar slug si no se proporciona
       const slug = createProductDto.slug || generateSlug(createProductDto.name);
 
-      // Verificar que el slug sea único (el contexto de Prisma ya filtra por store_id)
+      // Verificar que el slug sea único dentro de la tienda
       const existingProduct = await this.prisma.products.findFirst({
         where: {
+          store_id: storeId,
           slug: slug,
           state: { not: ProductState.ARCHIVED },
         },
@@ -58,6 +64,7 @@ export class ProductsService {
       if (createProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
+            store_id: storeId,
             sku: createProductDto.sku,
             state: { not: ProductState.ARCHIVED },
           },
@@ -69,6 +76,7 @@ export class ProductsService {
       }
 
       const {
+        store_id: dtoStoreId,
         category_ids,
         tax_category_ids,
         image_urls,
@@ -82,6 +90,7 @@ export class ProductsService {
         const product = await prisma.products.create({
           data: {
             ...productData,
+            store_id: storeId, // Agregar el store_id del contexto
             slug: slug,
             stock_quantity: 0, // Se inicializará via stock_levels
             updated_at: new Date(),
@@ -1004,5 +1013,93 @@ export class ProductsService {
     return await this.prisma.product_images.delete({
       where: { id: imageId },
     });
+  }
+
+  async getProductStats(storeId: number) {
+    try {
+      // Get all products for the store
+      const products = await this.prisma.products.findMany({
+        where: {
+          store_id: storeId,
+        },
+        include: {
+          product_images: true,
+        },
+      });
+
+      // Calculate stats
+      const total_products = products.length;
+      const active_products = products.filter(
+        (p) => p.state === 'active',
+      ).length;
+      const inactive_products = products.filter(
+        (p) => p.state === 'inactive',
+      ).length;
+      const archived_products = products.filter(
+        (p) => p.state === 'archived',
+      ).length;
+
+      // Stock calculations (simplified - using stock_quantity field)
+      const low_stock_products = products.filter(
+        (p) =>
+          p.stock_quantity !== null &&
+          p.stock_quantity !== undefined &&
+          p.stock_quantity > 0 &&
+          p.stock_quantity <= 10,
+      ).length;
+
+      const out_of_stock_products = products.filter(
+        (p) =>
+          p.stock_quantity !== null &&
+          p.stock_quantity !== undefined &&
+          p.stock_quantity === 0,
+      ).length;
+
+      // Products without images
+      const products_without_images = products.filter(
+        (p) => !p.product_images || p.product_images.length === 0,
+      ).length;
+
+      // Total value (sum of base_price * stock_quantity)
+      const total_value = products.reduce((sum, product) => {
+        const stock = product.stock_quantity || 0;
+        return sum + product.base_price * stock;
+      }, 0);
+
+      // Count unique categories and brands
+      const categories_count = await this.prisma.categories.count({
+        where: {
+          store_id: storeId,
+        },
+      });
+
+      // Count brands that have products in this store
+      const brands_count = await this.prisma.brands.count({
+        where: {
+          products: {
+            some: {
+              store_id: storeId,
+            },
+          },
+        },
+      });
+
+      return {
+        total_products,
+        active_products,
+        inactive_products,
+        archived_products,
+        low_stock_products,
+        out_of_stock_products,
+        products_without_images,
+        total_value,
+        categories_count,
+        brands_count,
+      };
+    } catch (error) {
+      throw new BadRequestException(
+        `Error calculating product stats: ${error.message}`,
+      );
+    }
   }
 }

@@ -171,6 +171,20 @@ export class EnvironmentSwitchService {
       },
     });
 
+    // También actualizar main_store_id cuando se cambia a STORE_ADMIN
+    if (targetEnvironment === 'STORE_ADMIN' && store_id) {
+      await this.prismaService.users.update({
+        where: { id: userId },
+        data: { main_store_id: store_id },
+      });
+      console.log('🔍 SWITCH - Updated main_store_id:', {
+        user_id: userId,
+        targetEnvironment,
+        store_id,
+        main_store_id: store_id,
+      });
+    }
+
     // Obtener el usuario completo con todas las relaciones necesarias
     const completeUser = await this.prismaService.users.findUnique({
       where: { id: userId },

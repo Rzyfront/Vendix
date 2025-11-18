@@ -1,6 +1,9 @@
 import { Injectable } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
-import { delay, map } from 'rxjs/operators';
+import { delay, map, catchError } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../../environments/environment';
+import { CartState } from '../models/cart.model';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -20,6 +23,7 @@ export type {
   providedIn: 'root',
 })
 export class PosPaymentService {
+  private readonly apiUrl = `${environment.apiUrl}/payments/pos`;
   private readonly PAYMENT_METHODS: PaymentMethod[] = [
     {
       id: 'cash',
@@ -59,27 +63,216 @@ export class PosPaymentService {
 
   private transactions: Transaction[] = [];
 
+  constructor(private http: HttpClient) {}
+
   getPaymentMethods(): Observable<PaymentMethod[]> {
     return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
       delay(100),
     );
   }
 
+  /**
+   * Process payment for immediate sale
+   */
   processPayment(request: PaymentRequest): Observable<PaymentResponse> {
-    return of(request).pipe(
-      delay(2000),
-      map((req) => {
-        if (req.paymentMethod.type === 'cash') {
-          return this.processCashPayment(req);
-        } else if (req.paymentMethod.type === 'card') {
-          return this.processCardPayment(req);
-        } else if (req.paymentMethod.type === 'transfer') {
-          return this.processTransferPayment(req);
-        } else if (req.paymentMethod.type === 'digital_wallet') {
-          return this.processDigitalWalletPayment(req);
+    const paymentData = {
+      customer_id: request.customerEmail ? 0 : 0, // Will be set by backend context
+      customer_name: 'Cliente General',
+      customer_email: request.customerEmail || '',
+      customer_phone: request.customerPhone || '',
+      items: [], // Empty for payment-only
+      subtotal: request.amount,
+      tax_amount: 0,
+      discount_amount: 0,
+      total_amount: request.amount,
+      requires_payment: true,
+      payment_method_id: parseInt(request.paymentMethod.id),
+      amount_received: request.cashReceived || request.amount,
+      payment_reference: request.reference || '',
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: 'current_user',
+      internal_notes: '',
+      update_inventory: false, // Payment only, no inventory update
+    };
+
+    return this.http.post<any>(this.apiUrl, paymentData).pipe(
+      map((response) => {
+        if (response.success) {
+          return {
+            success: true,
+            transactionId: response.payment?.id || this.generateTransactionId(),
+            message: response.message || 'Pago procesado correctamente',
+            change: response.payment?.change,
+          };
+        } else {
+          return {
+            success: false,
+            message: response.message || 'Error al procesar el pago',
+          };
         }
-        return { success: false, message: 'Método de pago no soportado' };
       }),
+      catchError((error) => {
+        return of({
+          success: false,
+          message: error.error?.message || 'Error al procesar el pago',
+        });
+      }),
+    );
+  }
+
+  /**
+   * Process sale with payment (cash sale)
+   */
+  processSaleWithPayment(
+    cartState: CartState,
+    paymentRequest: PaymentRequest,
+    createdBy: string,
+  ): Observable<any> {
+    const saleData = {
+      customer_id: cartState.customer?.id || 0,
+      customer_name: cartState.customer
+        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
+        : 'Cliente General',
+      customer_email: cartState.customer?.email || '',
+      customer_phone: cartState.customer?.phone || '',
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        cost: item.product.cost,
+      })),
+      subtotal: cartState.summary.subtotal,
+      tax_amount: cartState.summary.taxAmount,
+      discount_amount: cartState.summary.discountAmount,
+      total_amount: cartState.summary.total,
+      requires_payment: true,
+      payment_method_id: parseInt(paymentRequest.paymentMethod.id),
+      amount_received: paymentRequest.cashReceived || cartState.summary.total,
+      payment_reference: paymentRequest.reference || '',
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: createdBy,
+      internal_notes: cartState.notes || '',
+      update_inventory: true,
+    };
+
+    return this.http.post<any>(this.apiUrl, saleData).pipe(
+      map((response) => {
+        if (response.success) {
+          return {
+            success: true,
+            order: response.order,
+            payment: response.payment,
+            message: response.message,
+            change: response.payment?.change,
+          };
+        } else {
+          throw new Error(response.message || 'Error al procesar la venta');
+        }
+      }),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Process credit sale (no immediate payment)
+   */
+  processCreditSale(cartState: CartState, createdBy: string): Observable<any> {
+    const creditData = {
+      customer_id: cartState.customer?.id || 0,
+      customer_name: cartState.customer
+        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
+        : 'Cliente General',
+      customer_email: cartState.customer?.email || '',
+      customer_phone: cartState.customer?.phone || '',
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        cost: item.product.cost,
+      })),
+      subtotal: cartState.summary.subtotal,
+      tax_amount: cartState.summary.taxAmount,
+      discount_amount: cartState.summary.discountAmount,
+      total_amount: cartState.summary.total,
+      requires_payment: false,
+      credit_terms: {
+        payment_terms: 'Pendiente de pago',
+      },
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: createdBy,
+      internal_notes: cartState.notes || '',
+      update_inventory: true,
+    };
+
+    return this.http.post<any>(this.apiUrl, creditData).pipe(
+      map((response) => {
+        if (response.success) {
+          return {
+            success: true,
+            order: response.order,
+            message: response.message,
+          };
+        } else {
+          throw new Error(
+            response.message || 'Error al procesar la venta a crédito',
+          );
+        }
+      }),
+      catchError((error) => throwError(() => error)),
+    );
+  }
+
+  /**
+   * Save draft order
+   */
+  saveDraft(cartState: CartState, createdBy: string): Observable<any> {
+    const draftData = {
+      customer_id: cartState.customer?.id || 0,
+      customer_name: cartState.customer
+        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
+        : 'Cliente General',
+      customer_email: cartState.customer?.email || '',
+      customer_phone: cartState.customer?.phone || '',
+      items: cartState.items.map((item) => ({
+        product_id: parseInt(item.product.id),
+        product_name: item.product.name,
+        product_sku: item.product.sku,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+        total_price: item.totalPrice,
+        cost: item.product.cost,
+      })),
+      subtotal: cartState.summary.subtotal,
+      tax_amount: cartState.summary.taxAmount,
+      discount_amount: cartState.summary.discountAmount,
+      total_amount: cartState.summary.total,
+      requires_payment: false,
+      draft: true,
+      register_id: 'POS_REGISTER_001',
+      seller_user_id: createdBy,
+      internal_notes: cartState.notes || '',
+      update_inventory: false,
+    };
+
+    return this.http.post<any>(this.apiUrl, draftData).pipe(
+      map((response) => {
+        if (response.success) {
+          return {
+            success: true,
+            order: response.order,
+            message: response.message,
+          };
+        } else {
+          throw new Error(response.message || 'Error al guardar el borrador');
+        }
+      }),
+      catchError((error) => throwError(() => error)),
     );
   }
 

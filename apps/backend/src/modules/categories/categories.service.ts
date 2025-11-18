@@ -57,7 +57,6 @@ export class CategoriesService {
       page = 1,
       limit = 10,
       search,
-      store_id,
       sort_by = 'name',
       sort_order = 'asc',
       state,
@@ -73,7 +72,10 @@ export class CategoriesService {
         { name: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
       ];
-    if (store_id) where.store_id = store_id;
+
+    // ✅ BYPASS MANUAL ELIMINADO - ahora usa scoping automático de PrismaService
+    // El filtro store_id se aplica automáticamente según el contexto del usuario
+    // Los usuarios solo pueden ver categorías de su store actual
 
     const [categories, total] = await Promise.all([
       this.prisma.categories.findMany({

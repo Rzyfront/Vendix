@@ -308,7 +308,7 @@ export class AuthService {
       if (userWithRoles.organization_id) {
         const organization = await this.prismaService.organizations.findUnique({
           where: { id: userWithRoles.organization_id },
-          select: { slug: true }
+          select: { slug: true },
         });
         organizationSlug = organization?.slug;
       }
@@ -334,12 +334,29 @@ export class AuthService {
       // No fallar el registro si el email no se puede enviar
     }
 
+    // Transformar user_roles a roles array simple para compatibilidad
+    const { user_roles, ...userWithoutRoles } = userWithRoles;
+    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
+    const userWithRolesArray = {
+      ...userWithoutRoles,
+      roles, // Array simple: ["owner", "admin"]
+    };
+
     // Remover password del response
-    const { password: _, ...userWithoutPassword } = userWithRoles;
+    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+
+    // Obtener user_settings del usuario creado
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userWithRoles.id },
+    });
 
     return {
-      user: userWithoutPassword,
-      ...tokens,
+      user: userWithRolesAndPassword,
+      user_settings: userSettings,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: tokens.token_type,
+      expires_in: tokens.expires_in,
       wasExistingUser: result.wasExistingUser,
     };
   }
@@ -349,8 +366,16 @@ export class AuthService {
     client_info?: { ip_address?: string; user_agent?: string },
     app: string = 'STORE_ECOMMERCE',
   ) {
-    const { email, password, first_name, last_name, store_id } =
-      registerCustomerDto;
+    const {
+      email,
+      password,
+      first_name,
+      last_name,
+      phone,
+      document_type,
+      document_number,
+      store_id,
+    } = registerCustomerDto;
 
     // Buscar la tienda por ID
     const store = await this.prismaService.stores.findUnique({
@@ -381,8 +406,10 @@ export class AuthService {
       throw new BadRequestException('Rol customer no encontrado');
     }
 
+    // Generar contraseña si no se proporciona
+    const finalPassword = password || this.generateTemporaryPassword();
     // Hash de la contraseña
-    const hashedPassword = await bcrypt.hash(password, 12);
+    const hashedPassword = await bcrypt.hash(finalPassword, 12);
 
     // Crear usuario (no hay store_id directo en users; se asocia en store_users)
     const user = await this.prismaService.users.create({
@@ -391,6 +418,9 @@ export class AuthService {
         password: hashedPassword,
         first_name,
         last_name,
+        phone,
+        document_type,
+        document_number,
         username: await this.generateUniqueUsername(email),
         email_verified: false,
         organization_id: store.organization_id,
@@ -532,7 +562,7 @@ export class AuthService {
       if (userWithRoles.organization_id) {
         const organization = await this.prismaService.organizations.findUnique({
           where: { id: userWithRoles.organization_id },
-          select: { slug: true }
+          select: { slug: true },
         });
         organizationSlug = organization?.slug;
       }
@@ -564,12 +594,29 @@ export class AuthService {
       // No fallar el registro si el email no se puede enviar
     }
 
+    // Obtener user_settings del usuario creado
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userWithRoles.id },
+    });
+
+    // Transformar user_roles a roles array simple para compatibilidad
+    const { user_roles, ...userWithoutRoles } = userWithRoles;
+    const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
+    const userWithRolesArray = {
+      ...userWithoutRoles,
+      roles, // Array simple: ["owner", "admin"]
+    };
+
     // Remover password del response
-    const { password: _, ...userWithoutPassword } = userWithRoles;
+    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
     return {
-      user: userWithoutPassword,
-      ...tokens,
+      user: userWithRolesAndPassword,
+      user_settings: userSettings,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: tokens.token_type,
+      expires_in: tokens.expires_in,
     };
   }
 
@@ -803,14 +850,8 @@ export class AuthService {
   ) {
     const { email, password, organization_slug, store_slug } = loginDto;
 
-    // Validar que se proporcione al menos uno de los dos
-    if (!organization_slug && !store_slug) {
-      throw new BadRequestException(
-        'Debe proporcionar organization_slug o store_slug',
-      );
-    }
-
-    // Buscar usuario con rol (sin permisos para token optimizado)
+    
+    // Buscar usuario con rol para auto-detección de contexto
     const user = await this.prismaService.users.findFirst({
       where: { email },
       include: {
@@ -822,6 +863,18 @@ export class AuthService {
         organizations: true,
         addresses: true, // Agregar direcciones para consistencia con switch environment
       },
+    });
+
+    // Obtener main_store por separado si se necesita
+    if (user?.main_store_id) {
+      user.main_store = await this.prismaService.stores.findUnique({
+        where: { id: user.main_store_id },
+      });
+    }
+
+    // Obtener user_settings por separado para las validaciones
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: user.id },
     });
 
     if (!user) {
@@ -851,12 +904,73 @@ export class AuthService {
       throw new UnauthorizedException('Cuenta suspendida o archivada');
     }
 
+    // Validar que se proporcione al menos uno de los dos slugs (obligatorio)
+    if (!organization_slug && !store_slug) {
+      throw new BadRequestException(
+        'Debe proporcionar organization_slug o store_slug',
+      );
+    }
+
+    // Validar consistencia entre slugs y user_settings.app_type
+    let use_main_store_fallback = false;
+    const user_app_type = userSettings?.config?.app;
+
+    if (organization_slug && store_slug) {
+      throw new BadRequestException(
+        'Proporcione solo organization_slug o store_slug, no ambos',
+      );
+    }
+
+    if (organization_slug && user_app_type) {
+      if (user_app_type !== 'ORG_ADMIN') {
+        console.log('🔍 LOGIN - Inconsistencia detectada:', {
+          user_id: user.id,
+          provided_slug: 'organization_slug',
+          organization_slug: organization_slug,
+          user_app_type: user_app_type,
+          expected_app_type: 'ORG_ADMIN',
+        });
+        use_main_store_fallback = true;
+      }
+    }
+
+    if (store_slug && user_app_type) {
+      if (user_app_type !== 'STORE_ADMIN') {
+        console.log('🔍 LOGIN - Inconsistencia detectada:', {
+          user_id: user.id,
+          provided_slug: 'store_slug',
+          store_slug: store_slug,
+          user_app_type: user_app_type,
+          expected_app_type: 'STORE_ADMIN',
+        });
+        use_main_store_fallback = true;
+      }
+    }
+
+    // Si hay inconsistencia, usar main_store_id como fallback
+    let effective_organization_slug = organization_slug;
+    let effective_store_slug = store_slug;
+
+    if (use_main_store_fallback && user.main_store) {
+      effective_organization_slug = undefined;
+      effective_store_slug = user.main_store.slug;
+      console.log('🔍 LOGIN - Usando main_store fallback:', {
+        user_id: user.id,
+        main_store_id: user.main_store_id,
+        main_store_slug: user.main_store.slug,
+      });
+    } else if (use_main_store_fallback && !user.main_store) {
+      throw new BadRequestException(
+        'Inconsistencia de app_type detectada pero no hay main_store configurado',
+      );
+    }
+
     // Validar que el usuario pertenezca a la organización o tienda especificada
     let target_organization_id: number | null = null;
     let target_store_id: number | null = null;
     let login_context: string = '';
 
-    if (organization_slug) {
+    if (effective_organization_slug) {
       // Verificar que el usuario pertenezca a la organización especificada
       if (user.organization_id) {
         const userOrganization =
@@ -879,12 +993,12 @@ export class AuthService {
           'Usuario no pertenece a ninguna organización',
         );
       }
-    } else if (store_slug) {
+    } else if (effective_store_slug) {
       // Verificar que el usuario tenga acceso a la tienda especificada
       const storeUser = await this.prismaService.store_users.findFirst({
         where: {
           user_id: user.id,
-          store: { slug: store_slug },
+          store: { slug: effective_store_slug },
         },
         include: {
           store: {
@@ -904,7 +1018,7 @@ export class AuthService {
 
       target_organization_id = storeUser.store.organizations.id;
       target_store_id = storeUser.store.id;
-      login_context = `store:${store_slug}`;
+      login_context = `store:${effective_store_slug}`;
     }
 
     // Verificar si la cuenta está bloqueada
@@ -982,18 +1096,16 @@ export class AuthService {
       data: { last_login: new Date() },
     });
 
-    // Obtener user_settings
-    const userSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: user.id },
-    });
-
     // Remover password del response
     const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple
       user_settings: userSettings,
-      ...tokens,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: tokens.token_type,
+      expires_in: tokens.expires_in,
     };
   }
 
@@ -1257,7 +1369,7 @@ export class AuthService {
       if (user.organization_id) {
         const organization = await this.prismaService.organizations.findUnique({
           where: { id: user.organization_id },
-          select: { slug: true }
+          select: { slug: true },
         });
         organizationSlug = organization?.slug;
       }
@@ -2844,6 +2956,17 @@ export class AuthService {
     return username;
   }
 
+  private generateTemporaryPassword(): string {
+    // Generar una contraseña temporal segura
+    const chars =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    for (let i = 0; i < 12; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+  }
+
   // Parsear información del dispositivo desde User Agent
   private parseDeviceInfo(userAgent: string) {
     if (!userAgent) {
@@ -3010,7 +3133,7 @@ export class AuthService {
     const payload = {
       sub: user.id,
       organization_id: organization_id, // ✅ snake_case como en generateTokens
-      store_id: store_id,               // ✅ snake_case como en generateTokens
+      store_id: store_id, // ✅ snake_case como en generateTokens
     };
 
     const accessToken = this.jwtService.sign(payload, {

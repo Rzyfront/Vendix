@@ -13,8 +13,11 @@ import {
   PosCustomerService,
   PosCustomer,
 } from './services/pos-customer.service';
-import { PosOrderService } from './services/pos-order.service';
+import { PosPaymentService } from './services/pos-payment.service';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
+import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
+import { PosPaymentInterfaceComponent } from '../pos';
+import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 
 @Component({
   selector: 'app-pos',
@@ -25,6 +28,9 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
     IconComponent,
     SpinnerComponent,
     PosProductSelectionComponent,
+    PosCustomerModalComponent,
+    PosPaymentInterfaceComponent,
+    PosOrderConfirmationComponent,
   ],
   styleUrls: ['./pos.component.scss'],
   template: `
@@ -173,6 +179,31 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
           <p class="mt-4 text-gray-900">Procesando...</p>
         </div>
       </div>
+
+      <!-- Customer Modal -->
+      <app-pos-customer-modal
+        [isOpen]="showCustomerModal"
+        [customer]="editingCustomer"
+        (closed)="onCustomerModalClosed()"
+        (customerCreated)="onCustomerCreated($event)"
+        (customerUpdated)="onCustomerUpdated($event)"
+      ></app-pos-customer-modal>
+
+      <!-- Payment Interface Modal -->
+      <app-pos-payment-interface
+        [isOpen]="showPaymentModal"
+        [cartState]="cartState"
+        (closed)="onPaymentModalClosed()"
+        (paymentCompleted)="onPaymentCompleted($event)"
+      ></app-pos-payment-interface>
+
+      <!-- Order Confirmation Modal -->
+      <app-pos-order-confirmation
+        [isOpen]="showOrderConfirmation"
+        [orderData]="completedOrder"
+        (closed)="onOrderConfirmationClosed()"
+        (newSale)="onStartNewSale()"
+      ></app-pos-order-confirmation>
     </div>
   `,
   styles: [
@@ -191,6 +222,11 @@ export class PosComponent implements OnInit, OnDestroy {
 
   showCustomerModal = false;
   editingCustomer: PosCustomer | null = null;
+
+  showPaymentModal = false;
+  selectedPaymentMethod: any = null;
+
+  showOrderConfirmation = false;
 
   currentOrderId: string | null = null;
   currentOrderNumber: string | null = null;
@@ -211,7 +247,7 @@ export class PosComponent implements OnInit, OnDestroy {
   constructor(
     private cartService: PosCartService,
     private customerService: PosCustomerService,
-    private orderService: PosOrderService,
+    private paymentService: PosPaymentService,
     private toastService: ToastService,
   ) {}
 
@@ -327,13 +363,15 @@ export class PosComponent implements OnInit, OnDestroy {
 
     const createdBy = 'current_user';
 
-    this.orderService
-      .createDraftOrder(this.cartState, createdBy)
+    this.paymentService
+      .saveDraft(this.cartState, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: (response: any) => {
           this.loading = false;
-          this.toastService.success('Borrador guardado correctamente');
+          this.toastService.success(
+            response.message || 'Borrador guardado correctamente',
+          );
           this.onClearCart();
         },
         error: (error: any) => {
@@ -346,24 +384,42 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckout(): void {
     if (!this.cartState || this.isEmpty) return;
 
+    // Open payment modal instead of processing directly
+    this.showPaymentModal = true;
+  }
+
+  onPaymentModalClosed(): void {
+    this.showPaymentModal = false;
+    this.selectedPaymentMethod = null;
+  }
+
+  onPaymentCompleted(paymentData: any): void {
+    if (!this.cartState || this.isEmpty) return;
+
     this.loading = true;
+    this.showPaymentModal = false;
 
     const createdBy = 'current_user';
 
-    this.orderService
-      .createOrderFromCart(this.cartState, createdBy)
+    // Process sale with payment using the orquestrator
+    this.paymentService
+      .processSaleWithPayment(this.cartState, paymentData, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (order: any) => {
+        next: (result: any) => {
           this.loading = false;
-          this.currentOrderId = order.id;
-          this.currentOrderNumber = order.orderNumber;
-          this.toastService.success('Orden creada correctamente');
+          this.currentOrderId = result.order?.id;
+          this.currentOrderNumber = result.order?.order_number;
+          this.completedOrder = result.order;
+          this.showOrderConfirmation = true;
+          this.toastService.success('Venta procesada correctamente');
           this.onClearCart();
         },
         error: (error: any) => {
           this.loading = false;
-          this.toastService.error(error.message || 'Error al crear orden');
+          this.toastService.error(
+            error.message || 'Error al procesar la venta',
+          );
         },
       });
   }
@@ -374,5 +430,16 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onViewOrders(): void {
     this.toastService.info('Vista de órdenes próximamente');
+  }
+
+  onOrderConfirmationClosed(): void {
+    this.showOrderConfirmation = false;
+    this.completedOrder = null;
+  }
+
+  onStartNewSale(): void {
+    this.showOrderConfirmation = false;
+    this.completedOrder = null;
+    this.onClearCart();
   }
 }
