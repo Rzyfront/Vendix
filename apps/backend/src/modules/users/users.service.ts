@@ -44,7 +44,9 @@ export class UsersService {
     const existing_user = await this.prisma.users.findFirst({
       where: {
         email,
-        ...(target_organization_id && { organization_id: target_organization_id })
+        ...(target_organization_id && {
+          organization_id: target_organization_id,
+        }),
       },
     });
     if (existing_user) {

@@ -19,7 +19,9 @@ export class AdminUsersService {
 
   async create(createUserDto: CreateUserDto) {
     // Check if email already exists
-    const existingUser = await this.prisma.users.findUnique({
+    const existingUser = await (
+      this.prisma.withoutScope() as any
+    ).users.findUnique({
       where: { email: createUserDto.email },
     });
 
@@ -30,7 +32,7 @@ export class AdminUsersService {
     // Hash password
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-    const user = await this.prisma.users.create({
+    const user = await (this.prisma.withoutScope() as any).users.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
@@ -73,7 +75,7 @@ export class AdminUsersService {
     }
 
     const [users, total] = await Promise.all([
-      this.prisma.users.findMany({
+      (this.prisma.withoutScope() as any).users.findMany({
         where,
         skip,
         take: Number(limit),
@@ -89,7 +91,7 @@ export class AdminUsersService {
           created_at: 'desc',
         },
       }),
-      this.prisma.users.count({ where }),
+      (this.prisma.withoutScope() as any).users.count({ where }),
     ]);
 
     // Remove passwords from response
@@ -110,7 +112,7 @@ export class AdminUsersService {
   }
 
   async findOne(id: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id },
       include: {
         organizations: true,
@@ -140,7 +142,7 @@ export class AdminUsersService {
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id },
     });
 
@@ -150,7 +152,9 @@ export class AdminUsersService {
 
     // Check if email is being changed and if it already exists
     if (updateUserDto.email && updateUserDto.email !== user.email) {
-      const existingUser = await this.prisma.users.findUnique({
+      const existingUser = await (
+        this.prisma.withoutScope() as any
+      ).users.findUnique({
         where: { email: updateUserDto.email },
       });
 
@@ -165,7 +169,7 @@ export class AdminUsersService {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    const updatedUser = await this.prisma.users.update({
+    const updatedUser = await (this.prisma.withoutScope() as any).users.update({
       where: { id },
       data: updateData,
       include: {
@@ -184,7 +188,7 @@ export class AdminUsersService {
   }
 
   async remove(id: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id },
       include: {
         user_roles: true,
@@ -206,10 +210,10 @@ export class AdminUsersService {
 
     // Check if user has important data that shouldn't be deleted
     const [ordersCount, auditLogsCount] = await Promise.all([
-      this.prisma.orders.count({
+      (this.prisma.withoutScope() as any).orders.count({
         where: { created_by: id },
       }),
-      this.prisma.audit_logs.count({
+      (this.prisma.withoutScope() as any).audit_logs.count({
         where: { user_id: id },
       }),
     ]);
@@ -219,7 +223,7 @@ export class AdminUsersService {
       return this.deactivateUser(id);
     }
 
-    await this.prisma.users.delete({
+    await (this.prisma.withoutScope() as any).users.delete({
       where: { id },
     });
 
@@ -227,7 +231,7 @@ export class AdminUsersService {
   }
 
   async activateUser(id: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id },
     });
 
@@ -235,7 +239,7 @@ export class AdminUsersService {
       throw new NotFoundException('User not found');
     }
 
-    await this.prisma.users.update({
+    await (this.prisma.withoutScope() as any).users.update({
       where: { id },
       data: { state: user_state_enum.active },
     });
@@ -244,7 +248,7 @@ export class AdminUsersService {
   }
 
   async deactivateUser(id: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id },
     });
 
@@ -252,7 +256,7 @@ export class AdminUsersService {
       throw new NotFoundException('User not found');
     }
 
-    await this.prisma.users.update({
+    await (this.prisma.withoutScope() as any).users.update({
       where: { id },
       data: { state: user_state_enum.inactive },
     });
@@ -261,7 +265,7 @@ export class AdminUsersService {
   }
 
   async assignRole(userId: number, roleId: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id: userId },
     });
 
@@ -269,7 +273,7 @@ export class AdminUsersService {
       throw new NotFoundException('User not found');
     }
 
-    const role = await this.prisma.roles.findUnique({
+    const role = await (this.prisma.withoutScope() as any).roles.findUnique({
       where: { id: roleId },
     });
 
@@ -278,18 +282,20 @@ export class AdminUsersService {
     }
 
     // Check if role is already assigned
-    const existingUserRole = await this.prisma.user_roles.findFirst({
-      where: {
-        user_id: userId,
-        role_id: roleId,
-      },
-    });
+    const existingUserRole = await this.prisma
+      .withoutScope()
+      .user_roles.findFirst({
+        where: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      });
 
     if (existingUserRole) {
       throw new ConflictException('Role already assigned to user');
     }
 
-    await this.prisma.user_roles.create({
+    await (this.prisma.withoutScope() as any).user_roles.create({
       data: {
         user_id: userId,
         role_id: roleId,
@@ -300,7 +306,7 @@ export class AdminUsersService {
   }
 
   async removeRole(userId: number, roleId: number) {
-    const user = await this.prisma.users.findUnique({
+    const user = await (this.prisma.withoutScope() as any).users.findUnique({
       where: { id: userId },
     });
 
@@ -308,7 +314,7 @@ export class AdminUsersService {
       throw new NotFoundException('User not found');
     }
 
-    const role = await this.prisma.roles.findUnique({
+    const role = await (this.prisma.withoutScope() as any).roles.findUnique({
       where: { id: roleId },
     });
 
@@ -321,7 +327,9 @@ export class AdminUsersService {
       throw new ForbiddenException('Cannot remove super admin role');
     }
 
-    const userRole = await this.prisma.user_roles.findFirst({
+    const userRole = await (
+      this.prisma.withoutScope() as any
+    ).user_roles.findFirst({
       where: {
         user_id: userId,
         role_id: roleId,
@@ -332,7 +340,7 @@ export class AdminUsersService {
       throw new NotFoundException('Role not assigned to user');
     }
 
-    await this.prisma.user_roles.delete({
+    await (this.prisma.withoutScope() as any).user_roles.delete({
       where: { id: userRole.id },
     });
 
@@ -348,21 +356,21 @@ export class AdminUsersService {
       usersByRole,
       recentUsers,
     ] = await Promise.all([
-      this.prisma.users.count(),
-      this.prisma.users.count({
+      (this.prisma.withoutScope() as any).users.count(),
+      (this.prisma.withoutScope() as any).users.count({
         where: { state: user_state_enum.active },
       }),
-      this.prisma.users.count({
+      (this.prisma.withoutScope() as any).users.count({
         where: { state: user_state_enum.inactive },
       }),
-      this.prisma.users.count({
+      (this.prisma.withoutScope() as any).users.count({
         where: { state: user_state_enum.pending_verification },
       }),
-      this.prisma.user_roles.groupBy({
+      (this.prisma.withoutScope() as any).user_roles.groupBy({
         by: ['role_id'],
         _count: true,
       }),
-      this.prisma.users.findMany({
+      (this.prisma.withoutScope() as any).users.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
@@ -373,7 +381,7 @@ export class AdminUsersService {
 
     // Get role details for usersByRole
     const roleIds = usersByRole.map((item: any) => item.role_id);
-    const roles = await this.prisma.roles.findMany({
+    const roles = await (this.prisma.withoutScope() as any).roles.findMany({
       where: { id: { in: roleIds } },
       select: { id: true, name: true },
     });

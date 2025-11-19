@@ -38,9 +38,11 @@ export class OrdersService {
       const store = await this.prisma.stores.findFirst({
         where: {
           id: target_store_id,
-          ...(context?.is_super_admin ? {} : {
-            organization_id: context?.organization_id
-          })
+          ...(context?.is_super_admin
+            ? {}
+            : {
+                organization_id: context?.organization_id,
+              }),
         },
       });
       if (!store) {
@@ -168,7 +170,7 @@ export class OrdersService {
         id,
         // Aplicar scope de store_id a menos que sea super admin
         ...(!context?.is_super_admin && {
-          store_id: context?.store_id
+          store_id: context?.store_id,
         }),
       },
       include: {

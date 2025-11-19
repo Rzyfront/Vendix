@@ -15,7 +15,9 @@ export class AdminDomainsService {
   constructor(private prisma: PrismaService) {}
 
   async create(createDomainSettingDto: CreateDomainSettingDto) {
-    const existingDomain = await this.prisma.domain_settings.findUnique({
+    const existingDomain = await (
+      this.prisma.withoutScope() as any
+    ).domain_settings.findUnique({
       where: { hostname: createDomainSettingDto.hostname },
     });
 
@@ -23,7 +25,7 @@ export class AdminDomainsService {
       throw new ConflictException('Domain with this hostname already exists');
     }
 
-    return this.prisma.domain_settings.create({
+    return (this.prisma.withoutScope() as any).domain_settings.create({
       data: {
         hostname: createDomainSettingDto.hostname,
         organization_id: createDomainSettingDto.organization_id,
@@ -83,7 +85,7 @@ export class AdminDomainsService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.domain_settings.findMany({
+      (this.prisma.withoutScope() as any).domain_settings.findMany({
         where,
         skip,
         take,
@@ -97,7 +99,7 @@ export class AdminDomainsService {
         },
         orderBy: { created_at: 'desc' },
       }),
-      this.prisma.domain_settings.count({ where }),
+      (this.prisma.withoutScope() as any).domain_settings.count({ where }),
     ]);
 
     return {
@@ -112,7 +114,9 @@ export class AdminDomainsService {
   }
 
   async findOne(id: number) {
-    const domain = await this.prisma.domain_settings.findUnique({
+    const domain = await (
+      this.prisma.withoutScope() as any
+    ).domain_settings.findUnique({
       where: { id },
       include: {
         organization: {
@@ -132,7 +136,9 @@ export class AdminDomainsService {
   }
 
   async update(id: number, updateDomainSettingDto: UpdateDomainSettingDto) {
-    const existingDomain = await this.prisma.domain_settings.findUnique({
+    const existingDomain = await (
+      this.prisma.withoutScope() as any
+    ).domain_settings.findUnique({
       where: { id },
     });
 
@@ -140,7 +146,7 @@ export class AdminDomainsService {
       throw new NotFoundException('Domain not found');
     }
 
-    return this.prisma.domain_settings.update({
+    return (this.prisma.withoutScope() as any).domain_settings.update({
       where: { id },
       data: {
         ...updateDomainSettingDto,
@@ -161,7 +167,9 @@ export class AdminDomainsService {
   }
 
   async remove(id: number) {
-    const existingDomain = await this.prisma.domain_settings.findUnique({
+    const existingDomain = await (
+      this.prisma.withoutScope() as any
+    ).domain_settings.findUnique({
       where: { id },
     });
 
@@ -173,7 +181,7 @@ export class AdminDomainsService {
       throw new ConflictException('Cannot delete primary domain');
     }
 
-    return this.prisma.domain_settings.delete({
+    return (this.prisma.withoutScope() as any).domain_settings.delete({
       where: { id },
     });
   }
@@ -186,21 +194,21 @@ export class AdminDomainsService {
       domainsByOwnership,
       recentDomains,
     ] = await Promise.all([
-      this.prisma.domain_settings.count(),
-      this.prisma.domain_settings.count({
+      (this.prisma.withoutScope() as any).domain_settings.count(),
+      (this.prisma.withoutScope() as any).domain_settings.count({
         where: {
           OR: [{ last_verified_at: { not: null } }, { last_error: null }],
         },
       }),
-      this.prisma.domain_settings.groupBy({
+      (this.prisma.withoutScope() as any).domain_settings.groupBy({
         by: ['domain_type'],
         _count: true,
       }),
-      this.prisma.domain_settings.groupBy({
+      (this.prisma.withoutScope() as any).domain_settings.groupBy({
         by: ['domain_type'],
         _count: true,
       }),
-      this.prisma.domain_settings.findMany({
+      (this.prisma.withoutScope() as any).domain_settings.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
@@ -236,7 +244,9 @@ export class AdminDomainsService {
   }
 
   async verifyDomain(id: number) {
-    const domain = await this.prisma.domain_settings.findUnique({
+    const domain = await (
+      this.prisma.withoutScope() as any
+    ).domain_settings.findUnique({
       where: { id },
     });
 
@@ -246,7 +256,7 @@ export class AdminDomainsService {
 
     // Here you would implement actual domain verification logic
     // For now, we'll just update the verification timestamp
-    return this.prisma.domain_settings.update({
+    return (this.prisma.withoutScope() as any).domain_settings.update({
       where: { id },
       data: {
         last_verified_at: new Date(),

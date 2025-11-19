@@ -111,15 +111,15 @@ export class InventoryAdjustmentsService {
 
       // 4. Actualizar stock levels
       await this.stockLevelManager.updateStock({
-        productId: data.productId,
-        variantId: data.variantId,
-        locationId: data.locationId,
-        quantityChange: quantityChange,
-        movementType: 'adjustment',
+        product_id: data.productId,
+        variant_id: data.variantId,
+        location_id: data.locationId,
+        quantity_change: quantityChange,
+        movement_type: 'adjustment',
         reason: `Adjustment: ${data.type} - ${data.description}`,
-        userId: data.createdByUserId,
-        createMovement: true,
-        validateAvailability: false,
+        user_id: data.createdByUserId,
+        create_movement: true,
+        validate_availability: false,
       });
 
       // 5. Crear inventory transaction

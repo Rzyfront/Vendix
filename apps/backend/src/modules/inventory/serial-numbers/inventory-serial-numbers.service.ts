@@ -63,7 +63,9 @@ export class InventorySerialNumbersService {
     const batch = await this.prisma.inventory_batches.findFirst({
       where: {
         id: batch_id,
-        ...(!context?.is_super_admin && { organization_id: target_organization_id }),
+        ...(!context?.is_super_admin && {
+          organization_id: target_organization_id,
+        }),
       },
     });
 
@@ -72,16 +74,17 @@ export class InventorySerialNumbersService {
     }
 
     // Check if serial numbers already exist
-    const existing_serials = await this.prisma.inventory_serial_numbers.findMany(
-      {
+    const existing_serials =
+      await this.prisma.inventory_serial_numbers.findMany({
         where: {
           serial_number: {
             in: serial_numbers,
           },
-          ...(!context?.is_super_admin && { organization_id: target_organization_id }),
+          ...(!context?.is_super_admin && {
+            organization_id: target_organization_id,
+          }),
         },
-      },
-    );
+      });
 
     if (existing_serials.length > 0) {
       const existing_numbers = existing_serials.map((s) => s.serial_number);
@@ -139,22 +142,24 @@ export class InventorySerialNumbersService {
       where: {
         id,
         // Aplicar scope a través de producto o ubicación
-        ...(context?.is_super_admin ? {} : {
-          OR: [
-            {
-              products: {
-                stores: {
-                  organization_id: target_organization_id,
+        ...(context?.is_super_admin
+          ? {}
+          : {
+              OR: [
+                {
+                  products: {
+                    stores: {
+                      organization_id: target_organization_id,
+                    },
+                  },
                 },
-              },
-            },
-            {
-              inventory_locations: {
-                organization_id: target_organization_id,
-              },
-            },
-          ],
-        }),
+                {
+                  inventory_locations: {
+                    organization_id: target_organization_id,
+                  },
+                },
+              ],
+            }),
       },
       include: {
         products: {
@@ -456,7 +461,7 @@ export class InventorySerialNumbersService {
         await this.stockLevelManager.updateStock({
           product_id: serialNumber.product_id,
           variant_id: serialNumber.product_variant_id,
-          location_id: metadata?.location_id || serialNumber.location_id,
+          location_id: metadata?.locationId || serialNumber.location_id,
           quantity_change: quantity,
           movement_type: transactionType as any,
           reason: `Serial number status change: ${status}`,
@@ -564,7 +569,7 @@ export class InventorySerialNumbersService {
       await this.stockLevelManager.updateStock({
         product_id: serialNumber.product_id,
         variant_id: serialNumber.product_variant_id,
-        location_id: Number(target_location_id),
+        location_id: Number(targetLocationId),
         quantity_change: 1,
         movement_type: 'transfer',
         reason: `Transfer in: ${serialNumber.serial_number}`,
