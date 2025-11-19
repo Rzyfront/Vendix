@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild, Renderer2, OnDestroy } from '@angular/core';
+import { Component, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -30,7 +30,9 @@ import { Observable } from 'rxjs';
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
-        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
+        [style.margin-left]="
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+        "
       >
         <!-- Header (Fixed) -->
         <app-header
@@ -54,31 +56,20 @@ import { Observable } from 'rxjs';
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
-export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
+export class SuperAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   sidebarCollapsed = false;
-  currentPageTitle = 'Super Admin Dashboard';
   currentVlink = 'super-admin';
   platformTitle = 'Vendix Platform';
 
   // Dynamic user data
   organizationName$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
-  private resizeListener?: () => void;
 
   constructor(private authFacade: AuthFacade) {
-    console.log('[DEBUG] SuperAdminLayoutComponent has been constructed!');
-    console.log('[DEBUG] Menu items:', this.menuItems);
-
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
-  }
-
-  ngOnInit(): void {
-    console.log('[DEBUG] SuperAdminLayoutComponent initialized');
-    // Ensure menu items are properly set
-    console.log('[DEBUG] Menu items on init:', this.menuItems);
   }
 
   breadcrumb = {
@@ -186,12 +177,6 @@ export class SuperAdminLayoutComponent implements OnInit, OnDestroy {
     } else {
       // Desktop: toggle collapsed state
       this.sidebarCollapsed = !this.sidebarCollapsed;
-    }
-  }
-
-  ngOnDestroy() {
-    if (this.resizeListener) {
-      this.resizeListener();
     }
   }
 }

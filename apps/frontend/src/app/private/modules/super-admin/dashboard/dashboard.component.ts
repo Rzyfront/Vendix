@@ -219,6 +219,7 @@ interface ChartData {
               <!-- Bars -->
               <div
                 class="absolute inset-0 flex items-end justify-between gap-3 px-4"
+                *ngIf="chartData.datasets.length > 0"
               >
                 <div
                   *ngFor="let bar of chartData.datasets[0].data; let i = index"

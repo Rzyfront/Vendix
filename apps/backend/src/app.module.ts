@@ -28,6 +28,7 @@ import { AdminStoresModule } from './modules/superadmin/admin-stores/admin-store
 import { AdminDomainsModule } from './modules/superadmin/admin-domains/admin-domains.module';
 import { AdminRolesModule } from './modules/superadmin/admin-roles/admin-roles.module';
 import { AdminUsersModule } from './modules/superadmin/admin-users/admin-users.module';
+import { AdminDashboardModule } from './modules/superadmin/admin-dashboard/admin-dashboard.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
@@ -67,6 +68,7 @@ import { RequestContextInterceptor } from './common/interceptors/request-context
     AdminDomainsModule,
     AdminRolesModule,
     AdminUsersModule,
+    AdminDashboardModule,
     OnboardingModule,
   ],
   controllers: [AppController],
