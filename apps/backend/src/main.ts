@@ -37,7 +37,7 @@ async function bootstrap() {
     // Frontend domain: vendix.online and subdomains
     'https://vendix.online',
     'https://www.vendix.online',
-    new RegExp(`^https://([a-zA-Z0-9-]+\\.)?vendix\\.online$`),
+    /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.online$/,
     // CloudFront distributions
     'https://d10fsx06e3z6rc.cloudfront.net',
     'https://d1y0m1duatgngc.cloudfront.net',
