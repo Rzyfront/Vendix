@@ -23,7 +23,9 @@ export class AdminStoresService {
       strict: true,
     });
 
-    const existingStore = await this.prisma.stores.findFirst({
+    const existingStore = await (
+      this.prisma.withoutScope() as any
+    ).stores.findFirst({
       where: {
         OR: [{ slug }, { name: createStoreDto.name }],
         organization_id: createStoreDto.organization_id,
@@ -36,7 +38,7 @@ export class AdminStoresService {
       );
     }
 
-    return this.prisma.stores.create({
+    return (this.prisma.withoutScope() as any).stores.create({
       data: {
         ...createStoreDto,
         slug,
@@ -72,7 +74,7 @@ export class AdminStoresService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.stores.findMany({
+      (this.prisma.withoutScope() as any).stores.findMany({
         where,
         skip,
         take: Number(limit),
@@ -89,7 +91,7 @@ export class AdminStoresService {
           },
         },
       }),
-      this.prisma.stores.count({ where }),
+      (this.prisma.withoutScope() as any).stores.count({ where }),
     ]);
 
     return {
@@ -104,14 +106,14 @@ export class AdminStoresService {
   }
 
   async findOne(id: number) {
-    const store = await this.prisma.stores.findUnique({
+    const store = await (this.prisma.withoutScope() as any).stores.findUnique({
       where: { id },
       include: {
         organizations: true,
         addresses: true,
         store_users: {
           include: {
-            users: {
+            user: {
               select: {
                 id: true,
                 first_name: true,
@@ -140,7 +142,9 @@ export class AdminStoresService {
   }
 
   async update(id: number, updateStoreDto: UpdateStoreDto) {
-    const existingStore = await this.prisma.stores.findUnique({
+    const existingStore = await (
+      this.prisma.withoutScope() as any
+    ).stores.findUnique({
       where: { id },
     });
 
@@ -155,7 +159,9 @@ export class AdminStoresService {
         strict: true,
       });
 
-      const slugExists = await this.prisma.stores.findFirst({
+      const slugExists = await (
+        this.prisma.withoutScope() as any
+      ).stores.findFirst({
         where: {
           slug,
           id: { not: id },
@@ -170,7 +176,7 @@ export class AdminStoresService {
       }
     }
 
-    return this.prisma.stores.update({
+    return (this.prisma.withoutScope() as any).stores.update({
       where: { id },
       data: {
         ...updateStoreDto,
@@ -186,7 +192,9 @@ export class AdminStoresService {
   }
 
   async remove(id: number) {
-    const existingStore = await this.prisma.stores.findUnique({
+    const existingStore = await (
+      this.prisma.withoutScope() as any
+    ).stores.findUnique({
       where: { id },
       include: {
         _count: {
@@ -213,7 +221,7 @@ export class AdminStoresService {
       );
     }
 
-    return this.prisma.stores.delete({
+    return (this.prisma.withoutScope() as any).stores.delete({
       where: { id },
     });
   }
@@ -226,17 +234,19 @@ export class AdminStoresService {
       storesByState,
       recentStores,
     ] = await Promise.all([
-      this.prisma.stores.count(),
-      this.prisma.stores.count({ where: { is_active: true } }),
-      this.prisma.stores.groupBy({
+      (this.prisma.withoutScope() as any).stores.count(),
+      (this.prisma.withoutScope() as any).stores.count({
+        where: { is_active: true },
+      }),
+      (this.prisma.withoutScope() as any).stores.groupBy({
         by: ['store_type'],
         _count: true,
       }),
-      this.prisma.stores.groupBy({
+      (this.prisma.withoutScope() as any).stores.groupBy({
         by: ['is_active'],
         _count: true,
       }),
-      this.prisma.stores.findMany({
+      (this.prisma.withoutScope() as any).stores.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {

@@ -18,7 +18,12 @@ export interface ScopeValidationOptions {
 export class ScopeValidationMiddleware implements NestMiddleware {
   constructor(private readonly requestContextService: RequestContextService) {}
 
-  use(req: Request, res: Response, next: NextFunction, options?: ScopeValidationOptions) {
+  use(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+    options?: ScopeValidationOptions,
+  ) {
     const context = RequestContextService.getContext();
 
     // Opciones por defecto
@@ -42,7 +47,11 @@ export class ScopeValidationMiddleware implements NestMiddleware {
       }
 
       // Validar organización
-      if (opts.require_organization && !context.organization_id && !context.is_super_admin) {
+      if (
+        opts.require_organization &&
+        !context.organization_id &&
+        !context.is_super_admin
+      ) {
         throw new BadRequestException('Organization context is required');
       }
 
@@ -53,7 +62,9 @@ export class ScopeValidationMiddleware implements NestMiddleware {
 
       // Validar permisos de super admin
       if (!opts.allow_super_admin && context.is_super_admin) {
-        throw new ForbiddenException('Super admin access not allowed for this endpoint');
+        throw new ForbiddenException(
+          'Super admin access not allowed for this endpoint',
+        );
       }
 
       // Log de acceso para auditoría
@@ -123,9 +134,13 @@ export class ScopeValidationMiddleware implements NestMiddleware {
 /**
  * Factory function para crear middleware con opciones específicas
  */
-export function createScopeValidationMiddleware(options: ScopeValidationOptions) {
+export function createScopeValidationMiddleware(
+  options: ScopeValidationOptions,
+) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const middleware = new ScopeValidationMiddleware(new RequestContextService());
+    const middleware = new ScopeValidationMiddleware(
+      new RequestContextService(),
+    );
     middleware.use(req, res, next, options);
   };
 }

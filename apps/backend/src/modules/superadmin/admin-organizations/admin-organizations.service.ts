@@ -25,9 +25,11 @@ export class AdminOrganizationsService {
       strict: true,
     });
 
-    const existingOrg = await this.prisma.organizations.findFirst({
-      where: { OR: [{ slug }, { tax_id: createOrganizationDto.tax_id }] },
-    });
+    const existingOrg = await this.prisma
+      .withoutScope()
+      .organizations.findFirst({
+        where: { OR: [{ slug }, { tax_id: createOrganizationDto.tax_id }] },
+      });
 
     if (existingOrg) {
       throw new ConflictException(
@@ -35,7 +37,7 @@ export class AdminOrganizationsService {
       );
     }
 
-    return this.prisma.organizations.create({
+    return (this.prisma.withoutScope() as any).organizations.create({
       data: {
         ...createOrganizationDto,
         slug,
@@ -83,7 +85,7 @@ export class AdminOrganizationsService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.organizations.findMany({
+      (this.prisma.withoutScope() as any).organizations.findMany({
         where,
         skip,
         take: Number(limit),
@@ -100,7 +102,7 @@ export class AdminOrganizationsService {
           },
         },
       }),
-      this.prisma.organizations.count({ where }),
+      (this.prisma.withoutScope() as any).organizations.count({ where }),
     ]);
 
     return {
@@ -115,45 +117,47 @@ export class AdminOrganizationsService {
   }
 
   async findOne(id: number) {
-    const organization = await this.prisma.organizations.findUnique({
-      where: { id },
-      include: {
-        stores: {
-          include: {
-            addresses: true,
-            _count: {
-              select: {
-                store_users: true,
-                orders: true,
-                products: true,
+    const organization = await this.prisma
+      .withoutScope()
+      .organizations.findUnique({
+        where: { id },
+        include: {
+          stores: {
+            include: {
+              addresses: true,
+              _count: {
+                select: {
+                  store_users: true,
+                  orders: true,
+                  products: true,
+                },
               },
             },
           },
-        },
-        addresses: true,
-        users: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            state: true,
-            user_roles: {
-              include: {
-                roles: true,
+          addresses: true,
+          users: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              state: true,
+              user_roles: {
+                include: {
+                  roles: true,
+                },
               },
             },
           },
-        },
-        _count: {
-          select: {
-            stores: true,
-            users: true,
-            addresses: true,
+          _count: {
+            select: {
+              stores: true,
+              users: true,
+              addresses: true,
+            },
           },
         },
-      },
-    });
+      });
 
     if (!organization) {
       throw new NotFoundException('Organization not found');
@@ -163,14 +167,16 @@ export class AdminOrganizationsService {
   }
 
   async findBySlug(slug: string) {
-    const organization = await this.prisma.organizations.findUnique({
-      where: { slug },
-      include: {
-        stores: true,
-        addresses: true,
-        users: true,
-      },
-    });
+    const organization = await this.prisma
+      .withoutScope()
+      .organizations.findUnique({
+        where: { slug },
+        include: {
+          stores: true,
+          addresses: true,
+          users: true,
+        },
+      });
 
     if (!organization) {
       throw new NotFoundException('Organization not found');
@@ -180,9 +186,11 @@ export class AdminOrganizationsService {
   }
 
   async update(id: number, updateOrganizationDto: UpdateOrganizationDto) {
-    const existingOrg = await this.prisma.organizations.findUnique({
-      where: { id },
-    });
+    const existingOrg = await this.prisma
+      .withoutScope()
+      .organizations.findUnique({
+        where: { id },
+      });
 
     if (!existingOrg) {
       throw new NotFoundException('Organization not found');
@@ -198,9 +206,11 @@ export class AdminOrganizationsService {
         strict: true,
       });
 
-      const slugExists = await this.prisma.organizations.findFirst({
-        where: { slug, id: { not: id } },
-      });
+      const slugExists = await this.prisma
+        .withoutScope()
+        .organizations.findFirst({
+          where: { slug, id: { not: id } },
+        });
 
       if (slugExists) {
         throw new ConflictException(
@@ -213,9 +223,11 @@ export class AdminOrganizationsService {
       updateOrganizationDto.tax_id &&
       updateOrganizationDto.tax_id !== existingOrg.tax_id
     ) {
-      const taxIdExists = await this.prisma.organizations.findFirst({
-        where: { tax_id: updateOrganizationDto.tax_id, id: { not: id } },
-      });
+      const taxIdExists = await this.prisma
+        .withoutScope()
+        .organizations.findFirst({
+          where: { tax_id: updateOrganizationDto.tax_id, id: { not: id } },
+        });
 
       if (taxIdExists) {
         throw new ConflictException(
@@ -224,7 +236,7 @@ export class AdminOrganizationsService {
       }
     }
 
-    return this.prisma.organizations.update({
+    return (this.prisma.withoutScope() as any).organizations.update({
       where: { id },
       data: {
         ...updateOrganizationDto,
@@ -240,17 +252,19 @@ export class AdminOrganizationsService {
   }
 
   async remove(id: number) {
-    const existingOrg = await this.prisma.organizations.findUnique({
-      where: { id },
-      include: {
-        _count: {
-          select: {
-            stores: true,
-            users: true,
+    const existingOrg = await this.prisma
+      .withoutScope()
+      .organizations.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: {
+              stores: true,
+              users: true,
+            },
           },
         },
-      },
-    });
+      });
 
     if (!existingOrg) {
       throw new NotFoundException('Organization not found');
@@ -262,7 +276,7 @@ export class AdminOrganizationsService {
       );
     }
 
-    return this.prisma.organizations.delete({
+    return (this.prisma.withoutScope() as any).organizations.delete({
       where: { id },
     });
   }
@@ -275,10 +289,14 @@ export class AdminOrganizationsService {
       recentOrganizations,
       organizationsByStatus,
     ] = await Promise.all([
-      this.prisma.organizations.count(),
-      this.prisma.organizations.count({ where: { state: 'active' } }),
-      this.prisma.organizations.count({ where: { state: 'inactive' } }),
-      this.prisma.organizations.findMany({
+      (this.prisma.withoutScope() as any).organizations.count(),
+      this.prisma
+        .withoutScope()
+        .organizations.count({ where: { state: 'active' } }),
+      this.prisma
+        .withoutScope()
+        .organizations.count({ where: { state: 'inactive' } }),
+      (this.prisma.withoutScope() as any).organizations.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
         select: {
@@ -294,7 +312,7 @@ export class AdminOrganizationsService {
           },
         },
       }),
-      this.prisma.organizations.groupBy({
+      (this.prisma.withoutScope() as any).organizations.groupBy({
         by: ['state'],
         _count: true,
       }),
@@ -337,36 +355,36 @@ export class AdminOrganizationsService {
       recentOrders,
       topStores,
     ] = await Promise.all([
-      this.prisma.stores.count({
+      (this.prisma.withoutScope() as any).stores.count({
         where: { organization_id: id },
       }),
-      this.prisma.stores.count({
+      (this.prisma.withoutScope() as any).stores.count({
         where: { organization_id: id, is_active: true },
       }),
-      this.prisma.users.count({
+      (this.prisma.withoutScope() as any).users.count({
         where: { organization_id: id },
       }),
-      this.prisma.users.count({
+      (this.prisma.withoutScope() as any).users.count({
         where: { organization_id: id, state: 'active' },
       }),
-      this.prisma.orders.count({
-        where: { store: { organization_id: id }, ...dateFilter },
+      (this.prisma.withoutScope() as any).orders.count({
+        where: { stores: { organization_id: id }, ...dateFilter },
       }),
-      this.prisma.orders.aggregate({
-        where: { store: { organization_id: id }, ...dateFilter },
-        _sum: { total_amount: true },
+      (this.prisma.withoutScope() as any).orders.aggregate({
+        where: { stores: { organization_id: id }, ...dateFilter },
+        _sum: { grand_total: true },
       }),
-      this.prisma.orders.findMany({
-        where: { store: { organization_id: id } },
+      (this.prisma.withoutScope() as any).orders.findMany({
+        where: { stores: { organization_id: id } },
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {
-          store: {
+          stores: {
             select: { id: true, name: true },
           },
         },
       }),
-      this.prisma.stores.findMany({
+      (this.prisma.withoutScope() as any).stores.findMany({
         where: { organization_id: id },
         take: 5,
         orderBy: {
@@ -394,7 +412,7 @@ export class AdminOrganizationsService {
         totalUsers,
         activeUsers,
         totalOrders,
-        totalRevenue: totalRevenue._sum.total_amount || 0,
+        totalRevenue: Number(totalRevenue._sum.grand_total) || 0,
       },
       recentOrders,
       topStores,

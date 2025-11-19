@@ -88,15 +88,15 @@ export class InventoryBatchesService {
 
       // 4. Actualizar stock levels
       await this.stockLevelManager.updateStock({
-        productId: createBatchDto.product_id,
-        variantId: createBatchDto.product_variant_id,
-        locationId: createBatchDto.location_id || 1,
-        quantityChange: createBatchDto.quantity,
-        movementType: 'stock_in',
+        product_id: createBatchDto.product_id,
+        variant_id: createBatchDto.product_variant_id,
+        location_id: createBatchDto.location_id || 1,
+        quantity_change: createBatchDto.quantity,
+        movement_type: 'stock_in',
         reason: `Batch ${createBatchDto.batchNumber} received`,
-        userId: createBatchDto.userId,
-        createMovement: true,
-        validateAvailability: false,
+        user_id: createBatchDto.userId,
+        create_movement: true,
+        validate_availability: false,
       });
 
       return batch;
@@ -399,15 +399,15 @@ export class InventoryBatchesService {
 
       // Actualizar stock levels (reducir stock)
       await this.stockLevelManager.updateStock({
-        productId: batch.product_id,
-        variantId: batch.product_variant_id,
-        locationId: batch.location_id,
-        quantityChange: -quantityUsed,
-        movementType: 'sale',
+        product_id: batch.product_id,
+        variant_id: batch.product_variant_id,
+        location_id: batch.location_id,
+        quantity_change: -quantityUsed,
+        movement_type: 'sale',
         reason: `Batch ${batch.batch_number} quantity used`,
-        userId: userId,
-        createMovement: true,
-        validateAvailability: true,
+        user_id: userId,
+        create_movement: true,
+        validate_availability: true,
       });
 
       return updatedBatch;
@@ -486,32 +486,32 @@ export class InventoryBatchesService {
 
       // Crear movimiento de stock (salida de ubicación original)
       await this.stockLevelManager.updateStock({
-        productId: batch.product_id,
-        variantId: batch.product_variant_id,
-        locationId: batch.location_id,
-        quantityChange: -quantity,
-        movementType: 'transfer',
+        product_id: batch.product_id,
+        variant_id: batch.product_variant_id,
+        location_id: batch.location_id,
+        quantity_change: -quantity,
+        movement_type: 'transfer',
         reason: `Batch ${batch.batch_number} transferred out`,
-        userId: userId,
-        createMovement: true,
-        validateAvailability: true,
-        fromLocationId: batch.location_id,
-        toLocationId: toLocationId,
+        user_id: userId,
+        create_movement: true,
+        validate_availability: true,
+        from_location_id: batch.location_id,
+        to_location_id: toLocationId,
       });
 
       // Crear movimiento de stock (entrada a ubicación destino)
       await this.stockLevelManager.updateStock({
-        productId: batch.product_id,
-        variantId: batch.product_variant_id,
-        locationId: toLocationId,
-        quantityChange: quantity,
-        movementType: 'transfer',
+        product_id: batch.product_id,
+        variant_id: batch.product_variant_id,
+        location_id: toLocationId,
+        quantity_change: quantity,
+        movement_type: 'transfer',
         reason: `Batch ${batch.batch_number} transferred in`,
-        userId: userId,
-        createMovement: true,
-        validateAvailability: false,
-        fromLocationId: batch.location_id,
-        toLocationId: toLocationId,
+        user_id: userId,
+        create_movement: true,
+        validate_availability: false,
+        from_location_id: batch.location_id,
+        to_location_id: toLocationId,
       });
 
       return newBatch;

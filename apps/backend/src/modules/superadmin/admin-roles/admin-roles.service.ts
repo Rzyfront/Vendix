@@ -17,7 +17,9 @@ export class AdminRolesService {
   constructor(private prisma: PrismaService) {}
 
   async create(createRoleDto: CreateRoleDto) {
-    const existingRole = await this.prisma.roles.findUnique({
+    const existingRole = await (
+      this.prisma.withoutScope() as any
+    ).roles.findUnique({
       where: { name: createRoleDto.name },
     });
 
@@ -25,7 +27,7 @@ export class AdminRolesService {
       throw new ConflictException('Role with this name already exists');
     }
 
-    return this.prisma.roles.create({
+    return (this.prisma.withoutScope() as any).roles.create({
       data: {
         name: createRoleDto.name,
         description: createRoleDto.description,
@@ -91,7 +93,7 @@ export class AdminRolesService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.roles.findMany({
+      (this.prisma.withoutScope() as any).roles.findMany({
         where,
         skip,
         take: limit,
@@ -124,7 +126,7 @@ export class AdminRolesService {
         },
         orderBy: { created_at: 'desc' },
       }),
-      this.prisma.roles.count({ where }),
+      (this.prisma.withoutScope() as any).roles.count({ where }),
     ]);
 
     return {
@@ -139,7 +141,7 @@ export class AdminRolesService {
   }
 
   async findOne(id: number) {
-    const role = await this.prisma.roles.findUnique({
+    const role = await (this.prisma.withoutScope() as any).roles.findUnique({
       where: { id },
       include: {
         role_permissions: {
@@ -178,7 +180,9 @@ export class AdminRolesService {
   }
 
   async update(id: number, updateRoleDto: UpdateRoleDto) {
-    const existingRole = await this.prisma.roles.findUnique({
+    const existingRole = await (
+      this.prisma.withoutScope() as any
+    ).roles.findUnique({
       where: { id },
     });
 
@@ -187,7 +191,9 @@ export class AdminRolesService {
     }
 
     if (updateRoleDto.name && updateRoleDto.name !== existingRole.name) {
-      const nameExists = await this.prisma.roles.findFirst({
+      const nameExists = await (
+        this.prisma.withoutScope() as any
+      ).roles.findFirst({
         where: {
           name: updateRoleDto.name,
           id: { not: id },
@@ -199,7 +205,7 @@ export class AdminRolesService {
       }
     }
 
-    return this.prisma.roles.update({
+    return (this.prisma.withoutScope() as any).roles.update({
       where: { id },
       data: {
         ...updateRoleDto,
@@ -236,7 +242,9 @@ export class AdminRolesService {
   }
 
   async remove(id: number) {
-    const existingRole = await this.prisma.roles.findUnique({
+    const existingRole = await (
+      this.prisma.withoutScope() as any
+    ).roles.findUnique({
       where: { id },
       include: {
         _count: {
@@ -265,7 +273,7 @@ export class AdminRolesService {
       );
     }
 
-    return this.prisma.roles.delete({
+    return (this.prisma.withoutScope() as any).roles.delete({
       where: { id },
     });
   }
@@ -274,7 +282,7 @@ export class AdminRolesService {
     roleId: number,
     assignPermissionsDto: AssignPermissionsDto,
   ) {
-    const role = await this.prisma.roles.findUnique({
+    const role = await (this.prisma.withoutScope() as any).roles.findUnique({
       where: { id: roleId },
     });
 
@@ -282,7 +290,9 @@ export class AdminRolesService {
       throw new NotFoundException('Role not found');
     }
 
-    const existingPermissions = await this.prisma.role_permissions.findMany({
+    const existingPermissions = await (
+      this.prisma.withoutScope() as any
+    ).role_permissions.findMany({
       where: {
         role_id: roleId,
         permission_id: { in: assignPermissionsDto.permission_ids },
@@ -302,7 +312,7 @@ export class AdminRolesService {
       }),
     );
 
-    await this.prisma.role_permissions.createMany({
+    await (this.prisma.withoutScope() as any).role_permissions.createMany({
       data: rolePermissions,
     });
 
@@ -313,7 +323,7 @@ export class AdminRolesService {
     roleId: number,
     removePermissionsDto: RemovePermissionsDto,
   ) {
-    const role = await this.prisma.roles.findUnique({
+    const role = await (this.prisma.withoutScope() as any).roles.findUnique({
       where: { id: roleId },
     });
 
@@ -321,7 +331,7 @@ export class AdminRolesService {
       throw new NotFoundException('Role not found');
     }
 
-    await this.prisma.role_permissions.deleteMany({
+    await (this.prisma.withoutScope() as any).role_permissions.deleteMany({
       where: {
         role_id: roleId,
         permission_id: { in: removePermissionsDto.permission_ids },
@@ -340,18 +350,22 @@ export class AdminRolesService {
       rolesByUserCount,
       recentRoles,
     ] = await Promise.all([
-      this.prisma.roles.count(),
-      this.prisma.roles.count({ where: { is_system_role: true } }),
-      this.prisma.roles.count({ where: { is_system_role: false } }),
-      this.prisma.permissions.count(),
-      this.prisma.roles.findMany({
+      (this.prisma.withoutScope() as any).roles.count(),
+      (this.prisma.withoutScope() as any).roles.count({
+        where: { is_system_role: true },
+      }),
+      (this.prisma.withoutScope() as any).roles.count({
+        where: { is_system_role: false },
+      }),
+      (this.prisma.withoutScope() as any).permissions.count(),
+      (this.prisma.withoutScope() as any).roles.findMany({
         include: {
           _count: {
             select: { user_roles: true },
           },
         },
       }),
-      this.prisma.roles.findMany({
+      (this.prisma.withoutScope() as any).roles.findMany({
         take: 5,
         orderBy: { created_at: 'desc' },
         include: {

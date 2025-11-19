@@ -180,7 +180,8 @@ export class StockLevelManager {
     await this.prisma.$transaction(async (prisma) => {
       // Validar contexto
       const context = RequestContextService.getContext();
-      const organization_id = context?.organization_id || await this.getOrganizationId(product_id);
+      const organization_id =
+        context?.organization_id || (await this.getOrganizationId(product_id));
 
       // 1. Obtener stock level
       const stock_level = await this.getOrCreateStockLevel(
@@ -329,7 +330,9 @@ export class StockLevelManager {
     if (!context?.is_super_admin) {
       // Validar que el contexto tenga organization_id
       if (!context?.organization_id) {
-        throw new BadRequestException('Organization context is required for stock level operations');
+        throw new BadRequestException(
+          'Organization context is required for stock level operations',
+        );
       }
 
       // Validar que el producto pertenezca a la organización del contexto
@@ -337,31 +340,35 @@ export class StockLevelManager {
         where: {
           id: product_id,
           stores: {
-            organization_id: context.organization_id
-          }
-        }
+            organization_id: context.organization_id,
+          },
+        },
       });
 
       if (!product) {
-        throw new BadRequestException('Product not found or out of organization scope');
+        throw new BadRequestException(
+          'Product not found or out of organization scope',
+        );
       }
 
       // Validar que la ubicación pertenezca a la organización
       const location = await prisma.inventory_locations.findFirst({
         where: {
           id: location_id,
-          organization_id: context.organization_id
-        }
+          organization_id: context.organization_id,
+        },
       });
 
       if (!location) {
-        throw new BadRequestException('Location not found or out of organization scope');
+        throw new BadRequestException(
+          'Location not found or out of organization scope',
+        );
       }
     }
 
     // Para stock_levels, necesitamos usar el cliente base para evitar scoping automático
     // que podría interferir con las relaciones cruzadas
-    const basePrisma = (prisma as any)._baseClient || prisma;
+    const basePrisma = prisma._baseClient || prisma;
 
     // Use findFirst to avoid issues with unique constraint and null values
     let stock_level = await basePrisma.stock_levels.findFirst({
@@ -399,7 +406,9 @@ export class StockLevelManager {
     params: UpdateStockParams & { transaction_id: number },
   ): Promise<void> {
     const context = RequestContextService.getContext();
-    const organization_id = context?.organization_id || await this.getOrganizationId(params.product_id);
+    const organization_id =
+      context?.organization_id ||
+      (await this.getOrganizationId(params.product_id));
 
     await prisma.inventory_movements.create({
       data: {
@@ -505,7 +514,10 @@ export class StockLevelManager {
   /**
    * Obtiene stock levels por producto
    */
-  async getStockLevels(product_id: number, variant_id?: number): Promise<any[]> {
+  async getStockLevels(
+    product_id: number,
+    variant_id?: number,
+  ): Promise<any[]> {
     return await this.prisma.stock_levels.findMany({
       where: {
         product_id: product_id,

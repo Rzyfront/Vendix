@@ -86,19 +86,23 @@ export class ProductsService {
 
         if (!brand) {
           // Log específico para debugging
-          console.error(`Brand ID ${createProductDto.brand_id} not found. Available brands:`,
+          console.error(
+            `Brand ID ${createProductDto.brand_id} not found. Available brands:`,
             await this.prisma.brands.findMany({
-              select: { id: true, name: true, state: true }
-            }));
+              select: { id: true, name: true, state: true },
+            }),
+          );
 
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-            `Please check available brands in the system.`
+              `Please check available brands in the system.`,
           );
         }
       } else {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
-        console.warn('Creating product without brand_id. This might cause FK violation.');
+        console.warn(
+          'Creating product without brand_id. This might cause FK violation.',
+        );
       }
 
       // Verificar que el category_id exista y pertenezca a la tienda
@@ -115,7 +119,9 @@ export class ProductsService {
         });
 
         if (!category) {
-          throw new BadRequestException(`Category with ID ${createProductDto.category_id} not found, inactive, or out of store scope`);
+          throw new BadRequestException(
+            `Category with ID ${createProductDto.category_id} not found, inactive, or out of store scope`,
+          );
         }
       }
 
@@ -160,20 +166,24 @@ export class ProductsService {
           const tax_categories = await prisma.tax_categories.findMany({
             where: {
               id: { in: tax_category_ids },
-              ...(current_context?.is_super_admin ? {} : {
-                OR: [
-                  { store_id: store_id }, // Categorías específicas de la tienda
-                  { store_id: null }, // Categorías globales
-                ]
-              })
+              ...(current_context?.is_super_admin
+                ? {}
+                : {
+                    OR: [
+                      { store_id: store_id }, // Categorías específicas de la tienda
+                      { store_id: null }, // Categorías globales
+                    ],
+                  }),
             },
           });
 
           if (tax_categories.length !== tax_category_ids.length) {
-            const found_ids = tax_categories.map(tc => tc.id);
-            const missing_ids = tax_category_ids.filter(id => !found_ids.includes(id));
+            const found_ids = tax_categories.map((tc) => tc.id);
+            const missing_ids = tax_category_ids.filter(
+              (id) => !found_ids.includes(id),
+            );
             throw new BadRequestException(
-              `Tax categories not found or out of scope: ${missing_ids.join(', ')}`
+              `Tax categories not found or out of scope: ${missing_ids.join(', ')}`,
             );
           }
 
@@ -240,10 +250,103 @@ export class ProductsService {
           );
         }
 
-        return product;
-      });
+        // Obtener el producto completo con todas las relaciones para retornar
+        const completeProduct = await prisma.products.findUnique({
+          where: { id: product.id },
+          include: {
+            stores: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                organization_id: true,
+              },
+            },
+            brands: true,
+            product_categories: {
+              include: {
+                categories: true,
+              },
+            },
+            product_tax_assignments: {
+              include: {
+                tax_categories: true,
+              },
+            },
+            product_images: {
+              orderBy: { is_main: 'desc' },
+            },
+            product_variants: {
+              include: {
+                product_images: true,
+              },
+            },
+            reviews: {
+              where: { state: 'approved' },
+              include: {
+                users: {
+                  select: {
+                    id: true,
+                    first_name: true,
+                    last_name: true,
+                  },
+                },
+              },
+              orderBy: { created_at: 'desc' },
+              take: 10,
+            },
+            stock_levels: {
+              select: {
+                quantity_available: true,
+                quantity_reserved: true,
+                reorder_point: true,
+                inventory_locations: {
+                  select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                  },
+                },
+              },
+            },
+            _count: {
+              select: {
+                product_variants: true,
+                product_images: true,
+                reviews: true,
+              },
+            },
+          },
+        });
 
-      return await this.findOne(result.id);
+        // Calcular stock totals dinámicamente
+        const totalStockAvailable = completeProduct.stock_levels.reduce(
+          (sum, stock) => sum + stock.quantity_available,
+          0,
+        );
+        const totalStockReserved = completeProduct.stock_levels.reduce(
+          (sum, stock) => sum + stock.quantity_reserved,
+          0,
+        );
+
+        // Retornar producto con información de stock enriquecida
+        return {
+          ...completeProduct,
+          // Mantener compatibilidad con el campo existente pero basado en stock_levels
+          stock_quantity: totalStockAvailable,
+          // Nuevos campos agregados para mayor claridad
+          total_stock_available: totalStockAvailable,
+          total_stock_reserved: totalStockReserved,
+          stock_by_location: completeProduct.stock_levels.map((stock) => ({
+            location_id: stock.inventory_locations.id,
+            location_name: stock.inventory_locations.name,
+            location_type: stock.inventory_locations.type,
+            available: stock.quantity_available,
+            reserved: stock.quantity_reserved,
+            reorder_point: stock.reorder_point,
+          })),
+        };
+      });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -437,7 +540,7 @@ export class ProductsService {
         state: { not: ProductState.ARCHIVED }, // No mostrar productos archivados
         // Aplicar scope de store_id a menos que sea super admin
         ...(!context?.is_super_admin && {
-          store_id: context?.store_id
+          store_id: context?.store_id,
         }),
       },
       include: {
