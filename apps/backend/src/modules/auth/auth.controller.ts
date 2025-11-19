@@ -730,9 +730,10 @@ export class AuthController {
     @Req() req: AuthenticatedRequest,
     @Body() switchDto: any,
   ) {
-    const raw_ip = req.headers['x-forwarded-for'] || req.ip || '';
+    const expressReq = req as any;
+    const raw_ip = expressReq.headers['x-forwarded-for'] || expressReq.ip || '';
     const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
-    const user_agent = req.get('user-agent') || '';
+    const user_agent = expressReq.get('user-agent') || '';
     const client_info = {
       ip_address: ip_address || undefined,
       user_agent: user_agent || undefined,
