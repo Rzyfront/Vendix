@@ -323,16 +323,16 @@ export class SalesOrdersService {
         if (shippedItem && shippedItem.quantity_shipped > 0) {
           // Consume stock using StockLevelManager
           await this.stockLevelManager.updateStock({
-            productId: item.product_id,
-            variantId: item.product_variant_id,
-            locationId: item.location_id,
-            quantityChange: -shippedItem.quantity_shipped,
-            movementType: 'sale',
+            product_id: item.product_id,
+            variant_id: item.product_variant_id,
+            location_id: item.location_id,
+            quantity_change: -shippedItem.quantity_shipped,
+            movement_type: 'sale',
             reason: `Sales order ${salesOrder.order_number} shipment`,
-            userId: shippedByUserId,
-            orderItemId: item.id,
-            createMovement: true,
-            validateAvailability: true,
+            user_id: shippedByUserId,
+            order_item_id: item.id,
+            create_movement: true,
+            validate_availability: true,
           });
 
           // Release reserved stock

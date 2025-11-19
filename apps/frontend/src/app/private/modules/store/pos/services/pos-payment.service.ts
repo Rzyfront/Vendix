@@ -4,6 +4,7 @@ import { delay, map, catchError } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { CartState } from '../models/cart.model';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -63,7 +64,10 @@ export class PosPaymentService {
 
   private transactions: Transaction[] = [];
 
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private tenantFacade: TenantFacade,
+  ) {}
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
     return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
@@ -78,8 +82,9 @@ export class PosPaymentService {
     const paymentData = {
       customer_id: request.customerEmail ? 0 : 0, // Will be set by backend context
       customer_name: 'Cliente General',
-      customer_email: request.customerEmail || '',
+      customer_email: request.customerEmail || 'cliente@general.com',
       customer_phone: request.customerPhone || '',
+      store_id: this.getStoreId(),
       items: [], // Empty for payment-only
       subtotal: request.amount,
       tax_amount: 0,
@@ -133,8 +138,9 @@ export class PosPaymentService {
       customer_name: cartState.customer
         ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
         : 'Cliente General',
-      customer_email: cartState.customer?.email || '',
+      customer_email: cartState.customer?.email || 'cliente@general.com',
       customer_phone: cartState.customer?.phone || '',
+      store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
         product_name: item.product.name,
@@ -185,8 +191,9 @@ export class PosPaymentService {
       customer_name: cartState.customer
         ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
         : 'Cliente General',
-      customer_email: cartState.customer?.email || '',
+      customer_email: cartState.customer?.email || 'cliente@general.com',
       customer_phone: cartState.customer?.phone || '',
+      store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
         product_name: item.product.name,
@@ -237,8 +244,9 @@ export class PosPaymentService {
       customer_name: cartState.customer
         ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
         : 'Cliente General',
-      customer_email: cartState.customer?.email || '',
+      customer_email: cartState.customer?.email || 'cliente@general.com',
       customer_phone: cartState.customer?.phone || '',
+      store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
         product_name: item.product.name,
@@ -432,5 +440,17 @@ export class PosPaymentService {
       transactionId: 'REF' + Date.now(),
       message: 'Reembolso procesado correctamente',
     }).pipe(delay(1000));
+  }
+
+  /**
+   * Get current store ID
+   */
+  private getStoreId(): number {
+    const store = this.tenantFacade.getCurrentStore();
+    return store?.id
+      ? typeof store.id === 'string'
+        ? parseInt(store.id)
+        : store.id
+      : 1;
   }
 }

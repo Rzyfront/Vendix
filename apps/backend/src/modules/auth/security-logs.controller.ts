@@ -28,8 +28,8 @@ export class SecurityLogsController {
     description: 'Logs obtenidos exitosamente',
   })
   async getFailedLoginLogs(
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
     @Query('limit') limit?: string,
   ) {
     try {
@@ -38,8 +38,8 @@ export class SecurityLogsController {
         limit: limit ? parseInt(limit) : 50,
       };
 
-      if (fromDate) filters.fromDate = new Date(fromDate);
-      if (toDate) filters.toDate = new Date(toDate);
+      if (from_date) filters.from_date = new Date(from_date);
+      if (to_date) filters.to_date = new Date(to_date);
 
       const logs = await this.auditService.getAuditLogs(filters);
       return this.responseService.success(
@@ -65,16 +65,16 @@ export class SecurityLogsController {
     description: 'Logs obtenidos exitosamente',
   })
   async getAccountLockLogs(
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
   ) {
     try {
       const filters: any = {
         action: AuditAction.ACCOUNT_LOCKED,
       };
 
-      if (fromDate) filters.fromDate = new Date(fromDate);
-      if (toDate) filters.toDate = new Date(toDate);
+      if (from_date) filters.from_date = new Date(from_date);
+      if (to_date) filters.to_date = new Date(to_date);
 
       const logs = await this.auditService.getAuditLogs(filters);
       return this.responseService.success(
@@ -99,16 +99,16 @@ export class SecurityLogsController {
     description: 'Logs obtenidos exitosamente',
   })
   async getPasswordChangeLogs(
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
   ) {
     try {
       const filters: any = {
         action: AuditAction.PASSWORD_CHANGE,
       };
 
-      if (fromDate) filters.fromDate = new Date(fromDate);
-      if (toDate) filters.toDate = new Date(toDate);
+      if (from_date) filters.from_date = new Date(from_date);
+      if (to_date) filters.to_date = new Date(to_date);
 
       const logs = await this.auditService.getAuditLogs(filters);
       return this.responseService.success(
@@ -133,16 +133,16 @@ export class SecurityLogsController {
     description: 'Logs obtenidos exitosamente',
   })
   async getSuspiciousActivityLogs(
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
   ) {
     try {
       const filters: any = {
         action: AuditAction.SUSPICIOUS_ACTIVITY,
       };
 
-      if (fromDate) filters.fromDate = new Date(fromDate);
-      if (toDate) filters.toDate = new Date(toDate);
+      if (from_date) filters.from_date = new Date(from_date);
+      if (to_date) filters.to_date = new Date(to_date);
 
       const logs = await this.auditService.getAuditLogs(filters);
       return this.responseService.success(
@@ -167,28 +167,28 @@ export class SecurityLogsController {
     description: 'Resumen obtenido exitosamente',
   })
   async getSecuritySummary(
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
   ) {
-    const from = fromDate ? new Date(fromDate) : undefined;
-    const to = toDate ? new Date(toDate) : undefined;
+    const from = from_date ? new Date(from_date) : undefined;
+    const to = to_date ? new Date(to_date) : undefined;
 
     try {
       const [failedLogins, accountLocks, passwordChanges] = await Promise.all([
         this.auditService.getAuditLogs({
           action: AuditAction.LOGIN_FAILED,
-          fromDate: from,
-          toDate: to,
+          from_date: from,
+          to_date: to,
         }),
         this.auditService.getAuditLogs({
           action: AuditAction.ACCOUNT_LOCKED,
-          fromDate: from,
-          toDate: to,
+          from_date: from,
+          to_date: to,
         }),
         this.auditService.getAuditLogs({
           action: AuditAction.PASSWORD_CHANGE,
-          fromDate: from,
-          toDate: to,
+          from_date: from,
+          to_date: to,
         }),
       ]);
 

@@ -35,29 +35,29 @@ export class AuditController {
     description: 'Audit logs retrieved successfully',
   })
   async getAuditLogs(
-    @Query('userId') userId?: string,
-    @Query('storeId') storeId?: string,
+    @Query('user_id') user_id?: string,
+    @Query('store_id') store_id?: string,
     @Query('action') action?: AuditAction,
     @Query('resource') resource?: AuditResource,
-    @Query('resourceId') resourceId?: string,
-    @Query('fromDate') fromDate?: string,
-    @Query('toDate') toDate?: string,
+    @Query('resource_id') resource_id?: string,
+    @Query('from_date') from_date?: string,
+    @Query('to_date') to_date?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-    @Query('organizationId') organizationId?: string,
+    @Query('organization_id') organization_id?: string,
   ) {
     const filters: any = {};
 
-    if (userId) filters.userId = parseInt(userId);
-    if (storeId) filters.storeId = parseInt(storeId);
+    if (user_id) filters.user_id = parseInt(user_id);
+    if (store_id) filters.store_id = parseInt(store_id);
     if (action) filters.action = action;
     if (resource) filters.resource = resource;
-    if (resourceId) filters.resourceId = parseInt(resourceId);
-    if (fromDate) filters.fromDate = new Date(fromDate);
-    if (toDate) filters.toDate = new Date(toDate);
+    if (resource_id) filters.resource_id = parseInt(resource_id);
+    if (from_date) filters.from_date = new Date(from_date);
+    if (to_date) filters.to_date = new Date(to_date);
     if (limit) filters.limit = parseInt(limit);
     if (offset) filters.offset = parseInt(offset);
-    if (organizationId) filters.organizationId = parseInt(organizationId);
+    if (organization_id) filters.organization_id = parseInt(organization_id);
 
     const logs = await this.auditService.getAuditLogs(filters);
     return this.responseService.success(

@@ -17,12 +17,12 @@ export interface SwitchEnvironmentRequest {
 export interface SwitchEnvironmentData {
   user: any;
   tokens: {
-    accessToken: string;
-    refreshToken: string;
+    access_token: string;
+    refresh_token: string;
   };
   permissions: string[];
   roles: string[];
-  updatedEnvironment: string;
+  updated_environment: string;
 }
 
 export interface SwitchEnvironmentResponse {
@@ -50,8 +50,8 @@ export class EnvironmentSwitchService {
     };
 
     // Verificar que tenemos un token antes de hacer la petición
-    const currentToken = this.authService.getToken();
-    if (!currentToken) {
+    const current_token = this.authService.getToken();
+    if (!current_token) {
       console.error('No authentication token available for environment switch');
       return of(this.createErrorResponse('No authentication token available'));
     }
@@ -81,8 +81,8 @@ export class EnvironmentSwitchService {
     };
 
     // Verificar que tenemos un token antes de hacer la petición
-    const currentToken = this.authService.getToken();
-    if (!currentToken) {
+    const current_token = this.authService.getToken();
+    if (!current_token) {
       console.error('No authentication token available for environment switch');
       return of(this.createErrorResponse('No authentication token available'));
     }
@@ -115,7 +115,14 @@ export class EnvironmentSwitchService {
     storeSlug?: string,
   ): Promise<boolean> {
     try {
-      // Environment switch debug logging removed
+      console.log(
+        '🔍 EnvironmentSwitchService - performEnvironmentSwitch called:',
+        {
+          targetEnvironment,
+          storeSlug,
+          timestamp: new Date().toISOString(),
+        },
+      );
 
       // 1. Validar parámetros
       if (targetEnvironment === 'STORE_ADMIN' && !storeSlug) {
@@ -139,10 +146,13 @@ export class EnvironmentSwitchService {
       // Response logging removed
 
       // 3. Extraer datos de la respuesta del backend
-      const responseData = response.data || response;
+      const response_data = response.data || response;
 
       // 4. Validar respuesta del backend (nueva estructura idéntica a login)
-      if (!response?.success || (!responseData?.access_token && !responseData?.tokens)) {
+      if (
+        !response?.success ||
+        (!response_data?.access_token && !response_data?.tokens)
+      ) {
         console.error(
           '❌ Environment switch failed: Invalid response',
           response,
@@ -150,35 +160,77 @@ export class EnvironmentSwitchService {
         throw new Error(response?.message || 'Invalid response from server');
       }
 
-      // 5. Extraer tokens del formato actualizado (estructura de login)
-      const tokens = responseData.tokens || {
-        access_token: responseData.access_token,
-        refresh_token: responseData.refresh_token,
-        token_type: responseData.token_type,
-        expires_in: responseData.expires_in,
+      // Normalizar environment (manejar camelCase del backend nuevo)
+      const updated_environment =
+        response_data.updated_environment || response_data.updatedEnvironment;
+      // Asegurar que response_data tenga la propiedad en snake_case para compatibilidad
+      response_data.updated_environment = updated_environment;
+
+      // 5. Extraer tokens del formato actualizado (estructura de login unificada)
+      // Priorizar la estructura de respuesta unificada del backend
+      const raw_tokens = response_data.tokens || {
+        access_token: response_data.access_token,
+        refresh_token: response_data.refresh_token,
+        token_type: response_data.token_type,
+        expires_in: response_data.expires_in,
+      };
+
+      // Normalizar a camelCase para asegurar compatibilidad con AuthState y persistencia
+      // Manejar explícitamente los casos donde access_token puede venir como propiedad directa
+      const normalized_tokens = {
+        accessToken:
+          raw_tokens.accessToken ||
+          raw_tokens.access_token ||
+          response_data.access_token,
+        refreshToken:
+          raw_tokens.refreshToken ||
+          raw_tokens.refresh_token ||
+          response_data.refresh_token,
+        tokenType:
+          raw_tokens.tokenType ||
+          raw_tokens.token_type ||
+          response_data.token_type ||
+          'Bearer',
+        expiresIn:
+          raw_tokens.expiresIn ||
+          raw_tokens.expires_in ||
+          response_data.expires_in ||
+          3600,
+      };
+
+      // Crear objeto compatible con la interfaz esperada por restoreAuthState y saveUnifiedAuthState
+      // Necesitamos tanto camelCase (para state interno) como snake_case (para compatibilidad con saveUnifiedAuthState)
+      const tokens_payload = {
+        ...normalized_tokens,
+        access_token: normalized_tokens.accessToken,
+        refresh_token: normalized_tokens.refreshToken,
+        token_type: normalized_tokens.tokenType,
+        expires_in: normalized_tokens.expiresIn,
       };
 
       // 6. Actualizar estado de autenticación con estructura completa
       console.log('🔍 FRONTEND - Datos enviados a restoreAuthState:', {
-        user_roles: responseData.user?.roles,
-        user_keys: Object.keys(responseData.user || {}),
-        user_has_roles: !!responseData.user?.roles,
-        user_has_user_roles: !!responseData.user?.user_roles,
+        user_roles: response_data.user?.roles,
+        user_keys: Object.keys(response_data.user || {}),
+        user_has_roles: !!response_data.user?.roles,
+        user_has_user_roles: !!response_data.user?.user_roles,
+        tokens_extracted: !!normalized_tokens.accessToken,
       });
 
       this.authFacade.restoreAuthState(
-        responseData.user,          // Usuario completo con todas las relaciones
-        tokens,                     // Tokens en formato de login
-        responseData.user?.permissions || [], // Permisos del usuario (si vienen)
-        responseData.user?.roles || [],     // Roles transformados del backend
-        responseData.user_settings,         // user_settings separado como en login
+        response_data.user, // Usuario completo con todas las relaciones
+        tokens_payload, // Tokens en formato compatible
+        response_data.user?.permissions || [], // Permisos del usuario (si vienen)
+        response_data.user?.roles || [], // Roles transformados del backend
+        response_data.user_settings, // user_settings separado como en login
       );
 
       // 7. Sincronizar localStorage de forma unificada
-      this.saveUnifiedAuthState(responseData);
+      // Pasamos los tokens ya normalizados
+      this.saveUnifiedAuthState(response_data, tokens_payload);
 
       // 8. Actualizar AppConfigService inmediatamente
-      await this.updateAppConfig(responseData.updatedEnvironment);
+      await this.updateAppConfig(updated_environment);
 
       // 9. Esperar a que el estado se sincronice completamente
       await this.waitForAuthStateSync();
@@ -232,36 +284,63 @@ export class EnvironmentSwitchService {
   /**
    * Guarda el estado de autenticación de forma unificada en localStorage
    */
-  private saveUnifiedAuthState(responseData: any): void {
+  private saveUnifiedAuthState(
+    response_data: any,
+    normalized_tokens?: any,
+  ): void {
     try {
       // Extraer tokens en formato consistente (estructura de login)
-      const tokens = responseData.tokens || {
-        access_token: responseData.access_token,
-        refresh_token: responseData.refresh_token,
-        token_type: responseData.token_type || 'Bearer',
-        expires_in: responseData.expires_in || 3600,
-      };
+      // Si ya vienen normalizados, usarlos. Si no, intentar extraerlos.
+      let tokens;
 
-      const unifiedState = {
-        user: responseData.user,              // Usuario completo con relaciones
-        user_settings: responseData.user_settings, // Configuración actualizada
-        tokens: tokens,                       // Tokens en formato estándar
-        environment: responseData.updatedEnvironment,
+      if (normalized_tokens) {
+        tokens = {
+          ...normalized_tokens,
+          accessToken:
+            normalized_tokens.accessToken || normalized_tokens.access_token,
+          refreshToken:
+            normalized_tokens.refreshToken || normalized_tokens.refresh_token,
+        };
+      } else {
+        // Fallback de compatibilidad
+        const raw_tokens = response_data.tokens || {
+          access_token: response_data.access_token,
+          refresh_token: response_data.refresh_token,
+          token_type: response_data.token_type || 'Bearer',
+          expires_in: response_data.expires_in || 3600,
+        };
+        tokens = {
+          accessToken: raw_tokens.access_token || raw_tokens.accessToken,
+          refreshToken: raw_tokens.refresh_token || raw_tokens.refreshToken,
+          tokenType: raw_tokens.token_type || 'Bearer',
+          expiresIn: raw_tokens.expires_in || 3600,
+        };
+      }
+
+      const unified_state = {
+        user: response_data.user, // Usuario completo con relaciones
+        user_settings: response_data.user_settings, // Configuración actualizada
+        tokens: tokens, // Tokens en formato estándar (camelCase)
+        environment: response_data.updated_environment,
         timestamp: Date.now(),
       };
 
       // Guardar estado unificado
-      localStorage.setItem('vendix_auth_state', JSON.stringify(unifiedState));
+      localStorage.setItem('vendix_auth_state', JSON.stringify(unified_state));
 
       // Guardar environment por separado para compatibilidad
       localStorage.setItem(
         'vendix_user_environment',
-        responseData.updatedEnvironment,
+        response_data.updated_environment,
       );
 
       // Guardar tokens individualmente para compatibilidad con AuthService
-      localStorage.setItem('access_token', tokens.access_token);
-      localStorage.setItem('refresh_token', tokens.refresh_token);
+      if (tokens.accessToken) {
+        localStorage.setItem('access_token', tokens.accessToken);
+      }
+      if (tokens.refreshToken) {
+        localStorage.setItem('refresh_token', tokens.refreshToken);
+      }
 
       // Auth state save logging removed
     } catch (error) {
@@ -301,26 +380,26 @@ export class EnvironmentSwitchService {
   ): Promise<boolean> {
     try {
       // Verificar que el entorno en localStorage coincida
-      const cachedEnv = localStorage.getItem('vendix_user_environment');
-      if (cachedEnv !== targetEnvironment) {
+      const cached_env = localStorage.getItem('vendix_user_environment');
+      if (cached_env !== targetEnvironment) {
         // Environment mismatch warning removed
         return false;
       }
 
       // Verificar que los tokens existan
-      const accessToken = localStorage.getItem('access_token');
-      const refreshToken = localStorage.getItem('refresh_token');
-      if (!accessToken || !refreshToken) {
+      const access_token = localStorage.getItem('access_token');
+      const refresh_token = localStorage.getItem('refresh_token');
+      if (!access_token || !refresh_token) {
         // Missing tokens warning removed
         return false;
       }
 
       // Si es STORE_ADMIN, verificar que tenemos el store_slug
       if (targetEnvironment === 'STORE_ADMIN' && storeSlug) {
-        const authState = JSON.parse(
+        const auth_state = JSON.parse(
           localStorage.getItem('vendix_auth_state') || '{}',
         );
-        if (authState.user?.store?.slug !== storeSlug) {
+        if (auth_state.user?.store?.slug !== storeSlug) {
           // Store slug mismatch warning removed
           return false;
         }
@@ -335,42 +414,26 @@ export class EnvironmentSwitchService {
   }
 
   /**
-   * Redirige a la ruta correcta manteniendo la sesión
+   * Redirige a la ruta correcta y recarga la aplicación para aplicar el nuevo contexto
    */
   private async redirectToEnvironment(): Promise<void> {
     try {
-      // Esperar un momento para que el estado se asiente completamente
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Esperar un momento para asegurar que localStorage se ha sincronizado
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Obtener el entorno actual
-      const currentEnv = localStorage.getItem('vendix_user_environment');
+      // Ruta base para todos los entornos
+      const redirect_path = '/admin/dashboard';
 
-      // Forzar la recarga de la configuración de la aplicación
-      await this.appConfigService.setupConfig();
+      // 1. Navegar primero para actualizar la URL si es necesario
+      await this.router.navigate([redirect_path]);
 
-      // Determinar la ruta de redirección según el entorno
-      let redirectPath = '/admin/dashboard';
-
-      // Environment redirect logging removed
-
-      // Forzar la recarga completa de la ruta para asegurar que se cargue el layout correcto
-      const currentUrl = this.router.url;
-      // Current URL logging removed
-
-      // Navegar a la ruta final directamente
-      await this.router.navigate([redirectPath]);
-
-      // Forzar la recarga de la página para asegurar que se cargue el nuevo layout
-      // pero manteniendo la sesión activa
-      setTimeout(() => {
-        // Page reload logging removed
-        window.location.reload();
-      }, 200);
+      // 2. Recargar la página para reiniciar la aplicación con el nuevo contexto
+      // Ahora es seguro hacerlo porque los tokens están en el formato correcto (camelCase)
+      window.location.reload();
     } catch (error) {
       console.error('❌ Error redirecting to environment:', error);
-      // Fallback a recarga completa si la navegación falla
-      // Fallback reload logging removed
-      window.location.href = window.location.origin + '/admin/dashboard';
+      // Fallback seguro que también fuerza la recarga
+      window.location.href = '/admin/dashboard';
     }
   }
 

@@ -101,25 +101,26 @@ export class PosCustomerService {
       params = params.set('search', query.trim());
     }
 
-    return this.http
-      .get<PaginatedCustomersResponse>(this.apiUrl, { params })
-      .pipe(
-        map((response: any) => ({
-          data:
-            response.data?.map((c: any) =>
-              this.mapApiCustomerToPosCustomer(c),
-            ) || [],
-          total: response.total || 0,
-          page: response.page || page,
-          limit: response.limit || limit,
-          totalPages: response.totalPages || 0,
-        })),
-        tap(() => this.loading$.next(false)),
-        catchError((error) => {
-          this.loading$.next(false);
-          return throwError(() => error);
-        }),
-      );
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        // Handle both wrapped response (response.data with meta) and direct response
+        const customers = response.data || [];
+        const meta = response.meta || {};
+
+        return {
+          data: customers.map((c: any) => this.mapApiCustomerToPosCustomer(c)),
+          total: meta.total || response.total || 0,
+          page: meta.page || response.page || page,
+          limit: meta.limit || response.limit || limit,
+          totalPages: meta.totalPages || response.totalPages || 0,
+        };
+      }),
+      tap(() => this.loading$.next(false)),
+      catchError((error) => {
+        this.loading$.next(false);
+        return throwError(() => error);
+      }),
+    );
   }
 
   /**

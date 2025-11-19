@@ -7,6 +7,7 @@ import {
 } from '../../../../shared/components';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
 import { ActivatedRoute } from '@angular/router';
+import { GlobalFacade } from '../../../../core/store/global.facade';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -504,8 +505,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   constructor(
     private organizationDashboardService: OrganizationDashboardService,
     private route: ActivatedRoute,
+    private globalFacade: GlobalFacade,
   ) {
-    this.organizationId = this.route.snapshot.paramMap.get('id') || '';
+    const context = this.globalFacade.getUserContext();
+    this.organizationId =
+      this.route.snapshot.paramMap.get('id') || context?.organization?.id || '';
   }
 
   ngOnInit(): void {
@@ -518,6 +522,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private loadDashboardData(): void {
+    if (!this.organizationId) {
+      console.warn('No organization ID available for dashboard stats');
+      return;
+    }
+
     this.isLoading = true;
 
     this.organizationDashboardService

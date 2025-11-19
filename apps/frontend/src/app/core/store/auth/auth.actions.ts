@@ -16,11 +16,11 @@ export const loginSuccess = createAction(
   props<{
     user: any;
     user_settings?: any;
-    tokens: { accessToken: string; refreshToken: string };
+    tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
     message?: string;
-    updatedEnvironment?: string;
+    updated_environment?: string;
   }>(),
 );
 
@@ -35,12 +35,12 @@ export const logoutSuccess = createAction('[Auth] Logout Success');
 
 export const refreshToken = createAction(
   '[Auth] Refresh Token',
-  props<{ refreshToken: string }>(),
+  props<{ refresh_token: string }>(),
 );
 
 export const refreshTokenSuccess = createAction(
   '[Auth] Refresh Token Success',
-  props<{ tokens: { accessToken: string; refreshToken: string } }>(),
+  props<{ tokens: { access_token: string; refresh_token: string } }>(),
 );
 
 export const refreshTokenFailure = createAction(
@@ -74,7 +74,7 @@ export const restoreAuthState = createAction(
   props<{
     user: any;
     user_settings?: any;
-    tokens: { accessToken: string; refreshToken: string };
+    tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
   }>(),

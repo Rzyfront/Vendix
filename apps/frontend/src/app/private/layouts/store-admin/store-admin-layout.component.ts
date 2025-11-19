@@ -30,7 +30,7 @@ import { takeUntil } from 'rxjs/operators';
         [menuItems]="menuItems"
         [title]="(storeName$ | async) || storeName"
         subtitle="Store Admin"
-        [vlink]="(storeSlug$ | async) || storeSlug"
+        [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
       >
       </app-sidebar>
@@ -79,10 +79,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   currentVlink = 'store-admin';
   storeName = 'Main Street Store';
   storeSlug = 'main-street-store';
+  organizationSlug = 'acme-corp';
 
   // Dynamic user data
   storeName$: Observable<string | null>;
   storeSlug$: Observable<string | null>;
+  organizationSlug$: Observable<string | null>;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -95,6 +97,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   ) {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
+    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
   }
 
   ngOnInit(): void {

@@ -12,6 +12,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../audit/audit.service';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -26,6 +27,7 @@ export class EnvironmentSwitchService {
     userId: number,
     targetEnvironment: 'STORE_ADMIN' | 'ORG_ADMIN',
     storeSlug?: string,
+    client_info?: { ip_address?: string; user_agent?: string },
   ) {
     // Validar que el usuario exista
     const user = await this.prismaService.users.findUnique({
@@ -59,16 +61,18 @@ export class EnvironmentSwitchService {
     }
 
     // Verificar que el usuario tenga los roles necesarios
-    const userRoles = user.user_roles.map((ur) => ur.roles.name);
+    const user_role_names = user.user_roles.map((ur) => ur.roles.name);
 
-    let store_id = null;
+    let store_id: number | null = null;
+    let active_store = null;
+
     if (targetEnvironment === 'STORE_ADMIN') {
-      const hasStoreRole =
-        userRoles.includes('store_admin') ||
-        userRoles.includes('owner') ||
-        userRoles.includes('manager');
+      const has_store_role =
+        user_role_names.includes('store_admin') ||
+        user_role_names.includes('owner') ||
+        user_role_names.includes('manager');
 
-      if (!hasStoreRole) {
+      if (!has_store_role) {
         throw new UnauthorizedException(
           'No tienes permisos para acceder al entorno de tienda',
         );
@@ -95,26 +99,27 @@ export class EnvironmentSwitchService {
       }
 
       // Verificar que el usuario pertenezca a la organización de la tienda o esté asignado a la tienda
-      const hasAccess =
-        userRoles.includes('super_admin') ||
-        userRoles.includes('owner') ||
-        store.organizations.owner_id === userId ||
+      const has_access =
+        user_role_names.includes('super_admin') ||
+        user_role_names.includes('owner') ||
+        user.organization_id === store.organization_id ||
         store.store_users.length > 0;
 
-      if (!hasAccess) {
+      if (!has_access) {
         throw new UnauthorizedException('No tienes acceso a esta tienda');
       }
 
       store_id = store.id;
+      active_store = store;
     }
 
     if (targetEnvironment === 'ORG_ADMIN') {
-      const hasOrgRole =
-        userRoles.includes('org_admin') ||
-        userRoles.includes('owner') ||
-        userRoles.includes('super_admin');
+      const has_org_role =
+        user_role_names.includes('org_admin') ||
+        user_role_names.includes('owner') ||
+        user_role_names.includes('super_admin');
 
-      if (!hasOrgRole) {
+      if (!has_org_role) {
         throw new UnauthorizedException(
           'No tienes permisos para acceder al entorno de organización',
         );
@@ -142,17 +147,25 @@ export class EnvironmentSwitchService {
       store_id: store_id, // ✅ snake_case como en auth.service.ts
     };
 
-    const accessToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get('JWT_EXPIRES_IN', '1h'),
+    const accessTokenExpiry =
+      this.configService.get<string>('JWT_EXPIRES_IN') || '1h';
+    const refreshTokenExpiry =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+
+    const access_token = this.jwtService.sign(payload, {
+      expiresIn: accessTokenExpiry as any,
     });
 
-    const refreshToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get('JWT_REFRESH_EXPIRES_IN', '7d'),
+    const refresh_token = this.jwtService.sign(payload, {
+      expiresIn: refreshTokenExpiry as any,
     });
+
+    // Guardar sesión en DB
+    await this.createUserSession(user.id, refresh_token, client_info);
 
     const tokens = {
-      accessToken,
-      refreshToken,
+      access_token: access_token,
+      refresh_token: refresh_token,
     };
 
     // Primero actualizar user settings con el nuevo entorno (antes de consultar)
@@ -186,7 +199,7 @@ export class EnvironmentSwitchService {
     }
 
     // Obtener el usuario completo con todas las relaciones necesarias
-    const completeUser = await this.prismaService.users.findUnique({
+    const complete_user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: {
         user_roles: {
@@ -200,7 +213,7 @@ export class EnvironmentSwitchService {
     });
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
-    const { user_roles, ...userWithoutRoles } = completeUser;
+    const { user_roles, ...user_without_roles } = complete_user;
     const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
     console.log('🔍 SWITCH - Transformación de roles:', {
@@ -210,13 +223,13 @@ export class EnvironmentSwitchService {
       transformed_roles: roles,
     });
 
-    const userWithRolesArray = {
-      ...userWithoutRoles,
+    const user_with_roles_array = {
+      ...user_without_roles,
       roles, // Array simple: ["owner", "admin"]
     };
 
     // Obtener user_settings actualizados (después de la actualización)
-    const userSettings = await this.prismaService.user_settings.findUnique({
+    const user_settings = await this.prismaService.user_settings.findUnique({
       where: { user_id: userId },
     });
 
@@ -233,20 +246,139 @@ export class EnvironmentSwitchService {
     });
 
     // Remover password del response (igual que en login)
-    const { password, ...userWithRolesAndPassword } =
-      userWithRolesArray || user;
+    const { password, ...user_with_roles_and_password } =
+      user_with_roles_array || user;
+
+    // Agregar active_store al usuario para consistencia con login
+    const user_with_store = {
+      ...user_with_roles_and_password,
+      store: active_store,
+    };
 
     // Estructura idéntica a la del login: { user, user_settings, ...tokens }
     const response = {
-      user: userWithRolesAndPassword, // Usar usuario con roles array simple
-      user_settings: userSettings,
-      access_token: accessToken, // Formato igual que login
-      refresh_token: refreshToken, // Formato igual que login
+      user: user_with_store, // Usar usuario con roles array simple y store activo
+      user_settings: user_settings,
+      access_token: access_token, // Formato igual que login
+      refresh_token: refresh_token, // Formato igual que login
       token_type: 'Bearer', // Igual que login
-      expires_in: 3600, // Igual que login
+      expires_in: this.parseExpiryToMilliseconds(accessTokenExpiry), // ✅ Correct ms
       updatedEnvironment: targetEnvironment, // Campo adicional específico del switch
     };
 
     return response;
+  }
+
+  private async createUserSession(
+    user_id: number,
+    refresh_token: string,
+    client_info?: {
+      ip_address?: string;
+      user_agent?: string;
+    },
+  ) {
+    // Obtener duración del refresh token del entorno
+    const refreshTokenExpiry =
+      this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
+    const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
+
+    // Generar fingerprint del dispositivo
+    const device_fingerprint = this.generateDeviceFingerprint(client_info);
+
+    // Hashear el refresh token para almacenamiento seguro
+    const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
+
+    await this.prismaService.refresh_tokens.create({
+      data: {
+        user_id: user_id,
+        token: hashedRefreshToken, // Guardar hash en lugar del token en claro
+        expires_at: new Date(Date.now() + expiryMs),
+        ip_address: client_info?.ip_address || null,
+        user_agent: client_info?.user_agent || null,
+        device_fingerprint: device_fingerprint,
+        last_used: new Date(),
+        revoked: false,
+      },
+    });
+  }
+
+  // Método auxiliar para convertir duraciones JWT a milisegundos
+  private parseExpiryToMilliseconds(expiry: string): number {
+    const match = expiry.match(/^(\d+)([smhd])$/);
+    if (!match) {
+      return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
+    }
+
+    const value = parseInt(match[1]);
+    const unit = match[2];
+
+    switch (unit) {
+      case 's':
+        return value * 1000;
+      case 'm':
+        return value * 60 * 1000;
+      case 'h':
+        return value * 60 * 60 * 1000;
+      case 'd':
+        return value * 24 * 60 * 60 * 1000;
+      default:
+        return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
+    }
+  }
+
+  // Generar fingerprint único del dispositivo
+  private generateDeviceFingerprint(client_info?: {
+    ip_address?: string;
+    user_agent?: string;
+  }): string {
+    if (!client_info) {
+      return 'unknown-device';
+    }
+
+    // Extraer información básica del User Agent
+    const browser = this.extractBrowserFromUserAgent(
+      client_info.user_agent || '',
+    );
+    const os = this.extractOSFromUserAgent(client_info.user_agent || '');
+
+    // Crear fingerprint básico (sin ser invasivo)
+    const fingerprint = `${browser}-${os}-${client_info.ip_address?.split('.')[0] || 'unknown'}`;
+
+    // Hash para ofuscar información sensible
+    const crypto = require('crypto');
+    return crypto
+      .createHash('sha256')
+      .update(fingerprint)
+      .digest('hex')
+      .substring(0, 32);
+  }
+
+  // Extraer navegador principal del User Agent
+  private extractBrowserFromUserAgent(userAgent: string): string {
+    if (!userAgent) return 'unknown';
+
+    if (userAgent.includes('Chrome')) return 'Chrome';
+    if (userAgent.includes('Firefox')) return 'Firefox';
+    if (userAgent.includes('Safari') && !userAgent.includes('Chrome'))
+      return 'Safari';
+    if (userAgent.includes('Edge')) return 'Edge';
+    if (userAgent.includes('Opera')) return 'Opera';
+
+    return 'other';
+  }
+
+  // Extraer sistema operativo del User Agent
+  private extractOSFromUserAgent(userAgent: string): string {
+    if (!userAgent) return 'unknown';
+
+    if (userAgent.includes('Windows NT 10.0')) return 'Windows10';
+    if (userAgent.includes('Windows NT')) return 'Windows';
+    if (userAgent.includes('Mac OS X')) return 'macOS';
+    if (userAgent.includes('Linux')) return 'Linux';
+    if (userAgent.includes('Android')) return 'Android';
+    if (userAgent.includes('iPhone') || userAgent.includes('iPad'))
+      return 'iOS';
+
+    return 'other';
   }
 }

@@ -36,9 +36,9 @@ export class ProductsService {
     try {
       // Obtener store_id del DTO o del contexto del token
       const context = RequestContextService.getContext();
-      const storeId = createProductDto.store_id || context?.store_id;
+      const store_id = createProductDto.store_id || context?.store_id;
 
-      if (!storeId) {
+      if (!store_id) {
         throw new BadRequestException('No se pudo determinar la tienda actual');
       }
 
@@ -48,7 +48,7 @@ export class ProductsService {
       // Verificar que el slug sea único dentro de la tienda
       const existingProduct = await this.prisma.products.findFirst({
         where: {
-          store_id: storeId,
+          store_id: store_id,
           slug: slug,
           state: { not: ProductState.ARCHIVED },
         },
@@ -64,7 +64,7 @@ export class ProductsService {
       if (createProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
-            store_id: storeId,
+            store_id: store_id,
             sku: createProductDto.sku,
             state: { not: ProductState.ARCHIVED },
           },
@@ -75,8 +75,52 @@ export class ProductsService {
         }
       }
 
+      // Verificar que el brand_id exista y esté activo
+      if (createProductDto.brand_id) {
+        const brand = await this.prisma.brands.findFirst({
+          where: {
+            id: createProductDto.brand_id,
+            state: { not: 'archived' }, // Excluir marcas archivadas
+          },
+        });
+
+        if (!brand) {
+          // Log específico para debugging
+          console.error(`Brand ID ${createProductDto.brand_id} not found. Available brands:`,
+            await this.prisma.brands.findMany({
+              select: { id: true, name: true, state: true }
+            }));
+
+          throw new BadRequestException(
+            `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
+            `Please check available brands in the system.`
+          );
+        }
+      } else {
+        // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
+        console.warn('Creating product without brand_id. This might cause FK violation.');
+      }
+
+      // Verificar que el category_id exista y pertenezca a la tienda
+      if (createProductDto.category_id) {
+        const category = await this.prisma.categories.findFirst({
+          where: {
+            id: createProductDto.category_id,
+            OR: [
+              { store_id: store_id }, // Categoría específica de la tienda
+              { store_id: null }, // Categoría global
+            ],
+            state: { not: 'archived' },
+          },
+        });
+
+        if (!category) {
+          throw new BadRequestException(`Category with ID ${createProductDto.category_id} not found, inactive, or out of store scope`);
+        }
+      }
+
       const {
-        store_id: dtoStoreId,
+        store_id: dto_store_id,
         category_ids,
         tax_category_ids,
         image_urls,
@@ -86,14 +130,11 @@ export class ProductsService {
       } = createProductDto;
 
       const result = await this.prisma.$transaction(async (prisma) => {
-        // Usar base client para evitar scoping issues
-        const basePrisma = (prisma as any)._baseClient || prisma;
-
-        // Crear producto
-        const product = await basePrisma.products.create({
+        // Crear producto usando scoped client para asegurar isolation
+        const product = await prisma.products.create({
           data: {
             ...productData,
-            store_id: storeId, // Agregar el store_id del contexto
+            store_id: store_id, // Agregar el store_id del contexto
             slug: slug,
             stock_quantity: 0, // Se inicializará via stock_levels
             updated_at: new Date(),
@@ -112,10 +153,34 @@ export class ProductsService {
 
         // Asignar categorías de impuestos si se proporcionan
         if (tax_category_ids && tax_category_ids.length > 0) {
+          // Obtener contexto para validación
+          const current_context = RequestContextService.getContext();
+
+          // Validar que las categorías de impuestos existan y estén dentro del scope
+          const tax_categories = await prisma.tax_categories.findMany({
+            where: {
+              id: { in: tax_category_ids },
+              ...(current_context?.is_super_admin ? {} : {
+                OR: [
+                  { store_id: store_id }, // Categorías específicas de la tienda
+                  { store_id: null }, // Categorías globales
+                ]
+              })
+            },
+          });
+
+          if (tax_categories.length !== tax_category_ids.length) {
+            const found_ids = tax_categories.map(tc => tc.id);
+            const missing_ids = tax_category_ids.filter(id => !found_ids.includes(id));
+            throw new BadRequestException(
+              `Tax categories not found or out of scope: ${missing_ids.join(', ')}`
+            );
+          }
+
           await prisma.product_tax_assignments.createMany({
-            data: tax_category_ids.map((taxCategoryId) => ({
+            data: tax_categories.map((tax_category) => ({
               product_id: product.id,
-              tax_category_id: taxCategoryId,
+              tax_category_id: tax_category.id,
             })),
           });
         }
@@ -136,14 +201,14 @@ export class ProductsService {
           // Usar las ubicaciones especificadas en el DTO
           for (const stockLocation of stock_by_location) {
             await this.stockLevelManager.updateStock({
-              productId: product.id,
-              locationId: stockLocation.location_id,
-              quantityChange: stockLocation.quantity,
-              movementType: 'initial',
+              product_id: product.id,
+              location_id: stockLocation.location_id,
+              quantity_change: stockLocation.quantity,
+              movement_type: 'initial',
               reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
-              userId: 1, // Use default user ID as fallback
-              createMovement: true,
-              validateAvailability: false,
+              user_id: 1, // Use default user ID as fallback
+              create_movement: true,
+              validate_availability: false,
             });
           }
         } else if (stock_quantity && stock_quantity > 0) {
@@ -154,14 +219,14 @@ export class ProductsService {
             );
 
           await this.stockLevelManager.updateStock({
-            productId: product.id,
-            locationId: defaultLocation.id,
-            quantityChange: stock_quantity,
-            movementType: 'initial',
+            product_id: product.id,
+            location_id: defaultLocation.id,
+            quantity_change: stock_quantity,
+            movement_type: 'initial',
             reason: 'Initial stock on product creation (legacy)',
-            userId: 1, // Use default user ID as fallback
-            createMovement: true,
-            validateAvailability: false,
+            user_id: 1, // Use default user ID as fallback
+            create_movement: true,
+            validate_availability: false,
           });
         }
 
@@ -208,7 +273,17 @@ export class ProductsService {
     } = query;
     const skip = (page - 1) * limit;
 
+    // Obtener contexto para aplicar scope automático
+    const context = RequestContextService.getContext();
+    const scoped_store_id = store_id || context?.store_id;
+
+    if (!scoped_store_id && !context?.is_super_admin) {
+      throw new BadRequestException('Store context is required');
+    }
+
     const where: Prisma.productsWhereInput = {
+      // Aplicar siempre scope de store_id (a menos que sea super admin)
+      ...(!context?.is_super_admin && { store_id: scoped_store_id }),
       // Para POS optimizado, siempre incluir activos
       state: pos_optimized
         ? ProductState.ACTIVE
@@ -228,7 +303,6 @@ export class ProductsService {
           ],
         }),
       ...(state && { state }),
-      ...(store_id && { store_id }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -354,10 +428,17 @@ export class ProductsService {
   }
 
   async findOne(id: number) {
+    // Obtener contexto para aplicar scope automático
+    const context = RequestContextService.getContext();
+
     const product = await this.prisma.products.findFirst({
       where: {
         id,
         state: { not: ProductState.ARCHIVED }, // No mostrar productos archivados
+        // Aplicar scope de store_id a menos que sea super admin
+        ...(!context?.is_super_admin && {
+          store_id: context?.store_id
+        }),
       },
       include: {
         stores: {
@@ -568,9 +649,9 @@ export class ProductsService {
 
           if (tax_category_ids.length > 0) {
             await prisma.product_tax_assignments.createMany({
-              data: tax_category_ids.map((taxCategoryId) => ({
+              data: tax_category_ids.map((tax_category_id) => ({
                 product_id: id,
-                tax_category_id: taxCategoryId,
+                tax_category_id: tax_category_id,
               })),
             });
           }
@@ -613,14 +694,14 @@ export class ProductsService {
 
             if (quantityChange !== 0) {
               await this.stockLevelManager.updateStock({
-                productId: id,
-                locationId: stockLocation.location_id,
-                quantityChange: quantityChange,
-                movementType: 'adjustment',
+                product_id: id,
+                location_id: stockLocation.location_id,
+                quantity_change: quantityChange,
+                movement_type: 'adjustment',
                 reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
-                userId: 1, // Use default user ID as fallback
-                createMovement: true,
-                validateAvailability: false,
+                user_id: 1, // Use default user ID as fallback
+                create_movement: true,
+                validate_availability: false,
               });
             }
           }
@@ -636,14 +717,14 @@ export class ProductsService {
               );
 
             await this.stockLevelManager.updateStock({
-              productId: id,
-              locationId: defaultLocation.id,
-              quantityChange: stockDifference,
-              movementType: 'adjustment',
+              product_id: id,
+              location_id: defaultLocation.id,
+              quantity_change: stockDifference,
+              movement_type: 'adjustment',
               reason: 'Stock quantity updated from product edit (legacy)',
-              userId: 1, // Use default user ID as fallback
-              createMovement: true,
-              validateAvailability: false,
+              user_id: 1, // Use default user ID as fallback
+              create_movement: true,
+              validate_availability: false,
             });
           }
         }
@@ -778,14 +859,14 @@ export class ProductsService {
 
   // Gestión de variantes
   async createVariant(
-    productId: number,
+    product_id: number,
     createVariantDto: CreateProductVariantDto,
   ) {
     try {
       // Verificar que el producto existe y está activo
       const product = await this.prisma.products.findFirst({
         where: {
-          id: productId,
+          id: product_id,
           state: ProductState.ACTIVE,
         },
       });
@@ -804,7 +885,7 @@ export class ProductsService {
       }
 
       return await this.prisma.$transaction(async (prisma) => {
-        // Crear variante
+        // Crear variante usando scoped client
         const variant = await prisma.product_variants.create({
           data: {
             product_id: product.id, // Se infiere del contexto
@@ -829,15 +910,15 @@ export class ProductsService {
             );
 
           await this.stockLevelManager.updateStock({
-            productId: product.id,
-            variantId: variant.id,
-            locationId: defaultLocation.id,
-            quantityChange: createVariantDto.stock_quantity || 0,
-            movementType: 'initial',
+            product_id: product.id,
+            variant_id: variant.id,
+            location_id: defaultLocation.id,
+            quantity_change: createVariantDto.stock_quantity || 0,
+            movement_type: 'initial',
             reason: 'Initial stock on variant creation',
-            userId: 1, // Use default user ID as fallback
-            createMovement: true,
-            validateAvailability: false,
+            user_id: 1, // Use default user ID as fallback
+            create_movement: true,
+            validate_availability: false,
           });
         }
 
@@ -911,15 +992,15 @@ export class ProductsService {
               );
 
             await this.stockLevelManager.updateStock({
-              productId: existingVariant.product_id,
-              variantId: variantId,
-              locationId: defaultLocation.id,
-              quantityChange: stockDifference,
-              movementType: 'adjustment',
+              product_id: existingVariant.product_id,
+              variant_id: variantId,
+              location_id: defaultLocation.id,
+              quantity_change: stockDifference,
+              movement_type: 'adjustment',
               reason: 'Stock quantity updated from variant edit',
-              userId: 1, // Use default user ID as fallback
-              createMovement: true,
-              validateAvailability: false,
+              user_id: 1, // Use default user ID as fallback
+              create_movement: true,
+              validate_availability: false,
             });
           }
         }

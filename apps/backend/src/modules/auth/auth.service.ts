@@ -44,10 +44,10 @@ export class AuthService {
     const organization_slug = this.generateSlugFromName(organization_name);
 
     // Verificar si slug de organización ya existe
-    const existingOrg = await this.prismaService.organizations.findUnique({
+    const existing_org = await this.prismaService.organizations.findUnique({
       where: { slug: organization_slug },
     });
-    if (existingOrg) {
+    if (existing_org) {
       throw new ConflictException(
         'Una organización con este nombre ya existe.',
       );
@@ -921,7 +921,7 @@ export class AuthService {
     }
 
     if (organization_slug && user_app_type) {
-      if (user_app_type !== 'ORG_ADMIN') {
+      if (user_app_type !== 'ORG_ADMIN' && user_app_type !== 'VENDIX_ADMIN') {
         console.log('🔍 LOGIN - Inconsistencia detectada:', {
           user_id: user.id,
           provided_slug: 'organization_slug',
@@ -934,7 +934,7 @@ export class AuthService {
     }
 
     if (store_slug && user_app_type) {
-      if (user_app_type !== 'STORE_ADMIN') {
+      if (user_app_type !== 'STORE_ADMIN' && user_app_type !== 'VENDIX_ADMIN') {
         console.log('🔍 LOGIN - Inconsistencia detectada:', {
           user_id: user.id,
           provided_slug: 'store_slug',
@@ -968,6 +968,7 @@ export class AuthService {
     let target_organization_id: number | null = null;
     let target_store_id: number | null = null;
     let login_context: string = '';
+    let active_store = null;
 
     if (effective_organization_slug) {
       // Verificar que el usuario pertenezca a la organización especificada
@@ -1017,6 +1018,7 @@ export class AuthService {
 
       target_organization_id = storeUser.store.organizations.id;
       target_store_id = storeUser.store.id;
+      active_store = storeUser.store; // Guardar la tienda activa
       login_context = `store:${effective_store_slug}`;
     }
 
@@ -1096,10 +1098,13 @@ export class AuthService {
     });
 
     // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    const { password: _, ...userWithRolesAndPassword } = {
+      ...userWithRolesArray,
+      store: active_store || user.main_store,
+    };
 
     return {
-      user: userWithRolesAndPassword, // Usar usuario con roles array simple
+      user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
       user_settings: userSettings,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,

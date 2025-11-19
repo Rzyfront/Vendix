@@ -9,15 +9,15 @@ import { saveAuthState, clearAuthState } from '../persistence';
 export interface AuthState {
   user: any | null;
   user_settings: any | null;
-  tokens: { accessToken: string; refreshToken: string } | null;
+  tokens: { access_token: string; refresh_token: string } | null;
   permissions: string[];
   roles: string[];
   loading: boolean;
   error: NormalizedApiPayload | string | null;
-  isAuthenticated: boolean;
-  onboardingCompleted: boolean;
-  onboardingCurrentStep?: string;
-  onboardingCompletedSteps: string[];
+  is_authenticated: boolean;
+  onboarding_completed: boolean;
+  onboarding_current_step?: string;
+  onboarding_completed_steps: string[];
 }
 
 export const initialAuthState: AuthState = {
@@ -28,9 +28,9 @@ export const initialAuthState: AuthState = {
   roles: [],
   loading: true,
   error: null,
-  isAuthenticated: false,
-  onboardingCompleted: false,
-  onboardingCompletedSteps: [],
+  is_authenticated: false,
+  onboarding_completed: false,
+  onboarding_completed_steps: [],
 };
 
 export const authReducer = createReducer(
@@ -54,7 +54,7 @@ export const authReducer = createReducer(
         roles: roles || [],
         loading: false,
         error: null,
-        isAuthenticated: true,
+        is_authenticated: true,
       };
       // Save to localStorage for persistence
       saveAuthState(newState);
@@ -70,7 +70,7 @@ export const authReducer = createReducer(
       typeof error === 'string'
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    isAuthenticated: false,
+    is_authenticated: false,
   })),
 
   on(AuthActions.logout, (state) => ({
@@ -106,7 +106,7 @@ export const authReducer = createReducer(
       typeof error === 'string'
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    isAuthenticated: false,
+    is_authenticated: false,
   })),
 
   on(AuthActions.loadUser, (state) => ({
@@ -159,7 +159,7 @@ export const authReducer = createReducer(
         tokens,
         permissions: permissions || [],
         roles: roles || [],
-        isAuthenticated: true,
+        is_authenticated: true,
         loading: false,
         error: null,
       };
@@ -270,9 +270,9 @@ export const authReducer = createReducer(
       ...state,
       loading: false,
       error: null,
-      onboardingCompleted,
-      onboardingCurrentStep: currentStep,
-      onboardingCompletedSteps: completedSteps || [],
+      onboarding_completed: onboardingCompleted,
+      onboarding_current_step: currentStep,
+      onboarding_completed_steps: completedSteps || [],
     }),
   ),
 
@@ -287,6 +287,6 @@ export const authReducer = createReducer(
 
   on(AuthActions.setOnboardingCompleted, (state, { completed }) => ({
     ...state,
-    onboardingCompleted: completed,
+    onboarding_completed: completed,
   })),
 );

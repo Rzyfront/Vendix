@@ -22,9 +22,9 @@ export class StoresService {
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
-    const organizationId = RequestContextService.getOrganizationId();
+    const organization_id = RequestContextService.getOrganizationId();
 
-    if (!organizationId) {
+    if (!organization_id) {
       throw new BadRequestException('Organization context is required');
     }
 
@@ -32,7 +32,7 @@ export class StoresService {
     const existingStore = await this.prisma.stores.findFirst({
       where: {
         slug,
-        organization_id: organizationId,
+        organization_id: organization_id,
       },
     });
     if (existingStore) {
@@ -50,7 +50,7 @@ export class StoresService {
         slug,
         updated_at: new Date(),
         organizations: {
-          connect: { id: organizationId },
+          connect: { id: organization_id },
         },
       },
       include: {

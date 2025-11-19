@@ -274,7 +274,7 @@ export class ReturnOrdersService {
     returnItem: any,
     locationId?: number,
   ) {
-    const targetLocationId = locationId || returnOrder.location_id;
+    const target_location_id = locationId || returnOrder.location_id;
 
     // Create inventory movement for restocking
     await tx.inventory_movements.create({
@@ -282,7 +282,7 @@ export class ReturnOrdersService {
         organization_id: returnOrder.organization_id,
         product_id: returnItem.product_id,
         product_variant_id: returnItem.product_variant_id,
-        to_location_id: targetLocationId,
+        to_location_id: target_location_id,
         quantity: returnItem.quantity,
         movement_type: 'return',
         source_order_type: 'return_order',
@@ -296,7 +296,7 @@ export class ReturnOrdersService {
     await this.updateStockLevel(
       tx,
       returnItem.product_id,
-      targetLocationId,
+      target_location_id,
       returnItem.quantity,
       returnItem.product_variant_id,
     );
@@ -324,7 +324,7 @@ export class ReturnOrdersService {
       tx,
       returnItem.product_id,
       returnOrder.location_id,
-      -returnItem.quantity,
+      returnItem.quantity,
       returnItem.product_variant_id,
     );
   }
@@ -335,7 +335,7 @@ export class ReturnOrdersService {
     returnItem: any,
     locationId?: number,
   ) {
-    const targetLocationId = locationId || returnOrder.location_id;
+    const target_location_id = locationId || returnOrder.location_id;
 
     // Create inventory movement for repair
     await tx.inventory_movements.create({
@@ -343,7 +343,7 @@ export class ReturnOrdersService {
         organization_id: returnOrder.organization_id,
         product_id: returnItem.product_id,
         product_variant_id: returnItem.product_variant_id,
-        to_location_id: targetLocationId,
+        to_location_id: target_location_id,
         quantity: returnItem.quantity,
         movement_type: 'adjustment',
         source_order_type: 'return_order',
@@ -357,7 +357,7 @@ export class ReturnOrdersService {
     await this.updateStockLevel(
       tx,
       returnItem.product_id,
-      targetLocationId,
+      target_location_id,
       returnItem.quantity,
       returnItem.product_variant_id,
     );

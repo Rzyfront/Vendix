@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { Prisma, order_state_enum } from '@prisma/client';
+import { RequestContextService } from '../../common/context/request-context.service';
 
 @Injectable()
 export class OrdersService {
@@ -14,6 +15,14 @@ export class OrdersService {
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     try {
+      // Validar contexto y aplicar scope automático
+      const context = RequestContextService.getContext();
+      const target_store_id = createOrderDto.store_id || context?.store_id;
+
+      if (!target_store_id && !context?.is_super_admin) {
+        throw new BadRequestException('Store context is required');
+      }
+
       if (!createOrderDto.order_number) {
         createOrderDto.order_number = await this.generateOrderNumber();
       }
@@ -25,8 +34,14 @@ export class OrdersService {
         throw new NotFoundException('User (customer) not found');
       }
 
-      const store = await this.prisma.stores.findUnique({
-        where: { id: createOrderDto.store_id },
+      // Validar que la tienda exista y esté dentro del scope
+      const store = await this.prisma.stores.findFirst({
+        where: {
+          id: target_store_id,
+          ...(context?.is_super_admin ? {} : {
+            organization_id: context?.organization_id
+          })
+        },
       });
       if (!store) {
         throw new NotFoundException('Store not found');
@@ -35,7 +50,7 @@ export class OrdersService {
       return await this.prisma.orders.create({
         data: {
           customer_id: createOrderDto.customer_id, // This should be user_id
-          store_id: createOrderDto.store_id,
+          store_id: target_store_id, // Usar store_id del contexto
           order_number: createOrderDto.order_number,
           state: createOrderDto.state || order_state_enum.created,
           subtotal_amount: createOrderDto.subtotal,
@@ -93,7 +108,13 @@ export class OrdersService {
     } = query;
     const skip = (page - 1) * limit;
 
+    // Validar contexto y aplicar scope automático
+    const context = RequestContextService.getContext();
+    const target_store_id = store_id || context?.store_id;
+
     const where: Prisma.ordersWhereInput = {
+      // Aplicar siempre scope de store_id (a menos que sea super admin)
+      ...(!context?.is_super_admin && { store_id: target_store_id }),
       ...(search && {
         OR: [{ order_number: { contains: search, mode: 'insensitive' } }],
       }),
@@ -139,8 +160,17 @@ export class OrdersService {
   }
 
   async findOne(id: number) {
-    const order = await this.prisma.orders.findUnique({
-      where: { id },
+    // Validar contexto para aplicar scope
+    const context = RequestContextService.getContext();
+
+    const order = await this.prisma.orders.findFirst({
+      where: {
+        id,
+        // Aplicar scope de store_id a menos que sea super admin
+        ...(!context?.is_super_admin && {
+          store_id: context?.store_id
+        }),
+      },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
         order_items: { include: { products: true, product_variants: true } },

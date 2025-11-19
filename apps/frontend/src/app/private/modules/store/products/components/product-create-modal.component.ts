@@ -5,7 +5,6 @@ import {
   FormGroup,
   ReactiveFormsModule,
   Validators,
-  FormArray,
 } from '@angular/forms';
 import {
   ModalComponent,
@@ -25,6 +24,8 @@ import {
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
 import { BrandsService } from '../services/brands.service';
+import { CategoryQuickCreateComponent } from './category-quick-create.component';
+import { BrandQuickCreateComponent } from './brand-quick-create.component';
 
 @Component({
   selector: 'app-product-create-modal',
@@ -37,6 +38,8 @@ import { BrandsService } from '../services/brands.service';
     InputComponent,
     IconComponent,
     SelectorComponent,
+    CategoryQuickCreateComponent,
+    BrandQuickCreateComponent,
   ],
   template: `
     <app-modal
@@ -145,25 +148,49 @@ import { BrandsService } from '../services/brands.service';
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-selector
-              label="Primary Category"
-              placeholder="Select a category"
-              [options]="categoryOptions"
-              formControlName="category_id"
-              [helpText]="'Primary product category'"
-              [errorText]="getErrorMessage('category_id')"
-            >
-            </app-selector>
+            <div class="flex items-start gap-2">
+              <div class="flex-grow">
+                <app-selector
+                  label="Primary Category"
+                  placeholder="Select a category (optional)"
+                  [options]="categoryOptions"
+                  formControlName="category_id"
+                  [helpText]="'Primary product category'"
+                  [errorText]="getErrorMessage('category_id')"
+                >
+                </app-selector>
+              </div>
+              <button
+                type="button"
+                class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                (click)="isCategoryCreateOpen = true"
+                title="Create new category"
+              >
+                <app-icon name="plus" [size]="20"></app-icon>
+              </button>
+            </div>
 
-            <app-selector
-              label="Brand"
-              placeholder="Select a brand"
-              [options]="brandOptions"
-              formControlName="brand_id"
-              [helpText]="'Product brand (optional)'"
-              [errorText]="getErrorMessage('brand_id')"
-            >
-            </app-selector>
+            <div class="flex items-start gap-2">
+              <div class="flex-grow">
+                <app-selector
+                  label="Brand"
+                  placeholder="Select a brand (optional)"
+                  [options]="brandOptions"
+                  formControlName="brand_id"
+                  [helpText]="'Product brand (optional)'"
+                  [errorText]="getErrorMessage('brand_id')"
+                >
+                </app-selector>
+              </div>
+              <button
+                type="button"
+                class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                (click)="isBrandCreateOpen = true"
+                title="Create new brand"
+              >
+                <app-icon name="plus" [size]="20"></app-icon>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -288,6 +315,20 @@ import { BrandsService } from '../services/brands.service';
         </div>
       </div>
     </app-modal>
+
+    <app-category-quick-create
+      [isOpen]="isCategoryCreateOpen"
+      (openChange)="isCategoryCreateOpen = $event"
+      (created)="onCategoryCreated($event)"
+      (cancel)="isCategoryCreateOpen = false"
+    ></app-category-quick-create>
+
+    <app-brand-quick-create
+      [isOpen]="isBrandCreateOpen"
+      (openChange)="isBrandCreateOpen = $event"
+      (created)="onBrandCreated($event)"
+      (cancel)="isBrandCreateOpen = false"
+    ></app-brand-quick-create>
   `,
   styles: [
     `
@@ -307,6 +348,10 @@ export class ProductCreateModalComponent {
   imageUrls: string[] = [];
   categoryOptions: SelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
+
+  // Quick create modals state
+  isCategoryCreateOpen = false;
+  isBrandCreateOpen = false;
 
   constructor(
     private fb: FormBuilder,
@@ -341,7 +386,11 @@ export class ProductCreateModalComponent {
   }
 
   private loadCategoriesAndBrands(): void {
-    // Load categories
+    this.loadCategories();
+    this.loadBrands();
+  }
+
+  private loadCategories(): void {
     this.categoriesService.getCategories().subscribe({
       next: (categories: ProductCategory[]) => {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
@@ -352,16 +401,12 @@ export class ProductCreateModalComponent {
       },
       error: (error: any) => {
         console.error('Error loading categories:', error);
-        // Fallback options
-        this.categoryOptions = [
-          { value: 1, label: 'Electronics' },
-          { value: 2, label: 'Clothing' },
-          { value: 3, label: 'Food & Beverages' },
-        ];
+        this.categoryOptions = [];
       },
     });
+  }
 
-    // Load brands
+  private loadBrands(): void {
     this.brandsService.getBrands().subscribe({
       next: (brands: Brand[]) => {
         this.brandOptions = brands.map((brand: Brand) => ({
@@ -372,13 +417,21 @@ export class ProductCreateModalComponent {
       },
       error: (error: any) => {
         console.error('Error loading brands:', error);
-        // Fallback options
-        this.brandOptions = [
-          { value: 1, label: 'Generic Brand' },
-          { value: 2, label: 'Premium Brand' },
-        ];
+        this.brandOptions = [];
       },
     });
+  }
+
+  onCategoryCreated(category: ProductCategory): void {
+    this.loadCategories();
+    this.productForm.patchValue({ category_id: category.id });
+    this.isCategoryCreateOpen = false;
+  }
+
+  onBrandCreated(brand: Brand): void {
+    this.loadBrands();
+    this.productForm.patchValue({ brand_id: brand.id });
+    this.isBrandCreateOpen = false;
   }
 
   onCancel() {
@@ -463,8 +516,8 @@ export class ProductCreateModalComponent {
         formValue.stock_quantity > 0
           ? Number(formValue.stock_quantity)
           : undefined,
-      category_id: formValue.category_id || null,
-      brand_id: formValue.brand_id || null,
+      category_id: formValue.category_id ? Number(formValue.category_id) : null,
+      brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
       images: images.length > 0 ? images : undefined,
     };
 
@@ -477,6 +530,7 @@ export class ProductCreateModalComponent {
       error: (error) => {
         this.toastService.error(error || 'Error creating product');
         console.error('Error creating product:', error);
+        this.isSubmitting = false;
       },
     });
   }

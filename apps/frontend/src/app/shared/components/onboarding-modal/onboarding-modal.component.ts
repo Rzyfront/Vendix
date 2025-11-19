@@ -30,6 +30,7 @@ import { OnboardingWizardService } from '../../../core/services/onboarding-wizar
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ToastService } from '../toast/toast.service';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
+import { CountryService } from '../../../services/country.service';
 import { Subject, takeUntil } from 'rxjs';
 
 interface WizardStep {
@@ -398,6 +399,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     private cdr: ChangeDetectorRef,
     private toastService: ToastService,
     private envSwitchService: EnvironmentSwitchService,
+    private countryService: CountryService,
   ) {
     this.initializeForms();
   }
@@ -503,7 +505,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       city: [''],
       state_province: [''],
       postal_code: [''],
-      country_code: ['MX'],
+      country_code: ['CO'],
     });
 
     // Organization Form
@@ -522,12 +524,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       name: ['', Validators.required],
       description: [''],
       store_type: ['physical', Validators.required],
-      timezone: ['America/Mexico_City', Validators.required],
+      timezone: ['America/Bogota', Validators.required],
       address_line1: ['', Validators.required],
       city: ['', Validators.required],
       state_province: ['', Validators.required],
       postal_code: ['', Validators.required],
-      country_code: ['MX', Validators.required],
+      country_code: ['CO', Validators.required],
     });
 
     // App Config Form
@@ -539,6 +541,68 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       custom_domain: [''],
       subdomain: [''],
     });
+
+    // Setup data preloading
+    this.setupDataPreloading();
+  }
+
+  private setupDataPreloading(): void {
+    // User address → Store address preloading
+    this.userForm.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((userData) => {
+        if (
+          userData.address_line1 ||
+          userData.city ||
+          userData.state_province ||
+          userData.postal_code ||
+          userData.country_code
+        ) {
+          this.storeForm.patchValue(
+            {
+              address_line1: userData.address_line1 || '',
+              city: userData.city || '',
+              state_province: userData.state_province || '',
+              postal_code: userData.postal_code || '',
+              country_code: userData.country_code || 'CO',
+            },
+            { emitEvent: false },
+          );
+        }
+      });
+
+    // User address → Organization address preloading
+    this.userForm.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((userData) => {
+        // For organization, we can preload phone if available
+        if (userData.phone && !this.organizationForm.value.phone) {
+          this.organizationForm.patchValue(
+            {
+              phone: userData.phone,
+            },
+            { emitEvent: false },
+          );
+        }
+      });
+
+    // Organization address → Store address preloading
+    this.organizationForm.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((orgData) => {
+        if (orgData.name) {
+          // Extract base name without "Org" if exists
+          const baseName = orgData.name.replace(/\s+Org$/i, '');
+          this.storeForm.patchValue(
+            {
+              name: baseName,
+              description: `Tienda principal de ${orgData.name}`,
+              phone: orgData.phone || '',
+            },
+            { emitEvent: false },
+          );
+        }
+      });
   }
 
   private loadUserData(): void {
@@ -566,7 +630,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
               city: primaryAddress.city || '',
               state_province: primaryAddress.state_province || '',
               postal_code: primaryAddress.postal_code || '',
-              country_code: primaryAddress.country_code || 'MX',
+              country_code: primaryAddress.country_code || 'CO',
             });
           }
         }
@@ -606,6 +670,10 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           if (selectedAppType) {
             this.businessType =
               selectedAppType === 'STORE_ADMIN' ? 'STORE' : 'ORGANIZATION';
+
+            // Sync service state
+            this.wizardService.setAppType(selectedAppType);
+
             this.steps =
               this.businessType === 'STORE'
                 ? this.storeSteps
@@ -885,25 +953,68 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       const response = await this.wizardService.completeWizard().toPromise();
 
       if (response?.success) {
-        const app_type = this.wizardService.getAppType();
+        // Get app type from service or fallback to local state
+        const app_type =
+          this.wizardService.getAppType() ||
+          (this.businessType === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN');
 
         if (app_type === 'STORE_ADMIN') {
           const store_slug = this.wizardService.getCreatedStoreSlug();
+          console.log(
+            'Complete wizard - App type:',
+            app_type,
+            'Store slug:',
+            store_slug,
+          );
 
           if (store_slug) {
             try {
+              console.log(
+                '✅ Switching to STORE_ADMIN environment with slug:',
+                store_slug,
+              );
               await this.envSwitchService.performEnvironmentSwitch(
                 'STORE_ADMIN',
                 store_slug,
               );
+              console.log('✅ Environment switch completed successfully');
             } catch (switchError) {
-              console.error('Error switching environment:', switchError);
+              console.error('❌ Error switching environment:', switchError);
               this.toastService.error('Error al cambiar al entorno de tienda');
+              // Fallback reload to ensure clean state
+              window.location.reload();
             }
           } else {
-            console.error('No se encontró slug de store');
-            this.toastService.error('Error al completar el onboarding');
+            console.warn('⚠️ No se encontró slug de store');
+            // Si no hay slug, redirigir al dashboard general sin switch de entorno
+            this.toastService.warning(
+              'No se pudo identificar la tienda específica, redirigiendo al panel general',
+            );
+            // Fallback reload to ensure clean state
+            window.location.reload();
           }
+        } else if (app_type === 'ORG_ADMIN') {
+          // Para ORG_ADMIN, hacer switch a entorno de organización
+          try {
+            console.log('✅ Switching to ORG_ADMIN environment');
+            await this.envSwitchService.performEnvironmentSwitch('ORG_ADMIN');
+            console.log(
+              '✅ Organization environment switch completed successfully',
+            );
+          } catch (switchError) {
+            console.error(
+              '❌ Error switching to organization environment:',
+              switchError,
+            );
+            // Fallback reload to ensure clean state
+            window.location.reload();
+          }
+        } else {
+          console.warn('⚠️ Unknown app type:', app_type);
+          this.toastService.warning(
+            'Tipo de aplicación no reconocido, redirigiendo al panel general',
+          );
+          window.location.reload();
         }
 
         this.toastService.success(

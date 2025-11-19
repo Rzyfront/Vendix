@@ -121,10 +121,24 @@ export class OnboardingWizardService {
   }
 
   /**
+   * Set created store slug
+   */
+  setCreatedStoreSlug(slug: string): void {
+    this._created_store_slug = slug;
+  }
+
+  /**
    * Get app type
    */
   getAppType(): 'STORE_ADMIN' | 'ORG_ADMIN' | null {
     return this._app_type;
+  }
+
+  /**
+   * Set app type
+   */
+  setAppType(type: 'STORE_ADMIN' | 'ORG_ADMIN'): void {
+    this._app_type = type;
   }
 
   /**
@@ -236,8 +250,13 @@ export class OnboardingWizardService {
             ...currentData,
             store: data,
           });
-          if (response.data?.slug) {
-            this._created_store_slug = response.data.slug;
+          // Guardar el slug del store - viene en response.data (que es el store completo)
+          const storeSlug = response.data?.slug;
+          if (storeSlug) {
+            this._created_store_slug = storeSlug;
+            console.log('Store slug saved:', storeSlug);
+          } else {
+            console.warn('No store slug found in response:', response);
           }
           this.nextStep();
         }

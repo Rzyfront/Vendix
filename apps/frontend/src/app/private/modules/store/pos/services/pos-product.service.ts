@@ -66,7 +66,7 @@ export class PosProductService {
   private searchHistory$ = new BehaviorSubject<string[]>([]);
 
   constructor(private http: HttpClient) {
-    // No longer using mock data - using real API
+    this.initializeMockData();
   }
 
   private initializeMockData(): void {
@@ -144,35 +144,63 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
-    // Use real API call for POS optimized search
-    const params = new HttpParams()
-      .set('pos_optimized', filters.pos_optimized ? 'true' : 'false')
-      .set('include_stock', filters.include_stock ? 'true' : 'false')
+    let params = new HttpParams()
       .set('page', page.toString())
       .set('limit', pageSize.toString());
 
-    if (filters.barcode) {
-      params.set('barcode', filters.barcode);
-    } else if (filters.query) {
-      params.set('search', filters.query);
+    if (filters.query) {
+      params = params.set('search', filters.query);
     }
 
-    if (filters.category) {
-      params.set('category_id', filters.category);
+    if (filters.category && filters.category !== 'all') {
+      params = params.set('category_id', filters.category);
     }
 
-    if (filters.brand) {
-      params.set('brand_id', filters.brand);
+    if (filters.brand && filters.brand !== 'all') {
+      params = params.set('brand_id', filters.brand);
     }
 
-    return this.http.get<SearchResult>(this.apiUrl, { params }).pipe(
-      map(
-        (response) =>
-          response || { products: [], total: 0, page, pageSize, totalPages: 0 },
-      ),
-      catchError((error: any) => {
+    if (filters.inStock) {
+      params = params.set('in_stock', 'true');
+    }
+
+    if (filters.minPrice) {
+      params = params.set('min_price', filters.minPrice.toString());
+    }
+
+    if (filters.maxPrice) {
+      params = params.set('max_price', filters.maxPrice.toString());
+    }
+
+    if (filters.sortBy) {
+      params = params.set('sort_by', filters.sortBy);
+      if (filters.sortOrder) {
+        params = params.set('sort_order', filters.sortOrder);
+      }
+    }
+
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        // Adapt API response to SearchResult interface
+        // The backend usually returns { data: [], meta: { ... } } or similar for paginated results
+        // Assuming the standard response format from UsersController example
+        return {
+          products: response.data || [],
+          total: response.meta?.total || 0,
+          page: response.meta?.page || page,
+          pageSize: response.meta?.limit || pageSize,
+          totalPages: response.meta?.totalPages || 0,
+        };
+      }),
+      catchError((error) => {
         console.error('Error searching products:', error);
-        return of({ products: [], total: 0, page, pageSize, totalPages: 0 });
+        return of({
+          products: [],
+          total: 0,
+          page,
+          pageSize,
+          totalPages: 0,
+        });
       }),
     );
   }

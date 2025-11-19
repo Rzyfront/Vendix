@@ -98,8 +98,8 @@ export interface CreateProductDto {
   base_price: number;
   sku?: string;
   stock_quantity?: number;
-  category_id?: number;
-  brand_id?: number;
+  category_id?: number | null;
+  brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
   images?: CreateProductImageDto[];

@@ -70,15 +70,13 @@ export class EnvironmentContextService {
       ['org_admin', 'owner', 'super_admin'].includes(role),
     );
 
-    // Verificar la configuración permanente del usuario (fuente única de verdad)
-    const userPermanentEnvironment = userSettings.config.app;
-    const isInStoreAdminPermanently =
-      userPermanentEnvironment === 'STORE_ADMIN';
+    // Verificar la configuración permanente del usuario
+    const currentEnv = userSettings.config.app;
 
     // Para cambiar a organización, debe:
     // 1. Tener rol de organización
-    // 2. Tener su configuración permanente establecida en STORE_ADMIN
-    return hasOrgRole && isInStoreAdminPermanently;
+    // 2. Estar actualmente en el entorno STORE_ADMIN
+    return hasOrgRole && currentEnv === 'STORE_ADMIN';
   }
 
   /**
