@@ -5,6 +5,8 @@ import { PaymentsService } from './payments.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { ResponseModule } from '../../common/responses/response.module';
 import { OrdersModule } from '../orders/orders.module';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import {
   PaymentGatewayService,
   PaymentValidatorService,
@@ -38,6 +40,8 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     PaymentValidatorService,
     WebhookHandlerService,
     WebhookController,
+    StockLevelManager,
+    InventoryTransactionsService,
   ],
   exports: [
     PaymentsService,

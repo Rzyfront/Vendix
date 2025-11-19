@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
   Injectable,
   NotFoundException,
@@ -21,9 +22,11 @@ export class InventoryTransactionsService {
    */
   async createTransaction(
     data: CreateTransactionDto,
+    tx?: Prisma.TransactionClient,
   ): Promise<InventoryTransaction> {
+    const prisma = tx || this.prisma;
     try {
-      return await this.prisma.inventory_transactions.create({
+      return await prisma.inventory_transactions.create({
         data: {
           product_id: data.productId,
           product_variant_id: data.variantId,

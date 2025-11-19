@@ -70,9 +70,58 @@ export class PosPaymentService {
   ) {}
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
-    return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
-      delay(100),
+    // First try to get payment methods from backend
+    const storeId = this.getStoreId();
+    const paymentMethodsUrl = `${environment.apiUrl}/payments/stores/${storeId}/payment-methods`;
+
+    return this.http.get<any>(paymentMethodsUrl).pipe(
+      map((response) => {
+        if (response && Array.isArray(response)) {
+          // Transform backend payment methods to frontend format
+          return response.map((method: any) => ({
+            id: method.id.toString(),
+            name: method.name,
+            type: method.type,
+            icon: this.getPaymentIcon(method.type),
+            enabled: method.state === 'enabled',
+            requiresReference: method.type !== 'cash',
+            referenceLabel: this.getReferenceLabel(method.type),
+          }));
+        }
+        // Fallback to default methods if backend fails
+        return this.PAYMENT_METHODS.filter((method) => method.enabled);
+      }),
+      catchError((error) => {
+        console.warn(
+          'Error fetching payment methods from backend, using defaults:',
+          error,
+        );
+        return of(this.PAYMENT_METHODS.filter((method) => method.enabled)).pipe(
+          delay(100),
+        );
+      }),
     );
+  }
+
+  private getPaymentIcon(type: string): string {
+    const iconMap: { [key: string]: string } = {
+      cash: 'cash',
+      card: 'credit-card',
+      paypal: 'paypal',
+      bank_transfer: 'bank',
+      digital_wallet: 'smartphone',
+    };
+    return iconMap[type] || 'credit-card';
+  }
+
+  private getReferenceLabel(type: string): string {
+    const labelMap: { [key: string]: string } = {
+      card: 'Últimos 4 dígitos',
+      paypal: 'Email de PayPal',
+      bank_transfer: 'Número de referencia',
+      digital_wallet: 'Referencia de pago',
+    };
+    return labelMap[type] || 'Referencia';
   }
 
   /**

@@ -151,4 +151,38 @@ export class PaymentsController {
   async findOne(@Param('paymentId') paymentId: string, @Request() req) {
     return this.paymentsService.findOne(paymentId, req.user);
   }
+
+  @Get('stores/:storeId/payment-methods')
+  @ApiOperation({ summary: 'Get payment methods for a store' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment methods retrieved successfully',
+  })
+  async getStorePaymentMethods(
+    @Param('storeId') storeId: string,
+    @Request() req,
+  ) {
+    return this.paymentsService.getStorePaymentMethods(
+      parseInt(storeId),
+      req.user,
+    );
+  }
+
+  @Post('stores/:storeId/payment-methods')
+  @ApiOperation({ summary: 'Create payment method for a store' })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment method created successfully',
+  })
+  async createStorePaymentMethod(
+    @Param('storeId') storeId: string,
+    @Body() createPaymentMethodDto: any,
+    @Request() req,
+  ) {
+    return this.paymentsService.createStorePaymentMethod(
+      parseInt(storeId),
+      createPaymentMethodDto,
+      req.user,
+    );
+  }
 }

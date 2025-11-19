@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayService } from './services/payment-gateway.service';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { LocationsService } from '../inventory/locations/locations.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -22,6 +24,7 @@ export class PaymentsService {
   constructor(
     private prisma: PrismaService,
     private paymentGateway: PaymentGatewayService,
+    private stockLevelManager: StockLevelManager,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -438,8 +441,7 @@ export class PaymentsService {
         customer_id: dto.customer_id,
         store_id: dto.store_id,
         order_number: orderNumber,
-        state: 'confirmed',
-        payment_status: dto.requires_payment ? 'pending' : 'pending_payment',
+        state: 'processing', // Match enum order_state_enum
         subtotal_amount: dto.subtotal,
         tax_amount: dto.tax_amount || 0,
         discount_amount: dto.discount_amount || 0,
@@ -448,7 +450,6 @@ export class PaymentsService {
         billing_address_id: dto.billing_address_id,
         shipping_address_id: dto.shipping_address_id,
         internal_notes: dto.internal_notes,
-        created_by: user.id,
         order_items: {
           create: orderItems,
         },
@@ -492,15 +493,17 @@ export class PaymentsService {
         payment_method_id: dto.payment_method_id,
         amount: dto.total_amount,
         currency: dto.currency || 'USD',
-        status: 'succeeded',
+        state: 'succeeded',
         transaction_id: await this.generateTransactionId(),
-        reference: dto.payment_reference,
-        change: change,
-        metadata: {
-          register_id: dto.register_id,
-          seller_user_id: dto.seller_user_id,
-          amount_received: dto.amount_received,
-          is_pos_payment: true,
+        gateway_response: {
+          reference: dto.payment_reference,
+          change: change,
+          metadata: {
+            register_id: dto.register_id,
+            seller_user_id: dto.seller_user_id,
+            amount_received: dto.amount_received,
+            is_pos_payment: true,
+          },
         },
       },
       include: {
@@ -517,12 +520,31 @@ export class PaymentsService {
   private async updateOrderPaymentStatus(
     tx: any,
     orderId: number,
-    status: string,
+    paymentState: string,
   ) {
+    // Update order state based on payment state
+    let orderState: string;
+    switch (paymentState) {
+      case 'succeeded':
+        orderState = 'processing';
+        break;
+      case 'pending':
+        orderState = 'pending_payment';
+        break;
+      case 'failed':
+        orderState = 'created';
+        break;
+      case 'refunded':
+        orderState = 'refunded';
+        break;
+      default:
+        orderState = 'processing';
+    }
+
     await tx.orders.update({
       where: { id: orderId },
       data: {
-        payment_status: status,
+        state: orderState,
         updated_at: new Date(),
       },
     });
@@ -532,29 +554,42 @@ export class PaymentsService {
    * Update inventory from order
    */
   private async updateInventoryFromOrder(tx: any, order: any) {
-    for (const item of order.order_items) {
-      // Update product stock
-      await tx.products.update({
-        where: { id: item.product_id },
-        data: {
-          stock_quantity: {
-            decrement: item.quantity,
-          },
-        },
-      });
+    // Get default location for the store
+    // Since LocationsService is not injected, we do a direct query or rely on StockLevelManager finding the stock
+    // Ideally we should have the location in the order or item context, but for POS default location is usually implied if not set.
+    // We can check if the store has a default location.
 
-      // Create inventory movement
-      await tx.inventory_movements.create({
-        data: {
+    const defaultLocation = await tx.inventory_locations.findFirst({
+      where: {
+        store_id: order.store_id,
+        is_active: true,
+      },
+      orderBy: { id: 'asc' }, // Pick the first one as default
+    });
+
+    if (!defaultLocation) {
+      console.warn(
+        `No default location found for store ${order.store_id}. Skipping inventory update.`,
+      );
+      return;
+    }
+
+    for (const item of order.order_items) {
+      await this.stockLevelManager.updateStock(
+        {
           product_id: item.product_id,
-          store_id: order.store_id,
-          movement_type: 'out',
-          quantity: item.quantity,
-          reference_type: 'order',
-          reference_id: order.id,
-          notes: `POS Sale - Order ${order.order_number}`,
+          variant_id: item.product_variant_id,
+          location_id: defaultLocation.id,
+          quantity_change: -item.quantity, // Decrease stock
+          movement_type: 'sale',
+          reason: `POS Sale - Order ${order.order_number}`,
+          user_id: order.created_by,
+          order_item_id: item.id,
+          create_movement: true,
+          validate_availability: true, // Enforce stock limits
         },
-      });
+        tx, // Pass the transaction client
+      );
     }
   }
 
@@ -601,5 +636,66 @@ export class PaymentsService {
     });
 
     return storeUsers.map((su: any) => su.store_id);
+  }
+
+  /**
+   * Get payment methods for a store
+   */
+  async getStorePaymentMethods(storeId: number, user: any) {
+    // Check if user has access to this store
+    const userStoreIds = await this.getUserStoreIds(user);
+    if (!userStoreIds.includes(storeId)) {
+      throw new Error('Access denied to this store');
+    }
+
+    return this.prisma.payment_methods.findMany({
+      where: {
+        store_id: storeId,
+        state: 'enabled',
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        provider: true,
+        state: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /**
+   * Create payment method for a store
+   */
+  async createStorePaymentMethod(
+    storeId: number,
+    createPaymentMethodDto: any,
+    user: any,
+  ) {
+    // Check if user has admin access to this store
+    const userStoreIds = await this.getUserStoreIds(user);
+    if (!userStoreIds.includes(storeId)) {
+      throw new Error('Access denied to this store');
+    }
+
+    const { name, type, provider, config } = createPaymentMethodDto;
+
+    return this.prisma.payment_methods.create({
+      data: {
+        store_id: storeId,
+        name,
+        type,
+        provider: provider || 'internal',
+        config: config || {},
+        state: 'enabled',
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        provider: true,
+        state: true,
+      },
+    });
   }
 }

@@ -342,11 +342,29 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private initializeCategories(): void {
-    this.categories = [
-      { id: 'all', name: 'Todos', icon: 'grid' },
-      { id: 'Accesorios', name: 'Accesorios', icon: 'cpu' },
-    ];
+    this.categories = [{ id: 'all', name: 'Todos', icon: 'grid' }];
     this.selectedCategory = this.categories[0];
+    this.loadCategories();
+  }
+
+  private loadCategories(): void {
+    this.productService
+      .getCategories()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (categories) => {
+          // Add backend categories to the list
+          const backendCategories = categories.map((cat) => ({
+            id: cat.id.toString(),
+            name: cat.name,
+            icon: 'tag',
+          }));
+          this.categories = [this.categories[0], ...backendCategories];
+        },
+        error: (error) => {
+          console.warn('Error loading categories, using defaults:', error);
+        },
+      });
   }
 
   private setupSearchSubscription(): void {
@@ -367,14 +385,16 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     const filters: any = {
       pos_optimized: true,
       include_stock: true,
+      state: 'active', // Only get active products
+      store_id: this.getCurrentStoreId(),
     };
 
     if (this.searchQuery) {
-      filters.query = this.searchQuery;
+      filters.search = this.searchQuery;
     }
 
     if (this.selectedCategory && this.selectedCategory.id !== 'all') {
-      filters.category = this.selectedCategory.id;
+      filters.category_id = this.selectedCategory.id;
     }
 
     this.productService
@@ -382,14 +402,50 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result: SearchResult) => {
-          this.filteredProducts = result.products || [];
+          this.filteredProducts = this.transformProducts(result.products || []);
           this.loading = false;
         },
         error: (error: any) => {
           this.loading = false;
           this.toastService.error('Error al cargar productos');
+          console.error('Product search error:', error);
         },
       });
+  }
+
+  private transformProducts(products: any[]): any[] {
+    return products.map((product) => ({
+      id: product.id.toString(),
+      name: product.name,
+      sku: product.sku || '',
+      price: parseFloat(product.base_price || product.price || 0),
+      cost: product.cost ? parseFloat(product.cost) : undefined,
+      category: product.category?.name || 'Sin categoría',
+      brand: product.brand?.name || '',
+      stock: product.stock_quantity || product.quantity_available || 0,
+      minStock: 5, // Default minimum stock
+      image: product.image || '',
+      description: product.description || '',
+      barcode: product.barcode || '',
+      tags: product.tags || [],
+      isActive: product.state === 'active',
+      createdAt: new Date(product.created_at),
+      updatedAt: new Date(product.updated_at),
+    }));
+  }
+
+  private getCurrentStoreId(): number {
+    // Try to get store ID from localStorage or tenant service
+    const storeData = localStorage.getItem('current_store');
+    if (storeData) {
+      try {
+        const store = JSON.parse(storeData);
+        return typeof store.id === 'string' ? parseInt(store.id) : store.id;
+      } catch {
+        return 1; // fallback
+      }
+    }
+    return 1; // fallback store ID
   }
 
   onSearch(searchTerm: string): void {

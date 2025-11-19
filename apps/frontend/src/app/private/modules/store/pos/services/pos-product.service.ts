@@ -70,57 +70,6 @@ export class PosProductService {
   }
 
   private initializeMockData(): void {
-    this.products = [
-      {
-        id: '1',
-        name: 'Mouse Inalámbrico',
-        sku: 'MOUSE-WIFI-001',
-        price: 25.99,
-        cost: 15.0,
-        category: 'Accesorios',
-        brand: 'Logitech',
-        stock: 50,
-        minStock: 10,
-        barcode: '2345678901234',
-        tags: ['mouse', 'inalámbrico', 'logitech'],
-        isActive: true,
-        createdAt: new Date('2024-01-15'),
-        updatedAt: new Date('2024-01-15'),
-      },
-      {
-        id: '2',
-        name: 'Teclado Mecánico RGB',
-        sku: 'KEY-MEC-003',
-        price: 129.99,
-        cost: 85.0,
-        category: 'Accesorios',
-        brand: 'Corsair',
-        stock: 25,
-        minStock: 5,
-        barcode: '3456789012345',
-        tags: ['teclado', 'mecánico', 'rgb'],
-        isActive: true,
-        createdAt: new Date('2024-01-16'),
-        updatedAt: new Date('2024-01-16'),
-      },
-      {
-        id: '3',
-        name: 'Monitor LG 27" 4K',
-        sku: 'MON-LG-007',
-        price: 299.99,
-        cost: 200.0,
-        category: 'Accesorios',
-        brand: 'LG',
-        stock: 15,
-        minStock: 3,
-        barcode: '4567890123456',
-        tags: ['monitor', '4k', 'lg'],
-        isActive: true,
-        createdAt: new Date('2024-01-17'),
-        updatedAt: new Date('2024-01-17'),
-      },
-    ];
-
     this.categories = [
       { id: 'all', name: 'Todos' },
       { id: 'electronics', name: 'Electronicos' },
@@ -161,7 +110,8 @@ export class PosProductService {
     }
 
     if (filters.inStock) {
-      params = params.set('in_stock', 'true');
+      // For POS, we want products with stock
+      params = params.set('include_stock', 'true');
     }
 
     if (filters.minPrice) {
@@ -172,24 +122,61 @@ export class PosProductService {
       params = params.set('max_price', filters.maxPrice.toString());
     }
 
-    if (filters.sortBy) {
-      params = params.set('sort_by', filters.sortBy);
-      if (filters.sortOrder) {
-        params = params.set('sort_order', filters.sortOrder);
-      }
+    if (filters.pos_optimized) {
+      params = params.set('pos_optimized', 'true');
     }
+
+    if (filters.barcode) {
+      params = params.set('barcode', filters.barcode);
+    }
+
+    if (filters.include_stock) {
+      params = params.set('include_stock', 'true');
+    }
+
+    // Add store filter if available
+    const currentStore = this.getCurrentStoreId();
+    if (currentStore) {
+      params = params.set('store_id', currentStore.toString());
+    }
+
+    // Only get active products for POS
+    params = params.set('state', 'active');
 
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => {
-        // Adapt API response to SearchResult interface
-        // The backend usually returns { data: [], meta: { ... } } or similar for paginated results
-        // Assuming the standard response format from UsersController example
+        // Handle different response formats
+        let products = [];
+        let total = 0;
+        let currentPage = page;
+        let limit = pageSize;
+        let totalPages = 0;
+
+        if (response.data && Array.isArray(response.data)) {
+          // Standard paginated response
+          products = response.data;
+          total = response.meta?.total || response.total || products.length;
+          currentPage = response.meta?.page || response.page || page;
+          limit = response.meta?.limit || response.limit || pageSize;
+          totalPages = Math.ceil(total / limit);
+        } else if (Array.isArray(response)) {
+          // Direct array response
+          products = response;
+          total = products.length;
+          totalPages = Math.ceil(total / pageSize);
+        } else if (response.products && Array.isArray(response.products)) {
+          // Response with products property
+          products = response.products;
+          total = response.total || products.length;
+          totalPages = Math.ceil(total / pageSize);
+        }
+
         return {
-          products: response.data || [],
-          total: response.meta?.total || 0,
-          page: response.meta?.page || page,
-          pageSize: response.meta?.limit || pageSize,
-          totalPages: response.meta?.totalPages || 0,
+          products: this.transformProducts(products),
+          total,
+          page: currentPage,
+          pageSize: limit,
+          totalPages,
         };
       }),
       catchError((error) => {
@@ -203,6 +190,41 @@ export class PosProductService {
         });
       }),
     );
+  }
+
+  private transformProducts(products: any[]): any[] {
+    return products.map((product) => ({
+      id: product.id?.toString() || '',
+      name: product.name || '',
+      sku: product.sku || '',
+      price: parseFloat(product.base_price || product.price || 0),
+      cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
+      category: product.category?.name || 'Sin categoría',
+      brand: product.brand?.name || '',
+      stock: product.stock_quantity || product.quantity_available || 0,
+      minStock: product.min_stock_level || 5,
+      image: product.image_url || product.image || '',
+      description: product.description || '',
+      barcode: product.barcode || '',
+      tags: product.tags || [],
+      isActive: product.state === 'active',
+      createdAt: new Date(product.created_at),
+      updatedAt: new Date(product.updated_at),
+    }));
+  }
+
+  private getCurrentStoreId(): number | null {
+    // Try to get store ID from localStorage
+    const storeData = localStorage.getItem('current_store');
+    if (storeData) {
+      try {
+        const store = JSON.parse(storeData);
+        return typeof store.id === 'string' ? parseInt(store.id) : store.id;
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   getProductById(id: string): Observable<Product | null> {

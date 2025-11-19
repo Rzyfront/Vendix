@@ -407,27 +407,56 @@ export class PosComponent implements OnInit, OnDestroy {
 
     const createdBy = 'current_user';
 
-    // Process sale with payment using the orquestrator
-    this.paymentService
-      .processSaleWithPayment(this.cartState, paymentData, createdBy)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (result: any) => {
-          this.loading = false;
-          this.currentOrderId = result.order?.id;
-          this.currentOrderNumber = result.order?.order_number;
-          this.completedOrder = result.order;
-          this.showOrderConfirmation = true;
-          this.toastService.success('Venta procesada correctamente');
-          this.onClearCart();
-        },
-        error: (error: any) => {
-          this.loading = false;
-          this.toastService.error(
-            error.message || 'Error al procesar la venta',
-          );
-        },
-      });
+    if (paymentData.isCreditSale) {
+      // Handle credit sale
+      this.paymentService
+        .processCreditSale(this.cartState, createdBy)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result: any) => {
+            this.loading = false;
+            this.currentOrderId = result.order?.id;
+            this.currentOrderNumber = result.order?.order_number;
+            this.completedOrder = {
+              ...result.order,
+              isCreditSale: true,
+            };
+            this.showOrderConfirmation = true;
+            this.toastService.success(
+              'Venta a crédito procesada correctamente',
+            );
+            this.onClearCart();
+          },
+          error: (error: any) => {
+            this.loading = false;
+            this.toastService.error(
+              error.message || 'Error al procesar la venta a crédito',
+            );
+          },
+        });
+    } else {
+      // Process sale with payment using orquestrator
+      this.paymentService
+        .processSaleWithPayment(this.cartState, paymentData, createdBy)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result: any) => {
+            this.loading = false;
+            this.currentOrderId = result.order?.id;
+            this.currentOrderNumber = result.order?.order_number;
+            this.completedOrder = result.order;
+            this.showOrderConfirmation = true;
+            this.toastService.success('Venta procesada correctamente');
+            this.onClearCart();
+          },
+          error: (error: any) => {
+            this.loading = false;
+            this.toastService.error(
+              error.message || 'Error al procesar la venta',
+            );
+          },
+        });
+    }
   }
 
   onQuickSearch(): void {

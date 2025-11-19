@@ -58,7 +58,7 @@ export class UsersService {
     if (query.search) params = params.set('search', query.search);
     if (query.state) params = params.set('state', query.state);
 
-    return this.http.get<any>(`${this.apiUrl}/org/users`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/users`, { params }).pipe(
       map((response) => {
         // Mapear la respuesta de la API a la estructura esperada por el frontend
         return {

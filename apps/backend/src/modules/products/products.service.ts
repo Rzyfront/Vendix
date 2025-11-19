@@ -210,16 +210,19 @@ export class ProductsService {
         if (stock_by_location && stock_by_location.length > 0) {
           // Usar las ubicaciones especificadas en el DTO
           for (const stockLocation of stock_by_location) {
-            await this.stockLevelManager.updateStock({
-              product_id: product.id,
-              location_id: stockLocation.location_id,
-              quantity_change: stockLocation.quantity,
-              movement_type: 'initial',
-              reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
-              user_id: 1, // Use default user ID as fallback
-              create_movement: true,
-              validate_availability: false,
-            });
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: product.id,
+                location_id: stockLocation.location_id,
+                quantity_change: stockLocation.quantity,
+                movement_type: 'initial',
+                reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                user_id: 1, // Use default user ID as fallback
+                create_movement: true,
+                validate_availability: false,
+              },
+              prisma,
+            );
           }
         } else if (stock_quantity && stock_quantity > 0) {
           // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
@@ -228,16 +231,19 @@ export class ProductsService {
               product.store_id,
             );
 
-          await this.stockLevelManager.updateStock({
-            product_id: product.id,
-            location_id: defaultLocation.id,
-            quantity_change: stock_quantity,
-            movement_type: 'initial',
-            reason: 'Initial stock on product creation (legacy)',
-            user_id: 1, // Use default user ID as fallback
-            create_movement: true,
-            validate_availability: false,
-          });
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: product.id,
+              location_id: defaultLocation.id,
+              quantity_change: stock_quantity,
+              movement_type: 'initial',
+              reason: 'Initial stock on product creation (legacy)',
+              user_id: 1, // Use default user ID as fallback
+              create_movement: true,
+              validate_availability: false,
+            },
+            prisma,
+          );
         }
 
         // Inicializar stock levels para todas las ubicaciones de la organización
@@ -247,6 +253,7 @@ export class ProductsService {
           await this.stockLevelManager.initializeStockLevelsForProduct(
             product.id,
             context.organization_id,
+            prisma,
           );
         }
 
@@ -796,16 +803,19 @@ export class ProductsService {
             const quantityChange = stockLocation.quantity - currentQuantity;
 
             if (quantityChange !== 0) {
-              await this.stockLevelManager.updateStock({
-                product_id: id,
-                location_id: stockLocation.location_id,
-                quantity_change: quantityChange,
-                movement_type: 'adjustment',
-                reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
-                user_id: 1, // Use default user ID as fallback
-                create_movement: true,
-                validate_availability: false,
-              });
+              await this.stockLevelManager.updateStock(
+                {
+                  product_id: id,
+                  location_id: stockLocation.location_id,
+                  quantity_change: quantityChange,
+                  movement_type: 'adjustment',
+                  reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                  user_id: 1, // Use default user ID as fallback
+                  create_movement: true,
+                  validate_availability: false,
+                },
+                prisma,
+              );
             }
           }
         } else if (stock_quantity !== undefined) {
@@ -819,16 +829,19 @@ export class ProductsService {
                 product.store_id,
               );
 
-            await this.stockLevelManager.updateStock({
-              product_id: id,
-              location_id: defaultLocation.id,
-              quantity_change: stockDifference,
-              movement_type: 'adjustment',
-              reason: 'Stock quantity updated from product edit (legacy)',
-              user_id: 1, // Use default user ID as fallback
-              create_movement: true,
-              validate_availability: false,
-            });
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: id,
+                location_id: defaultLocation.id,
+                quantity_change: stockDifference,
+                movement_type: 'adjustment',
+                reason: 'Stock quantity updated from product edit (legacy)',
+                user_id: 1, // Use default user ID as fallback
+                create_movement: true,
+                validate_availability: false,
+              },
+              prisma,
+            );
           }
         }
 
@@ -1012,17 +1025,20 @@ export class ProductsService {
               product.store_id,
             );
 
-          await this.stockLevelManager.updateStock({
-            product_id: product.id,
-            variant_id: variant.id,
-            location_id: defaultLocation.id,
-            quantity_change: createVariantDto.stock_quantity || 0,
-            movement_type: 'initial',
-            reason: 'Initial stock on variant creation',
-            user_id: 1, // Use default user ID as fallback
-            create_movement: true,
-            validate_availability: false,
-          });
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: product.id,
+              variant_id: variant.id,
+              location_id: defaultLocation.id,
+              quantity_change: createVariantDto.stock_quantity || 0,
+              movement_type: 'initial',
+              reason: 'Initial stock on variant creation',
+              user_id: 1, // Use default user ID as fallback
+              create_movement: true,
+              validate_availability: false,
+            },
+            prisma,
+          );
         }
 
         return variant;
@@ -1094,17 +1110,20 @@ export class ProductsService {
                 existingVariant.products.store_id,
               );
 
-            await this.stockLevelManager.updateStock({
-              product_id: existingVariant.product_id,
-              variant_id: variantId,
-              location_id: defaultLocation.id,
-              quantity_change: stockDifference,
-              movement_type: 'adjustment',
-              reason: 'Stock quantity updated from variant edit',
-              user_id: 1, // Use default user ID as fallback
-              create_movement: true,
-              validate_availability: false,
-            });
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: existingVariant.product_id,
+                variant_id: variantId,
+                location_id: defaultLocation.id,
+                quantity_change: stockDifference,
+                movement_type: 'adjustment',
+                reason: 'Stock quantity updated from variant edit',
+                user_id: 1, // Use default user ID as fallback
+                create_movement: true,
+                validate_availability: false,
+              },
+              prisma,
+            );
           }
         }
 
