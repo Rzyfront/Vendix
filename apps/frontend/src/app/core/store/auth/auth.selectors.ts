@@ -194,7 +194,7 @@ export const selectNeedsOrganizationOnboarding = createSelector(
 
 export const selectUserStore = createSelector(
   selectUser,
-  (user: any) => user?.stores || null,
+  (user: any) => user?.store || user?.stores || null,
 );
 
 export const selectUserStoreName = createSelector(
@@ -210,17 +210,17 @@ export const selectUserStoreSlug = createSelector(
 // Onboarding selectors
 export const selectOnboardingCompleted = createSelector(
   selectAuthState,
-  (state: AuthState) => state.onboardingCompleted,
+  (state: AuthState) => state.onboarding_completed,
 );
 
 export const selectOnboardingCurrentStep = createSelector(
   selectAuthState,
-  (state: AuthState) => state.onboardingCurrentStep,
+  (state: AuthState) => state.onboarding_current_step,
 );
 
 export const selectOnboardingCompletedSteps = createSelector(
   selectAuthState,
-  (state: AuthState) => state.onboardingCompletedSteps,
+  (state: AuthState) => state.onboarding_completed_steps,
 );
 
 export const selectNeedsOnboarding = createSelector(

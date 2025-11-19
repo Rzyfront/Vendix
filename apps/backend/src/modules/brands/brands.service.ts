@@ -84,7 +84,9 @@ export class BrandsService {
 
     const skip = (page - 1) * limit;
 
-    const where: any = {};
+    const where: any = {
+      state: { not: 'archived' }, // Excluir archivados por defecto
+    };
 
     if (search) {
       where.OR = [
@@ -93,12 +95,8 @@ export class BrandsService {
       ];
     }
 
-    // Add store-specific filtering via products
-    where.products = {
-      some: {
-        store_id: storeId,
-      },
-    };
+    // ✅ SIMPLIFICADO: Brands es global, no necesita filtrar por store
+    // Las marcas globales están disponibles para todos los stores
 
     const [brands, total] = await Promise.all([
       this.prisma.brands.findMany({
@@ -193,7 +191,14 @@ export class BrandsService {
       );
     }
 
-    await this.prisma.brands.delete({ where: { id } });
+    // Eliminación lógica: cambiar estado a archived
+    await this.prisma.brands.update({
+      where: { id },
+      data: {
+        state: 'archived',
+        updated_at: new Date(),
+      },
+    });
   }
   private async validateUniqueName(name: string, excludeId?: number) {
     const where: any = { name };

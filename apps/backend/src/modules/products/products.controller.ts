@@ -203,9 +203,11 @@ export class ProductsController {
     @Body() createVariantDto: CreateProductVariantDto,
   ) {
     try {
-      // Set the product_id in the variant DTO
-      createVariantDto.product_id = productId;
-      const result = await this.productsService.createVariant(createVariantDto);
+      // Pass productId directly to service
+      const result = await this.productsService.createVariant(
+        productId,
+        createVariantDto,
+      );
       return this.responseService.created(
         result,
         'Variante de producto creada exitosamente',
@@ -293,6 +295,24 @@ export class ProductsController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al eliminar la imagen del producto',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('stats/store/:storeId')
+  @Permissions('products:read')
+  async getProductStats(@Param('storeId', ParseIntPipe) storeId: number) {
+    try {
+      const result = await this.productsService.getProductStats(storeId);
+      return this.responseService.success(
+        result,
+        'Estadísticas de productos obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las estadísticas de productos',
         error.response?.message || error.message,
         error.status || 400,
       );

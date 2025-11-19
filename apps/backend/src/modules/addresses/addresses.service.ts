@@ -23,13 +23,13 @@ export class AddressesService {
 
   async create(createAddressDto: CreateAddressDto, user: any) {
     // Validar que solo se proporcione un tipo de entidad
-    const entityTypes = [
+    const entity_types = [
       createAddressDto.store_id ? 'store' : null,
       createAddressDto.organization_id ? 'organization' : null,
       createAddressDto.user_id ? 'user' : null,
     ].filter(Boolean);
 
-    if (entityTypes.length !== 1) {
+    if (entity_types.length !== 1) {
       throw new BadRequestException(
         'Debe proporcionar exactamente uno de: store_id, organization_id, o user_id',
       );
@@ -61,7 +61,7 @@ export class AddressesService {
       });
     }
 
-    const addressData: Prisma.addressesUncheckedCreateInput = {
+    const address_data: Prisma.addressesUncheckedCreateInput = {
       address_line1: createAddressDto.address_line_1,
       address_line2: createAddressDto.address_line_2,
       city: createAddressDto.city,
@@ -83,7 +83,7 @@ export class AddressesService {
 
     try {
       return await this.prisma.addresses.create({
-        data: addressData,
+        data: address_data,
         include: {
           stores: { select: { id: true, name: true } },
           organizations: { select: { id: true, name: true } },
@@ -220,26 +220,26 @@ export class AddressesService {
       );
     }
 
-    const updateData: Prisma.addressesUpdateInput = {};
+    const update_data: Prisma.addressesUpdateInput = {};
     if (updateAddressDto.address_line_1)
-      updateData.address_line1 = updateAddressDto.address_line_1;
+      update_data.address_line1 = updateAddressDto.address_line_1;
     if (updateAddressDto.address_line_2)
-      updateData.address_line2 = updateAddressDto.address_line_2;
-    if (updateAddressDto.city) updateData.city = updateAddressDto.city;
+      update_data.address_line2 = updateAddressDto.address_line_2;
+    if (updateAddressDto.city) update_data.city = updateAddressDto.city;
     if (updateAddressDto.state)
-      updateData.state_province = updateAddressDto.state;
+      update_data.state_province = updateAddressDto.state;
     if (updateAddressDto.postal_code)
-      updateData.postal_code = updateAddressDto.postal_code;
+      update_data.postal_code = updateAddressDto.postal_code;
     if (updateAddressDto.country)
-      updateData.country_code = updateAddressDto.country;
-    if (updateAddressDto.type) updateData.type = updateAddressDto.type as any;
+      update_data.country_code = updateAddressDto.country;
+    if (updateAddressDto.type) update_data.type = updateAddressDto.type as any;
     if (updateAddressDto.is_primary !== undefined)
-      updateData.is_primary = updateAddressDto.is_primary;
+      update_data.is_primary = updateAddressDto.is_primary;
 
     try {
       return await this.prisma.addresses.update({
         where: { id },
-        data: updateData,
+        data: update_data,
         include: {
           stores: { select: { id: true, name: true } },
           organizations: { select: { id: true, name: true } },

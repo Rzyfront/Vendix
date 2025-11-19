@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -14,6 +15,7 @@ import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../email/email.service';
 import * as crypto from 'crypto';
+import { RequestContextService } from '../../common/context/request-context.service';
 
 @Injectable()
 export class UsersService {
@@ -31,25 +33,36 @@ export class UsersService {
       ...rest
     } = createUserDto;
 
-    const existingUser = await this.prisma.users.findFirst({
-      where: { email, organization_id },
+    // Validar contexto de organización
+    const context = RequestContextService.getContext();
+    const target_organization_id = organization_id || context?.organization_id;
+
+    if (!target_organization_id && !context?.is_super_admin) {
+      throw new BadRequestException('Organization context is required');
+    }
+
+    const existing_user = await this.prisma.users.findFirst({
+      where: {
+        email,
+        ...(target_organization_id && { organization_id: target_organization_id })
+      },
     });
-    if (existingUser) {
+    if (existing_user) {
       throw new ConflictException(
         'User with this email already exists in this organization',
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashed_password = await bcrypt.hash(password, 10);
 
     const user = await this.prisma.users.create({
       data: {
         ...rest,
         email,
-        password: hashedPassword,
-        organizations: {
-          connect: { id: organization_id },
-        },
+        password: hashed_password,
+        ...(target_organization_id && {
+          organizations: { connect: { id: target_organization_id } },
+        }),
         updated_at: new Date(),
       },
       select: {
@@ -108,25 +121,52 @@ export class UsersService {
 
     // Generate email verification token
     const token = crypto.randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
     await this.prisma.email_verification_tokens.create({
       data: {
         user_id: user.id,
         token,
-        expires_at: expiresAt,
+        expires_at: expires_at,
       },
     });
 
+    // Obtener el slug de la organización para el vLink
+    let organization_slug: string | undefined;
+    try {
+      if (user.organization_id) {
+        const organization = await this.prisma.organizations.findUnique({
+          where: { id: user.organization_id },
+          select: { slug: true },
+        });
+        organization_slug = organization?.slug;
+      }
+    } catch (error) {
+      console.error('❌ Error obteniendo slug de organización:', error);
+      // Continuar sin organization slug si hay error
+    }
+
     // Send verification email after user creation
-    const fullName = `${user.first_name} ${user.last_name}`.trim();
-    await this.emailService.sendVerificationEmail(user.email, token, fullName);
+    const full_name = `${user.first_name} ${user.last_name}`.trim();
+    await this.emailService.sendVerificationEmail(
+      user.email,
+      token,
+      full_name,
+      organization_slug,
+    );
 
     return user;
   }
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 10, search, state, organization_id } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      organization_id,
+      role,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.usersWhereInput = {
@@ -140,6 +180,15 @@ export class UsersService {
         ],
       }),
       ...(state && { state }),
+      ...(role && {
+        user_roles: {
+          some: {
+            roles: {
+              name: role,
+            },
+          },
+        },
+      }),
     };
 
     const [users, total] = await Promise.all([
@@ -264,8 +313,6 @@ export class UsersService {
   }
 
   async getDashboard(query: UsersDashboardDto) {
-    const { organization_id } = query;
-
     // Estadísticas generales de usuarios
     const [
       totalUsuarios,
@@ -278,15 +325,12 @@ export class UsersService {
       usuariosArchivados,
     ] = await Promise.all([
       // Total Usuarios
-      this.prisma.users.count({
-        where: organization_id ? { organization_id } : {},
-      }),
+      this.prisma.users.count(),
 
       // Activos
       this.prisma.users.count({
         where: {
           state: 'active',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -294,7 +338,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'pending_verification',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -302,7 +345,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           two_factor_enabled: true,
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -310,7 +352,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'inactive',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -318,7 +359,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'suspended',
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -326,7 +366,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           email_verified: true,
-          ...(organization_id && { organization_id }),
         },
       }),
 
@@ -334,7 +373,6 @@ export class UsersService {
       this.prisma.users.count({
         where: {
           state: 'archived',
-          ...(organization_id && { organization_id }),
         },
       }),
     ]);

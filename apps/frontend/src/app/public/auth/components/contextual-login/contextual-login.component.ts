@@ -1,7 +1,12 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { ConfigFacade } from '../../../../core/store/config';
@@ -12,10 +17,22 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
 import {
   InputComponent,
   ButtonComponent,
-  CardComponent
+  CardComponent,
+  IconComponent,
 } from '../../../../shared/components';
 
-export type LoginState = 'idle' | 'loading' | 'success' | 'error' | 'network_error' | 'rate_limited' | 'too_many_attempts' | 'account_locked' | 'account_suspended' | 'email_not_verified' | 'password_expired';
+export type LoginState =
+  | 'idle'
+  | 'loading'
+  | 'success'
+  | 'error'
+  | 'network_error'
+  | 'rate_limited'
+  | 'too_many_attempts'
+  | 'account_locked'
+  | 'account_suspended'
+  | 'email_not_verified'
+  | 'password_expired';
 
 export interface LoginError {
   type: LoginState;
@@ -33,24 +50,31 @@ export interface LoginError {
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    CardComponent
+    CardComponent,
+    IconComponent,
   ],
   template: `
-    <div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8" [class]="'bg-[var(--color-background)]'">
+    <div
+      class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
+      [class]="'bg-[var(--color-background)]'"
+    >
       <div class="max-w-sm w-full space-y-8">
         <!-- Contextual Branding -->
         <div class="text-center my-3">
-          @if (logoUrl) {
-            <div class="mx-auto h-16 w-16 flex items-center justify-center mb-4">
-              <img [src]="logoUrl" [alt]="displayName" class="h-14 w-14 rounded-md">
+          <div class="mx-auto flex items-center justify-center space-x-3 mb-4">
+            <div
+              class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
+            >
+              <app-icon name="cart" [size]="24" color="white"></app-icon>
             </div>
-          } @else {
-            <div class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4">
-              <span class="text-white font-bold text-xl">{{ contextInitial }}</span>
-            </div>
-          }
+            <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
+              {{ displayName || 'Vendix' }}
+            </h1>
+          </div>
 
-          <h2 class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]">
+          <h2
+            class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]"
+          >
             {{ loginTitle }}
           </h2>
           @if (displayName) {
@@ -67,7 +91,11 @@ export interface LoginError {
 
         <!-- Login Form -->
         <app-card shadow="md" class="mt-20" [animateOnLoad]="true">
-          <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="space-y-8">
+          <form
+            [formGroup]="loginForm"
+            (ngSubmit)="onSubmit()"
+            class="space-y-8"
+          >
             <div>
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType === 'vendix') {
@@ -78,7 +106,7 @@ export interface LoginError {
                   type="text"
                   size="md"
                   placeholder="mi-organizacion"
-                  >
+                >
                 </app-input>
               }
 
@@ -89,7 +117,8 @@ export interface LoginError {
                 [control]="loginForm.get('email')"
                 type="email"
                 size="md"
-                [placeholder]="emailPlaceholder">
+                [placeholder]="emailPlaceholder"
+              >
               </app-input>
 
               <!-- Password Field -->
@@ -99,21 +128,34 @@ export interface LoginError {
                 [control]="loginForm.get('password')"
                 type="password"
                 size="md"
-                placeholder="••••••••">
+                placeholder="••••••••"
+              >
               </app-input>
             </div>
 
             <!-- Error Display -->
             @if (hasError) {
-              <div class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]">
+              <div
+                class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
+              >
                 <div class="flex">
                   <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-[var(--color-destructive)]" viewBox="0 0 20 20" fill="currentColor">
-                      <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                    <svg
+                      class="h-5 w-5 text-[var(--color-destructive)]"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                        clip-rule="evenodd"
+                      />
                     </svg>
                   </div>
                   <div class="ml-3">
-                    <h3 class="text-sm font-medium text-[var(--color-destructive)]">
+                    <h3
+                      class="text-sm font-medium text-[var(--color-destructive)]"
+                    >
                       {{ errorMessage }}
                     </h3>
                   </div>
@@ -130,7 +172,8 @@ export interface LoginError {
               [loading]="isLoading"
               [fullWidth]="true"
               [showTextWhileLoading]="true"
-              class="mt-4 w-full">
+              class="mt-4 w-full"
+            >
               @if (isLoading) {
                 Iniciando sesión...
               } @else {
@@ -143,21 +186,34 @@ export interface LoginError {
               <div class="text-sm">
                 <a
                   (click)="navigateToForgotPassword()"
-                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer">
+                  class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer"
+                >
                   ¿Olvidaste tu contraseña?
                 </a>
               </div>
             </div>
-
           </form>
         </app-card>
+
+        <!-- Back to Landing -->
+        <div class="text-center mt-6">
+          <a
+            routerLink="/"
+            class="font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)]"
+          >
+            ← Volver al inicio
+          </a>
+        </div>
 
         <!-- Additional Links -->
         <div class="text-center text-sm text-[var(--color-text-secondary)]">
           @if (contextType === 'vendix') {
             <p>
               ¿Necesitas una cuenta corporativa?
-              <a routerLink="/auth/register" class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]">
+              <a
+                routerLink="/auth/register"
+                class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]"
+              >
                 Solicitar acceso
               </a>
             </p>
@@ -174,7 +230,7 @@ export interface LoginError {
       </div>
     </div>
   `,
-  styleUrls: []
+  styleUrls: [],
 })
 export class ContextualLoginComponent implements OnInit, OnDestroy {
   loginForm: FormGroup;
@@ -192,38 +248,43 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   constructor(
     private fb: FormBuilder,
     private authFacade: AuthFacade,
-    private router: Router
+    private router: Router,
   ) {
     this.loginForm = this.fb.group({
       vlink: [''],
       email: ['', [Validators.required, Validators.email]],
-      password: ['', [Validators.required, Validators.minLength(6)]]
+      password: ['', [Validators.required, Validators.minLength(6)]],
     });
   }
 
   ngOnInit(): void {
     this.loadAuthContext();
-    
-    this.authFacade.loading$.pipe(takeUntil(this.destroy$)).subscribe(loading => {
-      if (loading) this.loginState = 'loading';
-    });
 
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe(error => {
+    this.authFacade.loading$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((loading) => {
+        if (loading) this.loginState = 'loading';
+      });
+
+    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
       if (error) {
-        const normalizedError = typeof error === 'string' ? error : extractApiErrorMessage(error);
+        const normalizedError =
+          typeof error === 'string' ? error : extractApiErrorMessage(error);
         this.handleLoginError(normalizedError);
       } else {
         this.clearError();
       }
     });
 
-    this.authFacade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe(isAuth => {
-      if (isAuth) {
-        const welcomeMessage = this.getWelcomeMessage();
-        this.toast.success(welcomeMessage);
-        this.loginState = 'success';
-      }
-    });
+    this.authFacade.isAuthenticated$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((isAuth) => {
+        if (isAuth) {
+          const welcomeMessage = this.getWelcomeMessage();
+          this.toast.success(welcomeMessage);
+          this.loginState = 'success';
+        }
+      });
   }
 
   ngOnDestroy(): void {
@@ -234,7 +295,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   private loadAuthContext(): void {
     const appConfig = this.appConfigFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn('[CONTEXTUAL-LOGIN] App config not available, using default context');
+      console.warn(
+        '[CONTEXTUAL-LOGIN] App config not available, using default context',
+      );
       return;
     }
 
@@ -247,7 +310,10 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       this.contextType = 'organization';
       this.displayName = domainConfig.organization_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
-    } else if (domainConfig.domainType === 'store' || domainConfig.domainType === 'ecommerce') {
+    } else if (
+      domainConfig.domainType === 'store' ||
+      domainConfig.domainType === 'ecommerce'
+    ) {
       this.contextType = 'store';
       this.displayName = domainConfig.store_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
@@ -264,7 +330,11 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.loginState = error.type;
     this.loginError = error;
     this.apiErrorMessage = error.message;
-    this.toast.error(error.apiError || error.message, 'Error de inicio de sesión', 5000);
+    this.toast.error(
+      error.apiError || error.message,
+      'Error de inicio de sesión',
+      5000,
+    );
   }
 
   private clearError(): void {
@@ -302,27 +372,63 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.router.navigate(['/auth/forgot-owner-password']);
   }
 
-  get hasError(): boolean { return this.loginState !== 'idle' && this.loginState !== 'loading' && this.loginState !== 'success'; }
-  get isLoading(): boolean { return this.loginState === 'loading'; }
-  get isFormValid(): boolean { return this.loginForm.valid && this.loginState !== 'loading'; }
-  get errorMessage(): string { return this.loginError?.message || ''; }
-  get errorDetails(): string { return this.loginError?.details || ''; }
-  get apiError(): string | null { return this.apiErrorMessage || this.loginError?.message || null; }
-  get backgroundClass(): string { return 'bg-[var(--color-background)]'; } // Using token
-  get contextInitial(): string { return this.displayName.charAt(0).toUpperCase() || 'V'; }
-  get loginTitle(): string { return 'Iniciar Sesión'; }
-  get contextDescription(): string { return `en ${this.displayName}`; }
-  get defaultDescription(): string { return 'Plataforma de gestión'; }
-  get emailLabel(): string { return 'Email'; }
-  get emailPlaceholder(): string { return 'usuario@email.com'; }
-  get contextFooter(): string { return `Acceso a ${this.displayName}`}
+  get hasError(): boolean {
+    return (
+      this.loginState !== 'idle' &&
+      this.loginState !== 'loading' &&
+      this.loginState !== 'success'
+    );
+  }
+  get isLoading(): boolean {
+    return this.loginState === 'loading';
+  }
+  get isFormValid(): boolean {
+    return this.loginForm.valid && this.loginState !== 'loading';
+  }
+  get errorMessage(): string {
+    return this.loginError?.message || '';
+  }
+  get errorDetails(): string {
+    return this.loginError?.details || '';
+  }
+  get apiError(): string | null {
+    return this.apiErrorMessage || this.loginError?.message || null;
+  }
+  get backgroundClass(): string {
+    return 'bg-[var(--color-background)]';
+  } // Using token
+  get contextInitial(): string {
+    return this.displayName.charAt(0).toUpperCase() || 'V';
+  }
+  get loginTitle(): string {
+    return 'Iniciar Sesión';
+  }
+  get contextDescription(): string {
+    return `en ${this.displayName}`;
+  }
+  get defaultDescription(): string {
+    return 'Plataforma de gestión';
+  }
+  get emailLabel(): string {
+    return 'Email';
+  }
+  get emailPlaceholder(): string {
+    return 'usuario@email.com';
+  }
+  get contextFooter(): string {
+    return `Acceso a ${this.displayName}`;
+  }
 
   private getWelcomeMessage(): string {
     switch (this.contextType) {
-      case 'vendix': return '¡Bienvenido a Vendix Platform!';
-      case 'organization': return `¡Bienvenido a ${this.displayName || 'tu organización'}!`;
-      case 'store': return `¡Bienvenido a ${this.displayName || 'nuestra tienda'}!`;
-      default: return '¡Bienvenido!';
+      case 'vendix':
+        return '¡Bienvenido a Vendix Platform!';
+      case 'organization':
+        return `¡Bienvenido a ${this.displayName || 'tu organización'}!`;
+      case 'store':
+        return `¡Bienvenido a ${this.displayName || 'nuestra tienda'}!`;
+      default:
+        return '¡Bienvenido!';
     }
   }
 }

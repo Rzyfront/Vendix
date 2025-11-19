@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
   PosOrder,
   PosOrderStatus,
@@ -29,7 +30,10 @@ export class PosOrderService {
   private readonly loading$ = new BehaviorSubject<boolean>(false);
   private readonly currentOrder$ = new BehaviorSubject<PosOrder | null>(null);
 
-  constructor(private http: HttpClient) {
+  constructor(
+    private http: HttpClient,
+    private tenantFacade: TenantFacade,
+  ) {
     this.initializeMockData();
   }
 
@@ -51,8 +55,6 @@ export class PosOrderService {
    */
   createOrderFromCart(
     cartState: CartState,
-    storeId: string,
-    organizationId: string,
     createdBy: string,
   ): Observable<PosOrder> {
     this.loading$.next(true);
@@ -70,9 +72,9 @@ export class PosOrderService {
     const posPaymentRequest = {
       customer_id: cartState.customer?.id || 0,
       customer_name: cartState.customer?.name || 'Cliente General',
-      customer_email: cartState.customer?.email || '',
+      customer_email: cartState.customer?.email || 'cliente@general.com',
       customer_phone: cartState.customer?.phone || '',
-      store_id: parseInt(storeId),
+      store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
         product_name: item.product.name,
@@ -100,7 +102,20 @@ export class PosOrderService {
     return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
       map((response: any) => {
         if (response.success) {
-          return this.mapBackendOrderToPosOrder(response.order);
+          // If the response order is simplified, we might want to merge it with our request data
+          // to have a complete local object until we refresh
+          const fullOrder = {
+            ...response.order,
+            items: posPaymentRequest.items,
+            customer_id: posPaymentRequest.customer_id,
+            customer_name: posPaymentRequest.customer_name,
+            subtotal_amount: posPaymentRequest.subtotal,
+            tax_amount: posPaymentRequest.tax_amount,
+            total_amount: posPaymentRequest.total_amount,
+            created_at: new Date(),
+            updated_at: new Date(),
+          };
+          return this.mapBackendOrderToPosOrder(fullOrder);
         } else {
           throw new Error(response.message || 'Error creating order');
         }
@@ -123,8 +138,6 @@ export class PosOrderService {
    */
   createDraftOrder(
     cartState: CartState,
-    storeId: string,
-    organizationId: string,
     createdBy: string,
   ): Observable<PosOrder> {
     this.loading$.next(true);
@@ -135,8 +148,6 @@ export class PosOrderService {
       summary: cartState.summary,
       discounts: cartState.appliedDiscounts,
       notes: cartState.notes,
-      storeId,
-      organizationId,
       createdBy,
     };
 
@@ -199,9 +210,9 @@ export class PosOrderService {
     const posPaymentRequest = {
       customer_id: request.customer?.id || 0,
       customer_name: request.customer?.name || 'Cliente General',
-      customer_email: request.customer?.email || '',
+      customer_email: request.customer?.email || 'cliente@general.com',
       customer_phone: request.customer?.phone || '',
-      store_id: parseInt(request.storeId || '1'),
+      store_id: this.getStoreId(),
       items: (request.items || []).map((item) => ({
         product_id: parseInt(item.productId),
         product_name: item.productName,
@@ -229,10 +240,23 @@ export class PosOrderService {
     return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
       map((response: any) => {
         if (response.success) {
+          // Reconstruct simplified order from response + request data
+          const fullOrder = {
+            ...response.order,
+            items: posPaymentRequest.items,
+            customer_id: posPaymentRequest.customer_id,
+            customer_name: posPaymentRequest.customer_name,
+            subtotal_amount: posPaymentRequest.subtotal,
+            tax_amount: posPaymentRequest.tax_amount,
+            total_amount: posPaymentRequest.total_amount,
+            created_at: new Date(),
+            updated_at: new Date(),
+          };
+
           return {
             success: true,
             payment: response.payment,
-            order: this.mapBackendOrderToPosOrder(response.order),
+            order: this.mapBackendOrderToPosOrder(fullOrder),
             change: response.payment?.change,
             message: response.message,
           };
@@ -268,11 +292,13 @@ export class PosOrderService {
       orderNumber: backendOrder.order_number,
       customer: {
         id: backendOrder.customer_id?.toString() || '0',
+        first_name: backendOrder.customer_name || 'Cliente General',
+        last_name: backendOrder.customer_name?.split(' ')[1] || '',
         name: backendOrder.customer_name || 'Cliente General',
         email: backendOrder.customer_email || '',
         phone: backendOrder.customer_phone || '',
-        createdAt: new Date(),
-        updatedAt: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
       },
       items:
         backendOrder.items?.map((item: any) => ({
@@ -356,7 +382,9 @@ export class PosOrderService {
           filteredOrders = filteredOrders.filter(
             (order) =>
               order.orderNumber.toLowerCase().includes(searchTerm) ||
-              order.customer?.name.toLowerCase().includes(searchTerm) ||
+              (order.customer?.first_name + ' ' + order.customer?.last_name)
+                .toLowerCase()
+                .includes(searchTerm) ||
               order.customer?.email.toLowerCase().includes(searchTerm),
           );
         }
@@ -378,7 +406,7 @@ export class PosOrderService {
         // Filter by customer
         if (customerId) {
           filteredOrders = filteredOrders.filter(
-            (order) => order.customer?.id === customerId,
+            (order) => order.customer?.id === parseInt(customerId),
           );
         }
 
@@ -659,8 +687,8 @@ export class PosOrderService {
       updatedAt: new Date(),
       completedAt: status === 'confirmed' ? new Date() : undefined,
       createdBy: request.createdBy,
-      storeId: request.storeId,
-      organizationId: request.organizationId,
+      storeId: request.storeId || 'store_001',
+      organizationId: request.organizationId || 'org_001',
     };
   }
 
@@ -753,12 +781,15 @@ export class PosOrderService {
         id: 'ORDER_001',
         orderNumber: 'ORD-2024-001',
         customer: {
-          id: 'CUST_001',
+          id: 1,
           email: 'juan.perez@email.com',
-          name: 'Juan Pérez',
+          first_name: 'Juan',
+          last_name: 'Pérez',
           phone: '+5491123456789',
-          createdAt: new Date('2024-01-15'),
-          updatedAt: new Date('2024-01-15'),
+          document_type: 'dni',
+          document_number: '12345678',
+          created_at: new Date('2024-01-15'),
+          updated_at: new Date('2024-01-15'),
         },
         items: [
           {
@@ -889,5 +920,17 @@ export class PosOrderService {
       '_' +
       Math.random().toString(36).slice(2, 11).toUpperCase()
     );
+  }
+
+  /**
+   * Get current store ID
+   */
+  private getStoreId(): number {
+    const store = this.tenantFacade.getCurrentStore();
+    return store?.id
+      ? typeof store.id === 'string'
+        ? parseInt(store.id)
+        : store.id
+      : 1;
   }
 }

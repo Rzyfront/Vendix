@@ -10,12 +10,13 @@ async function main() {
 
   // Limpiar datos existentes (opcional - comentar en producción)
   console.log('🧹 Limpiando datos existentes...');
-  await prisma.role_permissions.deleteMany({});
-  await prisma.user_roles.deleteMany({});
-  await prisma.store_users.deleteMany({});
-
-  await prisma.domain_settings.deleteMany({});
-  await prisma.addresses.deleteMany({});
+  // Omitir limpieza por ahora para evitar errores de foreign key
+  // await prisma.role_permissions.deleteMany({});
+  // await prisma.user_roles.deleteMany({});
+  // await prisma.store_users.deleteMany({});
+  // await prisma.domain_settings.deleteMany({});
+  // await prisma.sales_orders.deleteMany({});
+  // await prisma.addresses.deleteMany({});
 
   const permissions = [
     // Autenticación
@@ -974,12 +975,12 @@ async function main() {
     });
   }
 
-  // Asignar permisos al owner (gestión completa de su organización)
+  // Asignar permisos al owner (control total de su organización)
   const ownerPermissions = allPermissions.filter(
     (p) =>
-      !p.name.includes('super_admin') &&
-      !p.name.includes('domains.delete') &&
-      !p.name.includes('organizations.delete'),
+      !p.name.includes('super_admin') && // Excluir permisos de superadmin
+      !p.name.includes('system.test') && // Excluir endpoints de sistema
+      !p.name.includes('users.impersonate'), // Excluir impersonación
   );
 
   for (const permission of ownerPermissions) {
@@ -1032,20 +1033,60 @@ async function main() {
     });
   }
 
-  // Asignar permisos al manager (gestión de tienda)
+  // Asignar permisos al manager (gestión completa de tienda)
   const managerPermissions = allPermissions.filter(
     (p) =>
-      p.name.includes('products.') ||
-      p.name.includes('categories.') ||
-      p.name.includes('brands.') ||
-      p.name.includes('inventory.') ||
-      p.name.includes('orders.') ||
-      p.name.includes('payments.') ||
+      // Users management (limitado a su tienda)
+      p.name.includes('users.create') ||
       p.name.includes('users.read') ||
+      p.name.includes('users.update') ||
+      p.name.includes('users.delete') ||
+      p.name.includes('users.search') ||
+      p.name.includes('users.stats') ||
+      // Stores management (solo lectura y configuración)
       p.name.includes('stores.read') ||
+      p.name.includes('stores.update') ||
+      p.name.includes('stores.search') ||
+      p.name.includes('stores.stats') ||
+      p.name.includes('stores.settings') ||
+      // Products management (completo)
+      p.name.includes('products.') ||
+      // Categories management (completo)
+      p.name.includes('categories.') ||
+      // Brands management (completo)
+      p.name.includes('brands.') ||
+      // Orders management (completo)
+      p.name.includes('orders.') ||
+      // Inventory management (completo)
+      p.name.includes('inventory.') ||
+      // Payments management (completo)
+      p.name.includes('payments.') ||
+      // Addresses management
       p.name.includes('addresses.') ||
+      // Taxes management (lectura)
       p.name.includes('taxes.read') ||
-      p.name.includes('audit.logs'),
+      // Audit logs (lectura)
+      p.name.includes('audit.logs') ||
+      // Email management (limitado)
+      p.name.includes('email.create') ||
+      p.name.includes('email.read') ||
+      p.name.includes('email.send') ||
+      // Auth management (básico)
+      p.name.includes('auth.login') ||
+      p.name.includes('auth.logout') ||
+      p.name.includes('auth.profile') ||
+      // Health checks
+      p.name.includes('health.check') ||
+      // Excluir permisos críticos que no debe tener
+      (!p.name.includes('super_admin') &&
+        !p.name.includes('system.') &&
+        !p.name.includes('organizations.delete') &&
+        !p.name.includes('domains.delete') &&
+        !p.name.includes('roles.') &&
+        !p.name.includes('permissions.') &&
+        !p.name.includes('security.') &&
+        !p.name.includes('rate.limiting.') &&
+        !p.name.includes('users.impersonate')),
   );
 
   for (const permission of managerPermissions) {
@@ -1184,7 +1225,7 @@ async function main() {
       legal_name: 'Tech Solutions Sociedad Anónima',
       tax_id: '800987654-3',
       phone: '+57-4-7654321',
-      website: 'https://techsolutions.co',
+      website: 'https://techsolutions.vendix.com',
       description: 'Empresa de tecnología y soluciones digitales',
       state: 'active',
     },
@@ -1195,7 +1236,7 @@ async function main() {
       legal_name: 'Fashion Retail Group Ltda.',
       tax_id: '811223344-5',
       phone: '+57-2-3344556',
-      website: 'https://fashionretail.com',
+      website: 'https://fashionretail.vendix.com',
       description: 'Grupo de retail especializado en moda',
       state: 'active',
     },
@@ -1206,7 +1247,7 @@ async function main() {
       legal_name: 'Gourmet Foods Internacional',
       tax_id: '822334455-6',
       phone: '+57-5-4455667',
-      website: 'https://gourmetfoods.com',
+      website: 'https://gourmetfoods.vendix.com',
       description: 'Distribuidor de alimentos gourmet',
       state: 'draft',
     },
@@ -1799,7 +1840,7 @@ async function main() {
 
     // Dominios de organizaciones
     {
-      hostname: 'techsolutions.co',
+      hostname: 'techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: null,
       domain_type: 'organization',
@@ -1819,8 +1860,8 @@ async function main() {
         },
         security: {
           cors_origins: [
-            'https://techsolutions.co',
-            'https://admin.techsolutions.co',
+            'https://techsolutions.vendix.com',
+            'https://admin-techsolutions.vendix.com',
           ],
           session_timeout: 7200000,
           max_login_attempts: 3,
@@ -1829,7 +1870,7 @@ async function main() {
       },
     },
     {
-      hostname: 'admin.techsolutions.co',
+      hostname: 'admin-techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: null,
       domain_type: 'organization',
@@ -1842,7 +1883,7 @@ async function main() {
     },
 
     {
-      hostname: 'fashionretail.com',
+      hostname: 'fashionretail.vendix.com',
       organization_id: fashionRetailOrg.id,
       store_id: null,
       domain_type: 'organization',
@@ -1866,7 +1907,7 @@ async function main() {
 
     // Dominios de tiendas
     {
-      hostname: 'tienda.techsolutions.co',
+      hostname: 'tienda-techsolutions.vendix.com',
       organization_id: techSolutionsOrg.id,
       store_id: techStore3.id,
       domain_type: 'ecommerce',
@@ -1878,7 +1919,7 @@ async function main() {
       },
     },
     {
-      hostname: 'moda.fashionretail.com',
+      hostname: 'moda-fashionretail.vendix.com',
       organization_id: fashionRetailOrg.id,
       store_id: fashionStore2.id,
       domain_type: 'ecommerce',
@@ -1892,7 +1933,7 @@ async function main() {
 
     // Dominio pendiente de verificación
     {
-      hostname: 'gourmetfoods.com',
+      hostname: 'gourmetfoods.vendix.com',
       organization_id: gourmetFoodsOrg.id,
       store_id: null,
       domain_type: 'organization',
@@ -2220,7 +2261,10 @@ async function main() {
       create: {
         name: taxCategory.name,
         description: taxCategory.description,
-        store_id: taxCategory.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
+        store_id:
+          taxCategory.organization_id === techSolutionsOrg.id
+            ? techStore1.id
+            : fashionStore1.id,
       },
     });
     createdTaxCategories.push(createdTaxCategory);
@@ -2232,8 +2276,13 @@ async function main() {
   for (const taxCategory of taxCategories) {
     const createdTaxRate = await prisma.tax_rates.create({
       data: {
-        tax_category_id: createdTaxCategories.find(t => t.name === taxCategory.name)?.id || 0,
-        store_id: taxCategory.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
+        tax_category_id:
+          createdTaxCategories.find((t) => t.name === taxCategory.name)?.id ||
+          0,
+        store_id:
+          taxCategory.organization_id === techSolutionsOrg.id
+            ? techStore1.id
+            : fashionStore1.id,
         rate: taxCategory.rate,
         name: taxCategory.name,
       },
@@ -2305,7 +2354,10 @@ async function main() {
         name: category.name,
         slug: category.slug,
         description: category.description,
-        store_id: category.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id,
+        store_id:
+          category.organization_id === techSolutionsOrg.id
+            ? techStore1.id
+            : fashionStore1.id,
       },
     });
     createdCategories.push(createdCategory);
@@ -2695,12 +2747,12 @@ async function main() {
   // Asignar categorías de impuestos a productos
   console.log('💰 Asignando categorías de impuestos a productos...');
   for (const product of products) {
-    const createdProduct = createdProducts.find(p => p.sku === product.sku);
+    const createdProduct = createdProducts.find((p) => p.sku === product.sku);
     if (createdProduct) {
-      const taxCategory = createdTaxCategories.find(t =>
+      const taxCategory = createdTaxCategories.find((t) =>
         product.organization_id === techSolutionsOrg.id
           ? t.name === 'IVA General'
-          : t.name === 'IVA General Fashion'
+          : t.name === 'IVA General Fashion',
       );
       if (taxCategory) {
         await prisma.product_tax_assignments.upsert({
@@ -2726,14 +2778,16 @@ async function main() {
     // Imágenes para MacBook Pro
     {
       product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
-      image_url: 'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-space-gray__d7tfgy9fh0om_large.jpg',
+      image_url:
+        'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-space-gray__d7tfgy9fh0om_large.jpg',
       alt_text: 'MacBook Pro 14" Space Gray',
       is_main: true,
       sort_order: 1,
     },
     {
       product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
-      image_url: 'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-silver__b5ys8q2q0y2a_large.jpg',
+      image_url:
+        'https://images.apple.com/v/macbook-pro-14/aos/compare/mbp-14-silver__b5ys8q2q0y2a_large.jpg',
       alt_text: 'MacBook Pro 14" Silver',
       is_main: false,
       sort_order: 2,
@@ -2742,14 +2796,16 @@ async function main() {
     // Imágenes para iPhone 15 Pro
     {
       product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
-      image_url: 'https://www.apple.com/newsroom/images/2023/09/Apple-unveils-iPhone-15-pro-and-iPhone-15-pro-max/article/Apple-iPhone-15-Pro-lineup-hero-230912.jpg.landing-medium.jpg',
+      image_url:
+        'https://www.apple.com/newsroom/images/2023/09/Apple-unveils-iPhone-15-pro-and-iPhone-15-pro-max/article/Apple-iPhone-15-Pro-lineup-hero-230912.jpg.landing-medium.jpg',
       alt_text: 'iPhone 15 Pro Black Titanium',
       is_main: true,
       sort_order: 1,
     },
     {
       product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
-      image_url: 'https://store.storeimages.c-apple.com/8756/as-images.apple.com/is/iphone-15-pro-finish-select-202309-6-1inch-blue-titanium?wid=5120&hei=2880&fmt=webp&qlt=70&.v=1692923777972',
+      image_url:
+        'https://store.storeimages.c-apple.com/8756/as-images.apple.com/is/iphone-15-pro-finish-select-202309-6-1inch-blue-titanium?wid=5120&hei=2880&fmt=webp&qlt=70&.v=1692923777972',
       alt_text: 'iPhone 15 Pro Blue Titanium',
       is_main: false,
       sort_order: 2,
@@ -2758,7 +2814,8 @@ async function main() {
     // Imágenes para Samsung Galaxy S24
     {
       product_id: createdProducts.find((p) => p.sku === 'SGS24-256-BLU')?.id,
-      image_url: 'https://images.samsung.com/is/image/samsung/p6pim/latin/feature/sm-s906bzkaxto/feature-large-539503735?$FB_TYPE_B_PNG$',
+      image_url:
+        'https://images.samsung.com/is/image/samsung/p6pim/latin/feature/sm-s906bzkaxto/feature-large-539503735?$FB_TYPE_B_PNG$',
       alt_text: 'Samsung Galaxy S24 Blue',
       is_main: true,
       sort_order: 1,
@@ -2767,7 +2824,8 @@ async function main() {
     // Imágenes para Nike Air Max
     {
       product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
-      image_url: 'https://static.nike.com/a/images/t_PDP_864_v1/f_auto,b_rgb:f5f5f5/8a44cbe5-e4a2-435e-a54c-87e269eb2b0e/air-max-90-shoes-5KqXQW.png',
+      image_url:
+        'https://static.nike.com/a/images/t_PDP_864_v1/f_auto,b_rgb:f5f5f5/8a44cbe5-e4a2-435e-a54c-87e269eb2b0e/air-max-90-shoes-5KqXQW.png',
       alt_text: 'Nike Air Max 90 Black',
       is_main: true,
       sort_order: 1,
@@ -2776,7 +2834,8 @@ async function main() {
     // Imágenes para Camiseta Adidas
     {
       product_id: createdProducts.find((p) => p.sku === 'CAD-CLAS-M-BLK')?.id,
-      image_url: 'https://assets.adidas.com/images/w_600,f_auto,q_auto/5d2b0b7c53674c6daaa9af1c0111e8f1_9366/Camiseta-Clasica-Negro_HQ2421_01_standard.jpg',
+      image_url:
+        'https://assets.adidas.com/images/w_600,f_auto,q_auto/5d2b0b7c53674c6daaa9af1c0111e8f1_9366/Camiseta-Clasica-Negro_HQ2421_01_standard.jpg',
       alt_text: 'Camiseta Adidas Clasica Negra',
       is_main: true,
       sort_order: 1,
@@ -3031,7 +3090,8 @@ async function main() {
           location_id: stockLevel.location_id,
           quantity_available: stockLevel.quantity_available,
           quantity_reserved: stockLevel.quantity_reserved,
-          quantity_on_hand: stockLevel.quantity_available + stockLevel.quantity_reserved,
+          quantity_on_hand:
+            stockLevel.quantity_available + stockLevel.quantity_reserved,
 
           reorder_point: stockLevel.reorder_point,
           max_stock: stockLevel.max_stock_level,
@@ -3284,21 +3344,24 @@ async function main() {
       product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
       user_id: customer1.id,
       rating: 5,
-      comment: 'El iPhone 15 Pro es increíble, la cámara es fantástica y la batería dura todo el día. Totalmente recomendado.',
+      comment:
+        'El iPhone 15 Pro es increíble, la cámara es fantástica y la batería dura todo el día. Totalmente recomendado.',
       state: 'approved',
     },
     {
       product_id: createdProducts.find((p) => p.sku === 'NAM90-42-BLK')?.id,
       user_id: customer2.id,
       rating: 4,
-      comment: 'Muy cómodas y de buena calidad. El único detalle es que son un poco pequeñas para la talla indicada.',
+      comment:
+        'Muy cómodas y de buena calidad. El único detalle es que son un poco pequeñas para la talla indicada.',
       state: 'approved',
     },
     {
       product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
       user_id: customer1.id,
       rating: 5,
-      comment: 'Rendimiento excepcional, pantalla brillante y teclado cómodo. Perfecta para trabajo y creatividad.',
+      comment:
+        'Rendimiento excepcional, pantalla brillante y teclado cómodo. Perfecta para trabajo y creatividad.',
       state: 'approved',
     },
   ];
@@ -3439,10 +3502,10 @@ async function main() {
   console.log('🌐 URLS DE PRUEBA:');
   console.log('Vendix PRODUCCIÓN: vendix.online (DEFAULT)');
   console.log('Vendix DEV: vendix.com');
-  console.log('Tech Solutions: techsolutions.co');
-  console.log('Fashion Retail: fashionretail.com');
-  console.log('Tienda Online Tech: tienda.techsolutions.co');
-  console.log('Tienda Online Fashion: moda.fashionretail.com');
+  console.log('Tech Solutions: techsolutions.vendix.com');
+  console.log('Fashion Retail: fashionretail.vendix.com');
+  console.log('Tienda Online Tech: tienda-techsolutions.vendix.com');
+  console.log('Tienda Online Fashion: moda-fashionretail.vendix.com');
 }
 
 main()

@@ -15,19 +15,11 @@ export class RequestContextInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const ctx = context.switchToHttp();
     const req = ctx.getRequest();
+    const requestId = req.headers['x-request-id'] || 'unknown';
     const user = req.user;
-    const requestId =
-      req.headers['x-request-id'] ||
-      Math.random().toString(36).substring(2, 10);
+    if (!user) return next.handle();
 
-    // Log forzado para saber si el interceptor se ejecuta
-    console.error(
-      `[CTX-INT] Interceptor ejecutado para path: ${req.path} | user: ${user ? 'SI' : 'NO'}`,
-    );
-
-    if (!user) {
-      return next.handle();
-    }
+    console.log('[CTX-INT] User object:', JSON.stringify(user, null, 2));
 
     const roles =
       user.user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
@@ -49,7 +41,7 @@ export class RequestContextInterceptor implements NestInterceptor {
 
     // Forzar log a stderr para Docker
     console.error(
-      `[${requestId}] [CTX-INT] Context set: User ${user.id} | Org ${contextObj.organization_id || 'N/A'} | Store ${contextObj.store_id || 'N/A'} | Roles: ${roles.join(', ')}`,
+      `[${requestId}] [CTX-INT] Context set: User ${user.id} | Org ${contextObj.organization_id || 'N/A'} | Store ${contextObj.store_id || 'N/A'} | Roles: ${roles.join(', ')} | is_super_admin: ${is_super_admin} | is_owner: ${is_owner}`,
     );
 
     return RequestContextService.asyncLocalStorage.run(contextObj, () => {

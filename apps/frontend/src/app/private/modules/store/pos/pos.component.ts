@@ -7,14 +7,25 @@ import {
   IconComponent,
   ToastService,
   SpinnerComponent,
+  CardComponent,
 } from '../../../../shared/components';
-import { PosCartService, CartState } from './services/pos-cart.service';
+import {
+  PosCartService,
+  CartState,
+  CartItem,
+} from './services/pos-cart.service';
+import { CartSummary } from './models/cart.model';
 import {
   PosCustomerService,
   PosCustomer,
 } from './services/pos-customer.service';
-import { PosOrderService } from './services/pos-order.service';
+import { PosPaymentService } from './services/pos-payment.service';
+import { PosStatsComponent } from './components/pos-stats.component';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
+import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
+import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
+import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
+import { PosCartComponent } from './cart/pos-cart.component';
 
 @Component({
   selector: 'app-pos',
@@ -24,176 +35,200 @@ import { PosProductSelectionComponent } from './components/pos-product-selection
     ButtonComponent,
     IconComponent,
     SpinnerComponent,
+    CardComponent,
+    PosStatsComponent,
     PosProductSelectionComponent,
+    PosCustomerModalComponent,
+    PosPaymentInterfaceComponent,
+    PosOrderConfirmationComponent,
+    PosCartComponent,
   ],
-  styleUrls: ['./pos.component.scss'],
   template: `
-    <div class="pos-container">
-      <header class="pos-header">
-        <div class="header-content">
-          <div class="header-brand">
-            <div class="brand-icon-container">
-              <app-icon
-                name="store"
-                [size]="20"
-                color="white"
-              ></app-icon>
-            </div>
-            <div class="brand-text">
-              <h1>Vendix POS</h1>
-              <p>Punto de Venta</p>
-            </div>
-          </div>
+    <div class="h-full flex flex-col gap-4 p-4 overflow-hidden">
+      <!-- POS Stats -->
+      <div class="flex-none">
+        <app-pos-stats [cartState]="cartState"></app-pos-stats>
+      </div>
 
-          <div class="header-actions">
-            <div
-              *ngIf="selectedCustomer"
-              class="customer-badge"
-            >
-              <app-icon name="user" [size]="16"></app-icon>
-              <span>{{ selectedCustomer.name }}</span>
-            </div>
-
-            <app-button
-              *ngIf="!selectedCustomer"
-              variant="outline"
-              size="sm"
-              (clicked)="onOpenCustomerModal()"
-            >
-              <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
-              Agregar Cliente
-            </app-button>
-          </div>
-        </div>
-      </header>
-
-      <div class="pos-main">
-        <div class="product-section">
-          <app-pos-product-selection
-            (productSelected)="onProductSelected($event)"
-            (productAddedToCart)="onProductAddedToCart($event)"
-          ></app-pos-product-selection>
-        </div>
-
-        <div class="cart-section">
-          <div class="cart-header">
-            <div class="cart-title-row">
-              <h2 class="cart-title">Carrito</h2>
-              <app-button
-                *ngIf="!isEmpty"
-                variant="ghost"
-                size="sm"
-                (clicked)="onClearCart()"
-              >
-                <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
-              </app-button>
-            </div>
-
-            <div *ngIf="isEmpty" class="cart-empty-state">
-              <app-icon
-                name="cart"
-                [size]="48"
-                class="cart-empty-icon"
-              ></app-icon>
-              <p class="cart-empty-text">Carrito vacío</p>
-              <p class="cart-empty-subtext">
-                Agrega productos para comenzar
-              </p>
-            </div>
-
-            <div *ngIf="!isEmpty" class="cart-items-container">
+      <!-- Main POS Interface -->
+      <div
+        class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
+      >
+        <!-- Header -->
+        <div class="flex-none px-6 py-4 border-b border-border">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
+            <div class="flex items-center gap-3">
               <div
-                *ngFor="let item of cartItems"
-                class="cart-item"
+                class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shadow-md"
               >
-                <div class="cart-item-info">
-                  <p class="cart-item-name">
-                    {{ item.product.name }}
-                  </p>
-                  <p class="cart-item-details">
-                    {{ item.quantity }}x {{ item.unitPrice }}
-                  </p>
-                </div>
-                <div class="cart-item-actions">
-                  <span class="cart-item-price">{{
-                    item.totalPrice
-                  }}</span>
-                  <app-button
-                    variant="ghost"
-                    size="sm"
-                    (clicked)="onRemoveFromCart(item.id)"
-                  >
-                    <app-icon name="x" [size]="14"></app-icon>
-                  </app-button>
-                </div>
+                <app-icon
+                  name="store"
+                  [size]="20"
+                  class="text-white"
+                ></app-icon>
               </div>
-            </div>
-          </div>
-
-          <div *ngIf="!isEmpty" class="cart-summary-section">
-            <div class="space-y-2">
-              <div class="summary-row">
-                <span class="summary-label">Subtotal:</span>
-                <span class="summary-value">{{ cartSummary.subtotal }}</span>
-              </div>
-              <div
-                *ngIf="cartSummary.discountAmount > 0"
-                class="summary-row discount"
-              >
-                <span class="summary-label">Descuento:</span>
-                <span class="summary-value">
-                  -{{ cartSummary.discountAmount }}
+              <div class="flex flex-col">
+                <h1 class="font-bold text-text-primary text-lg leading-none">
+                  Vendix POS
+                </h1>
+                <span class="text-xs text-text-secondary font-medium">
+                  Point of Sale
                 </span>
               </div>
-              <div class="summary-row">
-                <span class="summary-label">Impuestos:</span>
-                <span class="summary-value">{{ cartSummary.taxAmount }}</span>
-              </div>
-              <div class="summary-row total">
-                <span class="summary-label">Total:</span>
-                <span class="summary-value">{{ cartSummary.total }}</span>
-              </div>
             </div>
 
-            <div class="payment-actions">
+            <div class="flex items-center gap-3">
+              <!-- Customer Badge -->
+              <div
+                *ngIf="selectedCustomer"
+                class="group flex items-center gap-3 bg-primary-light px-4 py-2 rounded-lg cursor-pointer hover:bg-primary-light/80 transition-all border border-primary/20"
+                (click)="onOpenCustomerModal()"
+              >
+                <div
+                  class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary"
+                >
+                  <app-icon name="user" [size]="16"></app-icon>
+                </div>
+                <div class="flex flex-col">
+                  <span
+                    class="text-xs text-text-secondary font-medium leading-none"
+                    >Cliente</span
+                  >
+                  <span
+                    class="font-semibold text-text-primary leading-none truncate max-w-[150px]"
+                    >{{ selectedCustomer.name }}</span
+                  >
+                </div>
+                <div
+                  class="w-6 h-6 rounded-full hover:bg-surface/50 flex items-center justify-center ml-1 transition-colors"
+                  (click)="$event.stopPropagation(); onClearCustomer()"
+                >
+                  <app-icon
+                    name="x"
+                    [size]="14"
+                    class="text-text-secondary group-hover:text-destructive transition-colors"
+                  ></app-icon>
+                </div>
+              </div>
+
               <app-button
+                *ngIf="!selectedCustomer"
                 variant="outline"
                 size="md"
-                class="w-full"
-                (clicked)="onSaveDraft()"
+                (clicked)="onOpenCustomerModal()"
+                class="rounded-lg"
               >
-                <app-icon name="save" [size]="16" slot="icon"></app-icon>
-                Guardar Borrador
+                <app-icon
+                  name="user-plus"
+                  [size]="18"
+                  slot="icon"
+                  class="text-primary"
+                ></app-icon>
+                Asignar Cliente
               </app-button>
-              <button
-                class="pay-button"
-                (click)="onCheckout()"
-                [disabled]="isEmpty || loading"
-              >
-                <app-icon name="credit-card" [size]="16"></app-icon>
-                Procesar Venta
-              </button>
+
+              <div class="flex gap-2 items-center">
+                <app-button
+                  variant="ghost"
+                  size="md"
+                  (clicked)="onViewOrders()"
+                  title="Ver órdenes"
+                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg"
+                >
+                  <app-icon
+                    name="history"
+                    [size]="20"
+                    class="text-text-secondary"
+                  ></app-icon>
+                </app-button>
+
+                <app-button
+                  variant="ghost"
+                  size="md"
+                  (clicked)="onQuickSearch()"
+                  title="Búsqueda rápida"
+                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg"
+                >
+                  <app-icon
+                    name="search"
+                    [size]="20"
+                    class="text-text-secondary"
+                  ></app-icon>
+                </app-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 h-full">
+            <!-- Products Area (Left Side - 2 columns) -->
+            <div class="lg:col-span-2 h-full min-h-0">
+              <app-pos-product-selection
+                class="h-full block"
+                (productSelected)="onProductSelected($event)"
+                (productAddedToCart)="onProductAddedToCart($event)"
+              ></app-pos-product-selection>
+            </div>
+
+            <!-- Cart Area (Right Side - 1 column) -->
+            <div class="h-full min-h-0">
+              <app-pos-cart
+                class="h-full block"
+                (saveDraft)="onSaveDraft()"
+                (checkout)="onCheckout()"
+              ></app-pos-cart>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Loading Overlay -->
       <div
         *ngIf="loading"
-        class="absolute inset-0 bg-white bg-opacity-80 flex items-center justify-center z-50"
+        class="fixed inset-0 z-50 bg-surface/80 backdrop-blur-sm flex items-center justify-center"
       >
-        <div class="text-center">
-          <app-spinner [size]="'xl'"></app-spinner>
-          <p class="mt-4 text-gray-900">Procesando...</p>
-        </div>
+        <app-card class="w-auto min-w-[200px]" [padding]="true">
+          <div class="flex flex-col items-center py-6 px-4">
+            <app-spinner [size]="'lg'" color="primary"></app-spinner>
+            <p class="mt-4 text-text-primary font-medium text-sm">
+              Procesando solicitud...
+            </p>
+          </div>
+        </app-card>
       </div>
+
+      <!-- Modals -->
+      <app-pos-customer-modal
+        [isOpen]="showCustomerModal"
+        [customer]="editingCustomer"
+        (closed)="onCustomerModalClosed()"
+        (customerCreated)="onCustomerCreated($event)"
+        (customerUpdated)="onCustomerUpdated($event)"
+      ></app-pos-customer-modal>
+
+      <app-pos-payment-interface
+        [isOpen]="showPaymentModal"
+        [cartState]="cartState"
+        (closed)="onPaymentModalClosed()"
+        (paymentCompleted)="onPaymentCompleted($event)"
+      ></app-pos-payment-interface>
+
+      <app-pos-order-confirmation
+        [isOpen]="showOrderConfirmation"
+        [orderData]="completedOrder"
+        (closed)="onOrderConfirmationClosed()"
+        (newSale)="onStartNewSale()"
+      ></app-pos-order-confirmation>
     </div>
   `,
   styles: [
     `
       :host {
         display: block;
-        height: 100vh;
       }
     `,
   ],
@@ -206,12 +241,17 @@ export class PosComponent implements OnInit, OnDestroy {
   showCustomerModal = false;
   editingCustomer: PosCustomer | null = null;
 
+  showPaymentModal = false;
+  selectedPaymentMethod: any = null;
+
+  showOrderConfirmation = false;
+
   currentOrderId: string | null = null;
   currentOrderNumber: string | null = null;
   completedOrder: any = null;
 
-  public cartItems: any[] = [];
-  public cartSummary: any = {
+  public cartItems: CartItem[] = [];
+  public cartSummary: CartSummary = {
     subtotal: 0,
     taxAmount: 0,
     discountAmount: 0,
@@ -225,7 +265,7 @@ export class PosComponent implements OnInit, OnDestroy {
   constructor(
     private cartService: PosCartService,
     private customerService: PosCustomerService,
-    private orderService: PosOrderService,
+    private paymentService: PosPaymentService,
     private toastService: ToastService,
   ) {}
 
@@ -276,6 +316,11 @@ export class PosComponent implements OnInit, OnDestroy {
     this.showCustomerModal = true;
   }
 
+  onClearCustomer(): void {
+    this.customerService.clearSelectedCustomer();
+    this.toastService.info('Cliente removido de la venta');
+  }
+
   onCustomerModalClosed(): void {
     this.showCustomerModal = false;
     this.editingCustomer = null;
@@ -295,28 +340,11 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onProductSelected(product: any): void {
     // Product selected from POS product selection
-    console.log('Product selected:', product);
+    // console.log('Product selected:', product);
   }
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
-    this.toastService.success(event.product.name + ' agregado al carrito');
-  }
-
-  onRemoveFromCart(itemId: string): void {
-    this.cartService
-      .removeFromCart(itemId)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Producto eliminado del carrito');
-        },
-        error: (error: any) => {
-          this.loading = false;
-          this.toastService.error(
-            error.message || 'Error al eliminar producto',
-          );
-        },
-      });
+    // Toast is already handled in the child component
   }
 
   onClearCart(): void {
@@ -339,17 +367,17 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    const storeId = 'store_001';
-    const organizationId = 'org_001';
     const createdBy = 'current_user';
 
-    this.orderService
-      .createDraftOrder(this.cartState, storeId, organizationId, createdBy)
+    this.paymentService
+      .saveDraft(this.cartState, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: (response: any) => {
           this.loading = false;
-          this.toastService.success('Borrador guardado correctamente');
+          this.toastService.success(
+            response.message || 'Borrador guardado correctamente',
+          );
           this.onClearCart();
         },
         error: (error: any) => {
@@ -362,35 +390,68 @@ export class PosComponent implements OnInit, OnDestroy {
   onCheckout(): void {
     if (!this.cartState || this.isEmpty) return;
 
-    this.loading = true;
+    // Open payment modal instead of processing directly
+    this.showPaymentModal = true;
+  }
 
-    const storeId = 'store_001';
-    const organizationId = 'org_001';
+  onPaymentModalClosed(): void {
+    this.showPaymentModal = false;
+    this.selectedPaymentMethod = null;
+  }
+
+  onPaymentCompleted(paymentData: any): void {
+    if (!this.cartState || this.isEmpty) return;
+
+    this.loading = true;
+    this.showPaymentModal = false;
+
     const createdBy = 'current_user';
 
-    this.orderService
-      .createOrderFromCart(this.cartState, storeId, organizationId, createdBy)
+    // Process sale with payment using the orquestrator
+    this.paymentService
+      .processSaleWithPayment(this.cartState, paymentData, createdBy)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (order: any) => {
+        next: (result: any) => {
           this.loading = false;
-          this.currentOrderId = order.id;
-          this.currentOrderNumber = order.orderNumber;
-          this.toastService.success('Orden creada correctamente');
+          this.currentOrderId = result.order?.id;
+          this.currentOrderNumber = result.order?.order_number;
+          this.completedOrder = result.order;
+          this.showOrderConfirmation = true;
+          this.toastService.success('Venta procesada correctamente');
           this.onClearCart();
         },
         error: (error: any) => {
           this.loading = false;
-          this.toastService.error(error.message || 'Error al crear orden');
+          this.toastService.error(
+            error.message || 'Error al procesar la venta',
+          );
         },
       });
   }
 
   onQuickSearch(): void {
-    this.toastService.info('Usa Ctrl+F para búsqueda rápida');
+    // Dispatch an event or focus the search input
+    const searchInput = document.querySelector(
+      'input[type="search"]',
+    ) as HTMLInputElement;
+    if (searchInput) {
+      searchInput.focus();
+    }
   }
 
   onViewOrders(): void {
-    this.toastService.info('Vista de órdenes próximamente');
+    this.toastService.info('Historial de ventas próximamente');
+  }
+
+  onOrderConfirmationClosed(): void {
+    this.showOrderConfirmation = false;
+    this.completedOrder = null;
+  }
+
+  onStartNewSale(): void {
+    this.showOrderConfirmation = false;
+    this.completedOrder = null;
+    this.onClearCart();
   }
 }

@@ -106,7 +106,7 @@ export class EmailTemplates {
                 <div class="login-details">
                   <div class="login-item">
                     <span class="login-label">🌐 Tu enlace de acceso (vLink):</span>
-                    <span class="login-value">${data.vlink || 'tu-organizacion'}.vendix.online</span>
+                    <span class="login-value">${data.vlink || 'tu-organizacion'}</span>
                   </div>
                   <div class="login-item">
                     <span class="login-label">📧 Tu correo:</span>
@@ -205,7 +205,7 @@ Este enlace expirará en 24 horas por tu seguridad.
 🔐 PASO 2: INICIA SESIÓN EN TU CUENTA
 Una vez verificado, podrás acceder a tu cuenta con estos datos:
 
-🌐 Tu enlace de acceso (vLink): ${data.vlink || 'tu-organizacion'}.vendix.online
+🌐 Tu enlace de acceso (vLink): ${data.vlink || 'tu-organizacion'}
 📧 Tu correo: ${data.email}
 ${data.password ? `🔑 Tu contraseña: ${data.password}` : ''}
 

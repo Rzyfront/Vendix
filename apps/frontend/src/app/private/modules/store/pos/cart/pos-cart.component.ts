@@ -1,37 +1,322 @@
-import { Component } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  ChangeDetectionStrategy,
+  Output,
+  EventEmitter,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Observable, Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
+import {
+  PosCartService,
+  CartState,
+  CartItem,
+} from '../services/pos-cart.service';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ButtonComponent, IconComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="p-6">
-      <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">POS Cart</h1>
-        <p class="text-gray-600">Shopping cart for point of sale transactions</p>
+    <div
+      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
+    >
+      <!-- Cart Header -->
+      <div class="px-6 py-4 border-b border-border">
+        <div
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        >
+          <div class="flex-1 min-w-0">
+            <h2 class="text-lg font-semibold text-text-primary">
+              Carrito de Compras ({{
+                (cartState$ | async)?.items?.length || 0
+              }})
+            </h2>
+          </div>
+
+          <app-button
+            *ngIf="(cartState$ | async)?.items?.length ?? 0 > 0"
+            variant="outline"
+            size="sm"
+            (clicked)="clearCart()"
+            [loading]="(loading$ | async) ?? false"
+            class="text-destructive hover:text-destructive hover:bg-destructive-light"
+          >
+            <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
+            Vaciar
+          </app-button>
+        </div>
       </div>
 
-      <div class="bg-white rounded-lg shadow-sm border p-8">
-        <div class="text-center">
-          <div class="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
-            <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path>
-            </svg>
+      <!-- Cart Content -->
+      <div class="flex-1 overflow-y-auto p-6">
+        <!-- Empty State -->
+        <div
+          *ngIf="isEmpty$ | async"
+          class="flex flex-col items-center justify-center h-64 text-center"
+        >
+          <div
+            class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
+          >
+            <app-icon
+              name="shopping-cart"
+              [size]="32"
+              class="text-text-secondary"
+            ></app-icon>
           </div>
-          <h2 class="text-xl font-semibold text-gray-900 mb-2">Shopping Cart</h2>
-          <p class="text-gray-600 max-w-md mx-auto">
-            POS cart management is under development. You will be able to manage shopping cart items and totals here.
+          <h3 class="text-lg font-semibold text-text-primary mb-2">
+            Tu carrito está vacío
+          </h3>
+          <p class="text-sm text-text-secondary">
+            Selecciona productos para comenzar
           </p>
+        </div>
+
+        <!-- Cart Items List -->
+        <div *ngIf="!(isEmpty$ | async)" class="space-y-3">
+          <div
+            *ngFor="
+              let item of (cartState$ | async)?.items;
+              trackBy: trackByItemId
+            "
+            class="flex gap-3 p-3 rounded-lg border border-border bg-surface hover:bg-muted/30 transition-colors"
+          >
+            <!-- Product Image -->
+            <div
+              class="w-12 h-12 shrink-0 bg-muted rounded-lg overflow-hidden relative"
+            >
+              <div
+                class="absolute inset-0 flex items-center justify-center text-text-secondary"
+              >
+                <app-icon name="image" [size]="16"></app-icon>
+              </div>
+            </div>
+
+            <!-- Item Details -->
+            <div class="flex-1 min-w-0">
+              <h4 class="text-sm font-medium text-text-primary truncate">
+                {{ item.product.name }}
+              </h4>
+              <div class="flex justify-between items-center mt-1">
+                <span class="text-xs text-text-secondary">
+                  {{ formatCurrency(item.unitPrice) }} x {{ item.quantity }}
+                </span>
+                <span class="text-sm font-bold text-text-primary">
+                  {{ formatCurrency(item.totalPrice) }}
+                </span>
+              </div>
+
+              <!-- Quantity Controls -->
+              <div class="flex items-center justify-between mt-2">
+                <div
+                  class="flex items-center bg-surface border border-border rounded-lg h-7"
+                >
+                  <button
+                    class="px-2 hover:bg-muted h-full flex items-center text-text-secondary rounded-l-lg transition-colors"
+                    (click)="updateQuantity(item.id, item.quantity - 1)"
+                    [disabled]="(loading$ | async) ?? false"
+                  >
+                    <app-icon name="minus" [size]="10"></app-icon>
+                  </button>
+                  <span
+                    class="w-8 text-center text-xs font-bold text-text-primary"
+                  >
+                    {{ item.quantity }}
+                  </span>
+                  <button
+                    class="px-2 hover:bg-muted h-full flex items-center text-text-secondary rounded-r-lg transition-colors"
+                    (click)="updateQuantity(item.id, item.quantity + 1)"
+                    [disabled]="
+                      ((loading$ | async) ?? false) ||
+                      item.quantity >= item.product.stock
+                    "
+                  >
+                    <app-icon name="plus" [size]="10"></app-icon>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary Footer -->
+      <div
+        class="border-t border-border p-6 shrink-0 bg-muted/30"
+        *ngIf="!(isEmpty$ | async)"
+      >
+        <!-- Totals -->
+        <div class="space-y-2 mb-4">
+          <div class="flex justify-between text-sm text-text-secondary">
+            <span>Subtotal</span>
+            <span>{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
+          </div>
+          <div class="flex justify-between text-sm text-text-secondary">
+            <span>IVA (21%)</span>
+            <span>{{
+              formatCurrency((summary$ | async)?.taxAmount || 0)
+            }}</span>
+          </div>
+
+          <div
+            class="pt-2 border-t border-border flex justify-between items-center"
+          >
+            <span class="font-bold text-text-primary text-lg">Total</span>
+            <span class="font-extrabold text-2xl text-primary">
+              {{ formatCurrency((summary$ | async)?.total || 0) }}
+            </span>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="saveCart()"
+            [disabled]="(loading$ | async) ?? false"
+            class="flex-1"
+          >
+            Guardar
+          </app-button>
+          <app-button
+            variant="primary"
+            size="md"
+            (clicked)="proceedToPayment()"
+            [disabled]="(loading$ | async) ?? false"
+            class="flex-1"
+          >
+            Cobrar
+          </app-button>
         </div>
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-      width: 100%;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+        height: 100%;
+      }
+    `,
+  ],
 })
-export class PosCartComponent {}
+export class PosCartComponent implements OnInit, OnDestroy {
+  private destroy$ = new Subject<void>();
+
+  cartState$: Observable<CartState>;
+  isEmpty$: Observable<boolean>;
+  summary$: Observable<any>;
+  loading$: Observable<boolean>;
+
+  @Output() saveDraft = new EventEmitter<void>();
+  @Output() checkout = new EventEmitter<void>();
+
+  constructor(
+    private cartService: PosCartService,
+    private toastService: ToastService,
+  ) {
+    this.cartState$ = this.cartService.cartState;
+    this.isEmpty$ = this.cartService.isEmpty;
+    this.summary$ = this.cartService.summary;
+    this.loading$ = this.cartService.loading;
+  }
+
+  ngOnInit(): void {
+    // Component initialization logic if needed
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  trackByItemId(_index: number, item: CartItem): string {
+    return item.id;
+  }
+
+  updateQuantity(itemId: string, quantity: number): void {
+    if (quantity <= 0) {
+      this.removeFromCart(itemId);
+      return;
+    }
+
+    this.cartService
+      .updateCartItem({ itemId, quantity })
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Cantidad actualizada');
+        },
+        error: (error) => {
+          this.toastService.error(
+            error.message || 'Error al actualizar cantidad',
+          );
+        },
+      });
+  }
+
+  removeFromCart(itemId: string): void {
+    this.cartService
+      .removeFromCart(itemId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Producto eliminado del carrito');
+        },
+        error: (error) => {
+          this.toastService.error(
+            error.message || 'Error al eliminar producto',
+          );
+        },
+      });
+  }
+
+  clearCart(): void {
+    if (confirm('¿Estás seguro de que quieres vaciar el carrito?')) {
+      this.cartService
+        .clearCart()
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: () => {
+            this.toastService.success('Carrito vaciado');
+          },
+          error: (error) => {
+            this.toastService.error(error.message || 'Error al vaciar carrito');
+          },
+        });
+    }
+  }
+
+  saveCart(): void {
+    this.saveDraft.emit();
+  }
+
+  proceedToPayment(): void {
+    const currentState = this.cartService.getCurrentState();
+    if (currentState.items.length === 0) {
+      this.toastService.warning('El carrito está vacío');
+      return;
+    }
+
+    this.checkout.emit();
+  }
+
+  formatCurrency(amount: number): string {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+    }).format(amount);
+  }
+
+  handleImageError(event: any): void {
+    // Handle broken product images
+    event.target.style.display = 'none';
+  }
+}

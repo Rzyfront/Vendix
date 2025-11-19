@@ -5,9 +5,14 @@ meta {
 }
 
 get {
-  url: http://{{url}}/stores?page=1&limit=10&organization_id=16
+  url: http://{{url}}/stores?page=1&limit=10
   body: none
   auth: inherit
+}
+
+params:query {
+  page: 1
+  limit: 10
 }
 
 tests {

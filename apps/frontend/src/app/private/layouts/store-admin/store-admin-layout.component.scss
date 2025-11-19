@@ -43,7 +43,7 @@ main {
 }
 
 /* Responsive design */
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .p-6 {
     padding: 1rem;
   }

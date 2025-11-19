@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { environment } from '../../../../../../environments/environment';
 import {
   PosCustomer,
   CreatePosCustomerRequest,
@@ -27,10 +29,12 @@ export class PosCustomerService {
   private readonly selectedCustomer$ = new BehaviorSubject<PosCustomer | null>(
     null,
   );
+  private readonly apiUrl = `${environment.apiUrl}/users`;
+  private readonly registerUrl = `${environment.apiUrl}/auth/register-customer`;
 
-  constructor() {
-    // Initialize with mock data for development
-    this.initializeMockData();
+  constructor(private http: HttpClient) {
+    // Initialize with mock data for development if needed
+    // this.initializeMockData();
   }
 
   // Observable getters
@@ -63,10 +67,9 @@ export class PosCustomerService {
       );
     }
 
-    // Simulate API call
-    return of(request).pipe(
-      delay(300),
-      map((req) => this.createCustomerFromRequest(req)),
+    // Call API to create customer
+    return this.http.post<PosCustomer>(this.registerUrl, request).pipe(
+      map((response: any) => this.mapApiCustomerToPosCustomer(response)),
       tap((customer) => {
         const currentCustomers = this.customers$.value;
         this.customers$.next([customer, ...currentCustomers]);
@@ -88,37 +91,28 @@ export class PosCustomerService {
   ): Observable<PaginatedCustomersResponse> {
     this.loading$.next(true);
 
-    const { query = '', limit = 20, offset = 0 } = request;
+    const { query = '', limit = 20, page = 1 } = request;
+    let params = new HttpParams()
+      .set('limit', limit.toString())
+      .set('page', page.toString())
+      .set('role', 'customer');
 
-    return of(this.customers$.value).pipe(
-      delay(200),
-      map((customers) => {
-        let filteredCustomers = customers;
+    if (query.trim()) {
+      params = params.set('search', query.trim());
+    }
 
-        if (query.trim()) {
-          const searchTerm = query.toLowerCase().trim();
-          filteredCustomers = customers.filter(
-            (customer) =>
-              customer.email.toLowerCase().includes(searchTerm) ||
-              customer.name.toLowerCase().includes(searchTerm) ||
-              customer.phone?.toLowerCase().includes(searchTerm) ||
-              customer.documentNumber?.toLowerCase().includes(searchTerm),
-          );
-        }
-
-        const total = filteredCustomers.length;
-        const paginatedCustomers = filteredCustomers.slice(
-          offset,
-          offset + limit,
-        );
-        const hasMore = offset + limit < total;
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        // Handle both wrapped response (response.data with meta) and direct response
+        const customers = response.data || [];
+        const meta = response.meta || {};
 
         return {
-          customers: paginatedCustomers,
-          total,
-          limit,
-          offset,
-          hasMore,
+          data: customers.map((c: any) => this.mapApiCustomerToPosCustomer(c)),
+          total: meta.total || response.total || 0,
+          page: meta.page || response.page || page,
+          limit: meta.limit || response.limit || limit,
+          totalPages: meta.totalPages || response.totalPages || 0,
         };
       }),
       tap(() => this.loading$.next(false)),
@@ -137,9 +131,30 @@ export class PosCustomerService {
   }
 
   /**
+   * Create a new customer
+   */
+  createCustomer(request: CreatePosCustomerRequest): Observable<PosCustomer> {
+    this.loading$.next(true);
+
+    return this.http.post<PosCustomer>(this.registerUrl, request).pipe(
+      map((response: any) => this.mapApiCustomerToPosCustomer(response)),
+      tap((customer) => {
+        // Add to local customers list
+        const currentCustomers = this.customers$.value;
+        this.customers$.next([...currentCustomers, customer]);
+        this.loading$.next(false);
+      }),
+      catchError((error) => {
+        this.loading$.next(false);
+        return throwError(() => error);
+      }),
+    );
+  }
+
+  /**
    * Get customer by ID
    */
-  getCustomerById(id: string): Observable<PosCustomer | null> {
+  getCustomerById(id: number): Observable<PosCustomer | null> {
     const customer = this.customers$.value.find((c) => c.id === id);
     return of(customer || null);
   }
@@ -148,7 +163,7 @@ export class PosCustomerService {
    * Update customer information
    */
   updateCustomer(
-    id: string,
+    id: number,
     updates: Partial<CreatePosCustomerRequest>,
   ): Observable<PosCustomer> {
     this.loading$.next(true);
@@ -216,16 +231,24 @@ export class PosCustomerService {
       errors.push({ field: 'email', message: 'Email no es válido' });
     }
 
-    if (!request.name?.trim()) {
-      errors.push({ field: 'name', message: 'Nombre es requerido' });
+    if (!request.first_name?.trim()) {
+      errors.push({ field: 'firstName', message: 'Nombre es requerido' });
     }
 
-    if (request.documentNumber && !request.documentType) {
-      errors.push({
-        field: 'documentType',
-        message: 'Tipo de documento es requerido cuando se proporciona número',
-      });
-    }
+    // Document fields are now optional
+    // if (!request.document_type?.trim()) {
+    //   errors.push({
+    //     field: 'documentType',
+    //     message: 'Tipo de documento es requerido',
+    //   });
+    // }
+
+    // if (!request.document_number?.trim()) {
+    //   errors.push({
+    //     field: 'documentNumber',
+    //     message: 'Número de documento es requerido',
+    //   });
+    // }
 
     // Check for duplicate email
     const existingCustomer = this.customers$.value.find(
@@ -258,62 +281,47 @@ export class PosCustomerService {
     return {
       id: this.generateCustomerId(),
       email: request.email.trim().toLowerCase(),
-      name: request.name.trim(),
-      phone: request.phone?.trim() || undefined,
-      documentType: request.documentType,
-      documentNumber: request.documentNumber?.trim() || undefined,
-      address: request.address?.trim() || undefined,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      first_name: request.first_name.trim(),
+      last_name: request.last_name?.trim(),
+      phone: request.phone,
+      document_type: request.document_type,
+      document_number: request.document_number?.trim(),
+      created_at: new Date(),
+      updated_at: new Date(),
     };
   }
 
   /**
    * Generate unique customer ID
    */
-  private generateCustomerId(): string {
-    return 'CUST_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+  private generateCustomerId(): number {
+    return Date.now();
   }
 
   /**
-   * Initialize mock data for development
+   * Map API customer response to PosCustomer
    */
-  private initializeMockData(): void {
-    const mockCustomers: PosCustomer[] = [
-      {
-        id: 'CUST_001',
-        email: 'juan.perez@email.com',
-        name: 'Juan Pérez',
-        phone: '+5491123456789',
-        documentType: 'dni',
-        documentNumber: '12345678',
-        address: 'Av. Corrientes 1000, Buenos Aires',
-        createdAt: new Date('2024-01-15'),
-        updatedAt: new Date('2024-01-15'),
-      },
-      {
-        id: 'CUST_002',
-        email: 'maria.garcia@email.com',
-        name: 'María García',
-        phone: '+5491145678901',
-        documentType: 'dni',
-        documentNumber: '87654321',
-        address: 'Calle Florida 500, Buenos Aires',
-        createdAt: new Date('2024-02-20'),
-        updatedAt: new Date('2024-02-20'),
-      },
-      {
-        id: 'CUST_003',
-        email: 'carlos.rodriguez@email.com',
-        name: 'Carlos Rodríguez',
-        phone: '+5491178901234',
-        documentType: 'dni',
-        documentNumber: '45678901',
-        createdAt: new Date('2024-03-10'),
-        updatedAt: new Date('2024-03-10'),
-      },
-    ];
-
-    this.customers$.next(mockCustomers);
+  private mapApiCustomerToPosCustomer(apiCustomer: any): PosCustomer {
+    return {
+      id: apiCustomer.id,
+      email: apiCustomer.email,
+      first_name: apiCustomer.first_name,
+      last_name: apiCustomer.last_name,
+      phone: apiCustomer.phone,
+      document_type: apiCustomer.document_type,
+      document_number: apiCustomer.document_number,
+      created_at: new Date(apiCustomer.created_at),
+      updated_at: new Date(apiCustomer.updated_at),
+    };
   }
+
+  /**
+   * Initialize mock data for development (commented out)
+   */
+  // private initializeMockData(): void {
+  //   const mockCustomers: PosCustomer[] = [
+  //     // ... mock data
+  //   ];
+  //   this.customers$.next(mockCustomers);
+  // }
 }

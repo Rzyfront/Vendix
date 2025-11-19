@@ -1,4 +1,12 @@
-import { Component, Input, Output, EventEmitter, TemplateRef, ContentChild, AfterContentInit } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  TemplateRef,
+  ContentChild,
+  AfterContentInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 
@@ -21,8 +29,8 @@ export interface TableColumn {
 }
 
 export interface TableAction {
-  label: string;
-  icon?: string;
+  label: string | ((item: any) => string);
+  icon?: string | ((item: any) => string);
   action: (item: any) => void;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   disabled?: (item: any) => boolean;
@@ -37,7 +45,7 @@ export type SortDirection = 'asc' | 'desc' | null;
   standalone: true,
   imports: [CommonModule, IconComponent],
   templateUrl: './table.component.html',
-  styleUrl: './table.component.scss'
+  styleUrl: './table.component.scss',
 })
 export class TableComponent implements AfterContentInit {
   @Input() data: any[] = [];
@@ -54,7 +62,10 @@ export class TableComponent implements AfterContentInit {
   @Input() sortable = false;
   @Input() customClasses = '';
 
-  @Output() sort = new EventEmitter<{ column: string; direction: SortDirection }>();
+  @Output() sort = new EventEmitter<{
+    column: string;
+    direction: SortDirection;
+  }>();
   @Output() rowClick = new EventEmitter<any>();
 
   @ContentChild('actionsTemplate') actionsTemplate?: TemplateRef<any>;
@@ -64,9 +75,12 @@ export class TableComponent implements AfterContentInit {
 
   ngAfterContentInit(): void {
     // Validar que las columnas tengan las propiedades necesarias
-    this.columns.forEach(col => {
+    this.columns.forEach((col) => {
       if (!col.key || !col.label) {
-        console.warn('Columna inválida: cada columna debe tener key y label', col);
+        console.warn(
+          'Columna inválida: cada columna debe tener key y label',
+          col,
+        );
       }
     });
   }
@@ -93,7 +107,7 @@ export class TableComponent implements AfterContentInit {
 
     this.sort.emit({
       column: this.sortColumn!,
-      direction: this.sortDirection!
+      direction: this.sortDirection!,
     });
   }
 
@@ -116,15 +130,27 @@ export class TableComponent implements AfterContentInit {
     return action.disabled ? action.disabled(item) : false;
   }
 
+  getActionLabel(action: TableAction, item: any): string {
+    return typeof action.label === 'function'
+      ? action.label(item)
+      : action.label;
+  }
+
+  getActionIcon(action: TableAction, item: any): string {
+    const icon =
+      typeof action.icon === 'function' ? action.icon(item) : action.icon;
+    return icon || '';
+  }
+
   getSortIcon(column: TableColumn): string {
     if (this.sortColumn !== column.key) {
       return 'M7 16l-4-4m0 0l4-4m-4 4h18';
     }
-    
+
     if (this.sortDirection === 'asc') {
       return 'M5 15l7-7 7 7';
     }
-    
+
     return 'M19 9l-7 7-7-7';
   }
 
@@ -133,19 +159,16 @@ export class TableComponent implements AfterContentInit {
       'w-full',
       'border-collapse',
       'bg-surface',
-      'overflow-hidden'
+      'overflow-hidden',
     ];
 
     const sizeClasses = {
       sm: ['text-xs'],
       md: ['text-sm'],
-      lg: ['text-base']
+      lg: ['text-base'],
     };
 
-    const classes = [
-      ...baseClasses,
-      ...sizeClasses[this.size]
-    ];
+    const classes = [...baseClasses, ...sizeClasses[this.size]];
 
     if (this.bordered) {
       classes.push('border', 'border-border');
@@ -164,13 +187,13 @@ export class TableComponent implements AfterContentInit {
       'font-semibold',
       'text-text-primary',
       'border-b',
-      'border-border'
+      'border-border',
     ];
 
     const sizeClasses = {
       sm: ['px-3', 'py-2'],
       md: ['px-4', 'py-3'],
-      lg: ['px-6', 'py-4']
+      lg: ['px-6', 'py-4'],
     };
 
     return [...baseClasses, ...sizeClasses[this.size]].join(' ');
@@ -181,13 +204,13 @@ export class TableComponent implements AfterContentInit {
       'border-b',
       'border-border',
       'transition-colors',
-      'duration-150'
+      'duration-150',
     ];
 
     const sizeClasses = {
       sm: ['px-3', 'py-2'],
       md: ['px-4', 'py-3'],
-      lg: ['px-6', 'py-4']
+      lg: ['px-6', 'py-4'],
     };
 
     if (this.striped && index % 2 !== 0) {
@@ -205,7 +228,7 @@ export class TableComponent implements AfterContentInit {
     const alignClasses = {
       left: ['text-left'],
       center: ['text-center'],
-      right: ['text-right']
+      right: ['text-right'],
     };
 
     const widthClass = column.width ? [`w-[${column.width}]`] : [];
@@ -227,7 +250,7 @@ export class TableComponent implements AfterContentInit {
       'duration-150',
       'focus:outline-none',
       'focus:ring-2',
-      'focus:ring-offset-1'
+      'focus:ring-offset-1',
     ];
 
     const variantClasses = {
@@ -235,36 +258,36 @@ export class TableComponent implements AfterContentInit {
         'bg-primary',
         'text-white',
         'hover:bg-primary/90',
-        'focus:ring-primary/50'
+        'focus:ring-primary/50',
       ],
       secondary: [
         'bg-muted',
         'text-text-primary',
         'hover:bg-muted/80',
-        'focus:ring-muted/50'
+        'focus:ring-muted/50',
       ],
       danger: [
         'bg-red-600',
         'text-white',
         'hover:bg-red-700',
-        'focus:ring-red-500'
+        'focus:ring-red-500',
       ],
       ghost: [
         'text-text-secondary',
         'hover:bg-muted/20',
         'hover:text-text-primary',
-        'focus:ring-muted/50'
-      ]
+        'focus:ring-muted/50',
+      ],
     };
 
-    const disabledClasses = this.isActionDisabled(action, item) 
+    const disabledClasses = this.isActionDisabled(action, item)
       ? ['opacity-50', 'cursor-not-allowed']
       : ['cursor-pointer'];
 
     return [
       ...baseClasses,
       ...variantClasses[action.variant || 'ghost'],
-      ...disabledClasses
+      ...disabledClasses,
     ].join(' ');
   }
 
@@ -298,42 +321,45 @@ export class TableComponent implements AfterContentInit {
 
     const baseClass = 'status-badge';
     const sizeClass = `status-badge-${column.badgeConfig.size || 'md'}`;
-    
+
     if (column.badgeConfig.type === 'status') {
       // For status type, use predefined color classes
       // Apply transform if exists to get display value, but use original for class
       const displayValue = column.transform ? column.transform(value) : value;
       const originalValue = value; // Use original value for CSS class
-      
+
       // Handle UserState enum values and common status strings
       let statusValue = String(originalValue)?.toLowerCase() || 'default';
-      
+
       // Handle boolean values for active/inactive status
       if (typeof originalValue === 'boolean') {
         statusValue = originalValue ? 'active' : 'inactive';
       }
-      
+
       // Map common status variations to standard CSS classes
       const statusMap: Record<string, string> = {
-        'active': 'active',
-        'inactive': 'inactive',
-        'pending_verification': 'pending',
-        'pending': 'pending',
-        'suspended': 'suspended',
-        'archived': 'draft',
-        'draft': 'draft',
-        'completed': 'completed',
-        'error': 'error',
-        'warning': 'warning'
+        active: 'active',
+        inactive: 'inactive',
+        pending_verification: 'pending',
+        pending: 'pending',
+        suspended: 'suspended',
+        archived: 'draft',
+        draft: 'draft',
+        completed: 'completed',
+        error: 'error',
+        warning: 'warning',
       };
-      
+
       const colorClass = `status-${statusMap[statusValue] || 'default'}`;
       return `${baseClass} ${colorClass} ${sizeClass}`;
-    } else if (column.badgeConfig.type === 'custom' && column.badgeConfig.colorMap) {
+    } else if (
+      column.badgeConfig.type === 'custom' &&
+      column.badgeConfig.colorMap
+    ) {
       // For custom type, we'll use inline styles instead of CSS classes
       return `${baseClass} ${sizeClass} status-badge-custom`;
     }
-    
+
     return `${baseClass} ${sizeClass}`;
   }
 
@@ -383,19 +409,19 @@ export class TableComponent implements AfterContentInit {
     if (column.badgeConfig?.colorMap) {
       // Apply transform function to get display value if exists
       const displayValue = column.transform ? column.transform(value) : value;
-      
+
       // First try exact match with original value
       const exactValue = String(value);
       if (column.badgeConfig.colorMap[exactValue]) {
         return column.badgeConfig.colorMap[exactValue];
       }
-      
+
       // Then try case-insensitive match with original value
       const valueStr = String(value).toLowerCase();
       if (column.badgeConfig.colorMap[valueStr]) {
         return column.badgeConfig.colorMap[valueStr];
       }
-      
+
       // If we have a transform function, also try matching the transformed value
       if (column.transform && displayValue !== value) {
         const displayValueStr = String(displayValue).toLowerCase();
@@ -403,35 +429,56 @@ export class TableComponent implements AfterContentInit {
           return column.badgeConfig.colorMap[displayValueStr];
         }
       }
-      
+
       // Try to handle numeric values by converting to categories if applicable
       if (typeof value === 'number') {
-        if (value >= 4) { // high rating
-          return column.badgeConfig.colorMap['high'] || 
-                 column.badgeConfig.colorMap['excellent'] || 
-                 column.badgeConfig.colorMap['good'] || null;
-        } else if (value >= 3) { // medium rating
-          return column.badgeConfig.colorMap['medium'] || 
-                 column.badgeConfig.colorMap['average'] || null;
-        } else { // low rating
-          return column.badgeConfig.colorMap['low'] || 
-                 column.badgeConfig.colorMap['poor'] || null;
+        if (value >= 4) {
+          // high rating
+          return (
+            column.badgeConfig.colorMap['high'] ||
+            column.badgeConfig.colorMap['excellent'] ||
+            column.badgeConfig.colorMap['good'] ||
+            null
+          );
+        } else if (value >= 3) {
+          // medium rating
+          return (
+            column.badgeConfig.colorMap['medium'] ||
+            column.badgeConfig.colorMap['average'] ||
+            null
+          );
+        } else {
+          // low rating
+          return (
+            column.badgeConfig.colorMap['low'] ||
+            column.badgeConfig.colorMap['poor'] ||
+            null
+          );
         }
       }
-      
+
       // Handle string values that might contain numbers
       if (typeof value === 'string' && !isNaN(Number(value))) {
         const numValue = Number(value);
         if (numValue >= 4) {
-          return column.badgeConfig.colorMap['high'] || 
-                 column.badgeConfig.colorMap['excellent'] || 
-                 column.badgeConfig.colorMap['good'] || null;
+          return (
+            column.badgeConfig.colorMap['high'] ||
+            column.badgeConfig.colorMap['excellent'] ||
+            column.badgeConfig.colorMap['good'] ||
+            null
+          );
         } else if (numValue >= 3) {
-          return column.badgeConfig.colorMap['medium'] || 
-                 column.badgeConfig.colorMap['average'] || null;
+          return (
+            column.badgeConfig.colorMap['medium'] ||
+            column.badgeConfig.colorMap['average'] ||
+            null
+          );
         } else {
-          return column.badgeConfig.colorMap['low'] || 
-                 column.badgeConfig.colorMap['poor'] || null;
+          return (
+            column.badgeConfig.colorMap['low'] ||
+            column.badgeConfig.colorMap['poor'] ||
+            null
+          );
         }
       }
     }
@@ -469,9 +516,11 @@ export class TableComponent implements AfterContentInit {
   private hexToRgba(hex: string, alpha: number): string {
     // Remove # if present
     hex = hex.replace('#', '');
-    
+
     // Parse r, g, b values
-    let r = 0, g = 0, b = 0;
+    let r = 0,
+      g = 0,
+      b = 0;
     if (hex.length === 6) {
       r = parseInt(hex.substring(0, 2), 16);
       g = parseInt(hex.substring(2, 4), 16);
@@ -481,7 +530,7 @@ export class TableComponent implements AfterContentInit {
       g = parseInt(hex.substring(1, 2) + hex.substring(1, 2), 16);
       b = parseInt(hex.substring(2, 3) + hex.substring(2, 3), 16);
     }
-    
+
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 }

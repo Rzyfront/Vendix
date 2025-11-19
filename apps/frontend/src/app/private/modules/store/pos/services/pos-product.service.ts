@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { Observable, of, BehaviorSubject } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { environment } from '../../../../../../environments/environment';
 
 export interface Product {
   id: string;
@@ -58,6 +59,7 @@ export interface SearchResult {
   providedIn: 'root',
 })
 export class PosProductService {
+  private readonly apiUrl = `${environment.apiUrl}/products`;
   private products: Product[] = [];
   private categories: Category[] = [];
   private brands: Brand[] = [];
@@ -142,60 +144,122 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
-    // Use real API call for POS optimized search
-    const params = new HttpParams()
-      .set('pos_optimized', filters.pos_optimized ? 'true' : 'false')
-      .set('include_stock', filters.include_stock ? 'true' : 'false')
+    let params = new HttpParams()
       .set('page', page.toString())
       .set('limit', pageSize.toString());
 
-    if (filters.barcode) {
-      params.set('barcode', filters.barcode);
-    } else if (filters.query) {
-      params.set('search', filters.query);
+    if (filters.query) {
+      params = params.set('search', filters.query);
     }
 
-    if (filters.category) {
-      params.set('category_id', filters.category);
+    if (filters.category && filters.category !== 'all') {
+      params = params.set('category_id', filters.category);
     }
 
-    if (filters.brand) {
-      params.set('brand_id', filters.brand);
+    if (filters.brand && filters.brand !== 'all') {
+      params = params.set('brand_id', filters.brand);
     }
 
-    return this.http.get<SearchResult>('/api/products', { params }).pipe(
-      map(
-        (response) =>
-          response || { products: [], total: 0, page, pageSize, totalPages: 0 },
-      ),
-      catchError((error: any) => {
+    if (filters.inStock) {
+      params = params.set('in_stock', 'true');
+    }
+
+    if (filters.minPrice) {
+      params = params.set('min_price', filters.minPrice.toString());
+    }
+
+    if (filters.maxPrice) {
+      params = params.set('max_price', filters.maxPrice.toString());
+    }
+
+    if (filters.sortBy) {
+      params = params.set('sort_by', filters.sortBy);
+      if (filters.sortOrder) {
+        params = params.set('sort_order', filters.sortOrder);
+      }
+    }
+
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        // Adapt API response to SearchResult interface
+        // The backend usually returns { data: [], meta: { ... } } or similar for paginated results
+        // Assuming the standard response format from UsersController example
+        return {
+          products: response.data || [],
+          total: response.meta?.total || 0,
+          page: response.meta?.page || page,
+          pageSize: response.meta?.limit || pageSize,
+          totalPages: response.meta?.totalPages || 0,
+        };
+      }),
+      catchError((error) => {
         console.error('Error searching products:', error);
-        return of({ products: [], total: 0, page, pageSize, totalPages: 0 });
+        return of({
+          products: [],
+          total: 0,
+          page,
+          pageSize,
+          totalPages: 0,
+        });
       }),
     );
   }
 
   getProductById(id: string): Observable<Product | null> {
-    const product = this.products.find((p) => p.id === id);
-    return of(product || null).pipe(delay(100));
+    return this.http.get<Product>(`${this.apiUrl}/${id}`).pipe(
+      catchError((error: any) => {
+        console.error('Error getting product by ID:', error);
+        return of(null);
+      }),
+    );
   }
 
   getProductByBarcode(barcode: string): Observable<Product | null> {
-    const product = this.products.find((p) => p.barcode === barcode);
-    return of(product || null).pipe(delay(100));
+    const params = new HttpParams().set('barcode', barcode);
+    return this.http.get<SearchResult>(this.apiUrl, { params }).pipe(
+      map((response) =>
+        response.products && response.products.length > 0
+          ? response.products[0]
+          : null,
+      ),
+      catchError((error: any) => {
+        console.error('Error getting product by barcode:', error);
+        return of(null);
+      }),
+    );
   }
 
   getProductBySku(sku: string): Observable<Product | null> {
-    const product = this.products.find((p) => p.sku === sku);
-    return of(product || null).pipe(delay(100));
+    const params = new HttpParams().set('sku', sku);
+    return this.http.get<SearchResult>(this.apiUrl, { params }).pipe(
+      map((response) =>
+        response.products && response.products.length > 0
+          ? response.products[0]
+          : null,
+      ),
+      catchError((error: any) => {
+        console.error('Error getting product by SKU:', error);
+        return of(null);
+      }),
+    );
   }
 
   getCategories(): Observable<Category[]> {
-    return of(this.categories).pipe(delay(100));
+    return this.http.get<Category[]>(`${environment.apiUrl}/categories`).pipe(
+      catchError((error: any) => {
+        console.error('Error getting categories:', error);
+        return of([]);
+      }),
+    );
   }
 
   getBrands(): Observable<Brand[]> {
-    return of(this.brands).pipe(delay(100));
+    return this.http.get<Brand[]>(`${environment.apiUrl}/brands`).pipe(
+      catchError((error: any) => {
+        console.error('Error getting brands:', error);
+        return of([]);
+      }),
+    );
   }
 
   getCategoryIds(): Observable<string[]> {

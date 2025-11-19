@@ -48,6 +48,7 @@ export class EmailController {
       email?: string;
       username?: string;
       step?: string;
+      organizationSlug?: string; // Optional organization slug for testing
     },
   ) {
     // Solo admins pueden testear templates
@@ -67,6 +68,7 @@ export class EmailController {
           email,
           token,
           username,
+          body.organizationSlug, // Optional organization slug for testing
         );
         break;
       case 'password-reset':

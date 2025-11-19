@@ -1,0 +1,80 @@
+:host {
+  ::ng-deep .store-switch-modal {
+    .modal-content {
+      border-radius: 12px;
+      box-shadow:
+        0 20px 25px -5px rgba(0, 0, 0, 0.1),
+        0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    }
+
+    .modal-header {
+      background: linear-gradient(
+        135deg,
+        var(--color-primary) 0%,
+        var(--color-primary-dark) 100%
+      );
+      color: white;
+      border-radius: 12px 12px 0 0;
+      padding: 1.5rem;
+
+      .modal-title {
+        font-weight: 600;
+        font-size: 1.25rem;
+        margin: 0;
+      }
+    }
+
+    .modal-body {
+      padding: 2rem;
+
+      p {
+        font-size: 1rem;
+        line-height: 1.6;
+        margin: 0;
+
+        strong {
+          color: var(--color-primary);
+          font-weight: 600;
+        }
+      }
+    }
+
+    .modal-footer {
+      padding: 1.5rem;
+      border-top: 1px solid var(--color-border);
+      background-color: var(--color-background-secondary);
+      border-radius: 0 0 12px 12px;
+    }
+  }
+}
+
+// Default modal improvements
+.modal-content {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.modal-header {
+  border-bottom: none;
+  padding: 1.5rem;
+
+  .modal-title {
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+}
+
+.modal-body {
+  padding: 1.5rem;
+
+  p {
+    color: var(--color-text-secondary);
+    margin-bottom: 0;
+  }
+}
+
+.modal-footer {
+  border-top: 1px solid var(--color-border);
+  padding: 1rem 1.5rem;
+  background-color: var(--color-background-secondary);
+}

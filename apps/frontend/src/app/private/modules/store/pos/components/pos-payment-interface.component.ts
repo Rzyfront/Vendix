@@ -1,312 +1,152 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { Subject } from 'rxjs';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnInit,
+  OnDestroy,
+} from '@angular/core';
+import {
+  FormBuilder,
+  FormGroup,
+  FormControl,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { Subject, takeUntil, debounceTime } from 'rxjs';
 
 import {
   ButtonComponent,
+  ModalComponent,
+  InputComponent,
+  CardComponent,
   IconComponent,
-  ToastService,
-  SpinnerComponent,
 } from '../../../../../shared/components';
-import { PosCartService } from '../services/pos-cart.service';
-import { PosOrderService } from '../services/pos-order.service';
+import {
+  PosPaymentService,
+  PaymentMethod,
+} from '../services/pos-payment.service';
+import { CartState } from '../models/cart.model';
+
+interface PaymentState {
+  selectedMethod: PaymentMethod | null;
+  cashReceived: number;
+  reference: string;
+  isProcessing: boolean;
+  change: number;
+}
 
 @Component({
   selector: 'app-pos-payment-interface',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, SpinnerComponent],
-  template: `
-    <div class="payment-interface">
-      <div class="payment-container">
-        <div class="payment-header">
-          <h2>Procesar Pago</h2>
-        </div>
-
-        <div class="payment-methods">
-          <button
-            *ngFor="let method of paymentMethods"
-            (click)="selectPaymentMethod(method)"
-            [class]="getPaymentMethodClass(method)"
-            class="payment-method-btn"
-          >
-            <app-icon [name]="getPaymentIcon(method)" [size]="24"></app-icon>
-            <div class="payment-method-info">
-              <p class="payment-method-name">
-                {{ getPaymentMethodName(method) }}
-              </p>
-              <p class="payment-method-desc">
-                {{ getPaymentDescription(method) }}
-              </p>
-            </div>
-          </button>
-        </div>
-
-        <div class="payment-form">
-          <div class="payment-amount">
-            <p>
-              Monto a pagar: $<span>{{ totalAmount }}</span>
-            </p>
-          </div>
-
-          <div
-            *ngIf="selectedPaymentMethod?.id === 'cash'"
-            class="cash-payment"
-          >
-            <div>
-              <label>Monto recibido:</label>
-              <input
-                type="number"
-                class="cash-input"
-                [(ngModel)]="cashReceived"
-              />
-            </div>
-
-            <div *ngIf="cashReceived > totalAmount" class="change-amount">
-              <p>
-                Cambio: $<span>{{ cashReceived - totalAmount }}</span>
-              </p>
-            </div>
-          </div>
-
-          <div
-            *ngIf="selectedPaymentMethod?.id === 'card'"
-            class="card-payment"
-          >
-            <div>
-              <label>Número de tarjeta:</label>
-              <input
-                type="text"
-                class="card-input"
-                placeholder="**** **** **** ****"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div class="payment-actions">
-          <button (click)="cancelPayment()" class="cancel-btn">Cancelar</button>
-
-          <button
-            (click)="processPayment()"
-            [disabled]="!selectedPaymentMethod || processing"
-            class="confirm-btn"
-          >
-            <app-icon
-              name="credit-card"
-              [size]="16"
-              *ngIf="!processing"
-            ></app-icon>
-            <app-spinner [size]="'sm'" *ngIf="processing"></app-spinner>
-            <span *ngIf="!processing">Confirmar Pago</span>
-            <span *ngIf="processing">Procesando...</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  `,
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    ButtonComponent,
+    ModalComponent,
+    InputComponent,
+    CardComponent,
+    IconComponent,
+  ],
+  templateUrl: './pos-payment-interface.component.html',
   styles: [
     `
-      :host {
-        display: block;
-        height: 100vh;
+      .payment-method-card {
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        transition: all 0.2s ease;
       }
 
-      .payment-interface {
-        height: 100%;
-        background: #f3f4f6;
-        display: flex;
-        flex-direction: column;
+      .payment-method-card:hover {
+        border-color: var(--color-primary);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
       }
 
-      .payment-container {
-        flex: 1;
-        padding: 24px;
-        max-width: 448px;
-        margin: 0 auto;
-        width: 100%;
+      .payment-method-card.selected {
+        border-color: var(--color-primary);
+        background: var(--color-primary-light);
+        box-shadow: var(--shadow-md);
       }
 
-      .payment-header h2 {
-        font-size: 24px;
-        font-weight: bold;
-        color: #111827;
-        margin-bottom: 24px;
-      }
-
-      .payment-methods {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-        margin-bottom: 24px;
-      }
-
-      .payment-method-btn {
-        padding: 16px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
-        text-align: center;
-        background: white;
+      .keypad-btn {
+        padding: 1rem;
+        font-size: 1.125rem;
+        font-weight: 500;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
         cursor: pointer;
-        transition: all 0.2s;
+        transition: all 0.2s ease;
       }
 
-      .payment-method-btn:hover {
-        border-color: #d1d5db;
+      .keypad-btn:hover:not(:disabled) {
+        background: var(--color-primary-light);
+        border-color: var(--color-primary);
       }
 
-      .payment-method-btn.selected {
-        border-color: #3b82f6;
-        background: #eff6ff;
+      .keypad-btn:active {
+        transform: scale(0.95);
       }
 
-      .payment-method-info {
-        margin-top: 8px;
+      @keyframes pulse-success {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
       }
 
-      .payment-method-name {
-        font-weight: 500;
-        margin: 0;
-      }
-
-      .payment-method-desc {
-        font-size: 14px;
-        color: #6b7280;
-        margin: 4px 0 0 0;
-      }
-
-      .payment-form {
-        background: white;
-        border-radius: 8px;
-        padding: 24px;
-        margin-bottom: 24px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      }
-
-      .payment-amount {
-        margin-bottom: 16px;
-      }
-
-      .payment-amount p {
-        font-size: 18px;
-        font-weight: 500;
-        color: #111827;
-        margin: 0;
-      }
-
-      .cash-payment,
-      .card-payment {
-        margin-top: 16px;
-      }
-
-      .cash-payment label,
-      .card-payment label {
-        display: block;
-        font-size: 14px;
-        font-weight: 500;
-        color: #374151;
-        margin-bottom: 8px;
-      }
-
-      .cash-input,
-      .card-input {
-        width: 100%;
-        padding: 12px;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        font-size: 16px;
-      }
-
-      .change-amount {
-        margin-top: 16px;
-        color: #059669;
-      }
-
-      .payment-actions {
-        display: flex;
-        gap: 16px;
-      }
-
-      .cancel-btn {
-        flex: 1;
-        padding: 12px 16px;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
-        background: white;
-        color: #374151;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-      }
-
-      .cancel-btn:hover {
-        background: #f9fafb;
-      }
-
-      .confirm-btn {
-        flex: 1;
-        padding: 12px 16px;
-        border: none;
-        border-radius: 6px;
-        background: #2563eb;
-        color: white;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-      }
-
-      .confirm-btn:hover:not(:disabled) {
-        background: #1d4ed8;
-      }
-
-      .confirm-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
+      .pulse-success {
+        animation: pulse-success 2s infinite;
       }
     `,
   ],
 })
 export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
-  selectedPaymentMethod: any = null;
-  cashReceived: number = 0;
-  processing = false;
-  totalAmount = 0;
+  @Input() isOpen = false;
+  @Input() cartState: CartState | null = null;
+  @Output() closed = new EventEmitter<void>();
+  @Output() paymentCompleted = new EventEmitter<any>();
+  @Output() draftSaved = new EventEmitter<any>();
 
-  paymentMethods = [
-    {
-      id: 'cash',
-      name: 'Efectivo',
-      icon: 'dollar-sign',
-      description: 'Pago en efectivo',
-    },
-    {
-      id: 'card',
-      name: 'Tarjeta',
-      icon: 'credit-card',
-      description: 'Pago con tarjeta',
-    },
-    {
-      id: 'transfer',
-      name: 'Transferencia',
-      icon: 'bank-transfer',
-      description: 'Transferencia bancaria',
-    },
-  ];
+  paymentMethods: PaymentMethod[] = [];
+  paymentForm: FormGroup;
+  paymentState: PaymentState = {
+    selectedMethod: null,
+    cashReceived: 0,
+    reference: '',
+    isProcessing: false,
+    change: 0,
+  };
+
+  quickCashAmounts = [10, 20, 50, 100];
 
   private destroy$ = new Subject<void>();
 
+  get cashReceivedControl(): FormControl {
+    return this.paymentForm.get('cashReceived') as FormControl;
+  }
+
+  get referenceControl(): FormControl {
+    return this.paymentForm.get('reference') as FormControl;
+  }
+
   constructor(
-    private cartService: PosCartService,
-    private orderService: PosOrderService,
-    private toastService: ToastService,
-  ) {}
+    private fb: FormBuilder,
+    private paymentService: PosPaymentService,
+  ) {
+    this.paymentForm = this.createPaymentForm();
+  }
 
   ngOnInit(): void {
-    this.updateTotalAmount();
+    this.loadPaymentMethods();
+    this.setupFormListeners();
   }
 
   ngOnDestroy(): void {
@@ -314,54 +154,189 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  selectPaymentMethod(method: any): void {
-    this.selectedPaymentMethod = method;
+  private createPaymentForm(): FormGroup {
+    return this.fb.group({
+      cashReceived: [0, [Validators.required, Validators.min(0)]],
+      reference: [''],
+    });
   }
 
-  getPaymentMethodClass(method: any): string {
-    const baseClass = 'payment-method-btn';
-    const selectedClass = 'selected';
+  private setupFormListeners(): void {
+    this.cashReceivedControl.valueChanges
+      .pipe(takeUntil(this.destroy$), debounceTime(100))
+      .subscribe((value) => {
+        this.paymentState.cashReceived = parseFloat(value) || 0;
+        this.calculateChange();
+      });
 
-    return this.selectedPaymentMethod?.id === method.id
-      ? `${baseClass} ${selectedClass}`
-      : baseClass;
+    this.referenceControl.valueChanges
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((value) => {
+        this.paymentState.reference = value || '';
+      });
   }
 
-  getPaymentIcon(method: any): string {
-    return method.icon || 'credit-card';
+  private loadPaymentMethods(): void {
+    this.paymentService
+      .getPaymentMethods()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((methods) => {
+        this.paymentMethods = methods;
+      });
   }
 
-  getPaymentMethodName(method: any): string {
-    return method.name || 'Método de Pago';
+  selectPaymentMethod(method: PaymentMethod): void {
+    this.paymentState.selectedMethod = method;
+    this.paymentForm.reset();
+    this.paymentState.change = 0;
+
+    if (method.type === 'cash') {
+      this.cashReceivedControl.setValue(this.cartState?.summary?.total || 0);
+    }
   }
 
-  getPaymentDescription(method: any): string {
-    return method.description || 'Descripción del método';
+  getPaymentMethodClasses(method: PaymentMethod): string {
+    const baseClasses = ['payment-method-card'];
+    if (this.paymentState.selectedMethod?.id === method.id) {
+      baseClasses.push('selected');
+    }
+    return baseClasses.join(' ');
   }
 
-  cancelPayment(): void {
-    this.selectedPaymentMethod = null;
-    this.cashReceived = 0;
-    this.toastService.info('Pago cancelado');
+  setCashAmount(amount: number): void {
+    this.cashReceivedControl.setValue(amount);
+  }
+
+  appendNumber(num: number): void {
+    const currentValue = this.cashReceivedControl.value || 0;
+    const newValue = parseFloat(currentValue.toString() + num.toString());
+    this.cashReceivedControl.setValue(newValue);
+  }
+
+  clearCashAmount(): void {
+    this.cashReceivedControl.setValue(0);
+  }
+
+  calculateChange(): void {
+    if (this.paymentState.selectedMethod?.type === 'cash') {
+      const total = this.cartState?.summary?.total || 0;
+      const received = this.paymentState.cashReceived || 0;
+      this.paymentState.change = Math.max(0, received - total);
+    }
+  }
+
+  getReferenceError(): string | undefined {
+    const control = this.referenceControl;
+    if (control && control.errors && control.touched) {
+      if (control.errors['required']) {
+        return 'Este campo es requerido';
+      }
+      if (control.errors['minlength']) {
+        return 'Mínimo 4 caracteres';
+      }
+    }
+    return undefined;
+  }
+
+  canProcessPayment(): boolean {
+    if (!this.paymentState.selectedMethod || this.paymentState.isProcessing) {
+      return false;
+    }
+
+    if (this.paymentState.selectedMethod.type === 'cash') {
+      const total = this.cartState?.summary?.total || 0;
+      return this.paymentState.cashReceived >= total;
+    }
+
+    if (this.paymentState.selectedMethod.requiresReference) {
+      const reference = this.referenceControl.value;
+      return reference && reference.trim().length >= 4;
+    }
+
+    return true;
   }
 
   processPayment(): void {
-    if (!this.selectedPaymentMethod) {
-      this.toastService.warning('Por favor selecciona un método de pago');
+    if (
+      !this.canProcessPayment() ||
+      !this.cartState ||
+      !this.paymentState.selectedMethod
+    ) {
       return;
     }
 
-    this.processing = true;
+    this.paymentState.isProcessing = true;
 
-    setTimeout(() => {
-      this.processing = false;
-      this.toastService.success('Pago procesado correctamente');
-      this.selectedPaymentMethod = null;
-      this.cashReceived = 0;
-    }, 2000);
+    const paymentRequest = {
+      orderId: 'ORDER_' + Date.now(),
+      amount: this.cartState.summary.total,
+      paymentMethod: this.paymentState.selectedMethod,
+      cashReceived: this.paymentState.cashReceived,
+      reference: this.paymentState.reference,
+    };
+
+    this.paymentService
+      .processSaleWithPayment(this.cartState, paymentRequest, 'current_user')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          this.paymentState.isProcessing = false;
+          if (response.success) {
+            this.paymentCompleted.emit({
+              success: true,
+              order: response.order,
+              payment: response.payment,
+              change: response.change,
+              message: response.message,
+            });
+            this.onModalClosed();
+          } else {
+            console.error('Payment failed:', response.message);
+          }
+        },
+        error: (error) => {
+          this.paymentState.isProcessing = false;
+          console.error('Payment error:', error);
+        },
+      });
   }
 
-  private updateTotalAmount(): void {
-    this.totalAmount = 100;
+  saveAsDraft(): void {
+    if (!this.cartState) return;
+
+    this.paymentState.isProcessing = true;
+
+    this.paymentService
+      .saveDraft(this.cartState, 'current_user')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          this.paymentState.isProcessing = false;
+          if (response.success) {
+            this.draftSaved.emit({
+              success: true,
+              order: response.order,
+              message: response.message,
+            });
+            this.onModalClosed();
+          }
+        },
+        error: (error) => {
+          this.paymentState.isProcessing = false;
+          console.error('Save draft error:', error);
+        },
+      });
+  }
+
+  onModalClosed(): void {
+    this.paymentState = {
+      selectedMethod: null,
+      cashReceived: 0,
+      reference: '',
+      isProcessing: false,
+      change: 0,
+    };
+    this.paymentForm.reset();
+    this.closed.emit();
   }
 }

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -26,18 +26,22 @@ import { takeUntil } from 'rxjs/operators';
     <div class="flex">
       <!-- Sidebar -->
       <app-sidebar
+        #sidebarRef
         [menuItems]="menuItems"
         [title]="(storeName$ | async) || storeName"
         subtitle="Store Admin"
-        [vlink]="(storeSlug$ | async) || storeSlug"
+        [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
       >
       </app-sidebar>
 
       <!-- Main Content -->
       <div
-        class="flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
-        [style.margin-left]="sidebarCollapsed ? '4rem' : '15rem'"
+        class="main-content flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        [class.margin-desktop]="!sidebarRef?.isMobile"
+        [style.margin-left]="
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+        "
       >
         <!-- Header -->
         <app-header
@@ -68,15 +72,19 @@ import { takeUntil } from 'rxjs/operators';
   styleUrls: ['./store-admin-layout.component.scss'],
 })
 export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
+  @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
+
   sidebarCollapsed = false;
   currentPageTitle = 'Store Dashboard';
   currentVlink = 'store-admin';
   storeName = 'Main Street Store';
   storeSlug = 'main-street-store';
+  organizationSlug = 'acme-corp';
 
   // Dynamic user data
   storeName$: Observable<string | null>;
   storeSlug$: Observable<string | null>;
+  organizationSlug$: Observable<string | null>;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -89,21 +97,22 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   ) {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
+    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
   }
 
-    ngOnInit(): void {
-      // Check onboarding status when component initializes
-      this.checkOnboardingWithRoleValidation();
+  ngOnInit(): void {
+    // Check onboarding status when component initializes
+    this.checkOnboardingWithRoleValidation();
 
-      // Subscribe to onboarding needs and show modal instead of redirecting
-      this.authFacade.needsOnboarding$
-        .pipe(takeUntil(this.destroy$))
-        .subscribe((needsOnboarding: any) => {
-          // this.needsOnboarding = needsOnboarding;
-           this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
-          this.updateOnboardingModal();
-        });
-    }
+    // Subscribe to onboarding needs and show modal instead of redirecting
+    this.authFacade.needsOnboarding$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((needsOnboarding: any) => {
+        // this.needsOnboarding = needsOnboarding;
+        this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+        this.updateOnboardingModal();
+      });
+  }
 
   private checkOnboardingWithRoleValidation(): void {
     // Only proceed with onboarding logic if user is owner
@@ -121,7 +130,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     // this.needsOnboarding = !storeOnboarding;
     this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
     this.updateOnboardingModal();
-  }   
+  }
 
   private updateOnboardingModal(): void {
     // Double-check owner role before showing modal
@@ -169,23 +178,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Products',
       icon: 'package',
-      children: [
-        {
-          label: 'All Products',
-          icon: 'circle',
-          route: '/admin/products/all',
-        },
-        {
-          label: 'Categories',
-          icon: 'circle',
-          route: '/admin/products/categories',
-        },
-        {
-          label: 'Inventory',
-          icon: 'circle',
-          route: '/admin/products/inventory',
-        },
-      ],
+      route: '/admin/products',
     },
     {
       label: 'Orders',
@@ -270,7 +263,13 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   ];
 
   toggleSidebar() {
-    this.sidebarCollapsed = !this.sidebarCollapsed;
+    // If mobile, delegate to sidebar component
+    if (this.sidebarRef?.isMobile) {
+      this.sidebarRef.toggleSidebar();
+    } else {
+      // Desktop: toggle collapsed state
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+    }
   }
 
   onOnboardingCompleted(event: any): void {

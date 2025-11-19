@@ -118,7 +118,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     // Suscribirse a cambios de fullscreen
     this.fullscreenService.isFullscreen
       .pipe(takeUntil(this.destroy$))
-      .subscribe(isFullscreen => {
+      .subscribe((isFullscreen) => {
         this.isFullscreen = isFullscreen;
         this.updateFullscreenOption();
       });
@@ -167,7 +167,8 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
       label: 'Pantalla Completa',
       icon: 'fullscreen-enter',
       action: () => this.toggleFullscreen(),
-      condition: () => this.fullscreenService.isFullscreenSupported() && !this.isFullscreen,
+      condition: () =>
+        this.fullscreenService.isFullscreenSupported() && !this.isFullscreen,
     },
     {
       label: 'Salir de Pantalla Completa',
@@ -285,7 +286,9 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private canSwitchToOrganization(): boolean {
-    return this.environmentContextService.canSwitchToOrganization();
+    const canSwitch = this.environmentContextService.canSwitchToOrganization();
+    console.log('🔍 UserDropdown - canSwitchToOrganization:', canSwitch);
+    return canSwitch;
   }
 
   private async switchToOrganization(): Promise<void> {
@@ -335,7 +338,9 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private canSwitchToStore(): boolean {
-    return this.environmentContextService.canSwitchToStore();
+    const canSwitch = this.environmentContextService.canSwitchToStore();
+    console.log('🔍 UserDropdown - canSwitchToStore:', canSwitch);
+    return canSwitch;
   }
 
   private async toggleFullscreen(): Promise<void> {

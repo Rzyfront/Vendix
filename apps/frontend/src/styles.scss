@@ -25,13 +25,22 @@
   --fw-bold: 700;
 
   /* Font Sizes */
-  --fs-xs: 12px;
-  --fs-sm: 14px;
-  --fs-base: 16px;
-  --fs-lg: 18px;
-  --fs-xl: 20px;
-  --fs-2xl: 24px;
-  --fs-3xl: 30px;
+  --fs-xs: 0.75rem; /* 12px */
+  --fs-sm: 0.875rem; /* 14px */
+  --fs-base: 1rem; /* 16px */
+  --fs-lg: 1.125rem; /* 18px */
+  --fs-xl: 1.25rem; /* 20px */
+  --fs-2xl: 1.5rem; /* 24px */
+  --fs-3xl: 1.875rem; /* 30px */
+
+  /* Responsive Font Sizes - Mobile Optimized */
+  --fs-xs-mobile: 0.6875rem; /* 11px - ~8% smaller */
+  --fs-sm-mobile: 0.75rem; /* 12px - ~14% smaller */
+  --fs-base-mobile: 0.875rem; /* 14px - ~12% smaller */
+  --fs-lg-mobile: 0.9375rem; /* 15px - ~17% smaller */
+  --fs-xl-mobile: 1.0625rem; /* 17px - ~15% smaller */
+  --fs-2xl-mobile: 1.25rem; /* 20px - ~17% smaller */
+  --fs-3xl-mobile: 1.5rem; /* 24px - ~20% smaller */
 
   /* Default Theme Colors (Light) */
   --color-background: #f8fafc;
@@ -77,6 +86,11 @@
   --radius-lg: 0.75rem;
   --radius-pill: 9999px;
 
+  /* Logo Sizes */
+  --logo-sm: 2.25rem; /* 36px */
+  --logo-md: 2.5rem; /* 40px */
+  --logo-lg: 3rem; /* 48px */
+
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.04);
   --shadow-md: 0 4px 8px rgba(15, 23, 42, 0.06);
@@ -96,10 +110,26 @@
   --z-toast: 70;
   --z-maximum: 100;
 
+  /* Sidebar Variables */
+  --sidebar-width: 15rem; /* 240px */
+  --sidebar-width-collapsed: 4rem; /* 64px */
+  --sidebar-width-mobile: 80vw; /* Maximum width for mobile overlay */
+  --sidebar-backdrop-opacity: 0.5;
+  --sidebar-mobile-z-index: 55; /* Above header (50), below notifications (60) */
+
   /* Misc */
   --border-width: 1px;
-  --control-padding: 10px 12px;
+  --control-padding: 0.625rem 0.75rem; /* 10px 12px */
+  --control-padding-mobile: 0.5rem 0.625rem; /* 8px 10px - ~20% smaller */
   --transition-fast: 160ms;
+
+  /* Responsive Spacing - Mobile Optimized */
+  --spacing-xs-mobile: 0.25rem; /* 4px */
+  --spacing-sm-mobile: 0.5rem; /* 8px */
+  --spacing-md-mobile: 0.625rem; /* 10px */
+  --spacing-lg-mobile: 0.875rem; /* 14px */
+  --spacing-xl-mobile: 1.125rem; /* 18px */
+  --spacing-2xl-mobile: 1.375rem; /* 22px */
 }
 
 /* Dark Theme */
@@ -159,6 +189,141 @@ body {
   background-color: var(--color-background);
   color: var(--color-text-primary);
   line-height: 1.6;
+  font-size: var(--fs-base);
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  body {
+    font-size: var(--fs-base-mobile);
+    line-height: 1.5;
+  }
+
+  /* Apply mobile font sizes to all text elements */
+  h1 {
+    font-size: var(--fs-3xl-mobile);
+  }
+  h2 {
+    font-size: var(--fs-2xl-mobile);
+  }
+  h3 {
+    font-size: var(--fs-xl-mobile);
+  }
+  h4 {
+    font-size: var(--fs-lg-mobile);
+  }
+  h5 {
+    font-size: var(--fs-base-mobile);
+  }
+  h6 {
+    font-size: var(--fs-sm-mobile);
+  }
+  p,
+  span,
+  div {
+    font-size: inherit;
+  }
+  small {
+    font-size: var(--fs-xs-mobile);
+  }
+}
+
+  /* Apply mobile font sizes to all text elements */
+  h1 {
+    font-size: var(--fs-3xl-mobile);
+  }
+  h2 {
+    font-size: var(--fs-2xl-mobile);
+  }
+  h3 {
+    font-size: var(--fs-xl-mobile);
+  }
+  h4 {
+    font-size: var(--fs-lg-mobile);
+  }
+  h5 {
+    font-size: var(--fs-base-mobile);
+  }
+  h6 {
+    font-size: var(--fs-sm-mobile);
+  }
+  p,
+  span,
+  div {
+    font-size: inherit;
+  }
+  small {
+    font-size: var(--fs-xs-mobile);
+  }
+
+  /* Mobile spacing adjustments for common elements */
+  .container,
+  .section {
+    padding: var(--spacing-md-mobile);
+  }
+
+  .card,
+  .panel {
+    margin: var(--spacing-sm-mobile);
+    padding: var(--spacing-md-mobile);
+  }
+
+  .button {
+    padding: var(--control-padding-mobile);
+    margin: var(--spacing-xs-mobile);
+  }
+
+  .form-group {
+    margin-bottom: var(--spacing-md-mobile);
+  }
+
+  .form-input {
+    padding: var(--control-padding-mobile);
+  }
+
+  /* Compact mobile layouts */
+  .grid,
+  .flex {
+    gap: var(--spacing-sm-mobile);
+  }
+
+  .list-item {
+    padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
+  }
+
+  /* Header and navigation mobile spacing */
+  header,
+  nav {
+    padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
+  }
+
+  /* Footer mobile spacing */
+  footer {
+    padding: var(--spacing-lg-mobile) var(--spacing-md-mobile);
+  }
+
+
+@media (max-width: 480px) {
+  /* Extra compact spacing for very small screens */
+  .container,
+  .section {
+    padding: var(--spacing-sm-mobile);
+  }
+
+  .card,
+  .panel {
+    margin: var(--spacing-xs-mobile);
+    padding: var(--spacing-sm-mobile);
+  }
+
+  .form-group {
+    margin-bottom: var(--spacing-sm-mobile);
+  }
+
+  .grid,
+  .flex {
+    gap: var(--spacing-xs-mobile);
+  }
 }
 
 /* Loading Inter Font */

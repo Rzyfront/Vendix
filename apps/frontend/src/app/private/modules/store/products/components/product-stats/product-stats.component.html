@@ -1,0 +1,121 @@
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+  <!-- Total Products -->
+  <div
+    class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
+  >
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-text-secondary mb-1">Total Products</p>
+        <p class="text-2xl font-bold text-text-primary">
+          {{ stats?.total_products || 0 }}
+        </p>
+        <div class="flex items-center mt-2">
+          <span
+            class="text-xs font-medium"
+            [ngClass]="getGrowthClass(stats?.productsGrowthRate || 0)"
+          >
+            {{ getGrowthPercentage(stats?.productsGrowthRate || 0) }}
+          </span>
+          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+        </div>
+      </div>
+      <div
+        class="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center"
+      >
+        <app-icon name="package" [size]="24" class="text-primary"></app-icon>
+      </div>
+    </div>
+  </div>
+
+  <!-- Active Products -->
+  <div
+    class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
+  >
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-text-secondary mb-1">Active Products</p>
+        <p class="text-2xl font-bold text-text-primary">
+          {{ stats?.active_products || 0 }}
+        </p>
+        <div class="flex items-center mt-2">
+          <span
+            class="text-xs font-medium"
+            [ngClass]="getGrowthClass(stats?.activeProductsGrowthRate || 0)"
+          >
+            {{ getGrowthPercentage(stats?.activeProductsGrowthRate || 0) }}
+          </span>
+          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+        </div>
+      </div>
+      <div
+        class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center"
+      >
+        <app-icon
+          name="check-circle"
+          [size]="24"
+          class="text-green-600"
+        ></app-icon>
+      </div>
+    </div>
+  </div>
+
+  <!-- Low Stock Products -->
+  <div
+    class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
+  >
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-text-secondary mb-1">Low Stock Products</p>
+        <p class="text-2xl font-bold text-text-primary">
+          {{ stats?.low_stock_products || 0 }}
+        </p>
+        <div class="flex items-center mt-2">
+          <span
+            class="text-xs font-medium"
+            [ngClass]="getGrowthClass(stats?.lowStockGrowthRate || 0)"
+          >
+            {{ getGrowthPercentage(stats?.lowStockGrowthRate || 0) }}
+          </span>
+          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+        </div>
+      </div>
+      <div
+        class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center"
+      >
+        <app-icon
+          name="alert-triangle"
+          [size]="24"
+          class="text-yellow-600"
+        ></app-icon>
+      </div>
+    </div>
+  </div>
+
+  <!-- Products Without Images -->
+  <div
+    class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
+  >
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-text-secondary mb-1">Products Without Images</p>
+        <p class="text-2xl font-bold text-text-primary">
+          {{ stats?.products_without_images || 0 }}
+        </p>
+        <div class="flex items-center mt-2">
+          <span
+            class="text-xs font-medium"
+            [ngClass]="getGrowthClass(stats?.noImagesGrowthRate || 0)"
+          >
+            {{ getGrowthPercentage(stats?.noImagesGrowthRate || 0) }}
+          </span>
+          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+        </div>
+      </div>
+      <div
+        class="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center"
+      >
+        <app-icon name="image-off" [size]="24" class="text-red-600"></app-icon>
+      </div>
+    </div>
+  </div>
+</div>

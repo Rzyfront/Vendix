@@ -1,0 +1,252 @@
+<app-modal
+  [isOpen]="isOpen"
+  [size]="'lg'"
+  (closed)="onModalClosed()"
+  [showCloseButton]="true"
+  [title]="'Procesar Pago'"
+  [subtitle]="'Selecciona un método de pago para completar la venta'"
+>
+  <!-- Order Summary -->
+  <div class="mb-6">
+    <app-card
+      [shadow]="'sm'"
+      [customClasses]="
+        'bg-gradient-to-r from-[var(--color-primary-light)]/20 to-[var(--color-secondary-light)]/20 border-[var(--color-primary)]/30'
+      "
+    >
+      <div class="p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-sm text-[var(--color-text-secondary)]"
+            >Subtotal:</span
+          >
+          <span class="text-sm font-medium">
+            ${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}
+          </span>
+        </div>
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-sm text-[var(--color-text-secondary)]"
+            >Impuestos:</span
+          >
+          <span class="text-sm font-medium">
+            ${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}
+          </span>
+        </div>
+        <div
+          *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0"
+          class="flex justify-between items-center mb-2"
+        >
+          <span class="text-sm text-[var(--color-text-secondary)]"
+            >Descuento:</span
+          >
+          <span class="text-sm font-medium text-[var(--color-destructive)]">
+            -${{ cartState?.summary?.discountAmount | number: "1.2-2" }}
+          </span>
+        </div>
+        <div class="border-t border-[var(--color-border)] pt-2 mt-2">
+          <div class="flex justify-between items-center">
+            <span class="text-lg font-semibold text-[var(--color-text-primary)]"
+              >Total:</span
+            >
+            <span class="text-xl font-bold text-[var(--color-primary)]">
+              ${{ cartState?.summary?.total || 0 | number: "1.2-2" }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Payment Methods -->
+  <div class="mb-6">
+    <h3
+      class="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2"
+    >
+      <app-icon
+        name="credit-card"
+        [size]="20"
+        color="var(--color-primary)"
+      ></app-icon>
+      Método de Pago
+    </h3>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div
+        *ngFor="let method of paymentMethods"
+        (click)="selectPaymentMethod(method)"
+        [class]="getPaymentMethodClasses(method)"
+        class="payment-method-card cursor-pointer transition-all duration-200"
+      >
+        <div class="flex flex-col items-center p-4 text-center">
+          <app-icon
+            [name]="method.icon"
+            [size]="32"
+            [color]="
+              paymentState.selectedMethod?.id === method.id
+                ? 'var(--color-primary)'
+                : 'var(--color-text-secondary)'
+            "
+            class="mb-2"
+          ></app-icon>
+          <span class="text-sm font-medium">{{ method.name }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Payment Details Form -->
+  <div *ngIf="paymentState.selectedMethod" class="mb-6">
+    <app-card [shadow]="'sm'">
+      <div class="p-4">
+        <h4 class="text-md font-semibold text-[var(--color-text-primary)] mb-4">
+          Detalles de Pago - {{ paymentState.selectedMethod.name }}
+        </h4>
+
+        <!-- Cash Payment -->
+        <div
+          *ngIf="paymentState.selectedMethod.type === 'cash'"
+          class="space-y-4"
+        >
+          <div>
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)] mb-2"
+            >
+              Monto Recibido:
+            </label>
+            <div class="relative">
+              <span
+                class="absolute left-3 top-1/2 transform -translate-y-1/2 text-[var(--color-text-secondary)]"
+              >
+                $
+              </span>
+              <input
+                type="number"
+                [formControl]="cashReceivedControl"
+                class="w-full pl-8 pr-3 py-2 border border-[var(--color-border)] rounded-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
+                placeholder="0.00"
+                step="0.01"
+                (input)="calculateChange()"
+              />
+            </div>
+          </div>
+
+          <!-- Quick Amount Buttons -->
+          <div class="grid grid-cols-4 gap-2">
+            <button
+              *ngFor="let amount of quickCashAmounts"
+              type="button"
+              (click)="setCashAmount(amount)"
+              class="px-3 py-2 text-sm border border-[var(--color-border)] rounded-sm hover:bg-[var(--color-primary-light)] hover:border-[var(--color-primary)] transition-colors"
+            >
+              ${{ amount }}
+            </button>
+          </div>
+
+          <!-- Change Display -->
+          <div
+            *ngIf="paymentState.change > 0"
+            class="p-3 bg-[var(--color-success-light)]/20 border border-[var(--color-success)]/30 rounded-sm"
+          >
+            <div class="flex justify-between items-center">
+              <span class="text-sm font-medium text-[var(--color-success)]"
+                >Cambio:</span
+              >
+              <span class="text-lg font-bold text-[var(--color-success)]">
+                ${{ paymentState.change | number: "1.2-2" }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card/Transfer/Digital Wallet Payment -->
+        <div
+          *ngIf="paymentState.selectedMethod.requiresReference"
+          class="space-y-4"
+        >
+          <app-input
+            [formControl]="referenceControl"
+            [label]="paymentState.selectedMethod.referenceLabel || 'Referencia'"
+            [placeholder]="
+              paymentState.selectedMethod.referenceLabel ||
+              'Ingresa la referencia'
+            "
+            [size]="'md'"
+            [error]="getReferenceError()"
+          >
+          </app-input>
+        </div>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Numeric Keypad -->
+  <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="mb-6">
+    <app-card [shadow]="'sm'">
+      <div class="p-4">
+        <div class="grid grid-cols-3 gap-2">
+          <button
+            *ngFor="let num of [7, 8, 9, 4, 5, 6, 1, 2, 3]"
+            type="button"
+            (click)="appendNumber(num)"
+            class="keypad-btn"
+          >
+            {{ num }}
+          </button>
+          <button
+            type="button"
+            (click)="appendNumber(0)"
+            class="keypad-btn col-span-2"
+          >
+            0
+          </button>
+          <button
+            type="button"
+            (click)="clearCashAmount()"
+            class="keypad-btn bg-[var(--color-destructive)] text-white hover:bg-[var(--color-destructive)]/90"
+          >
+            C
+          </button>
+        </div>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Action Buttons -->
+  <div slot="footer" class="flex justify-between items-center">
+    <app-button
+      variant="outline"
+      size="md"
+      (clicked)="onModalClosed()"
+      [disabled]="paymentState.isProcessing"
+    >
+      <app-icon name="x" [size]="16" slot="icon"></app-icon>
+      Cancelar
+    </app-button>
+
+    <div class="flex gap-2">
+      <app-button
+        variant="secondary"
+        size="md"
+        (clicked)="saveAsDraft()"
+        [disabled]="paymentState.isProcessing"
+      >
+        <app-icon name="save" [size]="16" slot="icon"></app-icon>
+        Guardar Borrador
+      </app-button>
+
+      <app-button
+        variant="primary"
+        size="md"
+        (clicked)="processPayment()"
+        [loading]="paymentState.isProcessing"
+        [disabled]="!canProcessPayment()"
+      >
+        <app-icon name="check" [size]="16" slot="icon"></app-icon>
+        {{
+          paymentState.selectedMethod?.type === "cash"
+            ? "Cobrar"
+            : "Procesar Pago"
+        }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

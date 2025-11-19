@@ -6,12 +6,10 @@
   [customClasses]="customClasses"
   (closed)="onCancel()"
 >
-  <div class="px-6 py-5">
-    <p class="text-[var(--color-text-secondary)] leading-relaxed">
-      {{ message }}
-    </p>
+  <div class="modal-body">
+    <p [innerHTML]="message"></p>
   </div>
-  <div slot="footer" class="flex justify-end gap-3">
+  <div slot="footer" class="modal-footer flex justify-end gap-4">
     <app-button variant="outline" (clicked)="onCancel()">{{
       cancelText
     }}</app-button>

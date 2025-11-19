@@ -6,13 +6,13 @@ import {
   IsEnum,
   IsNumber,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateSupplierDto {
-  @ApiProperty({ description: 'Organization ID' })
+  @ApiPropertyOptional({ description: 'Organization ID' })
+  @IsOptional()
   @IsNumber()
-  @IsNotEmpty()
-  organization_id: number;
+  organization_id?: number;
 
   @ApiProperty({ description: 'Supplier name' })
   @IsString()

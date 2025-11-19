@@ -1,36 +1,41 @@
 export interface PosCustomer {
-  id: string;
+  id: number;
   email: string;
-  name: string;
+  first_name: string;
+  last_name?: string;
+  name?: string; // For backward compatibility
   phone?: string;
-  documentType?: 'dni' | 'passport' | 'cedula' | 'other';
-  documentNumber?: string;
+  document_type?: string;
+  document_number?: string;
   address?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface CreatePosCustomerRequest {
   email: string;
-  name: string;
+  first_name: string;
+  last_name?: string;
   phone?: string;
-  documentType?: 'dni' | 'passport' | 'cedula' | 'other';
-  documentNumber?: string;
+  document_type?: string;
+  document_number?: string;
   address?: string;
+  store_id: number;
+  password?: string;
 }
 
 export interface SearchCustomersRequest {
   query?: string;
   limit?: number;
-  offset?: number;
+  page?: number;
 }
 
 export interface PaginatedCustomersResponse {
-  customers: PosCustomer[];
+  data: PosCustomer[];
   total: number;
+  page: number;
   limit: number;
-  offset: number;
-  hasMore: boolean;
+  totalPages: number;
 }
 
 export interface CustomerValidationError {

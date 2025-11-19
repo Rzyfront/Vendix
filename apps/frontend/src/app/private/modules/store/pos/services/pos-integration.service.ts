@@ -54,7 +54,7 @@ export class PosIntegrationService {
     const params = {
       query: request.query || '',
       limit: request.limit?.toString() || '20',
-      offset: request.offset?.toString() || '0',
+      page: request.page?.toString() || '1',
     };
 
     return this.posApi
@@ -226,27 +226,29 @@ export class PosIntegrationService {
   // Mapping methods
   private mapApiCustomerToPosCustomer(apiCustomer: any): PosCustomer {
     return {
-      id: apiCustomer.id,
+      id: apiCustomer.id.toString(),
       email: apiCustomer.email,
-      name: apiCustomer.name,
+      first_name: apiCustomer.first_name,
+      last_name: apiCustomer.last_name,
+      name:
+        apiCustomer.name ||
+        `${apiCustomer.first_name} ${apiCustomer.last_name}`,
       phone: apiCustomer.phone,
-      documentType: apiCustomer.documentType,
-      documentNumber: apiCustomer.documentNumber,
+      document_type: apiCustomer.document_type,
+      document_number: apiCustomer.document_number,
       address: apiCustomer.address,
-      createdAt: new Date(apiCustomer.createdAt),
-      updatedAt: new Date(apiCustomer.updatedAt),
+      created_at: new Date(apiCustomer.created_at),
+      updated_at: new Date(apiCustomer.updated_at),
     };
   }
 
   private mapApiCustomersResponse(response: any): PaginatedCustomersResponse {
     return {
-      customers: response.customers.map((c: any) =>
-        this.mapApiCustomerToPosCustomer(c),
-      ),
+      data: response.data.map((c: any) => this.mapApiCustomerToPosCustomer(c)),
       total: response.total,
+      page: response.page,
       limit: response.limit,
-      offset: response.offset,
-      hasMore: response.hasMore,
+      totalPages: response.totalPages,
     };
   }
 

@@ -36,13 +36,16 @@ export class TaxesService {
   }
 
   async findAll(query: TaxCategoryQueryDto) {
-    const { page = 1, limit = 10, search, store_id } = query;
+    const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
 
     if (search)
       where.OR = [{ name: { contains: search, mode: 'insensitive' } }];
-    if (store_id) where.store_id = store_id;
+
+    // ✅ BYPASS MANUAL ELIMINADO - ahora usa scoping automático de PrismaService
+    // El filtro store_id se aplica automáticamente según el contexto del usuario
+    // Los usuarios solo pueden ver tax_categories de su store actual
 
     const [taxCategories, total] = await Promise.all([
       this.prisma.tax_categories.findMany({ where, skip, take: limit }),

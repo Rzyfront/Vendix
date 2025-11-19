@@ -55,6 +55,13 @@ export class DialogService {
       if (data.confirmVariant)
         componentRef.instance.confirmVariant = data.confirmVariant;
 
+      // Apply config
+      if (config.size) componentRef.instance.size = config.size;
+      if (config.showCloseButton !== undefined)
+        componentRef.instance.showCloseButton = config.showCloseButton;
+      if (config.customClasses)
+        componentRef.instance.customClasses = config.customClasses;
+
       const sub = componentRef.instance.confirm.subscribe(() => {
         resolve(true);
         sub.unsubscribe();

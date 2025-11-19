@@ -68,11 +68,13 @@ export class SendGridProvider implements EmailProvider {
     to: string,
     token: string,
     username: string,
+    organizationSlug?: string,
   ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
+      vlink: organizationSlug, // vlink is just the organization slug
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),

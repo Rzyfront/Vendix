@@ -1,21 +1,36 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormGroup, FormBuilder, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Store, StoreSettings } from '../../interfaces/store.interface';
+import {
+  FormGroup,
+  FormBuilder,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
+import {
+  Store,
+  StoreSettings,
+  StoreListItem,
+} from '../../interfaces/store.interface';
+import {
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-edit-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent],
   templateUrl: './store-edit-modal.component.html',
-  styleUrls: ['./store-edit-modal.component.scss']
+  styleUrls: ['./store-edit-modal.component.scss'],
 })
 export class StoreEditModalComponent {
-  @Input() store: Store | null = null;
-  @Input() isVisible: boolean = false;
-  @Input() isLoading: boolean = false;
-  @Output() close = new EventEmitter<void>();
-  @Output() save = new EventEmitter<Store>;
+  @Input() isOpen = false;
+  @Input() isSubmitting = false;
+  @Input() store?: StoreListItem;
+
+  @Output() openChange = new EventEmitter<boolean>();
+  @Output() submit = new EventEmitter<any>();
+  @Output() cancel = new EventEmitter<void>();
 
   editForm: FormGroup;
   settingsForm: FormGroup;
@@ -25,7 +40,13 @@ export class StoreEditModalComponent {
       id: [''],
       name: ['', [Validators.required, Validators.minLength(2)]],
       description: [''],
-      domain: ['', [Validators.required, Validators.pattern(/^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$/)]],
+      domain: [
+        '',
+        [
+          Validators.required,
+          Validators.pattern(/^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$/),
+        ],
+      ],
       email: ['', [Validators.required, Validators.email]],
       phone: [''],
       address: this.fb.group({
@@ -33,11 +54,11 @@ export class StoreEditModalComponent {
         city: [''],
         state: [''],
         zipCode: [''],
-        country: ['']
+        country: [''],
       }),
       status: ['active', Validators.required],
       logoUrl: [''],
-      bannerUrl: ['']
+      bannerUrl: [''],
     });
 
     this.settingsForm = this.fb.group({
@@ -51,7 +72,7 @@ export class StoreEditModalComponent {
       freeShippingThreshold: [0],
       currency: ['USD'],
       timezone: ['UTC'],
-      language: ['en']
+      language: ['en'],
     });
   }
 
@@ -65,15 +86,30 @@ export class StoreEditModalComponent {
         email: this.store.email,
         phone: this.store.phone || '',
         address: {
-          street: (typeof this.store.address === 'object' ? this.store.address?.street : '') || '',
-          city: (typeof this.store.address === 'object' ? this.store.address?.city : '') || '',
-          state: (typeof this.store.address === 'object' ? this.store.address?.state : '') || '',
-          zipCode: (typeof this.store.address === 'object' ? this.store.address?.zipCode : '') || '',
-          country: (typeof this.store.address === 'object' ? this.store.address?.country : '') || ''
+          street:
+            (typeof this.store.address === 'object'
+              ? this.store.address?.street
+              : '') || '',
+          city:
+            (typeof this.store.address === 'object'
+              ? this.store.address?.city
+              : '') || '',
+          state:
+            (typeof this.store.address === 'object'
+              ? this.store.address?.state
+              : '') || '',
+          zipCode:
+            (typeof this.store.address === 'object'
+              ? this.store.address?.zipCode
+              : '') || '',
+          country:
+            (typeof this.store.address === 'object'
+              ? this.store.address?.country
+              : '') || '',
         },
         status: this.store.status,
         logoUrl: this.store.logo_url || '',
-        bannerUrl: this.store.banner_url || ''
+        bannerUrl: this.store.banner_url || '',
       });
 
       if (this.store.settings) {
@@ -82,24 +118,39 @@ export class StoreEditModalComponent {
     }
   }
 
-  onClose(): void {
-    this.close.emit();
-  }
-
-  onSave(): void {
-    if (this.editForm.valid && this.settingsForm.valid) {
-      const updatedStore: Store = {
-        ...this.store,
-        ...this.editForm.value,
-        settings: this.settingsForm.value
-      };
-      this.save.emit(updatedStore);
+  onModalChange(isOpen: boolean): void {
+    this.openChange.emit(isOpen);
+    if (!isOpen) {
+      this.resetForm();
     }
   }
 
+  onCancel(): void {
+    this.cancel.emit();
+  }
+
+  onSubmit(): void {
+    if (this.editForm.valid && this.settingsForm.valid) {
+      const updatedStore = {
+        ...this.editForm.value,
+        settings: this.settingsForm.value,
+      };
+      this.submit.emit(updatedStore);
+    }
+  }
+
+  private resetForm(): void {
+    this.editForm.reset();
+    this.settingsForm.reset();
+  }
+
   // Getters para validación
-  get f() { return this.editForm.controls; }
-  get sf() { return this.settingsForm.controls; }
+  get f() {
+    return this.editForm.controls;
+  }
+  get sf() {
+    return this.settingsForm.controls;
+  }
 
   // Validación de formulario
   isFieldInvalid(fieldName: string, formGroup: string = 'edit'): boolean {
@@ -115,7 +166,8 @@ export class StoreEditModalComponent {
     if (!field) return '';
 
     if (field.errors?.['required']) return 'This field is required';
-    if (field.errors?.['minlength']) return `Minimum ${field.errors['minlength'].requiredLength} characters`;
+    if (field.errors?.['minlength'])
+      return `Minimum ${field.errors['minlength'].requiredLength} characters`;
     if (field.errors?.['email']) return 'Please enter a valid email';
     if (field.errors?.['pattern']) return 'Invalid format';
 

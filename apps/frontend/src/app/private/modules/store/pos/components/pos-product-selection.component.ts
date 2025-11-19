@@ -1,15 +1,22 @@
-import { Component, OnInit, OnDestroy, NO_ERRORS_SCHEMA, Output, EventEmitter } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  NO_ERRORS_SCHEMA,
+  Output,
+  EventEmitter,
+} from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
 
 import {
-  ButtonComponent,
-  InputsearchComponent,
   CardComponent,
   IconComponent,
+  ButtonComponent,
+  InputsearchComponent,
   ToastService,
-  SpinnerComponent,
 } from '../../../../../shared/components';
+
 import { PosCartService } from '../services/pos-cart.service';
 import {
   PosProductService,
@@ -21,125 +28,261 @@ import {
   standalone: true,
   imports: [
     CommonModule,
-    ButtonComponent,
-    InputsearchComponent,
     CardComponent,
     IconComponent,
-    SpinnerComponent,
+    ButtonComponent,
+    InputsearchComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
-    <div class="h-full flex flex-col">
-      <!-- Search Header -->
-      <div class="p-4 border-b border-gray-200 bg-white">
-        <div class="flex gap-3 items-center">
-          <div class="flex-1">
-            <app-inputsearch
-              placeholder="Buscar productos..."
-              (search)="onSearch($event)"
-              (clear)="onClearSearch()"
-            />
+    <div
+      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
+    >
+      <!-- Products Header -->
+      <div class="px-6 py-4 border-b border-border">
+        <div
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        >
+          <div class="flex-1 min-w-0">
+            <h2 class="text-lg font-semibold text-text-primary">
+              Productos Disponibles ({{ filteredProducts.length }})
+            </h2>
           </div>
 
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="onToggleScanMode()"
+          <div
+            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
           >
-            <app-icon name="barcode" [size]="16" slot="icon"></app-icon>
-            Escanear
-          </app-button>
-        </div>
-      </div>
+            <!-- Input de búsqueda compacto -->
+            <app-inputsearch
+              class="w-full sm:w-64"
+              size="sm"
+              placeholder="Buscar productos..."
+              [debounceTime]="300"
+              (searchChange)="onSearch($event)"
+            />
 
-      <!-- Categories -->
-      <div class="p-4 border-b border-gray-200">
-        <div class="flex gap-2 overflow-x-auto pb-2">
-          <button
-            *ngFor="let category of categories"
-            (click)="onSelectCategory(category)"
-            [class]="getCategoryClass(category)"
-            class="px-4 py-2 rounded-lg border font-medium text-sm whitespace-nowrap transition-colors"
+            <!-- Filtro de categoría -->
+            <select
+              class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+              (change)="onCategoryChange($event)"
+              [value]="selectedCategory?.id || 'all'"
+            >
+              <option *ngFor="let category of categories" [value]="category.id">
+                {{ category.name }}
+              </option>
+            </select>
+
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="onToggleScanMode()"
+              class="shrink-0"
+              title="Escanear código de barras"
+            >
+              <app-icon name="barcode" [size]="16" slot="icon"></app-icon>
+            </app-button>
+          </div>
+        </div>
+
+        <!-- Products Content -->
+        <div class="flex-1 overflow-y-auto p-6">
+          <!-- Loading State -->
+          <div *ngIf="loading" class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando productos...</p>
+          </div>
+
+          <!-- Empty State -->
+          <div
+            *ngIf="!loading && filteredProducts.length === 0"
+            class="flex flex-col items-center justify-center h-64 text-center p-8"
           >
-            {{ category.name }}
-          </button>
-        </div>
-      </div>
+            <div
+              class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
+            >
+              <app-icon
+                name="package"
+                [size]="32"
+                class="text-text-secondary"
+              ></app-icon>
+            </div>
+            <h3 class="text-lg font-semibold text-text-primary mb-2">
+              {{ getEmptyStateTitle() }}
+            </h3>
+            <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+              {{ getEmptyStateDescription() }}
+            </p>
+            <app-button
+              *ngIf="searchQuery"
+              variant="outline"
+              size="md"
+              (clicked)="onClearSearch()"
+            >
+              Limpiar búsqueda
+            </app-button>
+          </div>
 
-      <!-- Products Grid -->
-      <div class="flex-1 overflow-y-auto p-4">
-        <!-- Loading State -->
-        <div *ngIf="loading" class="flex items-center justify-center h-64">
-          <app-spinner [size]="'md'"></app-spinner>
-          <p class="mt-4 text-gray-600">Cargando productos...</p>
+          <!-- Products Grid -->
+          <div
+            *ngIf="!loading && filteredProducts.length > 0"
+            class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+          >
+            <app-card
+              *ngFor="
+                let product of filteredProducts;
+                trackBy: trackByProductId
+              "
+              [hoverable]="true"
+              (click)="onAddToCart(product)"
+              class="cursor-pointer group h-full flex flex-col overflow-hidden shadow-card hover:shadow-lg transition-all duration-200"
+              [padding]="false"
+            >
+              <div class="flex flex-col h-full">
+                <!-- Product Image & Badge -->
+                <div
+                  class="relative aspect-square bg-muted overflow-hidden rounded-t-lg"
+                >
+                  <div
+                    class="absolute inset-0 flex items-center justify-center text-text-secondary"
+                  >
+                    <app-icon name="image" [size]="32"></app-icon>
+                  </div>
+                  <!-- Real image would go here -->
+
+                  <!-- Stock Badge -->
+                  <div
+                    *ngIf="product.stock <= 5"
+                    class="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-bold text-white shadow-sm"
+                    [class]="
+                      product.stock === 0 ? 'bg-destructive' : 'bg-warning'
+                    "
+                  >
+                    {{
+                      product.stock === 0 ? 'AGOTADO' : product.stock + ' left'
+                    }}
+                  </div>
+                </div>
+
+                <!-- Content -->
+                <div class="p-4 flex flex-col flex-1">
+                  <h3
+                    class="text-sm font-semibold text-text-primary line-clamp-2 mb-2 leading-snug min-h-[2.5em]"
+                  >
+                    {{ product.name }}
+                  </h3>
+
+                  <div class="mt-auto flex items-center justify-between">
+                    <span class="text-base font-bold text-primary">
+                      {{
+                        product.price
+                          | currency: 'ARS' : 'symbol-narrow' : '1.0-0'
+                      }}
+                    </span>
+
+                    <div
+                      class="w-8 h-8 rounded-full bg-primary-light text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all duration-200"
+                    >
+                      <app-icon name="plus" [size]="16"></app-icon>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </app-card>
+          </div>
         </div>
 
         <!-- Empty State -->
         <div
           *ngIf="!loading && filteredProducts.length === 0"
-          class="text-center py-12"
+          class="flex flex-col items-center justify-center h-64 text-center p-8"
         >
-          <app-icon name="package" [size]="48" color="gray"></app-icon>
-          <p class="mt-4 text-gray-600">No se encontraron productos</p>
-          <p *ngIf="searchQuery" class="text-sm text-gray-500">
-            No hay resultados para "{{ searchQuery }}"
+          <div
+            class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
+          >
+            <app-icon
+              name="package"
+              [size]="32"
+              class="text-text-secondary"
+            ></app-icon>
+          </div>
+          <h3 class="text-lg font-semibold text-text-primary mb-2">
+            {{ getEmptyStateTitle() }}
+          </h3>
+          <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+            {{ getEmptyStateDescription() }}
           </p>
+          <app-button
+            *ngIf="searchQuery"
+            variant="outline"
+            size="md"
+            (clicked)="onClearSearch()"
+          >
+            Limpiar búsqueda
+          </app-button>
         </div>
 
         <!-- Products Grid -->
         <div
           *ngIf="!loading && filteredProducts.length > 0"
-          class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+          class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6"
         >
           <app-card
-            *ngFor="let product of filteredProducts"
+            *ngFor="let product of filteredProducts; trackBy: trackByProductId"
             [hoverable]="true"
-            (click)="onSelectProduct(product)"
-            class="cursor-pointer"
+            (click)="onAddToCart(product)"
+            class="cursor-pointer group h-full flex flex-col overflow-hidden shadow-card hover:shadow-lg transition-all duration-200"
+            [padding]="false"
           >
-            <div class="p-4">
-              <div class="flex justify-between items-start mb-3">
-                <div class="flex-1 min-w-0">
-                  <h3 class="font-medium text-gray-900 truncate">
-                    {{ product.name }}
-                  </h3>
-                  <p
-                    *ngIf="product.description"
-                    class="text-sm text-gray-600 mt-1 line-clamp-2"
-                  >
-                    {{ product.description }}
-                  </p>
-                </div>
-
-                <!-- Product Image -->
+            <div class="flex flex-col h-full">
+              <!-- Product Image & Badge -->
+              <div
+                class="relative aspect-square bg-muted overflow-hidden rounded-t-lg"
+              >
                 <div
-                  class="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center"
+                  class="absolute inset-0 flex items-center justify-center text-text-secondary"
                 >
-                  <app-icon name="package" [size]="24" color="gray"></app-icon>
+                  <app-icon name="image" [size]="32"></app-icon>
+                </div>
+                <!-- Real image would go here -->
+
+                <!-- Stock Badge -->
+                <div
+                  *ngIf="product.stock <= 5"
+                  class="absolute top-3 right-3 px-2 py-1 rounded-full text-xs font-bold text-white shadow-sm"
+                  [class]="
+                    product.stock === 0 ? 'bg-destructive' : 'bg-warning'
+                  "
+                >
+                  {{
+                    product.stock === 0 ? 'AGOTADO' : product.stock + ' left'
+                  }}
                 </div>
               </div>
 
-              <!-- Price and Stock -->
-              <div class="flex items-center justify-between">
-                <div>
-                  <p class="text-lg font-bold text-gray-900">
-                    {{ product.price }}
-                  </p>
-                  <p class="text-sm text-gray-600">
-                    Stock: {{ product.stock }}
-                  </p>
-                </div>
-
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (click)="onAddToCart(product); $event.stopPropagation()"
-                  [disabled]="product.stock === 0"
-                  [loading]="addingToCart.has(product.id)"
+              <!-- Content -->
+              <div class="p-4 flex flex-col flex-1">
+                <h3
+                  class="text-sm font-semibold text-text-primary line-clamp-2 mb-2 leading-snug min-h-[2.5em]"
                 >
-                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
-                  {{ product.stock === 0 ? 'Sin stock' : 'Agregar' }}
-                </app-button>
+                  {{ product.name }}
+                </h3>
+
+                <div class="mt-auto flex items-center justify-between">
+                  <span class="text-base font-bold text-primary">
+                    {{
+                      product.price
+                        | currency: 'ARS' : 'symbol-narrow' : '1.0-0'
+                    }}
+                  </span>
+
+                  <div
+                    class="w-8 h-8 rounded-full bg-primary-light text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-white transition-all duration-200"
+                  >
+                    <app-icon name="plus" [size]="16"></app-icon>
+                  </div>
+                </div>
               </div>
             </div>
           </app-card>
@@ -154,11 +297,12 @@ import {
         height: 100%;
       }
 
-      .line-clamp-2 {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
       }
     `,
   ],
@@ -172,7 +316,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   addingToCart = new Set<string>();
 
   @Output() productSelected = new EventEmitter<any>();
-  @Output() productAddedToCart = new EventEmitter<{ product: any; quantity: number }>();
+  @Output() productAddedToCart = new EventEmitter<{
+    product: any;
+    quantity: number;
+  }>();
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
@@ -197,11 +344,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   private initializeCategories(): void {
     this.categories = [
       { id: 'all', name: 'Todos', icon: 'grid' },
-      { id: 'electronics', name: 'Electrónicos', icon: 'cpu' },
-      { id: 'clothing', name: 'Ropa', icon: 'shirt' },
-      { id: 'food', name: 'Alimentos', icon: 'coffee' },
-      { id: 'books', name: 'Libros', icon: 'book' },
-      { id: 'other', name: 'Otros', icon: 'package' },
+      { id: 'Accesorios', name: 'Accesorios', icon: 'cpu' },
     ];
     this.selectedCategory = this.categories[0];
   }
@@ -217,9 +360,25 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   private loadProducts(): void {
     this.loading = true;
-    // Use POS optimized search for real products
+    this.filterProducts();
+  }
+
+  private filterProducts(): void {
+    const filters: any = {
+      pos_optimized: true,
+      include_stock: true,
+    };
+
+    if (this.searchQuery) {
+      filters.query = this.searchQuery;
+    }
+
+    if (this.selectedCategory && this.selectedCategory.id !== 'all') {
+      filters.category = this.selectedCategory.id;
+    }
+
     this.productService
-      .searchProducts({ pos_optimized: true, include_stock: true })
+      .searchProducts(filters)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result: SearchResult) => {
@@ -233,23 +392,19 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       });
   }
 
-  private filterProducts(): void {
-    // This would normally filter by category and search query
-    // For now, just use all products
-    this.productService
-      .searchProducts({})
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((result: SearchResult) => {
-        this.filteredProducts = result.products || [];
-      });
-  }
-
-  onSearch(event: any): void {
-    this.searchSubject$.next(event);
+  onSearch(searchTerm: string): void {
+    this.searchSubject$.next(searchTerm);
   }
 
   onClearSearch(): void {
     this.searchSubject$.next('');
+  }
+
+  onCategoryChange(event: any): void {
+    const categoryId = event.target.value;
+    const category = this.categories.find((c) => c.id === categoryId);
+    this.selectedCategory = category || this.categories[0];
+    this.filterProducts();
   }
 
   onSelectCategory(category: any): void {
@@ -259,8 +414,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   getCategoryClass(category: any): string {
     const baseClass =
-      'border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-800';
-    const selectedClass = 'border-blue-500 bg-blue-50 text-blue-600';
+      'border-border bg-surface text-text-secondary hover:border-primary hover:text-primary hover:bg-primary-light transition-colors';
+    const selectedClass =
+      'border-primary bg-primary-light text-primary shadow-card';
 
     return this.selectedCategory?.id === category.id
       ? selectedClass
@@ -303,5 +459,23 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   onToggleScanMode(): void {
     this.toastService.info('Modo escáner próximamente');
+  }
+
+  trackByProductId(index: number, product: any): string {
+    return product.id;
+  }
+
+  getEmptyStateTitle(): string {
+    if (this.searchQuery) {
+      return 'No se encontraron productos';
+    }
+    return 'No hay productos disponibles';
+  }
+
+  getEmptyStateDescription(): string {
+    if (this.searchQuery) {
+      return 'Intenta buscar con otros términos o cambia la categoría.';
+    }
+    return 'Los productos aparecerán aquí cuando estén disponibles.';
   }
 }

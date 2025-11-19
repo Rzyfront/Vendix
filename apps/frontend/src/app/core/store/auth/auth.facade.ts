@@ -100,8 +100,8 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.logout());
   }
 
-  refreshToken(refreshToken: string): void {
-    this.store.dispatch(AuthActions.refreshToken({ refreshToken }));
+  refreshToken(refresh_token: string): void {
+    this.store.dispatch(AuthActions.refreshToken({ refresh_token }));
   }
 
   loadUser(): void {
@@ -118,13 +118,19 @@ export class AuthFacade {
 
   restoreAuthState(
     user: any,
-    tokens: { accessToken: string; refreshToken: string },
+    tokens: { access_token: string; refresh_token: string },
     permissions?: string[],
     roles?: string[],
     user_settings?: any,
   ): void {
     this.store.dispatch(
-      AuthActions.restoreAuthState({ user, user_settings, tokens, permissions, roles }),
+      AuthActions.restoreAuthState({
+        user,
+        user_settings,
+        tokens,
+        permissions,
+        roles,
+      }),
     );
   }
 
@@ -157,7 +163,9 @@ export class AuthFacade {
 
   getUserSettings(): any {
     let result: any = null;
-    this.userSettings$.pipe(take(1)).subscribe((userSettings) => (result = userSettings));
+    this.userSettings$
+      .pipe(take(1))
+      .subscribe((userSettings) => (result = userSettings));
     return result;
   }
 
@@ -214,8 +222,8 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.setError({ error }));
   }
 
-  getTokens(): { accessToken: string; refreshToken: string } | null {
-    let result: { accessToken: string; refreshToken: string } | null = null;
+  getTokens(): { access_token: string; refresh_token: string } | null {
+    let result: { access_token: string; refresh_token: string } | null = null;
     this.tokens$.pipe(take(1)).subscribe((tokens) => (result = tokens));
     return result;
   }

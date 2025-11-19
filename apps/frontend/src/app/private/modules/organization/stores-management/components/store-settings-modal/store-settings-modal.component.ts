@@ -1,21 +1,31 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormGroup, FormBuilder, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormGroup,
+  FormBuilder,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { StoreSettings } from '../../interfaces/store.interface';
+import {
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-settings-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent],
   templateUrl: './store-settings-modal.component.html',
-  styleUrls: ['./store-settings-modal.component.scss']
+  styleUrls: ['./store-settings-modal.component.scss'],
 })
 export class StoreSettingsModalComponent {
-  @Input() isVisible: boolean = false;
-  @Input() isLoading: boolean = false;
+  @Input() isOpen: boolean = false;
+  @Input() isSubmitting: boolean = false;
   @Input() settings: StoreSettings | null = null;
-  @Output() close = new EventEmitter<void>();
-  @Output() save = new EventEmitter<StoreSettings>;
+  @Output() openChange = new EventEmitter<boolean>();
+  @Output() submit = new EventEmitter<StoreSettings>();
+  @Output() cancel = new EventEmitter<void>();
 
   settingsForm: FormGroup;
 
@@ -48,7 +58,7 @@ export class StoreSettingsModalComponent {
 
       // Shipping Settings
       enableShipping: [true],
-      freeShippingThreshold: [0, [Validators.min(0)]]
+      freeShippingThreshold: [0, [Validators.min(0)]],
     });
   }
 
@@ -62,16 +72,23 @@ export class StoreSettingsModalComponent {
         enableTaxCalculation: this.settings.enableTaxCalculation,
         taxRate: this.settings.taxRate || 0,
         enableShipping: this.settings.enableShipping,
-        freeShippingThreshold: this.settings.freeShippingThreshold || 0
+        freeShippingThreshold: this.settings.freeShippingThreshold || 0,
       });
     }
   }
 
-  onClose(): void {
-    this.close.emit();
+  onModalChange(isOpen: boolean): void {
+    this.openChange.emit(isOpen);
+    if (!isOpen) {
+      this.resetForm();
+    }
   }
 
-  onSave(): void {
+  onCancel(): void {
+    this.cancel.emit();
+  }
+
+  onSubmit(): void {
     if (this.settingsForm.valid) {
       const formValue = this.settingsForm.value;
 
@@ -84,11 +101,15 @@ export class StoreSettingsModalComponent {
         enableTaxCalculation: formValue.enableTaxCalculation,
         taxRate: formValue.taxRate,
         enableShipping: formValue.enableShipping,
-        freeShippingThreshold: formValue.freeShippingThreshold
+        freeShippingThreshold: formValue.freeShippingThreshold,
       };
 
-      this.save.emit(updatedSettings);
+      this.submit.emit(updatedSettings);
     }
+  }
+
+  private resetForm(): void {
+    this.settingsForm.reset();
   }
 
   // Theme options
@@ -96,7 +117,7 @@ export class StoreSettingsModalComponent {
     return [
       { value: 'light', label: 'Light' },
       { value: 'dark', label: 'Dark' },
-      { value: 'auto', label: 'Auto' }
+      { value: 'auto', label: 'Auto' },
     ];
   }
 
@@ -106,7 +127,7 @@ export class StoreSettingsModalComponent {
       { value: 'en', label: 'English' },
       { value: 'es', label: 'Español' },
       { value: 'fr', label: 'Français' },
-      { value: 'de', label: 'Deutsch' }
+      { value: 'de', label: 'Deutsch' },
     ];
   }
 
@@ -117,7 +138,7 @@ export class StoreSettingsModalComponent {
       { value: 'EUR', label: 'EUR - Euro' },
       { value: 'GBP', label: 'GBP - British Pound' },
       { value: 'CAD', label: 'CAD - Canadian Dollar' },
-      { value: 'MXN', label: 'MXN - Mexican Peso' }
+      { value: 'MXN', label: 'MXN - Mexican Peso' },
     ];
   }
 
@@ -128,7 +149,7 @@ export class StoreSettingsModalComponent {
       { value: '€{{amount}}', label: '€100.00' },
       { value: '£{{amount}}', label: '£100.00' },
       { value: '${{amount}} CAD', label: '$100.00 CAD' },
-      { value: '${{amount}} MXN', label: '$100.00 MXN' }
+      { value: '${{amount}} MXN', label: '$100.00 MXN' },
     ];
   }
 
@@ -143,12 +164,14 @@ export class StoreSettingsModalComponent {
       { value: 'America/Mexico_City', label: 'Mexico City' },
       { value: 'Europe/London', label: 'London' },
       { value: 'Europe/Paris', label: 'Paris' },
-      { value: 'Asia/Tokyo', label: 'Tokyo' }
+      { value: 'Asia/Tokyo', label: 'Tokyo' },
     ];
   }
 
   // Getters para validación
-  get f() { return this.settingsForm.controls; }
+  get f() {
+    return this.settingsForm.controls;
+  }
 
   // Validación de formulario
   isFieldInvalid(fieldName: string): boolean {
@@ -162,8 +185,10 @@ export class StoreSettingsModalComponent {
     if (!field) return '';
 
     if (field.errors?.['required']) return 'This field is required';
-    if (field.errors?.['min']) return `Minimum value is ${field.errors['min'].min}`;
-    if (field.errors?.['max']) return `Maximum value is ${field.errors['max'].max}`;
+    if (field.errors?.['min'])
+      return `Minimum value is ${field.errors['min'].min}`;
+    if (field.errors?.['max'])
+      return `Maximum value is ${field.errors['max'].max}`;
 
     return 'Invalid field';
   }

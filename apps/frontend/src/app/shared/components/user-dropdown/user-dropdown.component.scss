@@ -5,11 +5,11 @@
   .user-trigger {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 12px;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
     border: none;
     background: transparent;
-    border-radius: 12px;
+    border-radius: 0.75rem;
     cursor: pointer;
     transition: all 0.2s ease;
     background: var(--color-surface);
@@ -28,28 +28,28 @@
       text-align: left;
 
       .user-name {
-        font-size: 14px;
+        font-size: var(--fs-sm);
         font-weight: 500;
         color: var(--color-text-primary);
         line-height: 1.2;
       }
 
       .user-role {
-        font-size: 12px;
+        font-size: var(--fs-xs);
         color: var(--color-text-secondary);
         line-height: 1.2;
       }
     }
 
     .user-avatar {
-      width: 36px;
-      height: 36px;
+      width: var(--logo-sm);
+      height: var(--logo-sm);
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 600;
-      font-size: 14px;
+      font-size: var(--fs-sm);
       color: white;
       background: var(--color-primary);
       flex-shrink: 0;
@@ -69,10 +69,10 @@
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
-    min-width: 280px;
+    min-width: 17.5rem;  /* 280px */
     background: var(--color-surface);
     border: 1px solid var(--color-border);
-    border-radius: 12px;
+    border-radius: 0.75rem;
     box-shadow: var(--shadow-lg);
     opacity: 0;
     visibility: hidden;
@@ -88,21 +88,21 @@
     }
 
     .dropdown-header {
-      padding: 16px;
+      padding: 1rem;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 0.75rem;
       background: var(--color-background);
 
       .header-avatar {
-        width: 48px;
-        height: 48px;
+        width: var(--logo-lg);
+        height: var(--logo-lg);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         font-weight: 600;
-        font-size: 16px;
+        font-size: var(--fs-base);
         color: white;
         background: var(--color-primary);
         flex-shrink: 0;
@@ -113,7 +113,7 @@
         min-width: 0;
 
         .header-name {
-          font-size: 14px;
+          font-size: var(--fs-sm);
           font-weight: 600;
           color: var(--color-text-primary);
           margin: 0 0 4px 0;
@@ -123,7 +123,7 @@
         }
 
         .header-email {
-          font-size: 12px;
+          font-size: var(--fs-xs);
           color: var(--color-text-secondary);
           margin: 0;
           white-space: nowrap;
@@ -145,11 +145,11 @@
         width: 100%;
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 10px 12px;
+        gap: 0.75rem;
+        padding: var(--control-padding);
         border: none;
         background: transparent;
-        border-radius: 8px;
+        border-radius: 0.5rem;
         cursor: pointer;
         transition: all 0.15s ease;
         text-align: left;
@@ -177,7 +177,7 @@
         }
 
         .item-label {
-          font-size: 14px;
+          font-size: var(--fs-sm);
           color: var(--color-text-primary);
           font-weight: 500;
           flex: 1;
@@ -187,7 +187,7 @@
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 48em) {  /* 768px */
   .user-dropdown-container {
     .user-trigger {
       padding: 6px 8px;
@@ -198,15 +198,15 @@
       }
 
       .user-avatar {
-        width: 32px;
-        height: 32px;
-        font-size: 12px;
+        width: 2rem;
+        height: 2rem;
+        font-size: var(--fs-xs);
       }
     }
 
     .dropdown-menu {
-      min-width: 240px;
-      right: -12px;
+      min-width: 15rem;  /* 240px */
+      right: -0.75rem;
     }
   }
 }

@@ -4,10 +4,12 @@ import {
   Output,
   EventEmitter,
   ChangeDetectionStrategy,
+  OnInit,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
+import { CountryService, Country } from '../../../../services/country.service';
 
 @Component({
   selector: 'app-user-setup-step',
@@ -420,13 +422,12 @@ import { IconComponent } from '../../index';
                   class="field-input"
                   [formControl]="formGroup.get('country_code')"
                 >
-                  <option value="MX">México</option>
-                  <option value="CO">Colombia</option>
-                  <option value="US">Estados Unidos</option>
-                  <option value="AR">Argentina</option>
-                  <option value="CL">Chile</option>
-                  <option value="PE">Perú</option>
-                  <option value="ES">España</option>
+                  <option
+                    *ngFor="let country of countries"
+                    [value]="country.code"
+                  >
+                    {{ country.name }}
+                  </option>
                 </select>
               </div>
             </div>
@@ -446,9 +447,17 @@ import { IconComponent } from '../../index';
     </div>
   `,
 })
-export class UserSetupStepComponent {
+export class UserSetupStepComponent implements OnInit {
   @Input() formGroup: any;
   @Output() nextStep = new EventEmitter<void>();
   @Output() skipStep = new EventEmitter<void>();
   @Output() previousStep = new EventEmitter<void>();
+
+  countries: Country[] = [];
+
+  constructor(private countryService: CountryService) {}
+
+  ngOnInit(): void {
+    this.countries = this.countryService.getCountries();
+  }
 }

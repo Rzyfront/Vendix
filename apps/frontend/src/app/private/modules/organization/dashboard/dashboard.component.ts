@@ -1,17 +1,25 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ChartComponent,
   ChartData,
   IconComponent,
 } from '../../../../shared/components';
+import { OrganizationDashboardService } from './services/organization-dashboard.service';
+import { ActivatedRoute } from '@angular/router';
+import { GlobalFacade } from '../../../../core/store/global.facade';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 
 @Component({
   selector: 'app-organization-dashboard',
   standalone: true,
   imports: [CommonModule, ChartComponent, IconComponent],
   template: `
-    <div class="p-6 space-y-6" style="background-color: var(--color-background); min-height: 100vh;">
+    <div
+      class="p-6 space-y-6"
+      style="background-color: var(--color-background); min-height: 100vh;"
+    >
       <!-- Stats Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div
@@ -198,7 +206,10 @@ import {
         </div>
 
         <!-- Store Distribution Pie Chart -->
-        <div class="rounded-xl shadow-sm border border-border" style="background-color: var(--color-surface);">
+        <div
+          class="rounded-xl shadow-sm border border-border"
+          style="background-color: var(--color-surface);"
+        >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
               Store Distribution
@@ -216,7 +227,9 @@ import {
             >
             </app-chart>
             <div class="mt-6 space-y-3">
-              <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors">
+              <div
+                class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
+              >
                 <div class="flex items-center gap-3">
                   <div
                     class="w-4 h-4 rounded-full shadow-sm"
@@ -229,7 +242,9 @@ import {
                   <div class="text-xs text-gray-500">18 stores</div>
                 </div>
               </div>
-              <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors">
+              <div
+                class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
+              >
                 <div class="flex items-center gap-3">
                   <div
                     class="w-4 h-4 rounded-full shadow-sm"
@@ -242,7 +257,9 @@ import {
                   <div class="text-xs text-gray-500">12 stores</div>
                 </div>
               </div>
-              <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors">
+              <div
+                class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
+              >
                 <div class="flex items-center gap-3">
                   <div
                     class="w-4 h-4 rounded-full shadow-sm"
@@ -263,7 +280,10 @@ import {
       <!-- Recent Activity & Top Performers -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Recent Activity -->
-        <div class="rounded-xl shadow-sm border border-border" style="background-color: var(--color-surface);">
+        <div
+          class="rounded-xl shadow-sm border border-border"
+          style="background-color: var(--color-surface);"
+        >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
               Recent Activity
@@ -368,7 +388,10 @@ import {
         </div>
 
         <!-- Top Performing Stores -->
-        <div class="rounded-xl shadow-sm border border-border" style="background-color: var(--color-surface);">
+        <div
+          class="rounded-xl shadow-sm border border-border"
+          style="background-color: var(--color-surface);"
+        >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
               Top Performing Stores
@@ -468,55 +491,80 @@ import {
     `,
   ],
 })
-export class DashboardComponent {
+export class DashboardComponent implements OnInit, OnDestroy {
+  private destroy$ = new Subject<void>();
+  isLoading = false;
+  organizationId: string;
+
   // Revenue Chart Data - Stacked Line Chart
   revenueChartData: ChartData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Online Sales',
-        data: [28000, 32000, 30000, 38000, 45000, 62000],
-        borderColor: '#7ed7a5',
-        backgroundColor: 'rgba(126, 215, 165, 0.1)',
-        fill: true,
-        tension: 0.4,
-        borderWidth: 3,
-        pointBackgroundColor: '#7ed7a5',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-      },
-      {
-        label: 'In-Store Sales',
-        data: [22000, 25000, 23000, 28000, 32000, 38000],
-        borderColor: '#06b6d4',
-        backgroundColor: 'rgba(6, 182, 212, 0.1)',
-        fill: true,
-        tension: 0.4,
-        borderWidth: 3,
-        pointBackgroundColor: '#06b6d4',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-      },
-      {
-        label: 'Other Revenue',
-        data: [15000, 15000, 15000, 15000, 17000, 24580],
-        borderColor: '#fb923c',
-        backgroundColor: 'rgba(251, 146, 60, 0.1)',
-        fill: true,
-        tension: 0.4,
-        borderWidth: 3,
-        pointBackgroundColor: '#fb923c',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-      },
-    ],
+    labels: [],
+    datasets: [],
   };
+
+  constructor(
+    private organizationDashboardService: OrganizationDashboardService,
+    private route: ActivatedRoute,
+    private globalFacade: GlobalFacade,
+  ) {
+    const context = this.globalFacade.getUserContext();
+    this.organizationId =
+      this.route.snapshot.paramMap.get('id') || context?.organization?.id || '';
+  }
+
+  ngOnInit(): void {
+    this.loadDashboardData();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  private loadDashboardData(): void {
+    if (!this.organizationId) {
+      console.warn('No organization ID available for dashboard stats');
+      return;
+    }
+
+    this.isLoading = true;
+
+    this.organizationDashboardService
+      .getDashboardStats(this.organizationId)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (data) => {
+          this.updateRevenueChart(data);
+          this.isLoading = false;
+        },
+        error: (error) => {
+          console.error('Error loading organization dashboard data:', error);
+          this.isLoading = false;
+        },
+      });
+  }
+
+  private updateRevenueChart(data: any): void {
+    if (data.revenueBreakdown) {
+      this.revenueChartData = {
+        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], // This should come from API
+        datasets: data.revenueBreakdown.map((item: any) => ({
+          label: item.source.charAt(0).toUpperCase() + item.source.slice(1),
+          data: [28000, 32000, 30000, 38000, 45000, 62000], // This should come from API
+          borderColor: item.color,
+          backgroundColor: item.color + '20',
+          fill: true,
+          tension: 0.4,
+          borderWidth: 3,
+          pointBackgroundColor: item.color,
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+        })),
+      };
+    }
+  }
 
   revenueChartOptions = {
     responsive: true,
@@ -530,11 +578,7 @@ export class DashboardComponent {
       {
         label: 'Store Distribution',
         data: [45, 30, 25],
-        backgroundColor: [
-          '#7ed7a5',
-          '#06b6d4', 
-          '#fb923c'
-        ],
+        backgroundColor: ['#7ed7a5', '#06b6d4', '#fb923c'],
         borderColor: '#ffffff',
         borderWidth: 3,
         hoverOffset: 8,
