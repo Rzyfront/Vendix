@@ -84,10 +84,12 @@ export class OrganizationDashboardService {
 
   getDashboardStats(
     organizationId: string,
+    period?: string,
   ): Observable<OrganizationDashboardStats> {
+    const params = period ? `?period=${period}` : '';
     return this.http
       .get<OrganizationDashboardStats>(
-        `${this.apiUrl}/organizations/${organizationId}/stats`,
+        `${this.apiUrl}/organizations/${organizationId}/stats${params}`,
       )
       .pipe(
         catchError((error) => {

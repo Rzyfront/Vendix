@@ -17,7 +17,7 @@ import slugify from 'slugify';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async create(createOrganizationDto: CreateOrganizationDto) {
     const slug = slugify(createOrganizationDto.name, {
@@ -142,8 +142,80 @@ export class OrganizationsService {
     return this.prisma.organizations.delete({ where: { id } });
   }
 
+  private async getProfitTrendData(organization_id: number, period?: string) {
+    let monthsToGenerate = 6; // default
+
+    if (period === '1y') {
+      monthsToGenerate = 12;
+    } else if (period === 'all') {
+      // Get the earliest order date for this organization
+      const earliestOrder = await this.prisma.orders.findFirst({
+        where: {
+          stores: { organization_id },
+        },
+        orderBy: { created_at: 'asc' },
+        select: { created_at: true },
+      });
+
+      if (earliestOrder) {
+        const now = new Date();
+        const monthsDiff =
+          (now.getFullYear() - earliestOrder.created_at.getFullYear()) * 12 +
+          (now.getMonth() - earliestOrder.created_at.getMonth());
+        monthsToGenerate = Math.max(monthsDiff + 1, 1);
+      }
+    }
+
+    return Promise.all(
+      Array.from({ length: monthsToGenerate }).map(async (_, i) => {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+
+        const start = new Date(d.getFullYear(), d.getMonth(), 1);
+        const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+
+        const [revenueRes, costRes] = await Promise.all([
+          // Revenue
+          this.prisma.orders.aggregate({
+            where: {
+              stores: { organization_id },
+              created_at: { gte: start, lte: end },
+              state: 'finished',
+            },
+            _sum: { grand_total: true, shipping_cost: true },
+          }),
+          // Cost of Goods Sold
+          this.prisma.order_items.aggregate({
+            where: {
+              orders: {
+                stores: { organization_id: organization_id },
+                created_at: { gte: start, lte: end },
+                state: 'finished',
+              },
+            },
+            _sum: { total_cost: true },
+          }),
+        ]);
+
+        const revenue = Number(revenueRes._sum.grand_total || 0);
+        const shippingCost = Number(revenueRes._sum.shipping_cost || 0);
+        const cogs = Number(costRes._sum.total_cost || 0);
+        const totalCosts = shippingCost + cogs;
+        const profit = revenue - totalCosts;
+
+        return {
+          month: start.toLocaleString('default', { month: 'short' }),
+          year: start.getFullYear(),
+          amount: profit,
+          revenue: revenue,
+          costs: totalCosts,
+        };
+      }),
+    );
+  }
+
   async getDashboard(id: number, query: OrganizationDashboardDto) {
-    const { start_date, end_date } = query;
+    const { start_date, end_date, period } = query;
 
     // Dates setup
     const now = new Date();
@@ -182,56 +254,63 @@ export class OrganizationsService {
       storeActivity,
       userGrowth,
       auditActivity,
-      revenueTrendRaw,
-      storeDistributionRaw,
+      profitTrend,
+      storeDistribution,
     ] = await Promise.all([
       // Total Stores
       this.prisma.stores.count({
         where: { organization_id: id, is_active: true },
       }),
-      // New Stores This Month
+
+      // New stores this month
       this.prisma.stores.count({
         where: {
           organization_id: id,
+          is_active: true,
           created_at: { gte: currentMonthStart },
         },
       }),
 
-      // Active Users (Total)
+      // Active Users
       this.prisma.users.count({
         where: {
           organization_id: id,
           state: 'active',
         },
       }),
-      // Online Users (Active sessions in last 15 mins or so, or just active sessions)
-      this.prisma.user_sessions.count({
+
+      // Online users (simplified - could be enhanced with actual session tracking)
+      this.prisma.users.count({
         where: {
-          users: { organization_id: id },
-          is_active: true,
+          organization_id: id,
+          state: 'active',
+          // Add last_seen logic for real online tracking
         },
       }),
 
-      // Monthly Orders (Current Month)
+      // Monthly Orders
       this.prisma.orders.count({
         where: {
-          store: { organization_id: id },
+          stores: { organization_id: id },
           created_at: { gte: currentMonthStart },
-        },
-      }),
-      // Orders Today
-      this.prisma.orders.count({
-        where: {
-          store: { organization_id: id },
-          created_at: { gte: todayStart },
+          state: 'finished',
         },
       }),
 
-      // Profit Current Month (Revenue - Costs)
+      // Orders today
+      this.prisma.orders.count({
+        where: {
+          stores: { organization_id: id },
+          created_at: { gte: todayStart },
+          state: 'finished',
+        },
+      }),
+
+      // Revenue Current Month (Profit)
       Promise.all([
         this.prisma.orders.aggregate({
           where: {
-            store: { organization_id: id },
+            stores: { organization_id: id },
             created_at: { gte: currentMonthStart },
             state: 'finished',
           },
@@ -239,8 +318,8 @@ export class OrganizationsService {
         }),
         this.prisma.order_items.aggregate({
           where: {
-            order: {
-              store: { organization_id: id },
+            orders: {
+              stores: { organization_id: id },
               created_at: { gte: currentMonthStart },
               state: 'finished',
             },
@@ -253,11 +332,12 @@ export class OrganizationsService {
         const cogs = Number(costRes._sum.total_cost || 0);
         return { _sum: { profit: revenue - shippingCost - cogs } };
       }),
+
       // Profit Last Month (Revenue - Costs)
       Promise.all([
         this.prisma.orders.aggregate({
           where: {
-            store: { organization_id: id },
+            stores: { organization_id: id },
             created_at: { gte: lastMonthStart, lte: lastMonthEnd },
             state: 'finished',
           },
@@ -265,8 +345,8 @@ export class OrganizationsService {
         }),
         this.prisma.order_items.aggregate({
           where: {
-            order: {
-              store: { organization_id: id },
+            orders: {
+              stores: { organization_id: id },
               created_at: { gte: lastMonthStart, lte: lastMonthEnd },
               state: 'finished',
             },
@@ -321,57 +401,11 @@ export class OrganizationsService {
         },
       }),
 
-      // Profit Trend (Last 6 months) - Revenue minus costs
-      Promise.all(
-        Array.from({ length: 6 }).map((_, i) => {
-          const d = new Date();
-          d.setMonth(d.getMonth() - i);
+      // Enhanced Profit Trend with period support
+      this.getProfitTrendData(id, period),
 
-          const start = new Date(d.getFullYear(), d.getMonth(), 1);
-          const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-
-          return Promise.all([
-            // Revenue
-            this.prisma.orders.aggregate({
-              where: {
-                store: { organization_id: id },
-                created_at: { gte: start, lte: end },
-                state: 'finished',
-              },
-              _sum: { grand_total: true, shipping_cost: true },
-            }),
-            // Cost of Goods Sold
-            this.prisma.order_items.aggregate({
-              where: {
-                order: {
-                  store: { organization_id: id },
-                  created_at: { gte: start, lte: end },
-                  state: 'finished',
-                },
-              },
-              _sum: { total_cost: true },
-            }),
-          ]).then(([revenueRes, costRes]) => {
-            const revenue = Number(revenueRes._sum.grand_total || 0);
-            const shippingCost = Number(revenueRes._sum.shipping_cost || 0);
-            const cogs = Number(costRes._sum.total_cost || 0);
-            const totalCosts = shippingCost + cogs;
-            const profit = revenue - totalCosts;
-
-            return {
-              month: start.toLocaleString('default', { month: 'short' }),
-              year: start.getFullYear(),
-              amount: profit,
-            };
-          });
-        }),
-      ),
-
-      // Store Distribution by Sales Type (Physical/Online)
-      this.prisma.stores.findMany({
-        where: { organization_id: id, is_active: true },
-        select: { store_type: true },
-      }),
+      // Enhanced Store Distribution by Revenue
+      this.getStoreDistributionByRevenue(id),
     ]);
 
     const currentRev = Number(revenueCurrentMonth._sum.profit || 0);
@@ -379,24 +413,7 @@ export class OrganizationsService {
     const revenueDiff = currentRev - lastRev;
 
     // Process revenue trend (reverse to show chronological order)
-    const revenueTrend = revenueTrendRaw.reverse();
-
-    // Process store distribution by sales types
-    const salesTypeCounts = storeDistributionRaw.reduce(
-      (acc, store) => {
-        const salesType = store.store_type === 'online' ? 'online' : 'physical';
-        acc[salesType] = (acc[salesType] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>,
-    );
-
-    const storeDistribution = Object.entries(salesTypeCounts).map(
-      ([type, count]) => ({
-        type,
-        count,
-      }),
-    );
+    const revenueTrend = profitTrend.reverse();
 
     return {
       organization_id: id,
@@ -451,9 +468,59 @@ export class OrganizationsService {
     };
   }
 
+  private async getStoreDistributionByRevenue(organization_id: number) {
+    // Get revenue by store type for current month
+    const currentMonthStart = new Date(
+      new Date().getFullYear(),
+      new Date().getMonth(),
+      1,
+    );
+
+    // Get stores with their orders and revenue
+    const storesWithRevenue = await this.prisma.stores.findMany({
+      where: {
+        organization_id,
+        is_active: true,
+      },
+      select: {
+        store_type: true,
+        orders: {
+          where: {
+            created_at: { gte: currentMonthStart },
+            state: 'finished',
+          },
+          select: {
+            grand_total: true,
+          },
+        },
+      },
+    });
+
+    // Calculate revenue by store type
+    const revenueByType = storesWithRevenue.reduce(
+      (acc, store) => {
+        const storeRevenue = store.orders.reduce(
+          (sum, order) => sum + Number(order.grand_total || 0),
+          0,
+        );
+        const salesType = store.store_type === 'online' ? 'online' : 'physical';
+        acc[salesType] = (acc[salesType] || 0) + storeRevenue;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
+
+    return Object.entries(revenueByType).map(([type, revenue]) => ({
+      type,
+      revenue,
+      percentage: 0, // Will be calculated on frontend
+      order_count: 0, // Can be enhanced if needed
+    }));
+  }
+
   async getDashboardStats(): Promise<OrganizationsDashboardStatsDto> {
     // Obtener el total de organizaciones
-    const totalOrganizations = await this.prisma.organizations.count();
+    const total_organizations = await this.prisma.organizations.count();
 
     // Obtener organizaciones activas
     const active = await this.prisma.organizations.count({
@@ -471,7 +538,7 @@ export class OrganizationsService {
     });
 
     return {
-      total_organizations: totalOrganizations,
+      total_organizations,
       active,
       inactive,
       suspended,

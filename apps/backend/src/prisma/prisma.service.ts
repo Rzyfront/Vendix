@@ -49,6 +49,7 @@ export class PrismaService implements OnModuleInit {
     'tax_rates',
     'orders',
     'payments',
+    'store_payment_methods',  // NUEVO: métodos de pago por tienda
   ];
 
   constructor() {
@@ -205,9 +206,12 @@ export class PrismaService implements OnModuleInit {
   get orders() {
     return this.scopedClient.orders;
   }
-  get payment_methods() {
-    return this.scopedClient.payment_methods;
-  }
+  get system_payment_methods() {
+    return this.baseClient.system_payment_methods;
+  } // GLOBAL: catálogo de métodos de pago del sistema
+  get store_payment_methods() {
+    return this.scopedClient.store_payment_methods;
+  } // STORE-SCOPED: métodos habilitados por tienda
   get payments() {
     return this.scopedClient.payments;
   }

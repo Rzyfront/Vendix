@@ -1,6 +1,8 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { PaymentsController } from './payments.controller';
 import { WebhookController } from './webhook.controller';
+import { SystemPaymentMethodsController } from './controllers/system-payment-methods.controller';
+import { StorePaymentMethodsController } from './controllers/store-payment-methods.controller';
 import { PaymentsService } from './payments.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { ResponseModule } from '../../common/responses/response.module';
@@ -12,6 +14,8 @@ import {
   PaymentValidatorService,
   WebhookHandlerService,
 } from './services';
+import { SystemPaymentMethodsService } from './services/system-payment-methods.service';
+import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import {
   CashPaymentModule,
   StripeModule,
@@ -33,7 +37,12 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     BankTransferModule,
     forwardRef(() => OrdersModule),
   ],
-  controllers: [PaymentsController, WebhookController],
+  controllers: [
+    PaymentsController,
+    WebhookController,
+    SystemPaymentMethodsController,
+    StorePaymentMethodsController,
+  ],
   providers: [
     PaymentsService,
     PaymentGatewayService,
@@ -42,6 +51,8 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     WebhookController,
     StockLevelManager,
     InventoryTransactionsService,
+    SystemPaymentMethodsService,
+    StorePaymentMethodsService,
   ],
   exports: [
     PaymentsService,
@@ -49,6 +60,8 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     PaymentValidatorService,
     WebhookHandlerService,
     WebhookController,
+    SystemPaymentMethodsService,
+    StorePaymentMethodsService,
   ],
 })
 export class PaymentsModule implements OnModuleInit {
@@ -58,7 +71,7 @@ export class PaymentsModule implements OnModuleInit {
     private stripeProcessor: StripeProcessor,
     private paypalProcessor: PaypalProcessor,
     private bankTransferProcessor: BankTransferProcessor,
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.paymentGateway.registerProcessor('cash', this.cashProcessor);

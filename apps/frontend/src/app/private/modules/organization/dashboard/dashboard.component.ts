@@ -178,20 +178,44 @@ import { takeUntil } from 'rxjs/operators';
               </div>
               <div class="flex gap-2">
                 <button
-                  class="px-3 py-1 text-sm rounded-lg"
-                  style="background-color: var(--primary); color: white;"
+                  class="px-3 py-1 text-sm rounded-lg transition-colors"
+                  [style.background-color]="
+                    selectedPeriod === '6m' ? 'var(--primary)' : 'var(--muted)'
+                  "
+                  [style.color]="
+                    selectedPeriod === '6m'
+                      ? 'white'
+                      : 'var(--muted-foreground)'
+                  "
+                  (click)="onPeriodChange('6m')"
                 >
                   6M
                 </button>
                 <button
-                  class="px-3 py-1 text-sm rounded-lg"
-                  style="background-color: var(--muted); color: var(--muted-foreground);"
+                  class="px-3 py-1 text-sm rounded-lg transition-colors"
+                  [style.background-color]="
+                    selectedPeriod === '1y' ? 'var(--primary)' : 'var(--muted)'
+                  "
+                  [style.color]="
+                    selectedPeriod === '1y'
+                      ? 'white'
+                      : 'var(--muted-foreground)'
+                  "
+                  (click)="onPeriodChange('1y')"
                 >
                   1Y
                 </button>
                 <button
-                  class="px-3 py-1 text-sm rounded-lg"
-                  style="background-color: var(--muted); color: var(--muted-foreground);"
+                  class="px-3 py-1 text-sm rounded-lg transition-colors"
+                  [style.background-color]="
+                    selectedPeriod === 'all' ? 'var(--primary)' : 'var(--muted)'
+                  "
+                  [style.color]="
+                    selectedPeriod === 'all'
+                      ? 'white'
+                      : 'var(--muted-foreground)'
+                  "
+                  (click)="onPeriodChange('all')"
                 >
                   All
                 </button>
@@ -216,10 +240,10 @@ import { takeUntil } from 'rxjs/operators';
         >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
-              Store Distribution
+              Sales Distribution
             </h2>
             <p class="text-sm" style="color: var(--muted-foreground);">
-              By category
+              By sales type (Physical vs Online)
             </p>
           </div>
           <div class="p-6">
@@ -236,20 +260,17 @@ import { takeUntil } from 'rxjs/operators';
                 class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
               >
                 <span class="text-3xl font-bold" style="color: var(--text);">
-                  {{ dashboardStats?.stats?.total_stores?.value || 0 }}
+                  {{ storeDistributionLegend.length }}
                 </span>
                 <span class="text-sm" style="color: var(--muted-foreground);">
-                  Stores
+                  Types
                 </span>
               </div>
             </div>
 
             <div class="mt-6 space-y-3">
               <div
-                *ngFor="
-                  let item of dashboardStats?.store_distribution;
-                  let i = index
-                "
+                *ngFor="let item of storeDistributionLegend; let i = index"
                 class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <div class="flex items-center gap-3">
@@ -268,11 +289,17 @@ import { takeUntil } from 'rxjs/operators';
                       '4d'
                     "
                   ></div>
-                  <span class="font-medium text-gray-700">{{ item.type }}</span>
+                  <div>
+                    <span class="font-medium text-gray-700">{{
+                      item.type
+                    }}</span>
+                    <div class="text-xs text-gray-500">
+                      {{ item.percentage }}%
+                    </div>
+                  </div>
                 </div>
                 <div class="text-right">
-                  <span class="font-bold text-gray-900">{{ item.count }}</span>
-                  <!-- <div class="text-xs text-gray-500">stores</div> -->
+                  <span class="font-bold text-gray-900">{{ item.value }}</span>
                 </div>
               </div>
             </div>
@@ -499,6 +526,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   isLoading = false;
   organizationId: string = '';
   dashboardStats: any | null = null; // Using any to avoid strict type issues if interface isn't fully aligned yet, or use OrganizationDashboardStats
+  selectedPeriod: string = '6m';
   storeDistributionColors = [
     '#7ed7a5',
     '#06b6d4',
@@ -506,6 +534,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     '#a855f7',
     '#ec4899',
   ];
+  storeDistributionLegend: any[] = [];
 
   // Revenue Chart Data - Stacked Line Chart
   revenueChartData: ChartData = {
@@ -552,7 +581,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     this.isLoading = true;
 
     this.organizationDashboardService
-      .getDashboardStats(this.organizationId)
+      .getDashboardStats(this.organizationId, this.selectedPeriod)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
@@ -568,19 +597,65 @@ export class DashboardComponent implements OnInit, OnDestroy {
       });
   }
 
+  onPeriodChange(period: string): void {
+    this.selectedPeriod = period;
+    this.loadDashboardData();
+  }
+
+  private formatCurrency(value: number): string {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  }
+
   private updateRevenueChart(data: any): void {
     if (data.profit_trend) {
-      const labels = data.profit_trend.map((item: any) => item.month);
-      const values = data.profit_trend.map((item: any) => item.amount);
+      const labels = data.profit_trend.map(
+        (item: any) => `${item.month} ${item.year}`,
+      );
+      const revenue = data.profit_trend.map((item: any) => item.revenue || 0);
+      const costs = data.profit_trend.map((item: any) => item.costs || 0);
+      const profit = data.profit_trend.map((item: any) => item.amount || 0);
 
       this.revenueChartData = {
         labels: labels,
         datasets: [
           {
-            label: 'Total Profit',
-            data: values,
+            label: 'Revenue',
+            data: revenue,
+            borderColor: '#3b82f6', // Blue color
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: false,
+            tension: 0.4,
+            borderWidth: 2,
+            pointBackgroundColor: '#ffffff',
+            pointBorderColor: '#3b82f6',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
+          {
+            label: 'Costs',
+            data: costs,
+            borderColor: '#ef4444', // Red color
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            fill: false,
+            tension: 0.4,
+            borderWidth: 2,
+            pointBackgroundColor: '#ffffff',
+            pointBorderColor: '#ef4444',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
+          {
+            label: 'Profit',
+            data: profit,
             borderColor: '#22c55e', // Success color
-            backgroundColor: 'rgba(34, 197, 94, 0.1)', // Light success color
+            backgroundColor: 'rgba(34, 197, 94, 0.1)',
             fill: true,
             tension: 0.4,
             borderWidth: 2,
@@ -597,14 +672,21 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   private updateStoreDistributionChart(data: any): void {
     if (data.store_distribution) {
-      const labels = data.store_distribution.map((item: any) => item.type);
-      const values = data.store_distribution.map((item: any) => item.count);
+      const labels = data.store_distribution.map(
+        (item: any) => item.type.charAt(0).toUpperCase() + item.type.slice(1),
+      );
+      const values = data.store_distribution.map(
+        (item: any) => item.revenue || 0,
+      );
+
+      // Calculate total for percentage
+      const total = values.reduce((sum: number, val: number) => sum + val, 0);
 
       this.storeDistributionData = {
         labels: labels,
         datasets: [
           {
-            label: 'Store Distribution',
+            label: 'Sales Distribution',
             data: values,
             backgroundColor: this.storeDistributionColors,
             borderColor: '#ffffff',
@@ -615,6 +697,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
           },
         ],
       };
+
+      // Update the display values in the legend
+      this.storeDistributionLegend = data.store_distribution.map(
+        (item: any) => ({
+          type: item.type.charAt(0).toUpperCase() + item.type.slice(1),
+          value: this.formatCurrency(item.revenue || 0),
+          percentage:
+            total > 0 ? (((item.revenue || 0) / total) * 100).toFixed(1) : '0',
+        }),
+      );
     }
   }
 

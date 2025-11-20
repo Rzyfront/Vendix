@@ -25,7 +25,7 @@ export class PaymentsService {
     private prisma: PrismaService,
     private paymentGateway: PaymentGatewayService,
     private stockLevelManager: StockLevelManager,
-  ) {}
+  ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -231,8 +231,10 @@ export class PaymentsService {
     }
 
     if (paymentMethodType) {
-      where.payment_methods = {
-        type: paymentMethodType,
+      where.store_payment_method = {
+        system_payment_method: {
+          type: paymentMethodType,
+        },
       };
     }
 
@@ -302,7 +304,7 @@ export class PaymentsService {
             },
           },
         },
-        payment_methods: true,
+        store_payment_method: true,
         refunds: true,
       },
     });
@@ -370,8 +372,7 @@ export class PaymentsService {
     console.error(
       `Access denied: User ${user.id} (Roles: ${JSON.stringify(
         user.roles,
-      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${
-        store?.organization_id
+      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${store?.organization_id
       }). Allowed stores: ${JSON.stringify(userStoreIds)}`,
     );
     throw new ForbiddenException('Access denied to this store');
@@ -437,13 +438,13 @@ export class PaymentsService {
           },
           payment: payment
             ? {
-                id: payment.id,
-                amount: payment.amount,
-                payment_method: payment.payment_methods?.name || 'Unknown',
-                status: payment.status,
-                transaction_id: payment.transaction_id,
-                change: payment.change,
-              }
+              id: payment.id,
+              amount: payment.amount,
+              payment_method: payment.store_payment_method?.display_name || payment.store_payment_method?.system_payment_method?.display_name || 'Unknown',
+              status: payment.status,
+              transaction_id: payment.transaction_id,
+              change: payment.change,
+            }
             : undefined,
         };
       });
@@ -536,8 +537,11 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
   ) {
     // Get payment method details
-    const paymentMethod = await tx.payment_methods.findFirst({
+    const paymentMethod = await tx.store_payment_methods.findFirst({
       where: { id: dto.payment_method_id },
+      include: {
+        system_payment_method: true,
+      },
     });
 
     if (!paymentMethod) {
@@ -546,7 +550,7 @@ export class PaymentsService {
 
     // Calculate change for cash payments
     let change = 0;
-    if (paymentMethod.type === 'cash' && dto.amount_received) {
+    if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
       change = dto.amount_received - dto.total_amount;
     }
 
@@ -571,7 +575,11 @@ export class PaymentsService {
         },
       },
       include: {
-        payment_methods: true,
+        store_payment_method: {
+          include: {
+            system_payment_method: true,
+          },
+        },
       },
     });
 
@@ -709,7 +717,7 @@ export class PaymentsService {
     // Use standardized validation method
     await this.validateUserAccess(user, storeId);
 
-    return this.prisma.payment_methods.findMany({
+    return this.prisma.store_payment_methods.findMany({
       where: {
         store_id: storeId,
         state: 'enabled',
@@ -727,6 +735,7 @@ export class PaymentsService {
 
   /**
    * Create payment method for a store
+   * @deprecated Use StorePaymentMethodsService.enableForStore instead
    */
   async createStorePaymentMethod(
     storeId: number,
@@ -736,24 +745,10 @@ export class PaymentsService {
     // Use standardized validation method
     await this.validateUserAccess(user, storeId);
 
-    const { name, type, provider, config } = createPaymentMethodDto;
-
-    return this.prisma.payment_methods.create({
-      data: {
-        store_id: storeId,
-        name,
-        type,
-        provider: provider || 'internal',
-        config: config || {},
-        state: 'enabled',
-      },
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        provider: true,
-        state: true,
-      },
-    });
+    // This method is deprecated - use StorePaymentMethodsService.enableForStore instead
+    throw new BadRequestException(
+      'Creating payment methods directly is deprecated. Use POST /stores/:storeId/payment-methods/enable/:systemMethodId instead',
+    );
   }
 }
+
