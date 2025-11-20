@@ -181,7 +181,11 @@ export class PosCustomerService {
         const updatedCustomer = {
           ...currentCustomers[customerIndex],
           ...updates,
-          updatedAt: new Date(),
+          name:
+            updates.first_name || updates.last_name
+              ? `${updates.first_name || currentCustomers[customerIndex].first_name} ${updates.last_name || currentCustomers[customerIndex].last_name}`.trim()
+              : currentCustomers[customerIndex].name,
+          updated_at: new Date(),
         };
 
         currentCustomers[customerIndex] = updatedCustomer;
@@ -278,11 +282,16 @@ export class PosCustomerService {
   private createCustomerFromRequest(
     request: CreatePosCustomerRequest,
   ): PosCustomer {
+    const firstName = request.first_name.trim();
+    const lastName = request.last_name?.trim() || '';
+    const name = `${firstName} ${lastName}`.trim();
+
     return {
       id: this.generateCustomerId(),
       email: request.email.trim().toLowerCase(),
-      first_name: request.first_name.trim(),
-      last_name: request.last_name?.trim(),
+      first_name: firstName,
+      last_name: lastName,
+      name: name,
       phone: request.phone,
       document_type: request.document_type,
       document_number: request.document_number?.trim(),
@@ -302,11 +311,16 @@ export class PosCustomerService {
    * Map API customer response to PosCustomer
    */
   private mapApiCustomerToPosCustomer(apiCustomer: any): PosCustomer {
+    const firstName = apiCustomer.first_name || '';
+    const lastName = apiCustomer.last_name || '';
+    const name = `${firstName} ${lastName}`.trim();
+
     return {
       id: apiCustomer.id,
       email: apiCustomer.email,
       first_name: apiCustomer.first_name,
       last_name: apiCustomer.last_name,
+      name: name || apiCustomer.email, // Fallback to email if no name
       phone: apiCustomer.phone,
       document_type: apiCustomer.document_type,
       document_number: apiCustomer.document_number,

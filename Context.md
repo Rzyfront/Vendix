@@ -1,5 +1,30 @@
 # Vendix App Context
 
+## Rules !!CRITICAL!!
+
+### Variable Naming Conventions - ABSOLUTE PRIORITY
+The following variable naming conventions are **MANDATORY** and **NON-NEGOTIABLE**:
+
+- **Variables**: MUST use snake_case (e.g., `user_name`, `order_total`, `is_active`)
+- **Functions**: MUST use CamelCase (e.g., `getUserData()`, `calculateOrderTotal()`)
+- **Classes**: MUST use PascalCase (e.g., `UserService`, `OrderService`)
+
+**SUPER IMPORTANT!!**: Variable naming consistency is CRITICAL for:
+- Code readability and maintainability
+- Team collaboration efficiency
+- Automated code quality tools
+- Preventing naming conflicts and bugs
+- Ensuring proper TypeScript type inference
+
+**VIOLATIONS of variable naming conventions are considered CRITICAL issues and MUST be fixed immediately.**
+
+### Development Principles
+
+- Always use Task tool or multi-task tools available for complex operations
+- Prioritize code consistency over individual preferences
+- Follow established patterns strictly
+- Maintain high code quality standards
+
 ## Infrastructure
 
 - Runs in Docker with containers: `vendix_postgres` (PostgreSQL), `vendix_backend` (NestJS), `vendix_frontend` (Angular).
@@ -20,9 +45,13 @@
 
 ## Code Conventions !!IMPORTANT!!
 
-- Functions: CamelCase (e.g., `getUserData`).
-- Variables: snake_case (e.g., `user_name`).
-- Classes: PascalCase (e.g., `UserService`).
+### **ABSOLUTELY MANDATORY - Variable Naming (CRITICAL PRIORITY!!)**
+
+- **Variables**: MUST be snake_case (e.g., `user_name`, `order_total`, `product_list`) - **NO EXCEPTIONS!**
+- **Functions**: MUST be CamelCase (e.g., `getUserData()`, `calculateOrderTotal()`) - **NO EXCEPTIONS!**
+- **Classes**: MUST be PascalCase (e.g., `UserService`, `OrderService`) - **NO EXCEPTIONS!**
+
+**REMINDER**: Variable naming conventions are CRITICAL for project success. Violations will be immediately flagged and must be corrected. This affects code maintainability, team collaboration, and overall project quality.
 
 ## Architecture
 
@@ -298,3 +327,31 @@ tableColumns: TableColumn[] = [
 - Avoid complex calculations in templates
 - Use trackBy on large lists
 - Lazy loading of heavy components
+
+## Mandatory Requirements !!NON-NEGOTIABLE!!
+
+### **ALWAYS USE TASK TOOLS!!**
+For all complex, multi-step, or exploration tasks, you **MUST** use:
+- `Task tool` with specialized agents (Explore, Plan, general-purpose)
+- Available multi-task tools for parallel operations
+- Specialized tools before resorting to basic commands
+
+### **VARIABLE NAMING IS ABSOLUTE PRIORITY!!**
+You **MUST ALWAYS** respect variable naming conventions:
+- **Variables**: `snake_case` (e.g., `user_data`, `order_total`)
+- **Functions**: `CamelCase` (e.g., `getUserData()`, `processOrder()`)
+- **Classes**: `PascalCase` (e.g., `UserService`, `OrderService`)
+
+**IMPORTANT!!!** This is not optional:
+- Always double-check variable names before writing code
+- Never compromise on naming conventions for any reason
+- Immediately fix any naming violations
+- Reinforce these conventions in every interaction
+
+### **ENFORCEMENT POLICY**
+- Variable naming violations are treated as **CRITICAL bugs**
+- Failure to use Task tools when appropriate is **unacceptable**
+- Consistency and quality standards are **non-negotiable**
+- These rules apply to **ALL** code changes, no exceptions
+
+**REMEMBER**: Code quality and consistency directly impact project success, team productivity, and long-term maintainability.

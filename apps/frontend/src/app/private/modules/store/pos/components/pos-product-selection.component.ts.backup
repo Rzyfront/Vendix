@@ -8,7 +8,6 @@ import {
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { Store } from '@ngrx/store';
 
 import {
   IconComponent,
@@ -22,11 +21,6 @@ import {
   PosProductService,
   SearchResult,
 } from '../services/pos-product.service';
-import { environment } from '../../../../../../environments/environment';
-import {
-  selectAccessToken,
-  selectUser,
-} from '../../../../../core/store/auth/auth.selectors';
 
 @Component({
   selector: 'app-pos-product-selection',
@@ -141,9 +135,7 @@ import {
             "
           >
             <!-- Product Image or Icon -->
-            <div
-              class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
-            >
+            <div class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden">
               <!-- Product Image -->
               <img
                 *ngIf="product.image_url"
@@ -158,9 +150,7 @@ import {
                 *ngIf="!product.image_url"
                 class="absolute inset-0 flex items-center justify-center"
               >
-                <div
-                  class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
-                >
+                <div class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
                   <app-icon
                     name="image"
                     [size]="24"
@@ -179,9 +169,7 @@ import {
                     : 'bg-warning/80 text-white border-warning/60'
                 "
               >
-                {{
-                  product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock
-                }}
+                {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
               </div>
             </div>
 
@@ -209,16 +197,13 @@ import {
                 <!-- Price -->
                 <div class="flex flex-col">
                   <span class="text-text-primary font-bold text-lg">
-                    {{ product.price }}
+                    ${{ product.price }}
                   </span>
                   <span
-                    *ngIf="
-                      product.compare_at_price &&
-                      product.compare_at_price > product.price
-                    "
+                    *ngIf="product.compare_at_price && product.compare_at_price > product.price"
                     class="text-text-muted text-xs line-through"
                   >
-                    {{ product.compare_at_price }}
+                    ${{ product.compare_at_price }}
                   </span>
                 </div>
 
@@ -245,15 +230,9 @@ import {
                 *ngIf="product.sku || product.category_name"
                 class="mt-2 pt-2 border-t border-border/60"
               >
-                <div
-                  class="flex items-center justify-between text-xs text-text-muted"
-                >
-                  <span *ngIf="product.sku" class="font-mono">{{
-                    product.sku
-                  }}</span>
-                  <span *ngIf="product.category_name">{{
-                    product.category_name
-                  }}</span>
+                <div class="flex items-center justify-between text-xs text-text-muted">
+                  <span *ngIf="product.sku" class="font-mono">{{ product.sku }}</span>
+                  <span *ngIf="product.category_name">{{ product.category_name }}</span>
                 </div>
               </div>
             </div>
@@ -337,14 +316,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     private productService: PosProductService,
     private cartService: PosCartService,
     private toastService: ToastService,
-    private store: Store,
   ) {}
 
   ngOnInit(): void {
-    this.checkAuthState();
     this.initializeCategories();
     this.setupSearchSubscription();
-
     this.loadProducts();
   }
 
@@ -373,7 +349,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           this.categories = [this.categories[0], ...backendCategories];
         },
         error: (error) => {
-          // Error loading categories, using defaults
+          console.warn('Error loading categories, using defaults:', error);
         },
       });
   }
@@ -394,9 +370,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   private filterProducts(): void {
     const filters: any = {
-      // pos_optimized: true,
-      // include_stock: true,
+      pos_optimized: true,
+      include_stock: true,
       state: 'active',
+      store_id: this.getCurrentStoreId(),
     };
 
     if (this.searchQuery) {
@@ -412,18 +389,45 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result: SearchResult) => {
+          console.log('SearchResult received:', result);
+          console.log('Products count:', result.products?.length || 0);
+
           const uniqueProducts = this.removeDuplicateProducts(
             result.products || [],
           );
 
           this.filteredProducts = uniqueProducts;
           this.loading = false;
+
+          console.log('Unique products set:', this.filteredProducts);
+          console.log('Unique products length:', this.filteredProducts.length);
         },
         error: (error: any) => {
           this.loading = false;
           this.toastService.error('Error al cargar productos');
+          console.error('Product search error:', error);
         },
       });
+  }
+
+  private getCurrentStoreId(): number {
+    const storeData = localStorage.getItem('current_store');
+    if (storeData) {
+      try {
+        const store = JSON.parse(storeData);
+        if (!store?.id) {
+          throw new Error(
+            'No se pudo determinar el store ID del contexto actual',
+          );
+        }
+        return typeof store.id === 'string' ? parseInt(store.id) : store.id;
+      } catch {
+        throw new Error(
+          'No se pudo determinar el store ID del contexto actual',
+        );
+      }
+    }
+    throw new Error('No se pudo determinar el store ID del contexto actual');
   }
 
   onSearch(searchTerm: string): void {
@@ -508,23 +512,27 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
     const seen = new Set<string>();
     const uniqueProducts = products.filter((product) => {
-      if (
-        !product ||
-        product.id === undefined ||
-        product.id === null ||
-        product.id === ''
-      ) {
+      if (!product || !product.id) {
+        console.warn('Invalid product found and removed:', product);
         return false;
       }
 
       const productId = product.id;
       if (seen.has(productId)) {
+        console.warn(
+          'Duplicate product found and removed:',
+          productId,
+          product.name,
+        );
         return false;
       }
       seen.add(productId);
       return true;
     });
 
+    console.log(
+      `Removed ${products.length - uniqueProducts.length} duplicate products`,
+    );
     return uniqueProducts;
   }
 
@@ -540,30 +548,5 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       return 'Intenta buscar con otros términos o cambia la categoría.';
     }
     return 'Los productos aparecerán aquí cuando estén disponibles.';
-  }
-
-  private checkAuthState(): void {
-    // Use store selectors instead of direct localStorage access
-    this.store.select(selectAccessToken).subscribe((token: any) => {
-      if (!token) {
-        this.toastService.error(
-          'No estás autenticado. Por favor, inicia sesión.',
-        );
-      }
-    });
-
-    this.store.select(selectUser).subscribe((user: any) => {
-      // User data handled by store
-    });
-
-    // Keep store check for now since it's critical for POS
-    const currentStore = localStorage.getItem('current_store');
-    if (currentStore) {
-      try {
-        JSON.parse(currentStore);
-      } catch (e) {
-        // Error parsing current store
-      }
-    }
   }
 }

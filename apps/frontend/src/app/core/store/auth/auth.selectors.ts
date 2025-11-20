@@ -30,12 +30,12 @@ export const selectTokens = createSelector(
 
 export const selectAccessToken = createSelector(
   selectTokens,
-  (tokens: any) => tokens?.accessToken || null,
+  (tokens: any) => tokens?.access_token || null,
 );
 
 export const selectRefreshToken = createSelector(
   selectTokens,
-  (tokens: any) => tokens?.refreshToken || null,
+  (tokens: any) => tokens?.refresh_token || null,
 );
 
 export const selectIsAuthenticated = createSelector(

@@ -6,59 +6,45 @@
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4"
       >
+        <!-- Título y contador -->
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
-            Usuarios de la Organización ({{ pagination.total }})
+            Usuarios ({{ users.length }})
           </h2>
         </div>
 
-        <div class="filter-compact">
-          <!-- Input de búsqueda compacto -->
+        <!-- Controles compactos -->
+        <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <!-- Búsqueda -->
           <app-inputsearch
-            class="w-full sm:w-64"
+            class="min-w-[200px] flex-1 lg:flex-none"
             size="sm"
             placeholder="Buscar usuarios..."
-            [debounceTime]="1000"
+            [debounceTime]="500"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
 
-          <form [formGroup]="filterForm">
-            <!-- State Filter -->
-            <select
-              formControlName="state"
-              class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm"
-              [disabled]="isLoading"
-            >
-              <option *ngFor="let state of userStates" [value]="state.value">
-                {{ state.label }}
-              </option>
-            </select>
-          </form>
+          <!-- Filtro por estado -->
+          <select
+            formControlName="state"
+            class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
+            [disabled]="isLoading"
+          >
+            <option *ngFor="let state of userStates" [value]="state.value">
+              {{ state.label }}
+            </option>
+          </select>
 
+          <!-- Botones de acción -->
           <div class="flex gap-2 items-center">
-            <!-- View Mode Toggle -->
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="toggleViewMode()"
-              [disabled]="isLoading"
-              title="Cambiar vista"
-            >
-              <app-icon
-                [name]="viewMode === 'table' ? 'grid' : 'list'"
-                [size]="16"
-                slot="icon"
-              ></app-icon>
-            </app-button>
-
             <app-button
               variant="outline"
               size="sm"
               (clicked)="refreshUsers()"
               [disabled]="isLoading"
-              title="Refresh"
+              title="Actualizar"
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
@@ -69,16 +55,9 @@
               title="Nuevo Usuario"
             >
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">Nuevo Usuario</span>
+              <span class="hidden sm:inline ml-2">Nuevo</span>
             </app-button>
           </div>
-        </div>
-
-        <!-- Paginación info -->
-        <div class="flex items-center gap-2 mt-2 sm:mt-0">
-          <span class="text-sm text-text-secondary">
-            Página {{ pagination.page }} de {{ pagination.totalPages }}
-          </span>
         </div>
       </div>
     </div>

@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
-import { Observable, of, BehaviorSubject } from 'rxjs';
+import { Observable, of, BehaviorSubject, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
+import { StoreContextService } from '../../../../../core/services/store-context.service';
 
 export interface Product {
   id: string;
@@ -60,12 +61,14 @@ export interface SearchResult {
 })
 export class PosProductService {
   private readonly apiUrl = `${environment.apiUrl}/products`;
-  private products: Product[] = [];
   private categories: Category[] = [];
   private brands: Brand[] = [];
   private searchHistory$ = new BehaviorSubject<string[]>([]);
 
-  constructor(private http: HttpClient) {
+  constructor(
+    private http: HttpClient,
+    private storeContextService: StoreContextService,
+  ) {
     this.initializeMockData();
   }
 
@@ -93,144 +96,200 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
-    let params = new HttpParams()
-      .set('page', page.toString())
-      .set('limit', pageSize.toString());
+    const query: any = {
+      page,
+      limit: pageSize,
+      state: 'active',
+    };
 
     if (filters.query) {
-      params = params.set('search', filters.query);
+      query.search = filters.query;
     }
 
     if (filters.category && filters.category !== 'all') {
-      params = params.set('category_id', filters.category);
+      query.category_id = filters.category;
     }
 
     if (filters.brand && filters.brand !== 'all') {
-      params = params.set('brand_id', filters.brand);
+      query.brand_id = filters.brand;
     }
 
     if (filters.inStock) {
-      // For POS, we want products with stock
-      params = params.set('include_stock', 'true');
+      query.include_stock = 'true';
     }
 
     if (filters.minPrice) {
-      params = params.set('min_price', filters.minPrice.toString());
+      query.min_price = filters.minPrice;
     }
 
     if (filters.maxPrice) {
-      params = params.set('max_price', filters.maxPrice.toString());
+      query.max_price = filters.maxPrice;
     }
 
     if (filters.pos_optimized) {
-      params = params.set('pos_optimized', 'true');
+      query.pos_optimized = 'true';
     }
 
     if (filters.barcode) {
-      params = params.set('barcode', filters.barcode);
+      query.barcode = filters.barcode;
     }
 
     if (filters.include_stock) {
-      params = params.set('include_stock', 'true');
+      query.include_stock = 'true';
     }
 
-    // Add store filter if available
-    const currentStore = this.getCurrentStoreId();
-    if (currentStore) {
-      params = params.set('store_id', currentStore.toString());
-    }
-
-    // Only get active products for POS
-    params = params.set('state', 'active');
+    const params = this.buildParams(query);
 
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => {
-        // Handle different response formats
+        // Handle actual backend response format
         let products = [];
         let total = 0;
         let currentPage = page;
         let limit = pageSize;
         let totalPages = 0;
 
-        if (response.data && Array.isArray(response.data)) {
-          // Standard paginated response
+        if (response.success && response.data) {
+          // Backend response: { success: true, data: [...], meta: {...} }
+          products = Array.isArray(response.data) ? response.data : [];
+          total = response.meta?.total || response.total || products.length;
+          currentPage = response.meta?.page || response.page || page;
+          limit = response.meta?.limit || response.limit || pageSize;
+          totalPages = Math.ceil(total / limit);
+        } else if (response.data && Array.isArray(response.data)) {
+          // Alternative format: { data: [...], meta: {...} }
           products = response.data;
           total = response.meta?.total || response.total || products.length;
           currentPage = response.meta?.page || response.page || page;
           limit = response.meta?.limit || response.limit || pageSize;
           totalPages = Math.ceil(total / limit);
-        } else if (Array.isArray(response)) {
-          // Direct array response
-          products = response;
-          total = products.length;
-          totalPages = Math.ceil(total / pageSize);
-        } else if (response.products && Array.isArray(response.products)) {
-          // Response with products property
-          products = response.products;
-          total = response.total || products.length;
-          totalPages = Math.ceil(total / pageSize);
         }
 
+        const transformedProducts = this.transformProducts(products);
+
         return {
-          products: this.transformProducts(products),
+          products: transformedProducts,
           total,
           page: currentPage,
           pageSize: limit,
           totalPages,
         };
       }),
-      catchError((error) => {
-        console.error('Error searching products:', error);
-        return of({
-          products: [],
-          total: 0,
-          page,
-          pageSize,
-          totalPages: 0,
-        });
+      catchError((error: any) => {
+        // Mensajes de error más descriptivos
+        let errorMessage = 'An error occurred';
+
+        if (error.error?.message) {
+          errorMessage = error.error.message;
+        } else if (error.status === 400) {
+          errorMessage = 'Invalid data provided';
+        } else if (error.status === 401) {
+          errorMessage = 'Unauthorized access';
+        } else if (error.status === 403) {
+          errorMessage = 'Insufficient permissions';
+        } else if (error.status === 404) {
+          errorMessage = 'Product not found';
+        } else if (error.status === 409) {
+          errorMessage = 'Product with this SKU or slug already exists';
+        } else if (error.status >= 500) {
+          errorMessage = 'Server error. Please try again later';
+        }
+
+        return throwError(() => errorMessage);
       }),
     );
   }
 
   private transformProducts(products: any[]): any[] {
-    return products.map((product) => ({
-      id: product.id?.toString() || '',
-      name: product.name || '',
-      sku: product.sku || '',
-      price: parseFloat(product.base_price || product.price || 0),
-      cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
-      category: product.category?.name || 'Sin categoría',
-      brand: product.brand?.name || '',
-      stock: product.stock_quantity || product.quantity_available || 0,
-      minStock: product.min_stock_level || 5,
-      image: product.image_url || product.image || '',
-      description: product.description || '',
-      barcode: product.barcode || '',
-      tags: product.tags || [],
-      isActive: product.state === 'active',
-      createdAt: new Date(product.created_at),
-      updatedAt: new Date(product.updated_at),
-    }));
+    return products.map((product) => {
+      // Calculate total stock from stock_levels
+      let totalStock = 0;
+      if (product.stock_levels && Array.isArray(product.stock_levels)) {
+        // Sum stock from all locations
+        const storeStockLevels = product.stock_levels.filter((level: any) => {
+          return level.quantity_available > 0;
+        });
+
+        totalStock = storeStockLevels.reduce(
+          (sum: number, level: any) => sum + (level.quantity_available || 0),
+          0,
+        );
+      }
+
+      // Fallback to stock_quantity if no stock_levels
+      if (totalStock === 0) {
+        totalStock = product.stock_quantity || 0;
+      }
+
+      return {
+        id: product.id?.toString() || '',
+        name: product.name || '',
+        sku: product.sku || '',
+        price: parseFloat(product.base_price || product.price || 0),
+        cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
+        category:
+          product.product_categories && product.product_categories.length > 0
+            ? product.product_categories[0].name
+            : product.category?.name || 'Sin categoría',
+        brand: product.brands?.name || '',
+        stock: totalStock,
+        minStock: product.min_stock_level || 5,
+        image:
+          product.product_images && product.product_images.length > 0
+            ? product.product_images[0].url
+            : product.image_url || product.image || '',
+        description: product.description || '',
+        barcode: product.barcode || '',
+        tags: product.tags || [],
+        isActive: product.state === 'active',
+        createdAt: new Date(product.created_at),
+        updatedAt: new Date(product.updated_at),
+        // Include additional data for debugging
+        _rawStockLevels: product.stock_levels,
+        _rawStockQuantity: product.stock_quantity,
+      };
+    });
   }
 
-  private getCurrentStoreId(): number | null {
-    // Try to get store ID from localStorage
-    const storeData = localStorage.getItem('current_store');
-    if (storeData) {
-      try {
-        const store = JSON.parse(storeData);
-        return typeof store.id === 'string' ? parseInt(store.id) : store.id;
-      } catch {
-        return null;
+  private buildParams(query: any): HttpParams {
+    let params = new HttpParams();
+
+    Object.keys(query).forEach((key) => {
+      const value = query[key];
+      if (value !== undefined && value !== null) {
+        params = params.set(key, value.toString());
       }
+    });
+
+    return params;
+  }
+
+  private handleError(error: any): Observable<never> {
+    // Mensajes de error más descriptivos
+    let errorMessage = 'An error occurred';
+
+    if (error.error?.message) {
+      errorMessage = error.error.message;
+    } else if (error.status === 400) {
+      errorMessage = 'Invalid data provided';
+    } else if (error.status === 401) {
+      errorMessage = 'Unauthorized access';
+    } else if (error.status === 403) {
+      errorMessage = 'Insufficient permissions';
+    } else if (error.status === 404) {
+      errorMessage = 'Product not found';
+    } else if (error.status === 409) {
+      errorMessage = 'Product with this SKU or slug already exists';
+    } else if (error.status >= 500) {
+      errorMessage = 'Server error. Please try again later';
     }
-    return null;
+
+    return throwError(() => errorMessage);
   }
 
   getProductById(id: string): Observable<Product | null> {
     return this.http.get<Product>(`${this.apiUrl}/${id}`).pipe(
       catchError((error: any) => {
-        console.error('Error getting product by ID:', error);
         return of(null);
       }),
     );
@@ -245,7 +304,6 @@ export class PosProductService {
           : null,
       ),
       catchError((error: any) => {
-        console.error('Error getting product by barcode:', error);
         return of(null);
       }),
     );
@@ -260,7 +318,6 @@ export class PosProductService {
           : null,
       ),
       catchError((error: any) => {
-        console.error('Error getting product by SKU:', error);
         return of(null);
       }),
     );
@@ -269,7 +326,6 @@ export class PosProductService {
   getCategories(): Observable<Category[]> {
     return this.http.get<Category[]>(`${environment.apiUrl}/categories`).pipe(
       catchError((error: any) => {
-        console.error('Error getting categories:', error);
         return of([]);
       }),
     );
@@ -278,7 +334,6 @@ export class PosProductService {
   getBrands(): Observable<Brand[]> {
     return this.http.get<Brand[]>(`${environment.apiUrl}/brands`).pipe(
       catchError((error: any) => {
-        console.error('Error getting brands:', error);
         return of([]);
       }),
     );
@@ -312,27 +367,17 @@ export class PosProductService {
   }
 
   getPopularProducts(limit: number = 10): Observable<Product[]> {
-    const popular = this.products
-      .filter((p) => p.isActive)
-      .sort((a, b) => b.stock - a.stock)
-      .slice(0, limit);
-    return of(popular).pipe(delay(200));
+    // This would normally call an endpoint, for now return empty
+    return of([]).pipe(delay(200));
   }
 
   getLowStockProducts(limit: number = 10): Observable<Product[]> {
-    const lowStock = this.products
-      .filter((p) => p.isActive && p.stock <= p.minStock)
-      .sort((a, b) => a.stock - b.stock)
-      .slice(0, limit);
-    return of(lowStock).pipe(delay(200));
+    // This would normally call an endpoint, for now return empty
+    return of([]).pipe(delay(200));
   }
 
   updateStock(productId: string, quantity: number): Observable<Product | null> {
-    const product = this.products.find((p) => p.id === productId);
-    if (product) {
-      product.stock = Math.max(0, quantity);
-      product.updatedAt = new Date();
-    }
-    return of(product || null).pipe(delay(100));
+    // This would normally call an endpoint, for now return null
+    return of(null).pipe(delay(100));
   }
 }

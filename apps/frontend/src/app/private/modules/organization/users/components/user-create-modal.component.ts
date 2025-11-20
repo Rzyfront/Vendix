@@ -22,6 +22,7 @@ import {
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
 import { Subject, takeUntil } from 'rxjs';
+import { OrganizationsService } from '../../../super-admin/organizations/services/organizations.service';
 
 @Component({
   selector: 'app-user-create-modal',
@@ -42,9 +43,36 @@ import { Subject, takeUntil } from 'rxjs';
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="space-y-2">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-primary)]"
+            >
+              Organización *
+            </label>
+            <select
+              formControlName="organization_id"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              [disabled]="isCreating"
+              required
+            >
+              <option value="">Seleccionar organización</option>
+              <option *ngFor="let org of organizations" [value]="org.id">
+                {{ org.name }}
+              </option>
+            </select>
+            <div
+              *ngIf="
+                userForm.get('organization_id')?.invalid &&
+                userForm.get('organization_id')?.touched
+              "
+              class="text-red-500 text-sm"
+            >
+              La organización es requerida
+            </div>
+          </div>
           <app-input
             formControlName="first_name"
-            label="Nombre"
+            label="Nombre *"
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
@@ -53,7 +81,7 @@ import { Subject, takeUntil } from 'rxjs';
 
           <app-input
             formControlName="last_name"
-            label="Apellido"
+            label="Apellido *"
             placeholder="Pérez"
             [required]="true"
             [control]="userForm.get('last_name')"
@@ -62,16 +90,17 @@ import { Subject, takeUntil } from 'rxjs';
 
           <app-input
             formControlName="username"
-            label="Nombre de Usuario"
+            label="Nombre de Usuario *"
             placeholder="juanperez"
             [required]="true"
             [control]="userForm.get('username')"
             [disabled]="isCreating"
+            helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
           ></app-input>
 
           <app-input
             formControlName="email"
-            label="Email"
+            label="Email *"
             type="email"
             placeholder="juan@ejemplo.com"
             [required]="true"
@@ -81,12 +110,13 @@ import { Subject, takeUntil } from 'rxjs';
 
           <app-input
             formControlName="password"
-            label="Contraseña"
+            label="Contraseña *"
             type="password"
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
             [disabled]="isCreating"
+            helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
 
           <div class="space-y-2">
@@ -165,12 +195,15 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
   userForm: FormGroup;
   isCreating: boolean = false;
   UserState = UserState;
+  organizations: any[] = [];
   private destroy$ = new Subject<void>();
 
   usersService = inject(UsersService);
+  organizationsService = inject(OrganizationsService);
 
   constructor(private fb: FormBuilder) {
     this.userForm = this.fb.group({
+      organization_id: [null],
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
       username: [
@@ -179,19 +212,43 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
           Validators.required,
           Validators.minLength(3),
           Validators.maxLength(50),
+          Validators.pattern(/^[a-zA-Z0-9_]+$/),
         ],
       ],
       email: [
         '',
         [Validators.required, Validators.email, Validators.maxLength(255)],
       ],
-      password: ['', [Validators.required, Validators.minLength(8)]],
-      app: [''],
+      password: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(8),
+          Validators.pattern(
+            /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
+          ),
+        ],
+      ],
+      app: ['ORG_ADMIN'],
       state: [UserState.PENDING_VERIFICATION],
     });
   }
 
-  ngOnInit(): void {}
+  ngOnInit(): void {
+    this.loadOrganizations();
+  }
+
+  loadOrganizations(): void {
+    this.organizationsService.getOrganizations({}).subscribe({
+      next: (response) => {
+        this.organizations = response.data || [];
+      },
+      error: (error) => {
+        console.error('Error loading organizations:', error);
+        this.organizations = [];
+      },
+    });
+  }
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -200,6 +257,10 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
 
   onSubmit(): void {
     if (this.userForm.invalid || this.isCreating) {
+      // Mark all fields as touched to trigger validation messages
+      Object.keys(this.userForm.controls).forEach((key) => {
+        this.userForm.get(key)?.markAsTouched();
+      });
       return;
     }
 
@@ -219,18 +280,20 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isCreating = false;
           console.error('Error creating user:', error);
+          // TODO: Show user-friendly error message
         },
       });
   }
 
   resetForm(): void {
     this.userForm.reset({
+      organization_id: null,
       first_name: '',
       last_name: '',
       username: '',
       email: '',
       password: '',
-      app: '',
+      app: 'ORG_ADMIN',
       state: UserState.PENDING_VERIFICATION,
     });
   }

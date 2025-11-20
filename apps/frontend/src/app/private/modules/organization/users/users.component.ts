@@ -9,6 +9,7 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
+import { UserStatsService } from './services/user-stats.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
@@ -146,6 +147,7 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   constructor(
     private usersService: UsersService,
+    private userStatsService: UserStatsService,
     private fb: FormBuilder,
     private dialogService: DialogService,
     private toastService: ToastService,
@@ -243,25 +245,8 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUserStats(): void {
-    this.usersService.getUsersStats().subscribe({
-      next: (stats: UserStats) => {
-        this.userStats = stats;
-      },
-      error: (error) => {
-        console.error('Error loading user stats:', error);
-        // Establecer valores por defecto para evitar errores de renderizado
-        this.userStats = {
-          total_usuarios: 0,
-          activos: 0,
-          pendientes: 0,
-          con_2fa: 0,
-          inactivos: 0,
-          suspendidos: 0,
-          email_verificado: 0,
-          archivados: 0,
-        };
-      },
-    });
+    // Calculate stats from current users list
+    this.userStats = this.userStatsService.calculateStats(this.users);
   }
 
   onSearchChange(searchTerm: string): void {

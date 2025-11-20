@@ -21,6 +21,7 @@ import { LocationsService } from '../inventory/locations/locations.service';
 import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../common/context/request-context.service';
+import { ProductVariantService } from './services/product-variant.service';
 
 @Injectable()
 export class ProductsService {
@@ -30,6 +31,7 @@ export class ProductsService {
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
+    private readonly productVariantService: ProductVariantService,
   ) {}
 
   async create(createProductDto: CreateProductDto) {
@@ -380,6 +382,7 @@ export class ProductsService {
       pos_optimized,
       barcode,
       include_stock,
+      include_variants,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -464,6 +467,29 @@ export class ProductsService {
                     id: true,
                     name: true,
                     type: true,
+                  },
+                },
+              },
+            },
+          }),
+          ...(include_variants && {
+            product_variants: {
+              include: {
+                product_images: {
+                  where: { is_main: true },
+                  take: 1,
+                },
+                stock_levels: {
+                  select: {
+                    quantity_available: true,
+                    quantity_reserved: true,
+                    inventory_locations: {
+                      select: {
+                        id: true,
+                        name: true,
+                        type: true,
+                      },
+                    },
                   },
                 },
               },

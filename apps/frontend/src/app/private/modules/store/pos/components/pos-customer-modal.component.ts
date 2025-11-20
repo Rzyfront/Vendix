@@ -22,6 +22,7 @@ import {
   SelectorComponent,
   IconComponent,
   InputsearchComponent,
+  DialogService,
 } from '../../../../../shared/components';
 import { PosCustomerService } from '../services/pos-customer.service';
 import {
@@ -29,7 +30,7 @@ import {
   CreatePosCustomerRequest,
   PaginatedCustomersResponse,
 } from '../models/customer.model';
-import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
+import { StoreContextService } from '../../../../../core/services/store-context.service';
 
 @Component({
   selector: 'app-pos-customer-modal',
@@ -323,9 +324,10 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
   private searchSubject$ = new Subject<string>();
 
   constructor(
+    private dialogService: DialogService,
     private fb: FormBuilder,
     private customerService: PosCustomerService,
-    private tenantFacade: TenantFacade,
+    private storeContextService: StoreContextService,
   ) {
     this.customerForm = this.createCustomerForm();
   }
@@ -478,12 +480,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
     this.loading = true;
 
     // Get current store ID
-    let currentStoreId = 1; // Default store ID
-    this.tenantFacade.currentStore$
-      .subscribe((store) => {
-        currentStoreId = store?.id ? parseInt(store.id.toString()) : 1;
-      })
-      .unsubscribe();
+    const currentStoreId = this.storeContextService.getStoreIdOrThrow();
 
     const formData = this.customerForm.value;
     const customerData: CreatePosCustomerRequest = {

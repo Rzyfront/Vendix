@@ -8,7 +8,7 @@ import {
   throwError,
   map,
 } from 'rxjs';
-import { environment } from '../../../../../../environments/environment';
+import { environment } from '../../../../../../../environments/environment';
 import {
   User,
   CreateUserDto,
@@ -17,22 +17,22 @@ import {
   UsersDashboardDto,
   UserStats,
   PaginatedUsersResponse,
-} from '../interfaces/user.interface';
+} from '../../../users/interfaces/user.interface';
 
 @Injectable({
   providedIn: 'root',
 })
-export class UsersService {
+export class GlobalUsersService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
 
-  // Estado de carga
+  // Loading states
   private isLoading$ = new BehaviorSubject<boolean>(false);
   private isCreatingUser$ = new BehaviorSubject<boolean>(false);
   private isUpdatingUser$ = new BehaviorSubject<boolean>(false);
   private isDeletingUser$ = new BehaviorSubject<boolean>(false);
 
-  // Exponer estados como observables
+  // Expose loading states as observables
   get isLoading() {
     return this.isLoading$.asObservable();
   }
@@ -47,7 +47,7 @@ export class UsersService {
   }
 
   /**
-   * Obtener lista de usuarios de la organización con paginación y filtros
+   * Get all users with pagination and filters (Super Admin access)
    */
   getUsers(query: UserQueryDto = {}): Observable<PaginatedUsersResponse> {
     this.isLoading$.next(true);
@@ -57,10 +57,12 @@ export class UsersService {
     if (query.limit) params = params.set('limit', query.limit.toString());
     if (query.search) params = params.set('search', query.search);
     if (query.state) params = params.set('state', query.state);
+    if (query.organization_id)
+      params = params.set('organization_id', query.organization_id.toString());
 
     return this.http.get<any>(`${this.apiUrl}/users`, { params }).pipe(
       map((response) => {
-        // Mapear la respuesta de la API a la estructura esperada por el frontend
+        // Map API response to frontend structure
         return {
           data: response.data,
           pagination: {
@@ -73,14 +75,14 @@ export class UsersService {
       }),
       finalize(() => this.isLoading$.next(false)),
       catchError((error) => {
-        console.error('Error loading organization users:', error);
+        console.error('Error loading global users:', error);
         return throwError(() => error);
       }),
     );
   }
 
   /**
-   * Obtener usuario por ID
+   * Get user by ID (Super Admin access)
    */
   getUserById(id: number): Observable<User> {
     return this.http.get<User>(`${this.apiUrl}/users/${id}`).pipe(
@@ -92,7 +94,7 @@ export class UsersService {
   }
 
   /**
-   * Crear nuevo usuario en la organización
+   * Create new user (Super Admin access)
    */
   createUser(userData: CreateUserDto): Observable<User> {
     this.isCreatingUser$.next(true);
@@ -107,7 +109,7 @@ export class UsersService {
   }
 
   /**
-   * Actualizar usuario existente
+   * Update existing user (Super Admin access)
    */
   updateUser(id: number, userData: UpdateUserDto): Observable<User> {
     this.isUpdatingUser$.next(true);
@@ -122,7 +124,7 @@ export class UsersService {
   }
 
   /**
-   * Eliminar usuario (Soft delete)
+   * Delete user (Soft delete) (Super Admin access)
    */
   deleteUser(id: number): Observable<void> {
     this.isDeletingUser$.next(true);
@@ -137,44 +139,44 @@ export class UsersService {
   }
 
   /**
-   * Archivar usuario
+   * Activate user (Super Admin access)
    */
-  archiveUser(id: number): Observable<User> {
+  activateUser(id: number): Observable<User> {
     this.isUpdatingUser$.next(true);
 
-    return this.http.post<User>(`${this.apiUrl}/users/${id}/archive`, {}).pipe(
+    return this.http.post<User>(`${this.apiUrl}/users/${id}/activate`, {}).pipe(
       finalize(() => this.isUpdatingUser$.next(false)),
       catchError((error) => {
-        console.error('Error archiving user:', error);
+        console.error('Error activating user:', error);
         return throwError(() => error);
       }),
     );
   }
 
   /**
-   * Reactivar usuario
+   * Deactivate user (Super Admin access)
    */
-  reactivateUser(id: number): Observable<User> {
+  deactivateUser(id: number): Observable<User> {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/users/${id}/reactivate`, {})
+      .post<User>(`${this.apiUrl}/users/${id}/deactivate`, {})
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
-          console.error('Error reactivating user:', error);
+          console.error('Error deactivating user:', error);
           return throwError(() => error);
         }),
       );
   }
 
   /**
-   * Obtener estadísticas de usuarios de la organización
+   * Get global user dashboard statistics
    */
   getUsersStats(dashboardQuery: UsersDashboardDto = {}): Observable<UserStats> {
     let params = new HttpParams();
 
-    // Solo agregar parámetros si tienen valores válidos
+    // Only add parameters if they have valid values
     if (dashboardQuery.search && dashboardQuery.search.trim() !== '') {
       params = params.set('search', dashboardQuery.search.trim());
     }
@@ -194,7 +196,7 @@ export class UsersService {
       );
     }
 
-    console.log('Making org stats request with params:', params.toString());
+    console.log('Making global stats request with params:', params.toString());
 
     return this.http
       .get<{
@@ -203,7 +205,7 @@ export class UsersService {
       .pipe(
         map((response) => response.data),
         catchError((error) => {
-          console.error('Error getting organization users stats:', error);
+          console.error('Error getting global users stats:', error);
           console.error('Error details:', {
             status: error.status,
             statusText: error.statusText,
@@ -216,62 +218,7 @@ export class UsersService {
   }
 
   /**
-   * Resetear contraseña de usuario
-   */
-  resetUserPassword(id: number, newPassword: string): Observable<void> {
-    return this.http
-      .post<void>(`${this.apiUrl}/users/${id}/reset-password`, {
-        password: newPassword,
-      })
-      .pipe(
-        catchError((error) => {
-          console.error('Error resetting password:', error);
-          return throwError(() => error);
-        }),
-      );
-  }
-
-  /**
-   * Toggle 2FA para usuario
-   */
-  toggleUser2FA(id: number, enabled: boolean): Observable<User> {
-    return this.http
-      .patch<User>(`${this.apiUrl}/users/${id}/2fa`, { enabled })
-      .pipe(
-        catchError((error) => {
-          console.error('Error toggling 2FA:', error);
-          return throwError(() => error);
-        }),
-      );
-  }
-
-  /**
-   * Desbloquear usuario
-   */
-  unlockUser(id: number): Observable<User> {
-    return this.http.post<User>(`${this.apiUrl}/users/${id}/unlock`, {}).pipe(
-      catchError((error) => {
-        console.error('Error unlocking user:', error);
-        return throwError(() => error);
-      }),
-    );
-  }
-
-  /**
-   * Obtener organizaciones disponibles (para select en formularios)
-   */
-  getOrganizations(): Observable<any[]> {
-    return this.http.get<any>(`${this.apiUrl}/organizations`).pipe(
-      map((response) => response.data || []),
-      catchError((error) => {
-        console.error('Error loading organizations:', error);
-        return throwError(() => error);
-      }),
-    );
-  }
-
-  /**
-   * Asignar rol a usuario
+   * Assign role to user (Super Admin access)
    */
   assignRoleToUser(userId: number, roleId: number): Observable<User> {
     return this.http
@@ -285,7 +232,7 @@ export class UsersService {
   }
 
   /**
-   * Remover rol de usuario
+   * Remove role from user (Super Admin access)
    */
   removeRoleFromUser(userId: number, roleId: number): Observable<User> {
     return this.http

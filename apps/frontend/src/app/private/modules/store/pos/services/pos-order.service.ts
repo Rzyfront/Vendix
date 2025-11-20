@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
-import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
+import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
   PosOrder,
   PosOrderStatus,
@@ -18,7 +18,7 @@ import {
 } from '../models/order.model';
 
 // Re-export types for component usage
-export type { ProcessPaymentRequest } from '../models/order.model';
+export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 
@@ -32,7 +32,7 @@ export class PosOrderService {
 
   constructor(
     private http: HttpClient,
-    private tenantFacade: TenantFacade,
+    private storeContextService: StoreContextService,
   ) {
     this.initializeMockData();
   }
@@ -70,7 +70,7 @@ export class PosOrderService {
 
     // Build POS payment request for credit sale (no payment)
     const posPaymentRequest = {
-      customer_id: cartState.customer?.id || 0,
+      customer_id: cartState.customer?.id || 1,
       customer_name: cartState.customer?.name || 'Cliente General',
       customer_email: cartState.customer?.email || 'cliente@general.com',
       customer_phone: cartState.customer?.phone || '',
@@ -80,14 +80,14 @@ export class PosOrderService {
         product_name: item.product.name,
         product_sku: item.product.sku,
         quantity: item.quantity,
-        unit_price: item.unitPrice,
-        total_price: item.totalPrice,
+        unit_price: Number(item.unitPrice.toFixed(2)),
+        total_price: Number(item.totalPrice.toFixed(2)),
         cost: item.product.cost,
       })),
-      subtotal: cartState.summary.subtotal,
-      tax_amount: cartState.summary.taxAmount,
-      discount_amount: cartState.summary.discountAmount,
-      total_amount: cartState.summary.total,
+      subtotal: Number(cartState.summary.subtotal.toFixed(2)),
+      tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
+      discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
+      total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false, // Credit sale
       credit_terms: {
         payment_terms: 'Pendiente de pago',
@@ -208,7 +208,7 @@ export class PosOrderService {
 
     // Build POS payment request for cash sale
     const posPaymentRequest = {
-      customer_id: request.customer?.id || 0,
+      customer_id: request.customer?.id || 1,
       customer_name: request.customer?.name || 'Cliente General',
       customer_email: request.customer?.email || 'cliente@general.com',
       customer_phone: request.customer?.phone || '',
@@ -218,17 +218,19 @@ export class PosOrderService {
         product_name: item.productName,
         product_sku: item.productSku,
         quantity: item.quantity,
-        unit_price: item.unitPrice,
-        total_price: item.totalPrice,
+        unit_price: Number(item.unitPrice.toFixed(2)),
+        total_price: Number(item.totalPrice.toFixed(2)),
         cost: item.cost,
       })),
-      subtotal: request.subtotal || 0,
-      tax_amount: request.taxAmount || 0,
-      discount_amount: request.discountAmount || 0,
-      total_amount: request.amount,
+      subtotal: Number((request.subtotal || 0).toFixed(2)),
+      tax_amount: Number((request.taxAmount || 0).toFixed(2)),
+      discount_amount: Number((request.discountAmount || 0).toFixed(2)),
+      total_amount: Number(request.amount.toFixed(2)),
       requires_payment: true, // Cash sale
       payment_method_id: parseInt(request.paymentMethod.id),
-      amount_received: request.cashReceived,
+      amount_received: request.cashReceived
+        ? Number(request.cashReceived.toFixed(2))
+        : undefined,
       payment_reference: request.reference,
       register_id: 'POS_REGISTER_001',
       seller_user_id: request.sellerUserId || 'current_user',
@@ -253,9 +255,22 @@ export class PosOrderService {
             updated_at: new Date(),
           };
 
+          // Map backend payment to frontend model
+          let mappedPayment: any = undefined;
+          if (response.payment) {
+            mappedPayment = {
+              id: response.payment.id?.toString() || this.generatePaymentId(),
+              paymentMethod: request.paymentMethod,
+              amount: response.payment.amount,
+              status: response.payment.status,
+              transactionId: response.payment.transaction_id,
+              createdAt: new Date(),
+            };
+          }
+
           return {
             success: true,
-            payment: response.payment,
+            payment: mappedPayment,
             order: this.mapBackendOrderToPosOrder(fullOrder),
             change: response.payment?.change,
             message: response.message,
@@ -926,11 +941,6 @@ export class PosOrderService {
    * Get current store ID
    */
   private getStoreId(): number {
-    const store = this.tenantFacade.getCurrentStore();
-    return store?.id
-      ? typeof store.id === 'string'
-        ? parseInt(store.id)
-        : store.id
-      : 1;
+    return this.storeContextService.getStoreIdOrThrow();
   }
 }

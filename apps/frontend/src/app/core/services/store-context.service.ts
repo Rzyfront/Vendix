@@ -1,0 +1,89 @@
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class StoreContextService {
+  /**
+   * Get store ID from JWT token
+   */
+  getStoreId(): number | null {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.store_id ? parseInt(payload.store_id) : null;
+    } catch (e) {
+      console.error('❌ Error parsing token for store ID:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Get store ID with error throwing
+   */
+  getStoreIdOrThrow(): number {
+    const storeId = this.getStoreId();
+    if (!storeId) {
+      throw new Error('No se pudo determinar el store ID del contexto actual');
+    }
+    return storeId;
+  }
+
+  /**
+   * Get organization ID from JWT token
+   */
+  getOrganizationId(): number | null {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.organization_id ? parseInt(payload.organization_id) : null;
+    } catch (e) {
+      console.error('❌ Error parsing token for organization ID:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Get user ID from JWT token
+   */
+  getUserId(): number | null {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.sub ? parseInt(payload.sub) : null;
+    } catch (e) {
+      console.error('❌ Error parsing token for user ID:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Check if token exists and is valid
+   */
+  hasValidToken(): boolean {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const now = Math.floor(Date.now() / 1000);
+      return payload.exp > now;
+    } catch (e) {
+      return false;
+    }
+  }
+}

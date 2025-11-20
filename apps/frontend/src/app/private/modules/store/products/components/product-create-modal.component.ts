@@ -17,9 +17,11 @@ import {
 } from '../../../../../shared/components';
 import {
   CreateProductDto,
+  UpdateProductDto,
   CreateProductImageDto,
   ProductCategory,
   Brand,
+  Product,
 } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
@@ -44,7 +46,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   template: `
     <app-modal
       [size]="'lg'"
-      [title]="'Create New Product'"
+      [title]="isEditMode ? 'Edit Product' : 'Create New Product'"
       [isOpen]="isOpen"
       (closed)="onCancel()"
     >
@@ -310,7 +312,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
             [disabled]="productForm.invalid"
           >
             <app-icon name="save" [size]="16" slot="icon"></app-icon>
-            Create Product
+            {{ isEditMode ? 'Update Product' : 'Create Product' }}
           </app-button>
         </div>
       </div>
@@ -341,9 +343,14 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
 export class ProductCreateModalComponent {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
+  @Input() product: Product | null = null; // Product data for edit mode
   @Output() openChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<any>();
   @Output() cancel = new EventEmitter<void>();
+
+  get isEditMode(): boolean {
+    return !!this.product;
+  }
   productForm: FormGroup;
   imageUrls: string[] = [];
   categoryOptions: SelectorOption[] = [];
@@ -388,6 +395,34 @@ export class ProductCreateModalComponent {
   private loadCategoriesAndBrands(): void {
     this.loadCategories();
     this.loadBrands();
+  }
+
+  // Populate form when product data is available (edit mode)
+  private populateForm(): void {
+    if (!this.product) return;
+
+    this.productForm.patchValue({
+      name: this.product.name,
+      slug: this.product.slug,
+      description: this.product.description || '',
+      base_price: this.product.base_price,
+      sku: this.product.sku || '',
+      stock_quantity: this.product.stock_quantity || 0,
+      category_id: this.product.category_id || null,
+      brand_id: this.product.brand_id || null,
+    });
+
+    // Load existing images
+    if (this.product.images && this.product.images.length > 0) {
+      // Sort images so main image is first
+      const sortedImages = [...this.product.images].sort((a, b) => {
+        if (a.is_main && !b.is_main) return -1;
+        if (!a.is_main && b.is_main) return 1;
+        return 0;
+      });
+
+      this.imageUrls = sortedImages.map((img) => img.image_url);
+    }
   }
 
   private loadCategories(): void {
