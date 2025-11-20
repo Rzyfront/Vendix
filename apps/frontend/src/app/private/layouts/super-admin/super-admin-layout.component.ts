@@ -23,6 +23,7 @@ import { Observable } from 'rxjs';
         subtitle="Super Admin"
         [vlink]="(organizationSlug$ | async) || currentVlink"
         [collapsed]="sidebarCollapsed"
+        (expandSidebar)="toggleSidebar()"
       >
       </app-sidebar>
 
