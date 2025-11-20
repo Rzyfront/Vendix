@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import {
   ChartComponent,
   ChartData,
+  ChartOptions,
   IconComponent,
 } from '../../../../shared/components';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
@@ -37,11 +38,7 @@ import { takeUntil } from 'rxjs/operators';
                 style="color: var(--primary);"
               ></app-icon>
             </div>
-            <span
-              class="text-sm font-medium px-2 py-1 rounded-full"
-              style="background-color: var(--success-light); color: var(--success);"
-              >+12%</span
-            >
+            <!-- Placeholder for percentage if needed, or remove -->
           </div>
           <h3
             class="text-sm font-medium mb-1"
@@ -49,9 +46,12 @@ import { takeUntil } from 'rxjs/operators';
           >
             Total Stores
           </h3>
-          <p class="text-3xl font-bold" style="color: var(--text);">24</p>
+          <p class="text-3xl font-bold" style="color: var(--text);">
+            {{ dashboardStats?.stats?.total_stores?.value || 0 }}
+          </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            3 new this month
+            {{ dashboardStats?.stats?.total_stores?.sub_value || 0 }} new this
+            month
           </p>
         </div>
 
@@ -70,11 +70,6 @@ import { takeUntil } from 'rxjs/operators';
                 style="color: var(--accent);"
               ></app-icon>
             </div>
-            <span
-              class="text-sm font-medium px-2 py-1 rounded-full"
-              style="background-color: var(--success-light); color: var(--success);"
-              >+8%</span
-            >
           </div>
           <h3
             class="text-sm font-medium mb-1"
@@ -82,9 +77,11 @@ import { takeUntil } from 'rxjs/operators';
           >
             Active Users
           </h3>
-          <p class="text-3xl font-bold" style="color: var(--text);">1,428</p>
+          <p class="text-3xl font-bold" style="color: var(--text);">
+            {{ dashboardStats?.stats?.active_users?.value || 0 }}
+          </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            142 online now
+            {{ dashboardStats?.stats?.active_users?.sub_value || 0 }} online now
           </p>
         </div>
 
@@ -103,11 +100,6 @@ import { takeUntil } from 'rxjs/operators';
                 style="color: var(--warning);"
               ></app-icon>
             </div>
-            <span
-              class="text-sm font-medium px-2 py-1 rounded-full"
-              style="background-color: var(--error-light); color: var(--error);"
-              >-3%</span
-            >
           </div>
           <h3
             class="text-sm font-medium mb-1"
@@ -115,9 +107,12 @@ import { takeUntil } from 'rxjs/operators';
           >
             Monthly Orders
           </h3>
-          <p class="text-3xl font-bold" style="color: var(--text);">8,642</p>
+          <p class="text-3xl font-bold" style="color: var(--text);">
+            {{ dashboardStats?.stats?.monthly_orders?.value || 0 }}
+          </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            284 today
+            {{ dashboardStats?.stats?.monthly_orders?.sub_value || 0 }} orders
+            today
           </p>
         </div>
 
@@ -136,21 +131,30 @@ import { takeUntil } from 'rxjs/operators';
                 style="color: var(--success);"
               ></app-icon>
             </div>
-            <span
-              class="text-sm font-medium px-2 py-1 rounded-full"
-              style="background-color: var(--success-light); color: var(--success);"
-              >+23%</span
-            >
           </div>
           <h3
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Revenue
+            Profit
           </h3>
-          <p class="text-3xl font-bold" style="color: var(--text);">$124,580</p>
+          <p class="text-3xl font-bold" style="color: var(--text);">
+            {{ dashboardStats?.stats?.revenue?.value || 0 | currency }}
+          </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            +$28,420 vs last month
+            <span
+              [class.text-green-500]="
+                (dashboardStats?.stats?.revenue?.sub_value || 0) >= 0
+              "
+              [class.text-red-500]="
+                (dashboardStats?.stats?.revenue?.sub_value || 0) < 0
+              "
+            >
+              {{
+                (dashboardStats?.stats?.revenue?.sub_value || 0) > 0 ? '+' : ''
+              }}{{ dashboardStats?.stats?.revenue?.sub_value || 0 | currency }}
+            </span>
+            vs last month
           </p>
         </div>
       </div>
@@ -166,10 +170,10 @@ import { takeUntil } from 'rxjs/operators';
             <div class="flex items-center justify-between">
               <div>
                 <h2 class="text-lg font-semibold" style="color: var(--text);">
-                  Revenue Overview
+                  Profit Overview
                 </h2>
                 <p class="text-sm" style="color: var(--muted-foreground);">
-                  Monthly revenue trends
+                  Monthly profit trends
                 </p>
               </div>
               <div class="flex gap-2">
@@ -219,57 +223,56 @@ import { takeUntil } from 'rxjs/operators';
             </p>
           </div>
           <div class="p-6">
-            <app-chart
-              [data]="storeDistributionData"
-              type="pie"
-              size="small"
-              [options]="pieChartOptions"
-            >
-            </app-chart>
+            <div class="relative h-64">
+              <app-chart
+                [data]="storeDistributionData"
+                type="doughnut"
+                size="small"
+                [options]="pieChartOptions"
+              >
+              </app-chart>
+              <!-- Center Text Overlay -->
+              <div
+                class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
+              >
+                <span class="text-3xl font-bold" style="color: var(--text);">
+                  {{ dashboardStats?.stats?.total_stores?.value || 0 }}
+                </span>
+                <span class="text-sm" style="color: var(--muted-foreground);">
+                  Stores
+                </span>
+              </div>
+            </div>
+
             <div class="mt-6 space-y-3">
               <div
+                *ngFor="
+                  let item of dashboardStats?.store_distribution;
+                  let i = index
+                "
                 class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <div class="flex items-center gap-3">
                   <div
                     class="w-4 h-4 rounded-full shadow-sm"
-                    style="background-color: #7ed7a5; box-shadow: 0 2px 4px rgba(126, 215, 165, 0.3);"
+                    [style.background-color]="
+                      storeDistributionColors[
+                        i % storeDistributionColors.length
+                      ]
+                    "
+                    [style.box-shadow]="
+                      '0 2px 4px ' +
+                      storeDistributionColors[
+                        i % storeDistributionColors.length
+                      ] +
+                      '4d'
+                    "
                   ></div>
-                  <span class="font-medium text-gray-700">Retail</span>
+                  <span class="font-medium text-gray-700">{{ item.type }}</span>
                 </div>
                 <div class="text-right">
-                  <span class="font-bold text-gray-900">45%</span>
-                  <div class="text-xs text-gray-500">18 stores</div>
-                </div>
-              </div>
-              <div
-                class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div class="flex items-center gap-3">
-                  <div
-                    class="w-4 h-4 rounded-full shadow-sm"
-                    style="background-color: #06b6d4; box-shadow: 0 2px 4px rgba(6, 182, 212, 0.3);"
-                  ></div>
-                  <span class="font-medium text-gray-700">Food & Beverage</span>
-                </div>
-                <div class="text-right">
-                  <span class="font-bold text-gray-900">30%</span>
-                  <div class="text-xs text-gray-500">12 stores</div>
-                </div>
-              </div>
-              <div
-                class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
-              >
-                <div class="flex items-center gap-3">
-                  <div
-                    class="w-4 h-4 rounded-full shadow-sm"
-                    style="background-color: #fb923c; box-shadow: 0 2px 4px rgba(251, 146, 60, 0.3);"
-                  ></div>
-                  <span class="font-medium text-gray-700">Services</span>
-                </div>
-                <div class="text-right">
-                  <span class="font-bold text-gray-900">25%</span>
-                  <div class="text-xs text-gray-500">10 stores</div>
+                  <span class="font-bold text-gray-900">{{ item.count }}</span>
+                  <!-- <div class="text-xs text-gray-500">stores</div> -->
                 </div>
               </div>
             </div>
@@ -494,7 +497,15 @@ import { takeUntil } from 'rxjs/operators';
 export class DashboardComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
   isLoading = false;
-  organizationId: string;
+  organizationId: string = '';
+  dashboardStats: any | null = null; // Using any to avoid strict type issues if interface isn't fully aligned yet, or use OrganizationDashboardStats
+  storeDistributionColors = [
+    '#7ed7a5',
+    '#06b6d4',
+    '#fb923c',
+    '#a855f7',
+    '#ec4899',
+  ];
 
   // Revenue Chart Data - Stacked Line Chart
   revenueChartData: ChartData = {
@@ -506,14 +517,25 @@ export class DashboardComponent implements OnInit, OnDestroy {
     private organizationDashboardService: OrganizationDashboardService,
     private route: ActivatedRoute,
     private globalFacade: GlobalFacade,
-  ) {
-    const context = this.globalFacade.getUserContext();
-    this.organizationId =
-      this.route.snapshot.paramMap.get('id') || context?.organization?.id || '';
-  }
+  ) {}
 
   ngOnInit(): void {
-    this.loadDashboardData();
+    // First check route param
+    const routeId = this.route.snapshot.paramMap.get('id');
+    if (routeId) {
+      this.organizationId = routeId;
+      this.loadDashboardData();
+    } else {
+      // Fallback to user context
+      this.globalFacade.userContext$
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((context) => {
+          if (context?.organization?.id) {
+            this.organizationId = context.organization.id;
+            this.loadDashboardData();
+          }
+        });
+    }
   }
 
   ngOnDestroy(): void {
@@ -534,7 +556,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
+          this.dashboardStats = data;
           this.updateRevenueChart(data);
+          this.updateStoreDistributionChart(data);
           this.isLoading = false;
         },
         error: (error) => {
@@ -545,30 +569,108 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private updateRevenueChart(data: any): void {
-    if (data.revenueBreakdown) {
+    if (data.profit_trend) {
+      const labels = data.profit_trend.map((item: any) => item.month);
+      const values = data.profit_trend.map((item: any) => item.amount);
+
       this.revenueChartData = {
-        labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'], // This should come from API
-        datasets: data.revenueBreakdown.map((item: any) => ({
-          label: item.source.charAt(0).toUpperCase() + item.source.slice(1),
-          data: [28000, 32000, 30000, 38000, 45000, 62000], // This should come from API
-          borderColor: item.color,
-          backgroundColor: item.color + '20',
-          fill: true,
-          tension: 0.4,
-          borderWidth: 3,
-          pointBackgroundColor: item.color,
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-        })),
+        labels: labels,
+        datasets: [
+          {
+            label: 'Total Profit',
+            data: values,
+            borderColor: '#22c55e', // Success color
+            backgroundColor: 'rgba(34, 197, 94, 0.1)', // Light success color
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2,
+            pointBackgroundColor: '#ffffff',
+            pointBorderColor: '#22c55e',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 6,
+          },
+        ],
       };
     }
   }
 
-  revenueChartOptions = {
+  private updateStoreDistributionChart(data: any): void {
+    if (data.store_distribution) {
+      const labels = data.store_distribution.map((item: any) => item.type);
+      const values = data.store_distribution.map((item: any) => item.count);
+
+      this.storeDistributionData = {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Store Distribution',
+            data: values,
+            backgroundColor: this.storeDistributionColors,
+            borderColor: '#ffffff',
+            borderWidth: 3,
+            hoverOffset: 8,
+            hoverBorderWidth: 3,
+            spacing: 2,
+          },
+        ],
+      };
+    }
+  }
+
+  revenueChartOptions: ChartOptions = {
     responsive: true,
     maintainAspectRatio: false,
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'end',
+        labels: {
+          usePointStyle: true,
+          boxWidth: 8,
+          padding: 20,
+        },
+      },
+      tooltip: {
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        titleColor: '#1e293b',
+        bodyColor: '#475569',
+        borderColor: '#e2e8f0',
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+        boxPadding: 4,
+      },
+    },
+    scales: {
+      x: {
+        grid: {
+          display: false,
+        },
+        ticks: {
+          color: '#94a3b8',
+        },
+      },
+      y: {
+        beginAtZero: true,
+        grid: {
+          color: '#f1f5f9',
+          // drawBorder: false, // Removed as it causes lint error
+        },
+        border: {
+          display: false,
+        },
+        ticks: {
+          color: '#94a3b8',
+          callback: (value: any) => '$' + value / 1000 + 'K',
+        },
+      },
+    },
   };
 
   // Store Distribution Data - Enhanced Doughnut Chart
@@ -588,8 +690,15 @@ export class DashboardComponent implements OnInit, OnDestroy {
     ],
   };
 
-  pieChartOptions = {
+  pieChartOptions: any = {
+    // Changed to any to allow 'cutout' property
     responsive: true,
     maintainAspectRatio: false,
+    cutout: '75%', // Thinner ring like the example
+    plugins: {
+      legend: {
+        display: false, // Hide default legend to use the custom one below
+      },
+    },
   };
 }
