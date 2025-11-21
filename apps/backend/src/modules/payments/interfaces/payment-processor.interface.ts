@@ -5,7 +5,7 @@ export interface PaymentData {
   customerId?: number;
   amount: number;
   currency: string;
-  paymentMethodId: number;
+  storePaymentMethodId: number;
   storeId: number;
   metadata?: Record<string, any>;
   returnUrl?: string;

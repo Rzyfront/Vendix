@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { CashPaymentProcessor } from '../processors/cash/cash.processor';
+import { CashPaymentProcessor } from './processors/cash/cash.processor';
 import {
   PaymentData,
   PaymentResult,
   RefundResult,
   PaymentStatus,
-} from '../interfaces';
+} from './interfaces';
 import { payments_state_enum } from '@prisma/client';
 
 describe('CashPaymentProcessor', () => {
@@ -32,7 +32,7 @@ describe('CashPaymentProcessor', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -51,7 +51,7 @@ describe('CashPaymentProcessor', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -92,7 +92,7 @@ describe('CashPaymentProcessor', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -107,7 +107,7 @@ describe('CashPaymentProcessor', () => {
         customerId: 1,
         amount: 0, // Invalid amount
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -122,7 +122,7 @@ describe('CashPaymentProcessor', () => {
         customerId: 1,
         amount: 100.0,
         currency: '', // Missing currency
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 

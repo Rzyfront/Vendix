@@ -89,13 +89,13 @@ export class PaymentValidatorService {
   }
 
   async validatePaymentMethod(
-    paymentMethodId: number,
+    storePaymentMethodId: number,
     storeId: number,
   ): Promise<boolean> {
     try {
       const paymentMethod = await this.prisma.store_payment_methods.findFirst({
         where: {
-          id: paymentMethodId,
+          id: storePaymentMethodId,
           store_id: storeId,
           state: 'enabled',
         },

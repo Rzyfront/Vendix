@@ -36,7 +36,7 @@ export class PaymentsService {
         customerId: createPaymentDto.customerId,
         amount: createPaymentDto.amount,
         currency: createPaymentDto.currency,
-        paymentMethodId: createPaymentDto.paymentMethodId,
+        storePaymentMethodId: createPaymentDto.storePaymentMethodId,
         storeId: createPaymentDto.storeId,
         metadata: createPaymentDto.metadata,
         returnUrl: createPaymentDto.returnUrl,
@@ -72,7 +72,7 @@ export class PaymentsService {
         customerId: createOrderPaymentDto.customerId,
         amount: createOrderPaymentDto.amount,
         currency: createOrderPaymentDto.currency,
-        paymentMethodId: createOrderPaymentDto.paymentMethodId,
+        storePaymentMethodId: createOrderPaymentDto.storePaymentMethodId,
         storeId: createOrderPaymentDto.storeId,
         metadata: createOrderPaymentDto.metadata,
         returnUrl: createOrderPaymentDto.returnUrl,
@@ -538,7 +538,7 @@ export class PaymentsService {
   ) {
     // Get payment method details
     const paymentMethod = await tx.store_payment_methods.findFirst({
-      where: { id: dto.payment_method_id },
+      where: { id: dto.store_payment_method_id },
       include: {
         system_payment_method: true,
       },
@@ -558,7 +558,7 @@ export class PaymentsService {
     const payment = await tx.payments.create({
       data: {
         order_id: order.id,
-        payment_method_id: dto.payment_method_id,
+        store_payment_method_id: dto.store_payment_method_id,
         amount: dto.total_amount,
         currency: dto.currency || 'USD',
         state: 'succeeded',

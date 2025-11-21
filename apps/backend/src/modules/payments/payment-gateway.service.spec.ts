@@ -1,14 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentGatewayService } from '../services/payment-gateway.service';
-import { PaymentValidatorService } from '../services/payment-validator.service';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PaymentGatewayService } from './services/payment-gateway.service';
+import { PaymentValidatorService } from './services/payment-validator.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import {
   PaymentData,
   PaymentResult,
   RefundResult,
   PaymentStatus,
-} from '../interfaces';
-import { PaymentError, PaymentErrorCodes } from '../utils';
+} from './interfaces';
+import { PaymentError, PaymentErrorCodes } from './utils';
 import { payments_state_enum } from '@prisma/client';
 
 describe('PaymentGatewayService', () => {
@@ -21,7 +21,7 @@ describe('PaymentGatewayService', () => {
     customerId: 1,
     amount: 100.0,
     currency: 'USD',
-    paymentMethodId: 1,
+    storePaymentMethodId: 1,
     storeId: 1,
   };
 
@@ -50,7 +50,7 @@ describe('PaymentGatewayService', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
-      payment_methods: {
+      store_payment_methods: {
         findUnique: jest.fn(),
       },
       refunds: {
@@ -114,7 +114,7 @@ describe('PaymentGatewayService', () => {
       jest.spyOn(validator, 'validatePaymentAmount').mockResolvedValue(true);
       jest.spyOn(validator, 'validateCurrency').mockResolvedValue(true);
       jest
-        .spyOn(prisma.payment_methods, 'findUnique')
+        .spyOn(prisma.store_payment_methods, 'findUnique')
         .mockResolvedValue(mockPaymentMethod);
       jest
         .spyOn(prisma.payments, 'create')
@@ -168,7 +168,7 @@ describe('PaymentGatewayService', () => {
       jest.spyOn(validator, 'validatePaymentAmount').mockResolvedValue(true);
       jest.spyOn(validator, 'validateCurrency').mockResolvedValue(true);
       jest
-        .spyOn(prisma.payment_methods, 'findUnique')
+        .spyOn(prisma.store_payment_methods, 'findUnique')
         .mockResolvedValue(mockPaymentMethod);
 
       // Mock disabled processor
@@ -192,9 +192,10 @@ describe('PaymentGatewayService', () => {
         id: 1,
         transaction_id: 'txn_1234567890_abc123',
         order_id: 1,
-        payment_methods: {
+        store_payment_methods: {
           type: 'card',
         },
+        state: 'succeeded',
       };
 
       const mockRefundResult: RefundResult = {
@@ -243,7 +244,7 @@ describe('PaymentGatewayService', () => {
       const mockPayment = {
         id: 1,
         transaction_id: 'txn_1234567890_abc123',
-        payment_methods: {
+        store_payment_methods: {
           type: 'card',
         },
       };

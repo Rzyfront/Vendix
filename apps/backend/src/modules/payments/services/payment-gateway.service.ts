@@ -28,7 +28,7 @@ export class PaymentGatewayService {
       await this.validatePaymentData(paymentData);
 
       const paymentMethod = await this.getPaymentMethod(
-        paymentData.paymentMethodId,
+        paymentData.storePaymentMethodId,
       );
       const processor = this.getProcessor(paymentMethod.type);
 
@@ -173,7 +173,7 @@ export class PaymentGatewayService {
           paymentData.storeId,
         ),
         this.validatorService.validatePaymentMethod(
-          paymentData.paymentMethodId,
+          paymentData.storePaymentMethodId,
           paymentData.storeId,
         ),
         this.validatorService.validatePaymentAmount(
@@ -252,7 +252,7 @@ export class PaymentGatewayService {
       data: {
         order_id: paymentData.orderId,
         customer_id: paymentData.customerId,
-        store_payment_method_id: paymentData.paymentMethodId,
+        store_payment_method_id: paymentData.storePaymentMethodId,
         amount: paymentData.amount,
         currency: paymentData.currency,
         state: 'pending',
