@@ -31,7 +31,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
-  ) {}
+  ) { }
 
   async registerOwner(
     registerOwnerDto: RegisterOwnerDto,
@@ -871,15 +871,15 @@ export class AuthService {
       });
     }
 
-    // Obtener user_settings por separado para las validaciones
-    const userSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: user.id },
-    });
-
     if (!user) {
       await this.logLoginAttempt(null, false, email);
       throw new UnauthorizedException('Credenciales inválidas');
     }
+
+    // Obtener user_settings por separado para las validaciones
+    let userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: user.id },
+    });
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
@@ -911,8 +911,9 @@ export class AuthService {
     }
 
     // Validar consistencia entre slugs y user_settings.app_type
-    let use_main_store_fallback = false;
-    const user_app_type = userSettings?.config?.app;
+    const user_app_type = userSettings?.config?.['app'];
+    let effective_organization_slug = organization_slug;
+    let effective_store_slug = store_slug;
 
     if (organization_slug && store_slug) {
       throw new BadRequestException(
@@ -920,48 +921,100 @@ export class AuthService {
       );
     }
 
-    if (organization_slug && user_app_type) {
-      if (user_app_type !== 'ORG_ADMIN' && user_app_type !== 'VENDIX_ADMIN') {
-        console.log('🔍 LOGIN - Inconsistencia detectada:', {
-          user_id: user.id,
-          provided_slug: 'organization_slug',
-          organization_slug: organization_slug,
-          user_app_type: user_app_type,
-          expected_app_type: 'ORG_ADMIN',
-        });
-        use_main_store_fallback = true;
-      }
-    }
+    // 🔒 VALIDACIÓN ESTRICTA DE PERTENENCIA (Organizational Chain)
+    const hasHighPrivilege = roles.some((r) =>
+      ['owner', 'admin', 'super_admin'].includes(r),
+    );
 
-    if (store_slug && user_app_type) {
-      if (user_app_type !== 'STORE_ADMIN' && user_app_type !== 'VENDIX_ADMIN') {
-        console.log('🔍 LOGIN - Inconsistencia detectada:', {
-          user_id: user.id,
-          provided_slug: 'store_slug',
-          store_slug: store_slug,
-          user_app_type: user_app_type,
-          expected_app_type: 'STORE_ADMIN',
-        });
-        use_main_store_fallback = true;
-      }
-    }
-
-    // Si hay inconsistencia, usar main_store_id como fallback
-    let effective_organization_slug = organization_slug;
-    let effective_store_slug = store_slug;
-
-    if (use_main_store_fallback && user.main_store) {
-      effective_organization_slug = undefined;
-      effective_store_slug = user.main_store.slug;
-      console.log('🔍 LOGIN - Usando main_store fallback:', {
-        user_id: user.id,
-        main_store_id: user.main_store_id,
-        main_store_slug: user.main_store.slug,
+    if (organization_slug) {
+      const targetOrg = await this.prismaService.organizations.findUnique({
+        where: { slug: organization_slug },
       });
-    } else if (use_main_store_fallback && !user.main_store) {
-      throw new BadRequestException(
-        'Inconsistencia de app_type detectada pero no hay main_store configurado',
-      );
+
+      if (!targetOrg || user.organization_id !== targetOrg.id) {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Credenciales inválidas');
+      }
+    } else if (store_slug) {
+      const targetStore = await this.prismaService.stores.findUnique({
+        where: { slug: store_slug },
+        include: { organizations: true },
+      });
+
+      if (
+        !targetStore ||
+        targetStore.organization_id !== user.organization_id
+      ) {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Credenciales inválidas');
+      }
+
+      if (!hasHighPrivilege) {
+        const isStoreUser = await this.prismaService.store_users.findFirst({
+          where: {
+            store_id: targetStore.id,
+            user_id: user.id,
+          },
+        });
+
+        if (!isStoreUser) {
+          await this.logLoginAttempt(user.id, false);
+          throw new UnauthorizedException('Credenciales inválidas');
+        }
+      }
+    }
+
+    // 1. Lógica para STORE_ADMIN intentando login con Organization Slug
+    if (organization_slug && user_app_type === 'STORE_ADMIN') {
+      // hasHighPrivilege ya calculado arriba
+
+      if (hasHighPrivilege && user.main_store) {
+        console.log(
+          '🔄 LOGIN - Auto-switching STORE_ADMIN to main_store context',
+        );
+        effective_organization_slug = undefined;
+        effective_store_slug = user.main_store.slug;
+
+        // Verificar y crear relación store_users si es necesario
+        const existingStoreUser =
+          await this.prismaService.store_users.findUnique({
+            where: {
+              store_id_user_id: {
+                store_id: user.main_store.id,
+                user_id: user.id,
+              },
+            },
+          });
+
+        if (!existingStoreUser) {
+          await this.prismaService.store_users.create({
+            data: {
+              store_id: user.main_store.id,
+              user_id: user.id,
+            },
+          });
+          console.log(
+            '✅ LOGIN - Auto-created store_users relation for high-privilege user',
+          );
+        }
+      }
+    }
+
+    // 2. Lógica para ORG_ADMIN intentando login con Store Slug
+    if (store_slug && user_app_type === 'ORG_ADMIN') {
+      console.log('🔄 LOGIN - Switching ORG_ADMIN to STORE_ADMIN app_type');
+
+      // Actualizar app_type en base de datos
+      const newConfig = {
+        ...(userSettings.config as object),
+        app: 'STORE_ADMIN',
+      };
+      userSettings = await this.prismaService.user_settings.update({
+        where: { id: userSettings.id },
+        data: { config: newConfig },
+      });
+
+      // El flujo continúa normalmente con effective_store_slug
     }
 
     // Validar que el usuario pertenezca a la organización o tienda especificada
@@ -978,7 +1031,10 @@ export class AuthService {
             where: { id: user.organization_id },
           });
 
-        if (!userOrganization || userOrganization.slug !== organization_slug) {
+        if (
+          !userOrganization ||
+          userOrganization.slug !== effective_organization_slug
+        ) {
           await this.logLoginAttempt(user.id, false);
           throw new UnauthorizedException(
             'Usuario no pertenece a la organización especificada',
@@ -986,7 +1042,7 @@ export class AuthService {
         }
 
         target_organization_id = userOrganization.id;
-        login_context = `organization:${organization_slug}`;
+        login_context = `organization:${effective_organization_slug}`;
       } else {
         await this.logLoginAttempt(user.id, false);
         throw new UnauthorizedException(
@@ -2519,14 +2575,15 @@ export class AuthService {
     };
 
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
+      expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
+        '1h') as any,
     });
     const refreshToken = this.jwtService.sign(payload, {
       secret:
-        this.configService.get<string>('JWT_REFRESH_SECRET') ||
-        this.configService.get<string>('JWT_SECRET'),
-      expiresIn:
-        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d',
+        (this.configService.get<string>('JWT_REFRESH_SECRET') ||
+          this.configService.get<string>('JWT_SECRET')) as string,
+      expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+        '7d') as any,
     });
 
     return {

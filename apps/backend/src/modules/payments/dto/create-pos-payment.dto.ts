@@ -156,7 +156,7 @@ export class CreatePosPaymentDto {
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  payment_method_id?: number;
+  store_payment_method_id?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -246,7 +246,7 @@ export class UpdateOrderWithPaymentDto {
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  payment_method_id?: number;
+  store_payment_method_id?: number;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })

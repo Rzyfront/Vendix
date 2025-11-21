@@ -17,10 +17,10 @@
     "// ----- DATABASE (Backend) -----": "",
     "db:reset-seed": "npm run db:reset -w apps/backend && npm run db:seed -w apps/backend",
     "// ----- DOCKER -----": "",
-    "docker:up": "docker-compose up -d",
-    "docker:rebuild": "docker-compose up --build -d",
-    "docker:down": "docker-compose down",
-    "docker:down-v": "docker-compose down --volumes"
+    "docker:up": "docker compose up -d",
+    "docker:rebuild": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:down-v": "docker compose down --volumes"
   },
   "devDependencies": {
     "prettier": "^3.4.2"

@@ -809,7 +809,6 @@ export class BreadcrumbService {
           icon: 'home',
         },
       };
-      console.log('Breadcrumb Default:', defaultBreadcrumb);
       this.breadcrumbSubject.next(defaultBreadcrumb);
     }
   }

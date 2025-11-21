@@ -83,31 +83,37 @@ import { PosCartComponent } from './cart/pos-cart.component';
               <!-- Customer Badge -->
               <div
                 *ngIf="selectedCustomer"
-                class="group flex items-center gap-3 bg-primary-light px-4 py-2 rounded-lg cursor-pointer hover:bg-primary-light/80 transition-all border border-primary/20"
+                class="group flex items-center gap-4 bg-primary-light px-6 py-3 rounded-xl cursor-pointer hover:bg-primary-light/80 transition-all border border-primary/20 shadow-sm"
                 (click)="onOpenCustomerModal()"
               >
                 <div
-                  class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary"
+                  class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary"
                 >
-                  <app-icon name="user" [size]="16"></app-icon>
+                  <app-icon name="user" [size]="18"></app-icon>
                 </div>
-                <div class="flex flex-col">
+                <div class="flex flex-col min-w-0">
                   <span
-                    class="text-xs text-text-secondary font-medium leading-none"
+                    class="text-xs text-text-secondary font-medium leading-tight"
                     >Cliente</span
                   >
                   <span
-                    class="font-semibold text-text-primary leading-none truncate max-w-[150px]"
+                    class="font-semibold text-text-primary leading-tight truncate max-w-[200px]"
+                    [title]="selectedCustomer.name"
                     >{{ selectedCustomer.name }}</span
+                  >
+                  <span
+                    class="text-xs text-text-secondary leading-tight truncate max-w-[200px]"
+                    [title]="selectedCustomer.email"
+                    >{{ selectedCustomer.email }}</span
                   >
                 </div>
                 <div
-                  class="w-6 h-6 rounded-full hover:bg-surface/50 flex items-center justify-center ml-1 transition-colors"
+                  class="w-8 h-8 rounded-full hover:bg-surface/50 flex items-center justify-center ml-2 transition-colors"
                   (click)="$event.stopPropagation(); onClearCustomer()"
                 >
                   <app-icon
                     name="x"
-                    [size]="14"
+                    [size]="16"
                     class="text-text-secondary group-hover:text-destructive transition-colors"
                   ></app-icon>
                 </div>
@@ -208,6 +214,7 @@ import { PosCartComponent } from './cart/pos-cart.component';
         (closed)="onCustomerModalClosed()"
         (customerCreated)="onCustomerCreated($event)"
         (customerUpdated)="onCustomerUpdated($event)"
+        (customerSelected)="onCustomerSelected($event)"
       ></app-pos-customer-modal>
 
       <app-pos-payment-interface
@@ -318,7 +325,12 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onClearCustomer(): void {
     this.customerService.clearSelectedCustomer();
-    this.toastService.info('Cliente removido de la venta');
+    this.cartService
+      .setCustomer(null)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.toastService.info('Cliente removido de la venta');
+      });
   }
 
   onCustomerModalClosed(): void {
@@ -328,14 +340,35 @@ export class PosComponent implements OnInit, OnDestroy {
 
   onCustomerCreated(customer: PosCustomer): void {
     this.customerService.selectCustomer(customer);
-    this.showCustomerModal = false;
-    this.toastService.success('Cliente agregado correctamente');
+    this.cartService
+      .setCustomer(customer)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.showCustomerModal = false;
+        this.toastService.success('Cliente agregado correctamente');
+      });
   }
 
   onCustomerUpdated(customer: PosCustomer): void {
     this.customerService.selectCustomer(customer);
-    this.showCustomerModal = false;
-    this.toastService.success('Cliente actualizado correctamente');
+    this.cartService
+      .setCustomer(customer)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.showCustomerModal = false;
+        this.toastService.success('Cliente actualizado correctamente');
+      });
+  }
+
+  onCustomerSelected(customer: PosCustomer): void {
+    this.customerService.selectCustomer(customer);
+    this.cartService
+      .setCustomer(customer)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.showCustomerModal = false;
+        this.toastService.success('Cliente asignado correctamente');
+      });
   }
 
   onProductSelected(product: any): void {
@@ -407,27 +440,56 @@ export class PosComponent implements OnInit, OnDestroy {
 
     const createdBy = 'current_user';
 
-    // Process sale with payment using the orquestrator
-    this.paymentService
-      .processSaleWithPayment(this.cartState, paymentData, createdBy)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (result: any) => {
-          this.loading = false;
-          this.currentOrderId = result.order?.id;
-          this.currentOrderNumber = result.order?.order_number;
-          this.completedOrder = result.order;
-          this.showOrderConfirmation = true;
-          this.toastService.success('Venta procesada correctamente');
-          this.onClearCart();
-        },
-        error: (error: any) => {
-          this.loading = false;
-          this.toastService.error(
-            error.message || 'Error al procesar la venta',
-          );
-        },
-      });
+    if (paymentData.isCreditSale) {
+      // Handle credit sale
+      this.paymentService
+        .processCreditSale(this.cartState, createdBy)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result: any) => {
+            this.loading = false;
+            this.currentOrderId = result.order?.id;
+            this.currentOrderNumber = result.order?.order_number;
+            this.completedOrder = {
+              ...result.order,
+              isCreditSale: true,
+            };
+            this.showOrderConfirmation = true;
+            this.toastService.success(
+              'Venta a crédito procesada correctamente',
+            );
+            this.onClearCart();
+          },
+          error: (error: any) => {
+            this.loading = false;
+            this.toastService.error(
+              error.message || 'Error al procesar la venta a crédito',
+            );
+          },
+        });
+    } else {
+      // Process sale with payment using orquestrator
+      this.paymentService
+        .processSaleWithPayment(this.cartState, paymentData, createdBy)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (result: any) => {
+            this.loading = false;
+            this.currentOrderId = result.order?.id;
+            this.currentOrderNumber = result.order?.order_number;
+            this.completedOrder = result.order;
+            this.showOrderConfirmation = true;
+            this.toastService.success('Venta procesada correctamente');
+            this.onClearCart();
+          },
+          error: (error: any) => {
+            this.loading = false;
+            this.toastService.error(
+              error.message || 'Error al procesar la venta',
+            );
+          },
+        });
+    }
   }
 
   onQuickSearch(): void {

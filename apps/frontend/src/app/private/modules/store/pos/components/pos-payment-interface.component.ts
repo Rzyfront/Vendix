@@ -301,6 +301,36 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       });
   }
 
+  processCreditSale(): void {
+    if (!this.cartState || this.paymentState.isProcessing) return;
+
+    this.paymentState.isProcessing = true;
+
+    this.paymentService
+      .processCreditSale(this.cartState, 'current_user')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          this.paymentState.isProcessing = false;
+          if (response.success) {
+            this.paymentCompleted.emit({
+              success: true,
+              order: response.order,
+              message: response.message,
+              isCreditSale: true,
+            });
+            this.onModalClosed();
+          } else {
+            console.error('Credit sale failed:', response.message);
+          }
+        },
+        error: (error) => {
+          this.paymentState.isProcessing = false;
+          console.error('Credit sale error:', error);
+        },
+      });
+  }
+
   saveAsDraft(): void {
     if (!this.cartState) return;
 

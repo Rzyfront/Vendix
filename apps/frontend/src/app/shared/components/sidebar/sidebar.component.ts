@@ -1,4 +1,4 @@
-import { Component, Input, Renderer2, OnDestroy, ElementRef, AfterViewInit, ChangeDetectorRef } from '@angular/core';
+import { Component, Input, Output, EventEmitter, Renderer2, OnDestroy, ElementRef, AfterViewInit, ChangeDetectorRef, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
@@ -137,12 +137,13 @@ export interface MenuItem {
   `,
   styleUrls: ['./sidebar.component.scss'],
 })
-export class SidebarComponent implements OnDestroy, AfterViewInit {
+export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() menuItems: MenuItem[] = [];
   @Input() title: string = 'Vendix Corp';
   @Input() vlink: string = 'vlink-slug';
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
+  @Output() expandSidebar = new EventEmitter<void>();
 
   isMobile = false;
   isMobileOpen = false;
@@ -163,6 +164,12 @@ export class SidebarComponent implements OnDestroy, AfterViewInit {
   ngAfterViewInit() {
     // Setup focusable elements for accessibility
     this.updateFocusableElements();
+  }
+
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['collapsed'] && changes['collapsed'].currentValue === true) {
+      this.openSubmenus.clear();
+    }
   }
 
   ngOnDestroy() {
@@ -350,9 +357,18 @@ export class SidebarComponent implements OnDestroy, AfterViewInit {
   }
 
   toggleSubmenu(menuLabel: string) {
+    // Auto-expand if collapsed and has children (PC only)
+    if (this.collapsed && !this.isMobile) {
+      this.expandSidebar.emit();
+      // We want to open this submenu after expansion, so we add it.
+      // The exclusive logic below will handle clearing others.
+    }
+
     if (this.openSubmenus.has(menuLabel)) {
       this.openSubmenus.delete(menuLabel);
     } else {
+      // Exclusive Accordion: Close all other submenus
+      this.openSubmenus.clear();
       this.openSubmenus.add(menuLabel);
     }
   }

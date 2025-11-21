@@ -1,13 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentsService } from '../payments.service';
+import { BadRequestException } from '@nestjs/common';
+import { PaymentsService } from './payments.service';
+import {
+  PaymentData,
+  PaymentResult,
+  PaymentStatus,
+} from './interfaces';
 import {
   PaymentGatewayService,
   PaymentValidatorService,
-  WebhookHandlerService,
-} from '../services';
-import { PaymentError, PaymentErrorCodes } from '../utils';
-import { PrismaService } from '../../../prisma/prisma.service';
+} from './services';
+import { StorePaymentMethodsService } from './services/store-payment-methods.service';
+import { WebhookHandlerService } from './services/webhook-handler.service';
+import { PaymentError, PaymentErrorCodes } from './utils';
+import { PrismaService } from '../../prisma/prisma.service';
 import { payments_state_enum } from '@prisma/client';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -32,6 +40,7 @@ describe('PaymentsService', () => {
     order_number: 'ORD202511140001',
     state: 'created',
     grand_total: 100.0,
+    store_id: 1,
     stores: {
       id: 1,
       name: 'Test Store',
@@ -47,6 +56,9 @@ describe('PaymentsService', () => {
       },
       store_users: {
         findMany: jest.fn(),
+      },
+      stores: {
+        findUnique: jest.fn(),
       },
     };
 
@@ -76,6 +88,12 @@ describe('PaymentsService', () => {
           provide: WebhookHandlerService,
           useValue: {},
         },
+        {
+          provide: StockLevelManager,
+          useValue: {
+            updateStock: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -95,7 +113,7 @@ describe('PaymentsService', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -126,7 +144,7 @@ describe('PaymentsService', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -148,7 +166,7 @@ describe('PaymentsService', () => {
         await service.processPayment(createPaymentDto, mockUser);
         fail('Should have thrown an error');
       } catch (error) {
-        expect(error).toBeInstanceOf(PaymentError);
+        expect(error).toBeInstanceOf(BadRequestException);
       }
     });
 
@@ -158,7 +176,7 @@ describe('PaymentsService', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 2, // Different store
       };
 
@@ -186,7 +204,7 @@ describe('PaymentsService', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
         customerEmail: 'customer@example.com',
         customerName: 'John Doe',
@@ -235,8 +253,8 @@ describe('PaymentsService', () => {
       };
 
       const mockPayment = {
-        ...mockOrder,
         transaction_id: 'txn_1234567890_abc123',
+        orders: mockOrder,
       };
 
       const mockStoreUsers = [{ store_id: 1 }];

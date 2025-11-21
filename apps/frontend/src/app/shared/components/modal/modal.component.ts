@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-export type ModalSize = 'sm' | 'md' | 'lg';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
 @Component({
   selector: 'app-modal',
@@ -158,6 +158,7 @@ export class ModalComponent implements OnInit, OnDestroy {
       sm: ['max-w-sm'],
       md: ['max-w-2xl'],
       lg: ['max-w-7xl', 'w-full', 'h-full', 'max-h-[90vh]'],
+      xl: ['max-w-[90vw]', 'w-full', 'h-full', 'max-h-[90vh]'],
     };
 
     const classes = [...baseClasses, ...sizeClasses[this.size]];

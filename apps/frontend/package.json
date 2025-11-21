@@ -11,7 +11,7 @@
     "// ----- PRODUCTION -----": "",
     "build:prod": "ng build --configuration production",
     "// ----- CODE QUALITY -----": "",
-    "lint": "ng lint --fix",
+    "lint": "ng lint",
     "format": "prettier --write \"src/**/*.ts\" \"src/**/*.html\" \"src/**/*.scss\""
   },
   "private": true,

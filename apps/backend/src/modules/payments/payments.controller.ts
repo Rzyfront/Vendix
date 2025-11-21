@@ -9,6 +9,8 @@ import {
   Request,
   HttpCode,
   HttpStatus,
+  NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -144,11 +146,68 @@ export class PaymentsController {
     );
   }
 
+  @Get('payment-methods')
+  @ApiOperation({ summary: 'Get payment methods for the current user store' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment methods retrieved successfully',
+  })
+  async getMyStorePaymentMethods(@Request() req) {
+    if (!req.user.store_id) {
+      // Si el usuario no tiene scope de tienda (ej. es org admin global),
+      // intentamos usar la primera tienda a la que tiene acceso o lanzamos error.
+      // Para POS, se asume que hay un contexto de tienda.
+      // Sin embargo, el error original venía de intentar usar ID 1.
+      // Vamos a permitir que el servicio maneje o lanzar error si no hay contexto.
+      throw new BadRequestException(
+        'User session does not have a specific store context',
+      );
+    }
+    return this.paymentsService.getStorePaymentMethods(
+      req.user.store_id,
+      req.user,
+    );
+  }
+
   @Get(':paymentId')
   @ApiOperation({ summary: 'Get payment by ID' })
   @ApiResponse({ status: 200, description: 'Payment retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
   async findOne(@Param('paymentId') paymentId: string, @Request() req) {
     return this.paymentsService.findOne(paymentId, req.user);
+  }
+
+  @Get('stores/:storeId/payment-methods')
+  @ApiOperation({ summary: 'Get payment methods for a store' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment methods retrieved successfully',
+  })
+  async getStorePaymentMethods(
+    @Param('storeId') storeId: string,
+    @Request() req,
+  ) {
+    return this.paymentsService.getStorePaymentMethods(
+      parseInt(storeId),
+      req.user,
+    );
+  }
+
+  @Post('stores/:storeId/payment-methods')
+  @ApiOperation({ summary: 'Create payment method for a store' })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment method created successfully',
+  })
+  async createStorePaymentMethod(
+    @Param('storeId') storeId: string,
+    @Body() createPaymentMethodDto: any,
+    @Request() req,
+  ) {
+    return this.paymentsService.createStorePaymentMethod(
+      parseInt(storeId),
+      createPaymentMethodDto,
+      req.user,
+    );
   }
 }

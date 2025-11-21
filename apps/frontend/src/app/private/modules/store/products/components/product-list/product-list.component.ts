@@ -261,26 +261,42 @@ export class ProductListComponent implements OnInit, OnDestroy {
 
   createProduct(productData?: CreateProductDto | Event): void {
     if (!productData || productData instanceof Event) {
-      if (this.createProductForm.invalid) {
-        Object.keys(this.createProductForm.controls).forEach((key) => {
-          this.createProductForm.get(key)?.markAsTouched();
-        });
-        return;
-      }
-
-      const formData = this.createProductForm.value;
-      productData = {
-        name: formData.name,
-        slug: formData.slug || this.generateSlug(formData.name),
-        description: formData.description || undefined,
-        base_price: formData.base_price,
-        sku: formData.sku || undefined,
-        stock_quantity: formData.stock_quantity || undefined,
-        category_id: formData.category_id || undefined,
-        brand_id: formData.brand_id || undefined,
+      // Called from "Cadastrar" button - create a default product
+      const defaultProductData: CreateProductDto = {
+        name: 'New Product',
+        slug: this.generateSlug('New Product'),
+        description: 'Default product created from quick action',
+        base_price: 0,
+        sku: undefined,
+        stock_quantity: 0,
+        category_id: undefined,
+        brand_id: undefined,
       };
+
+      this.isCreatingProduct = true;
+
+      const sub = this.productsService
+        .createProduct(defaultProductData)
+        .subscribe({
+          next: (response: any) => {
+            console.log('Create product response:', response);
+            this.loadProducts();
+            this.loadStats();
+            this.toastService.success('Product created successfully');
+            this.isCreatingProduct = false;
+          },
+          error: (error: any) => {
+            console.error('Error creating product:', error);
+            this.toastService.error('Error creating product');
+            this.isCreatingProduct = false;
+          },
+        });
+
+      this.subscriptions.push(sub);
+      return;
     }
 
+    // Called with form data from modal - create the product and refresh table
     this.isCreatingProduct = true;
 
     const sub = this.productsService

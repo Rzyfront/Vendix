@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
-import { Observable, of, BehaviorSubject } from 'rxjs';
+import { Observable, of, BehaviorSubject, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
+import { StoreContextService } from '../../../../../core/services/store-context.service';
 
 export interface Product {
   id: string;
@@ -60,67 +61,18 @@ export interface SearchResult {
 })
 export class PosProductService {
   private readonly apiUrl = `${environment.apiUrl}/products`;
-  private products: Product[] = [];
   private categories: Category[] = [];
   private brands: Brand[] = [];
   private searchHistory$ = new BehaviorSubject<string[]>([]);
 
-  constructor(private http: HttpClient) {
+  constructor(
+    private http: HttpClient,
+    private storeContextService: StoreContextService,
+  ) {
     this.initializeMockData();
   }
 
   private initializeMockData(): void {
-    this.products = [
-      {
-        id: '1',
-        name: 'Mouse Inalámbrico',
-        sku: 'MOUSE-WIFI-001',
-        price: 25.99,
-        cost: 15.0,
-        category: 'Accesorios',
-        brand: 'Logitech',
-        stock: 50,
-        minStock: 10,
-        barcode: '2345678901234',
-        tags: ['mouse', 'inalámbrico', 'logitech'],
-        isActive: true,
-        createdAt: new Date('2024-01-15'),
-        updatedAt: new Date('2024-01-15'),
-      },
-      {
-        id: '2',
-        name: 'Teclado Mecánico RGB',
-        sku: 'KEY-MEC-003',
-        price: 129.99,
-        cost: 85.0,
-        category: 'Accesorios',
-        brand: 'Corsair',
-        stock: 25,
-        minStock: 5,
-        barcode: '3456789012345',
-        tags: ['teclado', 'mecánico', 'rgb'],
-        isActive: true,
-        createdAt: new Date('2024-01-16'),
-        updatedAt: new Date('2024-01-16'),
-      },
-      {
-        id: '3',
-        name: 'Monitor LG 27" 4K',
-        sku: 'MON-LG-007',
-        price: 299.99,
-        cost: 200.0,
-        category: 'Accesorios',
-        brand: 'LG',
-        stock: 15,
-        minStock: 3,
-        barcode: '4567890123456',
-        tags: ['monitor', '4k', 'lg'],
-        isActive: true,
-        createdAt: new Date('2024-01-17'),
-        updatedAt: new Date('2024-01-17'),
-      },
-    ];
-
     this.categories = [
       { id: 'all', name: 'Todos' },
       { id: 'electronics', name: 'Electronicos' },
@@ -144,71 +96,200 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
-    let params = new HttpParams()
-      .set('page', page.toString())
-      .set('limit', pageSize.toString());
+    const query: any = {
+      page,
+      limit: pageSize,
+      state: 'active',
+    };
 
     if (filters.query) {
-      params = params.set('search', filters.query);
+      query.search = filters.query;
     }
 
     if (filters.category && filters.category !== 'all') {
-      params = params.set('category_id', filters.category);
+      query.category_id = filters.category;
     }
 
     if (filters.brand && filters.brand !== 'all') {
-      params = params.set('brand_id', filters.brand);
+      query.brand_id = filters.brand;
     }
 
     if (filters.inStock) {
-      params = params.set('in_stock', 'true');
+      query.include_stock = 'true';
     }
 
     if (filters.minPrice) {
-      params = params.set('min_price', filters.minPrice.toString());
+      query.min_price = filters.minPrice;
     }
 
     if (filters.maxPrice) {
-      params = params.set('max_price', filters.maxPrice.toString());
+      query.max_price = filters.maxPrice;
     }
 
-    if (filters.sortBy) {
-      params = params.set('sort_by', filters.sortBy);
-      if (filters.sortOrder) {
-        params = params.set('sort_order', filters.sortOrder);
-      }
+    if (filters.pos_optimized) {
+      query.pos_optimized = 'true';
     }
+
+    if (filters.barcode) {
+      query.barcode = filters.barcode;
+    }
+
+    if (filters.include_stock) {
+      query.include_stock = 'true';
+    }
+
+    const params = this.buildParams(query);
 
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => {
-        // Adapt API response to SearchResult interface
-        // The backend usually returns { data: [], meta: { ... } } or similar for paginated results
-        // Assuming the standard response format from UsersController example
+        // Handle actual backend response format
+        let products = [];
+        let total = 0;
+        let currentPage = page;
+        let limit = pageSize;
+        let totalPages = 0;
+
+        if (response.success && response.data) {
+          // Backend response: { success: true, data: [...], meta: {...} }
+          products = Array.isArray(response.data) ? response.data : [];
+          total = response.meta?.total || response.total || products.length;
+          currentPage = response.meta?.page || response.page || page;
+          limit = response.meta?.limit || response.limit || pageSize;
+          totalPages = Math.ceil(total / limit);
+        } else if (response.data && Array.isArray(response.data)) {
+          // Alternative format: { data: [...], meta: {...} }
+          products = response.data;
+          total = response.meta?.total || response.total || products.length;
+          currentPage = response.meta?.page || response.page || page;
+          limit = response.meta?.limit || response.limit || pageSize;
+          totalPages = Math.ceil(total / limit);
+        }
+
+        const transformedProducts = this.transformProducts(products);
+
         return {
-          products: response.data || [],
-          total: response.meta?.total || 0,
-          page: response.meta?.page || page,
-          pageSize: response.meta?.limit || pageSize,
-          totalPages: response.meta?.totalPages || 0,
+          products: transformedProducts,
+          total,
+          page: currentPage,
+          pageSize: limit,
+          totalPages,
         };
       }),
-      catchError((error) => {
-        console.error('Error searching products:', error);
-        return of({
-          products: [],
-          total: 0,
-          page,
-          pageSize,
-          totalPages: 0,
-        });
+      catchError((error: any) => {
+        // Mensajes de error más descriptivos
+        let errorMessage = 'An error occurred';
+
+        if (error.error?.message) {
+          errorMessage = error.error.message;
+        } else if (error.status === 400) {
+          errorMessage = 'Invalid data provided';
+        } else if (error.status === 401) {
+          errorMessage = 'Unauthorized access';
+        } else if (error.status === 403) {
+          errorMessage = 'Insufficient permissions';
+        } else if (error.status === 404) {
+          errorMessage = 'Product not found';
+        } else if (error.status === 409) {
+          errorMessage = 'Product with this SKU or slug already exists';
+        } else if (error.status >= 500) {
+          errorMessage = 'Server error. Please try again later';
+        }
+
+        return throwError(() => errorMessage);
       }),
     );
+  }
+
+  private transformProducts(products: any[]): any[] {
+    return products.map((product) => {
+      // Calculate total stock from stock_levels
+      let totalStock = 0;
+      if (product.stock_levels && Array.isArray(product.stock_levels)) {
+        // Sum stock from all locations
+        const storeStockLevels = product.stock_levels.filter((level: any) => {
+          return level.quantity_available > 0;
+        });
+
+        totalStock = storeStockLevels.reduce(
+          (sum: number, level: any) => sum + (level.quantity_available || 0),
+          0,
+        );
+      }
+
+      // Fallback to stock_quantity if no stock_levels
+      if (totalStock === 0) {
+        totalStock = product.stock_quantity || 0;
+      }
+
+      return {
+        id: product.id?.toString() || '',
+        name: product.name || '',
+        sku: product.sku || '',
+        price: parseFloat(product.base_price || product.price || 0),
+        cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
+        category:
+          product.product_categories && product.product_categories.length > 0
+            ? product.product_categories[0].name
+            : product.category?.name || 'Sin categoría',
+        brand: product.brands?.name || '',
+        stock: totalStock,
+        minStock: product.min_stock_level || 5,
+        image:
+          product.product_images && product.product_images.length > 0
+            ? product.product_images[0].url
+            : product.image_url || product.image || '',
+        description: product.description || '',
+        barcode: product.barcode || '',
+        tags: product.tags || [],
+        isActive: product.state === 'active',
+        createdAt: new Date(product.created_at),
+        updatedAt: new Date(product.updated_at),
+        // Include additional data for debugging
+        _rawStockLevels: product.stock_levels,
+        _rawStockQuantity: product.stock_quantity,
+      };
+    });
+  }
+
+  private buildParams(query: any): HttpParams {
+    let params = new HttpParams();
+
+    Object.keys(query).forEach((key) => {
+      const value = query[key];
+      if (value !== undefined && value !== null) {
+        params = params.set(key, value.toString());
+      }
+    });
+
+    return params;
+  }
+
+  private handleError(error: any): Observable<never> {
+    // Mensajes de error más descriptivos
+    let errorMessage = 'An error occurred';
+
+    if (error.error?.message) {
+      errorMessage = error.error.message;
+    } else if (error.status === 400) {
+      errorMessage = 'Invalid data provided';
+    } else if (error.status === 401) {
+      errorMessage = 'Unauthorized access';
+    } else if (error.status === 403) {
+      errorMessage = 'Insufficient permissions';
+    } else if (error.status === 404) {
+      errorMessage = 'Product not found';
+    } else if (error.status === 409) {
+      errorMessage = 'Product with this SKU or slug already exists';
+    } else if (error.status >= 500) {
+      errorMessage = 'Server error. Please try again later';
+    }
+
+    return throwError(() => errorMessage);
   }
 
   getProductById(id: string): Observable<Product | null> {
     return this.http.get<Product>(`${this.apiUrl}/${id}`).pipe(
       catchError((error: any) => {
-        console.error('Error getting product by ID:', error);
         return of(null);
       }),
     );
@@ -223,7 +304,6 @@ export class PosProductService {
           : null,
       ),
       catchError((error: any) => {
-        console.error('Error getting product by barcode:', error);
         return of(null);
       }),
     );
@@ -238,7 +318,6 @@ export class PosProductService {
           : null,
       ),
       catchError((error: any) => {
-        console.error('Error getting product by SKU:', error);
         return of(null);
       }),
     );
@@ -247,7 +326,6 @@ export class PosProductService {
   getCategories(): Observable<Category[]> {
     return this.http.get<Category[]>(`${environment.apiUrl}/categories`).pipe(
       catchError((error: any) => {
-        console.error('Error getting categories:', error);
         return of([]);
       }),
     );
@@ -256,7 +334,6 @@ export class PosProductService {
   getBrands(): Observable<Brand[]> {
     return this.http.get<Brand[]>(`${environment.apiUrl}/brands`).pipe(
       catchError((error: any) => {
-        console.error('Error getting brands:', error);
         return of([]);
       }),
     );
@@ -290,27 +367,17 @@ export class PosProductService {
   }
 
   getPopularProducts(limit: number = 10): Observable<Product[]> {
-    const popular = this.products
-      .filter((p) => p.isActive)
-      .sort((a, b) => b.stock - a.stock)
-      .slice(0, limit);
-    return of(popular).pipe(delay(200));
+    // This would normally call an endpoint, for now return empty
+    return of([]).pipe(delay(200));
   }
 
   getLowStockProducts(limit: number = 10): Observable<Product[]> {
-    const lowStock = this.products
-      .filter((p) => p.isActive && p.stock <= p.minStock)
-      .sort((a, b) => a.stock - b.stock)
-      .slice(0, limit);
-    return of(lowStock).pipe(delay(200));
+    // This would normally call an endpoint, for now return empty
+    return of([]).pipe(delay(200));
   }
 
   updateStock(productId: string, quantity: number): Observable<Product | null> {
-    const product = this.products.find((p) => p.id === productId);
-    if (product) {
-      product.stock = Math.max(0, quantity);
-      product.updatedAt = new Date();
-    }
-    return of(product || null).pipe(delay(100));
+    // This would normally call an endpoint, for now return null
+    return of(null).pipe(delay(100));
   }
 }

@@ -287,7 +287,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
   private canSwitchToOrganization(): boolean {
     const canSwitch = this.environmentContextService.canSwitchToOrganization();
-    console.log('🔍 UserDropdown - canSwitchToOrganization:', canSwitch);
     return canSwitch;
   }
 
@@ -339,7 +338,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
   private canSwitchToStore(): boolean {
     const canSwitch = this.environmentContextService.canSwitchToStore();
-    console.log('🔍 UserDropdown - canSwitchToStore:', canSwitch);
     return canSwitch;
   }
 

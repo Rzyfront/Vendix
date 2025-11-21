@@ -1,0 +1,80 @@
+meta {
+  name: Update Purchase Order
+  type: http
+  seq: 6
+}
+
+patch {
+  url: {{baseUrl}}/orders/purchase-orders/1
+  body: {
+    "expected_date": "2024-12-15T23:59:59.000Z",
+    "notes": "Updated purchase order notes",
+    "shipping_cost": 15.00,
+    "discount_amount": 10.00,
+    "items": [
+      {
+        "product_id": 1,
+        "quantity": 15,
+        "unit_price": 24.50
+      },
+      {
+        "product_id": 2,
+        "quantity": 5,
+        "unit_price": 35.00
+      }
+    ]
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should update purchase order", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    
+    expect(res.body).to.have.property('id');
+    expect(res.body).to.have.property('supplier_id');
+    expect(res.body).to.have.property('location_id');
+    expect(res.body).to.have.property('status');
+    expect(res.body).to.have.property('total_amount');
+    expect(res.body).to.have.property('items');
+    expect(res.body).to.have.property('notes');
+    expect(res.body).to.have.property('shipping_cost');
+    expect(res.body).to.have.property('discount_amount');
+    
+    expect(res.body.id).to.be.a('number');
+    expect(res.body.notes).to.equal('Updated purchase order notes');
+    expect(res.body.shipping_cost).to.equal(15.00);
+    expect(res.body.discount_amount).to.equal(10.00);
+    expect(res.body.items).to.be.an('array');
+    expect(res.body.items.length).to.equal(2);
+  });
+  
+  test("Should update items correctly", function() {
+    const items = res.body.items;
+    
+    // Check first item
+    const firstItem = items.find(item => item.product_id === 1);
+    expect(firstItem).to.exist;
+    expect(firstItem.quantity).to.equal(15);
+    expect(firstItem.unit_price).to.equal(24.50);
+    
+    // Check second item
+    const secondItem = items.find(item => item.product_id === 2);
+    expect(secondItem).to.exist;
+    expect(secondItem.quantity).to.equal(5);
+    expect(secondItem.unit_price).to.equal(35.00);
+  });
+  
+  test("Should recalculate totals correctly", function() {
+    const items = res.body.items;
+    const expectedSubtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+    const expectedTotal = expectedSubtotal - (res.body.discount_amount || 0) + (res.body.shipping_cost || 0);
+    
+    expect(res.body.subtotal).to.equal(expectedSubtotal);
+    expect(res.body.total_amount).to.equal(expectedTotal);
+  });
+}

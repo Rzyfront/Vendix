@@ -58,7 +58,7 @@ export class UsersService {
     if (query.search) params = params.set('search', query.search);
     if (query.state) params = params.set('state', query.state);
 
-    return this.http.get<any>(`${this.apiUrl}/org/users`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/users`, { params }).pipe(
       map((response) => {
         // Mapear la respuesta de la API a la estructura esperada por el frontend
         return {
@@ -83,7 +83,7 @@ export class UsersService {
    * Obtener usuario por ID
    */
   getUserById(id: number): Observable<User> {
-    return this.http.get<User>(`${this.apiUrl}/org/users/${id}`).pipe(
+    return this.http.get<User>(`${this.apiUrl}/users/${id}`).pipe(
       catchError((error) => {
         console.error('Error getting user:', error);
         return throwError(() => error);
@@ -97,7 +97,7 @@ export class UsersService {
   createUser(userData: CreateUserDto): Observable<User> {
     this.isCreatingUser$.next(true);
 
-    return this.http.post<User>(`${this.apiUrl}/org/users`, userData).pipe(
+    return this.http.post<User>(`${this.apiUrl}/users`, userData).pipe(
       finalize(() => this.isCreatingUser$.next(false)),
       catchError((error) => {
         console.error('Error creating user:', error);
@@ -112,15 +112,13 @@ export class UsersService {
   updateUser(id: number, userData: UpdateUserDto): Observable<User> {
     this.isUpdatingUser$.next(true);
 
-    return this.http
-      .patch<User>(`${this.apiUrl}/org/users/${id}`, userData)
-      .pipe(
-        finalize(() => this.isUpdatingUser$.next(false)),
-        catchError((error) => {
-          console.error('Error updating user:', error);
-          return throwError(() => error);
-        }),
-      );
+    return this.http.patch<User>(`${this.apiUrl}/users/${id}`, userData).pipe(
+      finalize(() => this.isUpdatingUser$.next(false)),
+      catchError((error) => {
+        console.error('Error updating user:', error);
+        return throwError(() => error);
+      }),
+    );
   }
 
   /**
@@ -129,7 +127,7 @@ export class UsersService {
   deleteUser(id: number): Observable<void> {
     this.isDeletingUser$.next(true);
 
-    return this.http.delete<void>(`${this.apiUrl}/org/users/${id}`).pipe(
+    return this.http.delete<void>(`${this.apiUrl}/users/${id}`).pipe(
       finalize(() => this.isDeletingUser$.next(false)),
       catchError((error) => {
         console.error('Error deleting user:', error);
@@ -144,15 +142,13 @@ export class UsersService {
   archiveUser(id: number): Observable<User> {
     this.isUpdatingUser$.next(true);
 
-    return this.http
-      .post<User>(`${this.apiUrl}/org/users/${id}/archive`, {})
-      .pipe(
-        finalize(() => this.isUpdatingUser$.next(false)),
-        catchError((error) => {
-          console.error('Error archiving user:', error);
-          return throwError(() => error);
-        }),
-      );
+    return this.http.post<User>(`${this.apiUrl}/users/${id}/archive`, {}).pipe(
+      finalize(() => this.isUpdatingUser$.next(false)),
+      catchError((error) => {
+        console.error('Error archiving user:', error);
+        return throwError(() => error);
+      }),
+    );
   }
 
   /**
@@ -162,7 +158,7 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/org/users/${id}/reactivate`, {})
+      .post<User>(`${this.apiUrl}/users/${id}/reactivate`, {})
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
@@ -203,7 +199,7 @@ export class UsersService {
     return this.http
       .get<{
         data: UserStats;
-      }>(`${this.apiUrl}/org/users/dashboard`, { params })
+      }>(`${this.apiUrl}/users/dashboard`, { params })
       .pipe(
         map((response) => response.data),
         catchError((error) => {
@@ -224,7 +220,7 @@ export class UsersService {
    */
   resetUserPassword(id: number, newPassword: string): Observable<void> {
     return this.http
-      .post<void>(`${this.apiUrl}/org/users/${id}/reset-password`, {
+      .post<void>(`${this.apiUrl}/users/${id}/reset-password`, {
         password: newPassword,
       })
       .pipe(
@@ -240,7 +236,7 @@ export class UsersService {
    */
   toggleUser2FA(id: number, enabled: boolean): Observable<User> {
     return this.http
-      .patch<User>(`${this.apiUrl}/org/users/${id}/2fa`, { enabled })
+      .patch<User>(`${this.apiUrl}/users/${id}/2fa`, { enabled })
       .pipe(
         catchError((error) => {
           console.error('Error toggling 2FA:', error);
@@ -250,28 +246,53 @@ export class UsersService {
   }
 
   /**
-   * Verificar email de usuario
+   * Desbloquear usuario
    */
-  verifyUserEmail(id: number): Observable<User> {
+  unlockUser(id: number): Observable<User> {
+    return this.http.post<User>(`${this.apiUrl}/users/${id}/unlock`, {}).pipe(
+      catchError((error) => {
+        console.error('Error unlocking user:', error);
+        return throwError(() => error);
+      }),
+    );
+  }
+
+  /**
+   * Obtener organizaciones disponibles (para select en formularios)
+   */
+  getOrganizations(): Observable<any[]> {
+    return this.http.get<any>(`${this.apiUrl}/organizations`).pipe(
+      map((response) => response.data || []),
+      catchError((error) => {
+        console.error('Error loading organizations:', error);
+        return throwError(() => error);
+      }),
+    );
+  }
+
+  /**
+   * Asignar rol a usuario
+   */
+  assignRoleToUser(userId: number, roleId: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/org/users/${id}/verify-email`, {})
+      .post<User>(`${this.apiUrl}/users/${userId}/roles/${roleId}`, {})
       .pipe(
         catchError((error) => {
-          console.error('Error verifying email:', error);
+          console.error('Error assigning role to user:', error);
           return throwError(() => error);
         }),
       );
   }
 
   /**
-   * Desbloquear usuario
+   * Remover rol de usuario
    */
-  unlockUser(id: number): Observable<User> {
+  removeRoleFromUser(userId: number, roleId: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/org/users/${id}/unlock`, {})
+      .delete<User>(`${this.apiUrl}/users/${userId}/roles/${roleId}`)
       .pipe(
         catchError((error) => {
-          console.error('Error unlocking user:', error);
+          console.error('Error removing role from user:', error);
           return throwError(() => error);
         }),
       );

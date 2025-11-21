@@ -8,58 +8,56 @@ datasource db {
 }
 
 model users {
-   id                        Int                         @id @default(autoincrement())
-   username                  String                      @unique @db.VarChar(50)
-   email                     String                      @db.VarChar(255)
-   password                  String
-   state                     user_state_enum             @default(pending_verification)
-   last_login                DateTime?                   @db.Timestamp(6)
-   failed_login_attempts     Int                         @default(0)
-   locked_until              DateTime?                   @db.Timestamp(6)
-   email_verified            Boolean                     @default(false)
-   two_factor_enabled        Boolean                     @default(false)
-   two_factor_secret         String?
-   created_at                DateTime?                   @default(now()) @db.Timestamp(6)
-   updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
-   first_name                String                      @db.VarChar(100)
-   last_name                 String                      @db.VarChar(100)
-   organization_id           Int
-   main_store_id             Int?
-   phone                     String?                     @db.VarChar(50)
-   document_type             String?                     @db.VarChar(50)
-   document_number           String?                     @db.VarChar(50)
-   addresses                 addresses[]                 @relation("user_addresses")
-   api_keys                  api_keys[]
-   audit_logs                audit_logs[]
-   email_verification_tokens email_verification_tokens[]
-   inventory_adjustments1    inventory_adjustments[]     @relation("inventory_adjustments_approved_by")
-   inventory_adjustments     inventory_adjustments[]     @relation("inventory_adjustments_created_by")
-   inventory_movements       inventory_movements[]
-   inventory_transactions    inventory_transactions[]
-   password_reset_tokens     password_reset_tokens[]
-   purchase_orders1          purchase_orders[]           @relation("purchase_orders_approved_by")
-   purchase_orders           purchase_orders[]           @relation("purchase_orders_created_by")
-   refresh_tokens            refresh_tokens[]
-   refunds                   refunds[]
-   reviews                   reviews[]
-   sales_orders1             sales_orders[]              @relation("sales_orders_approved_by")
-   sales_orders              sales_orders[]              @relation("sales_orders_created_by")
-   stock_reservations        stock_reservations[]
-   stock_transfers1          stock_transfers[]           @relation("stock_transfers_approved_by")
-   stock_transfers           stock_transfers[]           @relation("stock_transfers_created_by")
-   store_users               store_users[]
-   user_roles                user_roles[]
-   user_sessions             user_sessions[]
-   user_settings             user_settings?
-   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
-   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  id                        Int                         @id @default(autoincrement())
+  username                  String                      @unique @db.VarChar(50)
+  email                     String                      @db.VarChar(255)
+  password                  String
+  state                     user_state_enum             @default(pending_verification)
+  last_login                DateTime?                   @db.Timestamp(6)
+  failed_login_attempts     Int                         @default(0)
+  locked_until              DateTime?                   @db.Timestamp(6)
+  email_verified            Boolean                     @default(false)
+  two_factor_enabled        Boolean                     @default(false)
+  two_factor_secret         String?
+  created_at                DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
+  first_name                String                      @db.VarChar(100)
+  last_name                 String                      @db.VarChar(100)
+  organization_id           Int
+  phone                     String?                     @db.VarChar(50)
+  document_number           String?                     @db.VarChar(50)
+  document_type             String?                     @db.VarChar(50)
+  main_store_id             Int?
+  addresses                 addresses[]                 @relation("user_addresses")
+  api_keys                  api_keys[]
+  audit_logs                audit_logs[]
+  email_verification_tokens email_verification_tokens[]
+  inventory_adjustments1    inventory_adjustments[]     @relation("inventory_adjustments_approved_by")
+  inventory_adjustments     inventory_adjustments[]     @relation("inventory_adjustments_created_by")
+  inventory_movements       inventory_movements[]
+  inventory_transactions    inventory_transactions[]
+  password_reset_tokens     password_reset_tokens[]
+  purchase_orders1          purchase_orders[]           @relation("purchase_orders_approved_by")
+  purchase_orders           purchase_orders[]           @relation("purchase_orders_created_by")
+  refresh_tokens            refresh_tokens[]
+  refunds                   refunds[]
+  reviews                   reviews[]
+  sales_orders1             sales_orders[]              @relation("sales_orders_approved_by")
+  sales_orders              sales_orders[]              @relation("sales_orders_created_by")
+  stock_reservations        stock_reservations[]
+  stock_transfers1          stock_transfers[]           @relation("stock_transfers_approved_by")
+  stock_transfers           stock_transfers[]           @relation("stock_transfers_created_by")
+  store_users               store_users[]
+  user_roles                user_roles[]
+  user_sessions             user_sessions[]
+  user_settings             user_settings?
+  main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
+  organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
-   @@index([email_verified])
-   @@index([state])
-   @@index([document_number])
+  @@index([email_verified])
+  @@index([state])
+  @@index([document_number])
 }
-
-
 
 model user_settings {
   id         Int       @id @default(autoincrement())
@@ -261,33 +259,33 @@ model organization_settings {
 }
 
 model stores {
-  id                  Int                   @id @default(autoincrement())
-  name                String                @db.VarChar(255)
-  slug                String                @db.VarChar(255)
-  created_at          DateTime?             @default(now()) @db.Timestamp(6)
-  updated_at          DateTime?             @default(now()) @db.Timestamp(6)
-  is_active           Boolean               @default(true)
-  manager_user_id     Int?
-  organization_id     Int
-  store_code          String?               @unique @db.VarChar(20)
-  store_type          store_type_enum       @default(physical)
-  timezone            String?               @db.VarChar(50)
-  onboarding          Boolean               @default(false)
-  addresses           addresses[]
-  audit_logs          audit_logs[]
-  categories          categories[]
-  domain_settings     domain_settings[]
-  inventory_locations inventory_locations[]
-  login_attempts      login_attempts[]
-  orders              orders[]
-  payment_methods     payment_methods[]
-  products            products[]
-  store_settings      store_settings?
-  store_users         store_users[]
-  organizations       organizations         @relation(fields: [organization_id], references: [id])
-  main_store_users    users[]               @relation("main_store")
-  tax_categories      tax_categories[]
-  tax_rates           tax_rates[]
+  id                    Int                     @id @default(autoincrement())
+  name                  String                  @db.VarChar(255)
+  slug                  String                  @db.VarChar(255)
+  created_at            DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamp(6)
+  is_active             Boolean                 @default(true)
+  manager_user_id       Int?
+  organization_id       Int
+  store_code            String?                 @unique @db.VarChar(20)
+  store_type            store_type_enum         @default(physical)
+  timezone              String?                 @db.VarChar(50)
+  onboarding            Boolean                 @default(false)
+  addresses             addresses[]
+  audit_logs            audit_logs[]
+  categories            categories[]
+  domain_settings       domain_settings[]
+  inventory_locations   inventory_locations[]
+  login_attempts        login_attempts[]
+  orders                orders[]
+  products              products[]
+  store_payment_methods store_payment_methods[]
+  store_settings        store_settings?
+  store_users           store_users[]
+  organizations         organizations           @relation(fields: [organization_id], references: [id])
+  tax_categories        tax_categories[]
+  tax_rates             tax_rates[]
+  main_store_users      users[]                 @relation("main_store")
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -355,13 +353,13 @@ model addresses {
 }
 
 model brands {
-  id          Int                @id @default(autoincrement())
-  name        String             @unique @db.VarChar(100)
+  id          Int              @id @default(autoincrement())
+  name        String           @unique @db.VarChar(100)
   description String?
   logo_url    String?
-  state       brand_state_enum  @default(active)
-  created_at  DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at  DateTime?          @default(now()) @db.Timestamp(6)
+  created_at  DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?        @default(now()) @db.Timestamp(6)
+  state       brand_state_enum @default(active)
   products    products[]
 }
 
@@ -470,34 +468,64 @@ model orders {
   refunds                                         refunds[]
 }
 
-model payment_methods {
-  id       Int                       @id @default(autoincrement())
-  store_id Int
-  name     String                    @db.VarChar(100)
-  type     payment_methods_type_enum
-  provider String?                   @db.VarChar(100)
-  config   Json?
-  state    payment_method_state_enum
-  stores   stores                    @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  payments payments[]
+model system_payment_methods {
+  id                    Int                       @id @default(autoincrement())
+  name                  String                    @unique @db.VarChar(100)
+  display_name          String                    @db.VarChar(100)
+  description           String?
+  type                  payment_methods_type_enum
+  provider              String                    @db.VarChar(100)
+  logo_url              String?
+  is_active             Boolean                   @default(true)
+  requires_config       Boolean                   @default(false)
+  config_schema         Json?
+  default_config        Json?
+  supported_currencies  String[]
+  min_amount            Decimal?                  @db.Decimal(12, 2)
+  max_amount            Decimal?                  @db.Decimal(12, 2)
+  processing_fee_type   fee_type_enum?
+  processing_fee_value  Decimal?                  @db.Decimal(12, 4)
+  created_at            DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                  @default(now()) @db.Timestamp(6)
+  store_payment_methods store_payment_methods[]
+}
+
+model store_payment_methods {
+  id                       Int                       @id @default(autoincrement())
+  store_id                 Int
+  system_payment_method_id Int
+  display_name             String?                   @db.VarChar(100)
+  custom_config            Json?
+  state                    payment_method_state_enum @default(enabled)
+  display_order            Int                       @default(0)
+  min_amount               Decimal?                  @db.Decimal(12, 2)
+  max_amount               Decimal?                  @db.Decimal(12, 2)
+  created_at               DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime                  @default(now()) @db.Timestamp(6)
+  payments                 payments[]
+  stores                   stores                    @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  system_payment_method    system_payment_methods    @relation(fields: [system_payment_method_id], references: [id], onUpdate: NoAction)
+
+  @@unique([store_id, system_payment_method_id])
+  @@index([store_id, state])
 }
 
 model payments {
-  id                Int                 @id @default(autoincrement())
-  order_id          Int
-  customer_id       Int?
-  payment_method_id Int?
-  amount            Decimal             @db.Decimal(12, 2)
-  currency          String              @db.VarChar(10)
-  state             payments_state_enum
-  transaction_id    String?             @unique @db.VarChar(255)
-  gateway_response  Json?
-  paid_at           DateTime?           @db.Timestamp(6)
-  created_at        DateTime?           @default(now()) @db.Timestamp(6)
-  updated_at        DateTime?           @default(now()) @db.Timestamp(6)
-  orders            orders              @relation(fields: [order_id], references: [id], onUpdate: NoAction)
-  payment_methods   payment_methods?    @relation(fields: [payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  refunds           refunds[]
+  id                      Int                    @id @default(autoincrement())
+  order_id                Int
+  customer_id             Int?
+  amount                  Decimal                @db.Decimal(12, 2)
+  currency                String                 @db.VarChar(10)
+  state                   payments_state_enum
+  transaction_id          String?                @unique @db.VarChar(255)
+  gateway_response        Json?
+  paid_at                 DateTime?              @db.Timestamp(6)
+  created_at              DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?              @default(now()) @db.Timestamp(6)
+  store_payment_method_id Int?
+  orders                  orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  store_payment_method    store_payment_methods? @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  refunds                 refunds[]
 }
 
 model product_categories {
@@ -727,10 +755,10 @@ model stock_levels {
   product_variants    product_variants?   @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
 
   @@unique([product_id, product_variant_id, location_id])
-  @@index([product_id, location_id]) // Para búsquedas de stock por producto y ubicación
-  @@index([product_id]) // Para cálculos de stock total por producto
-  @@index([location_id, quantity_available]) // Para búsquedas de productos con stock disponible
-  @@index([quantity_available, reorder_point]) // Para alertas de stock bajo
+  @@index([product_id, location_id])
+  @@index([product_id])
+  @@index([location_id, quantity_available])
+  @@index([quantity_available, reorder_point])
 }
 
 model inventory_movements {
@@ -1125,6 +1153,12 @@ enum payment_methods_type_enum {
   card
   paypal
   bank_transfer
+}
+
+enum fee_type_enum {
+  fixed
+  percentage
+  mixed
 }
 
 enum payments_state_enum {

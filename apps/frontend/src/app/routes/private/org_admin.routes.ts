@@ -180,6 +180,13 @@ export const orgAdminRoutes: Routes = [
         ],
       },
       {
+        path: 'users',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/users/users.component'
+          ).then((c) => c.UsersComponent),
+      },
+      {
         path: 'operations',
         children: [
           {

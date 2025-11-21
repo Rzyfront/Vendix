@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentGatewayService } from './services/payment-gateway.service';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { LocationsService } from '../inventory/locations/locations.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -22,7 +24,8 @@ export class PaymentsService {
   constructor(
     private prisma: PrismaService,
     private paymentGateway: PaymentGatewayService,
-  ) {}
+    private stockLevelManager: StockLevelManager,
+  ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -33,7 +36,7 @@ export class PaymentsService {
         customerId: createPaymentDto.customerId,
         amount: createPaymentDto.amount,
         currency: createPaymentDto.currency,
-        paymentMethodId: createPaymentDto.paymentMethodId,
+        storePaymentMethodId: createPaymentDto.storePaymentMethodId,
         storeId: createPaymentDto.storeId,
         metadata: createPaymentDto.metadata,
         returnUrl: createPaymentDto.returnUrl,
@@ -69,7 +72,7 @@ export class PaymentsService {
         customerId: createOrderPaymentDto.customerId,
         amount: createOrderPaymentDto.amount,
         currency: createOrderPaymentDto.currency,
-        paymentMethodId: createOrderPaymentDto.paymentMethodId,
+        storePaymentMethodId: createOrderPaymentDto.storePaymentMethodId,
         storeId: createOrderPaymentDto.storeId,
         metadata: createOrderPaymentDto.metadata,
         returnUrl: createOrderPaymentDto.returnUrl,
@@ -228,8 +231,10 @@ export class PaymentsService {
     }
 
     if (paymentMethodType) {
-      where.payment_methods = {
-        type: paymentMethodType,
+      where.store_payment_method = {
+        system_payment_method: {
+          type: paymentMethodType,
+        },
       };
     }
 
@@ -299,7 +304,7 @@ export class PaymentsService {
             },
           },
         },
-        payment_methods: true,
+        store_payment_method: true,
         refunds: true,
       },
     });
@@ -308,7 +313,18 @@ export class PaymentsService {
       throw new NotFoundException('Payment not found');
     }
 
-    await this.validateUserAccess(user, payment.orders.stores.id);
+    // Check if user has access to this payment's store
+    // The payment is linked to an order, which is linked to a store
+    if (payment.orders && payment.orders.store_id) {
+      await this.validateUserAccess(user, payment.orders.store_id);
+    } else {
+      // If for some reason order linkage is missing (should not happen), log warning
+      console.warn(`Payment ${paymentId} has no linked order/store context`);
+      // For safety, only super_admin should access orphaned records
+      if (!user.roles || !user.roles.includes('super_admin')) {
+        throw new ForbiddenException('Access denied to this payment record');
+      }
+    }
 
     return {
       data: payment,
@@ -316,11 +332,50 @@ export class PaymentsService {
   }
 
   private async validateUserAccess(user: any, storeId: number): Promise<void> {
-    const userStoreIds = await this.getUserStoreIds(user);
-
-    if (!userStoreIds.includes(storeId)) {
-      throw new ForbiddenException('Access denied to this store');
+    // 1. Allow super_admin to access any store
+    if (user.roles && user.roles.includes('super_admin')) {
+      return;
     }
+
+    // 2. Check if user is explicitly assigned to the store (store_users)
+    const userStoreIds = await this.getUserStoreIds(user);
+    if (userStoreIds.includes(storeId)) {
+      return;
+    }
+
+    // 3. Check if user's main_store_id matches the requested store
+    if (user.main_store_id === storeId) {
+      return;
+    }
+
+    // 4. Check if user's current token store_id matches the requested store
+    if (user.store_id === storeId) {
+      return;
+    }
+
+    // 5. Check if user is Owner or Admin of the Organization that owns the store
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+
+    if (store && user.organization_id === store.organization_id) {
+      if (
+        user.roles &&
+        (user.roles.includes('owner') || user.roles.includes('admin'))
+      ) {
+        return;
+      }
+    }
+
+    // 6. Access denied
+    console.error(
+      `Access denied: User ${user.id} (Roles: ${JSON.stringify(
+        user.roles,
+      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${store?.organization_id
+      }). Allowed stores: ${JSON.stringify(userStoreIds)}`,
+    );
+    throw new ForbiddenException('Access denied to this store');
   }
 
   /**
@@ -342,14 +397,14 @@ export class PaymentsService {
         );
 
         // 2. Process payment if required
-        let payment = null;
+        let payment: any = null;
         if (createPosPaymentDto.requires_payment) {
           payment = await this.processPosPaymentTransaction(
             tx,
             order,
             createPosPaymentDto,
           );
-          await this.updateOrderPaymentStatus(tx, order.id, 'paid');
+          await this.updateOrderPaymentStatus(tx, order.id, 'succeeded');
         } else {
           // Credit sale - update order status
           await this.updateOrderPaymentStatus(tx, order.id, 'pending_payment');
@@ -378,19 +433,18 @@ export class PaymentsService {
             id: order.id,
             order_number: order.order_number,
             status: order.state,
-            payment_status: order.payment_status,
+            payment_status: payment ? payment.state : 'pending',
             total_amount: order.grand_total,
           },
           payment: payment
             ? {
-                id: (payment as any).id,
-                amount: (payment as any).amount,
-                payment_method:
-                  (payment as any).payment_methods?.name || 'Unknown',
-                status: (payment as any).status,
-                transaction_id: (payment as any).transaction_id,
-                change: (payment as any).change,
-              }
+              id: payment.id,
+              amount: payment.amount,
+              payment_method: payment.store_payment_method?.display_name || payment.store_payment_method?.system_payment_method?.display_name || 'Unknown',
+              status: payment.status,
+              transaction_id: payment.transaction_id,
+              change: payment.change,
+            }
             : undefined,
         };
       });
@@ -416,21 +470,35 @@ export class PaymentsService {
     const orderNumber = await this.generateOrderNumber(tx);
 
     // Create order items
-    const orderItems = dto.items.map((item) => ({
-      product_id: item.product_id,
-      product_variant_id: item.product_variant_id,
-      product_name: item.product_name,
-      product_sku: item.product_sku,
-      variant_sku: item.variant_sku,
-      variant_attributes: item.variant_attributes,
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      total_price: item.total_price,
-      tax_rate: item.tax_rate,
-      tax_amount_item: item.tax_amount_item,
-      cost: item.cost,
-      notes: item.notes,
-    }));
+    const orderItems = dto.items.map((item) => {
+      const orderItem: any = {
+        product_name: item.product_name,
+        product_sku: item.product_sku,
+        variant_sku: item.variant_sku,
+        variant_attributes: item.variant_attributes
+          ? JSON.stringify(item.variant_attributes)
+          : undefined,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        total_price: item.total_price,
+        tax_rate: item.tax_rate,
+        tax_amount_item: item.tax_amount_item,
+        cost: item.cost,
+        notes: item.notes,
+      };
+
+      if (item.product_id) {
+        orderItem.products = { connect: { id: item.product_id } };
+      }
+
+      if (item.product_variant_id) {
+        orderItem.product_variants = {
+          connect: { id: item.product_variant_id },
+        };
+      }
+
+      return orderItem;
+    });
 
     // Create the order
     const order = await tx.orders.create({
@@ -438,8 +506,7 @@ export class PaymentsService {
         customer_id: dto.customer_id,
         store_id: dto.store_id,
         order_number: orderNumber,
-        state: 'confirmed',
-        payment_status: dto.requires_payment ? 'pending' : 'pending_payment',
+        state: 'processing', // Match enum order_state_enum
         subtotal_amount: dto.subtotal,
         tax_amount: dto.tax_amount || 0,
         discount_amount: dto.discount_amount || 0,
@@ -448,7 +515,6 @@ export class PaymentsService {
         billing_address_id: dto.billing_address_id,
         shipping_address_id: dto.shipping_address_id,
         internal_notes: dto.internal_notes,
-        created_by: user.id,
         order_items: {
           create: orderItems,
         },
@@ -471,8 +537,11 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
   ) {
     // Get payment method details
-    const paymentMethod = await tx.payment_methods.findFirst({
-      where: { id: dto.payment_method_id },
+    const paymentMethod = await tx.store_payment_methods.findFirst({
+      where: { id: dto.store_payment_method_id },
+      include: {
+        system_payment_method: true,
+      },
     });
 
     if (!paymentMethod) {
@@ -481,7 +550,7 @@ export class PaymentsService {
 
     // Calculate change for cash payments
     let change = 0;
-    if (paymentMethod.type === 'cash' && dto.amount_received) {
+    if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
       change = dto.amount_received - dto.total_amount;
     }
 
@@ -489,22 +558,28 @@ export class PaymentsService {
     const payment = await tx.payments.create({
       data: {
         order_id: order.id,
-        payment_method_id: dto.payment_method_id,
+        store_payment_method_id: dto.store_payment_method_id,
         amount: dto.total_amount,
         currency: dto.currency || 'USD',
-        status: 'succeeded',
+        state: 'succeeded',
         transaction_id: await this.generateTransactionId(),
-        reference: dto.payment_reference,
-        change: change,
-        metadata: {
-          register_id: dto.register_id,
-          seller_user_id: dto.seller_user_id,
-          amount_received: dto.amount_received,
-          is_pos_payment: true,
+        gateway_response: {
+          reference: dto.payment_reference,
+          change: change,
+          metadata: {
+            register_id: dto.register_id,
+            seller_user_id: dto.seller_user_id,
+            amount_received: dto.amount_received,
+            is_pos_payment: true,
+          },
         },
       },
       include: {
-        payment_methods: true,
+        store_payment_method: {
+          include: {
+            system_payment_method: true,
+          },
+        },
       },
     });
 
@@ -517,12 +592,31 @@ export class PaymentsService {
   private async updateOrderPaymentStatus(
     tx: any,
     orderId: number,
-    status: string,
+    paymentState: string,
   ) {
+    // Update order state based on payment state
+    let orderState: string;
+    switch (paymentState) {
+      case 'succeeded':
+        orderState = 'processing';
+        break;
+      case 'pending':
+        orderState = 'pending_payment';
+        break;
+      case 'failed':
+        orderState = 'created';
+        break;
+      case 'refunded':
+        orderState = 'refunded';
+        break;
+      default:
+        orderState = 'processing';
+    }
+
     await tx.orders.update({
       where: { id: orderId },
       data: {
-        payment_status: status,
+        state: orderState,
         updated_at: new Date(),
       },
     });
@@ -532,29 +626,42 @@ export class PaymentsService {
    * Update inventory from order
    */
   private async updateInventoryFromOrder(tx: any, order: any) {
-    for (const item of order.order_items) {
-      // Update product stock
-      await tx.products.update({
-        where: { id: item.product_id },
-        data: {
-          stock_quantity: {
-            decrement: item.quantity,
-          },
-        },
-      });
+    // Get default location for the store
+    // Since LocationsService is not injected, we do a direct query or rely on StockLevelManager finding the stock
+    // Ideally we should have the location in the order or item context, but for POS default location is usually implied if not set.
+    // We can check if the store has a default location.
 
-      // Create inventory movement
-      await tx.inventory_movements.create({
-        data: {
+    const defaultLocation = await tx.inventory_locations.findFirst({
+      where: {
+        store_id: order.store_id,
+        is_active: true,
+      },
+      orderBy: { id: 'asc' }, // Pick the first one as default
+    });
+
+    if (!defaultLocation) {
+      console.warn(
+        `No default location found for store ${order.store_id}. Skipping inventory update.`,
+      );
+      return;
+    }
+
+    for (const item of order.order_items) {
+      await this.stockLevelManager.updateStock(
+        {
           product_id: item.product_id,
-          store_id: order.store_id,
-          movement_type: 'out',
-          quantity: item.quantity,
-          reference_type: 'order',
-          reference_id: order.id,
-          notes: `POS Sale - Order ${order.order_number}`,
+          variant_id: item.product_variant_id,
+          location_id: defaultLocation.id,
+          quantity_change: -item.quantity, // Decrease stock
+          movement_type: 'sale',
+          reason: `POS Sale - Order ${order.order_number}`,
+          user_id: order.created_by,
+          order_item_id: item.id,
+          create_movement: true,
+          validate_availability: true, // Enforce stock limits
         },
-      });
+        tx, // Pass the transaction client
+      );
     }
   }
 
@@ -602,4 +709,46 @@ export class PaymentsService {
 
     return storeUsers.map((su: any) => su.store_id);
   }
+
+  /**
+   * Get payment methods for a store
+   */
+  async getStorePaymentMethods(storeId: number, user: any) {
+    // Use standardized validation method
+    await this.validateUserAccess(user, storeId);
+
+    return this.prisma.store_payment_methods.findMany({
+      where: {
+        store_id: storeId,
+        state: 'enabled',
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        provider: true,
+        state: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  /**
+   * Create payment method for a store
+   * @deprecated Use StorePaymentMethodsService.enableForStore instead
+   */
+  async createStorePaymentMethod(
+    storeId: number,
+    createPaymentMethodDto: any,
+    user: any,
+  ) {
+    // Use standardized validation method
+    await this.validateUserAccess(user, storeId);
+
+    // This method is deprecated - use StorePaymentMethodsService.enableForStore instead
+    throw new BadRequestException(
+      'Creating payment methods directly is deprecated. Use POST /stores/:storeId/payment-methods/enable/:systemMethodId instead',
+    );
+  }
 }
+

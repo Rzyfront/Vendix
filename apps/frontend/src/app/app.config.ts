@@ -25,6 +25,8 @@ import { configReducer } from './core/store/config/config.reducer';
 import { ConfigEffects } from './core/store/config/config.effects';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
+import { ThemeService } from './core/services/theme.service';
+import { ToastService } from './shared/components/toast/toast.service';
 
 import { routes } from './app.routes';
 
@@ -82,5 +84,7 @@ export const appConfig: ApplicationConfig = {
       deps: [Store, RouteManagerService],
       multi: true,
     },
+    ThemeService,
+    ToastService,
   ],
 };

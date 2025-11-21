@@ -33,6 +33,7 @@ import { takeUntil } from 'rxjs/operators';
         subtitle="Organization Admin"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
+        (expandSidebar)="toggleSidebar()"
       >
       </app-sidebar>
 

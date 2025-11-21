@@ -4,7 +4,7 @@ import { OrderValidationResult } from '../interfaces';
 
 @Injectable()
 export class PaymentValidatorService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   async validateOrder(
     orderId: number,
@@ -89,19 +89,31 @@ export class PaymentValidatorService {
   }
 
   async validatePaymentMethod(
-    paymentMethodId: number,
+    storePaymentMethodId: number,
     storeId: number,
   ): Promise<boolean> {
     try {
-      const paymentMethod = await this.prisma.payment_methods.findFirst({
+      const paymentMethod = await this.prisma.store_payment_methods.findFirst({
         where: {
-          id: paymentMethodId,
+          id: storePaymentMethodId,
           store_id: storeId,
           state: 'enabled',
         },
+        include: {
+          system_payment_method: true,
+        },
       });
 
-      return !!paymentMethod;
+      if (!paymentMethod) {
+        return false;
+      }
+
+      // Also validate that the system payment method is active
+      if (!paymentMethod.system_payment_method.is_active) {
+        return false;
+      }
+
+      return true;
     } catch (error) {
       return false;
     }

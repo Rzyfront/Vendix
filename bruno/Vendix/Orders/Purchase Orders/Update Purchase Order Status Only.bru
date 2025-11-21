@@ -1,0 +1,37 @@
+meta {
+  name: Update Purchase Order Status Only
+  type: http
+  seq: 7
+}
+
+patch {
+  url: {{baseUrl}}/orders/purchase-orders/1
+  body: {
+    "status": "approved",
+    "notes": "Order approved for processing"
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should update purchase order status", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.be.an('object');
+    
+    expect(res.body).to.have.property('id');
+    expect(res.body).to.have.property('status');
+    expect(res.body).to.have.property('notes');
+    
+    expect(res.body.status).to.equal('approved');
+    expect(res.body.notes).to.equal('Order approved for processing');
+  });
+  
+  test("Should preserve existing items when only status is updated", function() {
+    expect(res.body).to.have.property('items');
+    expect(res.body.items).to.be.an('array');
+    expect(res.body.items.length).to.be.greaterThan(0);
+  });
+}

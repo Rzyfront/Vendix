@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentValidatorService } from '../services/payment-validator.service';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { OrderValidationResult } from '../interfaces';
+import { PaymentValidatorService } from './services/payment-validator.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { OrderValidationResult } from './interfaces';
 
 describe('PaymentValidatorService', () => {
   let service: PaymentValidatorService;
@@ -12,7 +12,7 @@ describe('PaymentValidatorService', () => {
       orders: {
         findUnique: jest.fn(),
       },
-      payment_methods: {
+      store_payment_methods: {
         findFirst: jest.fn(),
       },
       payments: {
@@ -125,7 +125,15 @@ describe('PaymentValidatorService', () => {
         state: 'created',
         store_id: 1,
         grand_total: 100.0,
-        order_items: [],
+        order_items: [
+          {
+            product_id: 1,
+            product_name: 'Test Product',
+            quantity: 1,
+            unit_price: 100.0,
+            total_price: 100.0,
+          },
+        ],
         payments: [
           {
             state: 'succeeded',
@@ -166,10 +174,13 @@ describe('PaymentValidatorService', () => {
         id: 1,
         store_id: 1,
         state: 'enabled',
+        system_payment_method: {
+          is_active: true,
+        },
       };
 
       jest
-        .spyOn(prisma.payment_methods, 'findFirst')
+        .spyOn(prisma.store_payment_methods, 'findFirst')
         .mockResolvedValue(mockPaymentMethod);
 
       const result = await service.validatePaymentMethod(1, 1);
@@ -185,7 +196,7 @@ describe('PaymentValidatorService', () => {
       };
 
       jest
-        .spyOn(prisma.payment_methods, 'findFirst')
+        .spyOn(prisma.store_payment_methods, 'findFirst')
         .mockResolvedValue(mockPaymentMethod);
 
       const result = await service.validatePaymentMethod(1, 1);
@@ -194,7 +205,7 @@ describe('PaymentValidatorService', () => {
     });
 
     it('should reject non-existent payment method', async () => {
-      jest.spyOn(prisma.payment_methods, 'findFirst').mockResolvedValue(null);
+      jest.spyOn(prisma.store_payment_methods, 'findFirst').mockResolvedValue(null);
 
       const result = await service.validatePaymentMethod(999, 1);
 
@@ -336,7 +347,7 @@ describe('PaymentValidatorService', () => {
         organization_id: 2, // Different organization
       };
 
-      jest.spyOn(prisma.users, 'findFirst').mockResolvedValue(mockCustomer);
+      jest.spyOn(prisma.users, 'findFirst').mockResolvedValue(null);
 
       const result = await service.validateCustomer(1, 1);
 

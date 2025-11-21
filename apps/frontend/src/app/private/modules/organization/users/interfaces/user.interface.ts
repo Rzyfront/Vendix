@@ -41,6 +41,7 @@ export enum UserState {
 }
 
 export interface CreateUserDto {
+  organization_id?: number;
   app?: 'ORG_ADMIN' | 'STORE_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
   first_name: string;
   last_name: string;
@@ -51,6 +52,7 @@ export interface CreateUserDto {
 }
 
 export interface UpdateUserDto {
+  organization_id?: number;
   app?: 'ORG_ADMIN' | 'STORE_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
   first_name?: string;
   last_name?: string;
@@ -68,6 +70,7 @@ export interface UserQueryDto {
   limit?: number;
   search?: string;
   state?: UserState;
+  organization_id?: number;
 }
 
 export interface UsersDashboardDto {

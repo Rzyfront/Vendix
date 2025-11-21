@@ -123,9 +123,12 @@ export interface UpdateProductDto {
 
 export interface CreateProductVariantDto {
   sku: string;
+  name?: string;
   price_override?: number;
+  price?: number;
   stock_quantity: number;
   image_id?: number;
+  attributes?: Record<string, any>;
 }
 
 export interface CreateProductImageDto {
@@ -183,4 +186,84 @@ export interface ProductStats {
   activeProductsGrowthRate?: number;
   lowStockGrowthRate?: number;
   noImagesGrowthRate?: number;
+}
+
+// Interface para gestión combinada de producto y variantes
+export interface ProductVariantManagement {
+  id?: number;
+  sku: string;
+  name?: string;
+  price_override?: number;
+  price?: number;
+  stock_quantity: number;
+  image_id?: number;
+  image_url?: string;
+  attributes?: Record<string, any>;
+  attributeValues?: VariantAttributeValue[];
+  isEditing?: boolean;
+  isDeleted?: boolean;
+}
+
+// Interface para gestión combinada de producto y variantes
+export interface ProductManagement {
+  // Información básica del producto
+  id?: number;
+  name: string;
+  slug?: string;
+  description?: string;
+  base_price: number;
+  sku?: string;
+  stock_quantity?: number;
+  state?: ProductState;
+  category_id?: number | null;
+  brand_id?: number | null;
+  category_ids?: number[];
+  tax_category_ids?: number[];
+
+  // Gestión de variantes
+  hasVariants: boolean;
+  variants?: ProductVariantManagement[];
+  variantAttributes?: VariantAttribute[];
+
+  // Imágenes del producto
+  images?: CreateProductImageDto[];
+
+  // Control de creación/edición
+  isEditing?: boolean;
+}
+
+export interface VariantAttribute {
+  id?: number;
+  name: string;
+  type: 'text' | 'number' | 'boolean' | 'select';
+  required: boolean;
+  options?: string[]; // Para tipo 'select'
+}
+
+export interface VariantAttributeValue {
+  attribute_id: number;
+  attribute_name: string;
+  value: string | number | boolean;
+}
+
+// DTO para creación/actualización combinada
+export interface ProductVariantManagementDto {
+  // Datos del producto
+  name: string;
+  slug?: string;
+  description?: string;
+  base_price: number;
+  sku?: string;
+  stock_quantity?: number;
+  state?: ProductState;
+  category_id?: number | null;
+  brand_id?: number | null;
+  category_ids?: number[];
+  tax_category_ids?: number[];
+  images?: CreateProductImageDto[];
+
+  // Datos de variantes
+  hasVariants: boolean;
+  variantAttributes?: VariantAttribute[];
+  variants?: ProductVariantManagement[];
 }

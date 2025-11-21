@@ -2,7 +2,7 @@ import {
   IsInt,
   IsString,
   IsOptional,
-  IsDecimal,
+  IsNumber,
   IsArray,
   ValidateNested,
   IsEnum,
@@ -38,21 +38,21 @@ export class CreateOrderItemDto {
   quantity: number;
 
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   unit_price: number;
 
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   total_price: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,5' })
+  @IsNumber({ maxDecimalPlaces: 5 })
   tax_rate?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount_item?: number;
 }
 
@@ -78,26 +78,26 @@ export class CreateOrderDto {
   payment_status?: payments_state_enum;
 
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   subtotal: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   shipping_cost?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   discount_amount?: number;
 
   @Transform(({ value }) => parseFloat(value))
-  @IsDecimal({ decimal_digits: '0,2' })
+  @IsNumber({ maxDecimalPlaces: 2 })
   total_amount: number;
 
   @IsOptional()

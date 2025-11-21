@@ -17,7 +17,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: PrismaService,
     private validatorService: PaymentValidatorService,
-  ) {}
+  ) { }
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
@@ -28,7 +28,7 @@ export class PaymentGatewayService {
       await this.validatePaymentData(paymentData);
 
       const paymentMethod = await this.getPaymentMethod(
-        paymentData.paymentMethodId,
+        paymentData.storePaymentMethodId,
       );
       const processor = this.getProcessor(paymentMethod.type);
 
@@ -173,7 +173,7 @@ export class PaymentGatewayService {
           paymentData.storeId,
         ),
         this.validatorService.validatePaymentMethod(
-          paymentData.paymentMethodId,
+          paymentData.storePaymentMethodId,
           paymentData.storeId,
         ),
         this.validatorService.validatePaymentAmount(
@@ -216,14 +216,17 @@ export class PaymentGatewayService {
   }
 
   private async getPaymentMethod(paymentMethodId: number) {
-    const paymentMethod = await this.prisma.payment_methods.findUnique({
+    const paymentMethod = await this.prisma.store_payment_methods.findUnique({
       where: { id: paymentMethodId },
+      include: {
+        system_payment_method: true,
+      },
     });
 
     if (!paymentMethod) {
       throw new PaymentError(
         PaymentErrorCodes.PAYMENT_METHOD_DISABLED,
-        'Payment method not found',
+        'Payment method not found or disabled',
       );
     }
 
@@ -249,7 +252,7 @@ export class PaymentGatewayService {
       data: {
         order_id: paymentData.orderId,
         customer_id: paymentData.customerId,
-        payment_method_id: paymentData.paymentMethodId,
+        store_payment_method_id: paymentData.storePaymentMethodId,
         amount: paymentData.amount,
         currency: paymentData.currency,
         state: 'pending',

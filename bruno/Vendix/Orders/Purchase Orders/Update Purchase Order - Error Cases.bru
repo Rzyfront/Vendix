@@ -1,0 +1,27 @@
+meta {
+  name: Update Purchase Order - Error Cases
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/orders/purchase-orders/99999
+  body: {
+    "notes": "This should fail"
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Should return 404 for non-existent purchase order", function() {
+    expect(res.status).to.equal(404);
+    expect(res.body).to.be.an('object');
+    
+    expect(res.body).to.have.property('success');
+    expect(res.body).to.have.property('message');
+    expect(res.body.success).to.equal(false);
+  });
+}

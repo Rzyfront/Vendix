@@ -56,7 +56,7 @@
     </app-card>
   </div>
 
-  <!-- Payment Methods -->
+  <!-- Payment Options -->
   <div class="mb-6">
     <h3
       class="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2"
@@ -66,28 +66,57 @@
         [size]="20"
         color="var(--color-primary)"
       ></app-icon>
-      Método de Pago
+      Opciones de Venta
     </h3>
 
-    <div class="grid grid-cols-2 gap-4">
+    <!-- Credit Sale Option -->
+    <div class="mb-4">
       <div
-        *ngFor="let method of paymentMethods"
-        (click)="selectPaymentMethod(method)"
-        [class]="getPaymentMethodClasses(method)"
-        class="payment-method-card cursor-pointer transition-all duration-200"
+        (click)="processCreditSale()"
+        class="payment-method-card cursor-pointer transition-all duration-200 bg-gradient-to-r from-orange-50 to-amber-50 border-orange-200 hover:border-orange-400"
       >
         <div class="flex flex-col items-center p-4 text-center">
           <app-icon
-            [name]="method.icon"
+            name="calendar"
             [size]="32"
-            [color]="
-              paymentState.selectedMethod?.id === method.id
-                ? 'var(--color-primary)'
-                : 'var(--color-text-secondary)'
-            "
+            color="var(--color-warning)"
             class="mb-2"
           ></app-icon>
-          <span class="text-sm font-medium">{{ method.name }}</span>
+          <span class="text-sm font-medium text-[var(--color-text-primary)]"
+            >Venta a Crédito</span
+          >
+          <span class="text-xs text-[var(--color-text-secondary)] mt-1"
+            >Generar orden sin pago inmediato</span
+          >
+        </div>
+      </div>
+    </div>
+
+    <!-- Payment Methods -->
+    <div>
+      <h4 class="text-md font-medium text-[var(--color-text-primary)] mb-3">
+        Pagos Inmediatos
+      </h4>
+      <div class="grid grid-cols-2 gap-4">
+        <div
+          *ngFor="let method of paymentMethods"
+          (click)="selectPaymentMethod(method)"
+          [class]="getPaymentMethodClasses(method)"
+          class="payment-method-card cursor-pointer transition-all duration-200"
+        >
+          <div class="flex flex-col items-center p-4 text-center">
+            <app-icon
+              [name]="method.icon"
+              [size]="32"
+              [color]="
+                paymentState.selectedMethod?.id === method.id
+                  ? 'var(--color-primary)'
+                  : 'var(--color-text-secondary)'
+              "
+              class="mb-2"
+            ></app-icon>
+            <span class="text-sm font-medium">{{ method.name }}</span>
+          </div>
         </div>
       </div>
     </div>

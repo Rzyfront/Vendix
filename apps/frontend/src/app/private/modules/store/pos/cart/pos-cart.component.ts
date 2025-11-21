@@ -54,6 +54,30 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         </div>
       </div>
 
+      <!-- Customer Information -->
+      <div
+        *ngIf="(cartState$ | async)?.customer"
+        class="px-6 py-3 bg-primary/5 border-b border-primary/20"
+      >
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+            <app-icon name="user" [size]="16" class="text-primary"></app-icon>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-xs text-text-secondary font-medium">Cliente asignado</p>
+            <p class="text-sm font-semibold text-text-primary truncate">
+              {{ (cartState$ | async)?.customer?.name }}
+            </p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs text-text-secondary">DNI</p>
+            <p class="text-sm font-medium text-text-primary">
+              {{ (cartState$ | async)?.customer?.document_number || 'N/A' }}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- Cart Content -->
       <div class="flex-1 overflow-y-auto p-6">
         <!-- Empty State -->

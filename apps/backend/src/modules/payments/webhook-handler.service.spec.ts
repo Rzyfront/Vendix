@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { WebhookHandlerService } from '../services/webhook-handler.service';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { WebhookEvent } from '../interfaces';
+import { WebhookHandlerService } from './services/webhook-handler.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { WebhookEvent } from './interfaces';
 
 describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
@@ -73,9 +73,11 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      await expect(
-        service.handleWebhook(mockStripeEvent),
-      ).resolves.not.toThrow();
+      try {
+        await service.handleWebhook(mockStripeEvent);
+      } catch (error) {
+        fail('Should not have thrown an error');
+      }
     });
 
     it('should handle PayPal payment capture completed', async () => {
@@ -92,9 +94,11 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      await expect(
-        service.handleWebhook(mockPaypalEvent),
-      ).resolves.not.toThrow();
+      try {
+        await service.handleWebhook(mockPaypalEvent);
+      } catch (error) {
+        fail('Should not have thrown an error');
+      }
     });
 
     it('should handle unknown processor gracefully', async () => {
@@ -105,15 +109,21 @@ describe('WebhookHandlerService', () => {
         rawBody: '{}',
       };
 
-      await expect(service.handleWebhook(unknownEvent)).resolves.not.toThrow();
+      try {
+        await service.handleWebhook(unknownEvent);
+      } catch (error) {
+        fail('Should not have thrown an error');
+      }
     });
 
     it('should handle payment not found gracefully', async () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(null);
 
-      await expect(
-        service.handleWebhook(mockStripeEvent),
-      ).resolves.not.toThrow();
+      try {
+        await service.handleWebhook(mockStripeEvent);
+      } catch (error) {
+        fail('Should not have thrown an error');
+      }
     });
 
     it('should handle errors gracefully', async () => {
@@ -121,9 +131,12 @@ describe('WebhookHandlerService', () => {
         .spyOn(prisma.payments, 'findFirst')
         .mockRejectedValue(new Error('Database error'));
 
-      await expect(service.handleWebhook(mockStripeEvent)).rejects.toThrow(
-        'Database error',
-      );
+      try {
+        await service.handleWebhook(mockStripeEvent);
+        fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).toBe('Database error');
+      }
     });
   });
 
@@ -142,9 +155,11 @@ describe('WebhookHandlerService', () => {
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
 
-      await expect(
-        service['updatePaymentStatus']('pi_1234567890', 'succeeded', {}),
-      ).resolves.not.toThrow();
+      try {
+        await service['updatePaymentStatus']('pi_1234567890', 'succeeded', {});
+      } catch (error) {
+        fail('Should not have thrown an error');
+      }
     });
 
     it('should set paid_at when status is succeeded', async () => {
@@ -161,8 +176,7 @@ describe('WebhookHandlerService', () => {
       await service['updatePaymentStatus']('pi_1234567890', 'succeeded', {});
 
       expect(updateSpy).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.any(Object),
+        (expect as any).any(Object),
       );
     });
   });
@@ -189,8 +203,7 @@ describe('WebhookHandlerService', () => {
       await service['updateOrderStatus'](1);
 
       expect(updateSpy).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.any(Object),
+        (expect as any).any(Object),
       );
     });
 

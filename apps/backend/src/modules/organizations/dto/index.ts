@@ -161,6 +161,12 @@ export class AddUserToOrganizationDto {
   permissions?: any;
 }
 
+export enum DashboardPeriod {
+  SIX_MONTHS = '6m',
+  ONE_YEAR = '1y',
+  ALL = 'all',
+}
+
 export class OrganizationDashboardDto {
   @IsOptional()
   @Type(() => Date)
@@ -169,6 +175,10 @@ export class OrganizationDashboardDto {
   @IsOptional()
   @Type(() => Date)
   end_date?: Date;
+
+  @IsOptional()
+  @IsEnum(DashboardPeriod)
+  period?: DashboardPeriod = DashboardPeriod.SIX_MONTHS;
 }
 
 export class UsersDashboardDto {

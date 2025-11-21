@@ -146,14 +146,18 @@ import {
   styles: [
     `
       .pos-payment-container {
-        padding: 24px;
+        background: var(--color-background);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: 20px;
         max-width: 600px;
         margin: 0 auto;
+        box-shadow: var(--shadow-sm);
       }
 
       .payment-header {
         text-align: center;
-        margin-bottom: 32px;
+        margin-bottom: 24px;
       }
 
       .payment-header h2 {
@@ -162,81 +166,87 @@ import {
 
       .methods-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 16px;
-        margin-bottom: 32px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 24px;
       }
 
       .method-card {
-        border: 2px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 20px;
+        border: 2px solid var(--color-border);
+        border-radius: 8px;
+        padding: 16px;
         text-align: center;
         cursor: pointer;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
+        background: var(--color-surface);
       }
 
       .method-card:hover {
-        border-color: #3b82f6;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        border-color: var(--color-primary);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-md);
       }
 
       .method-card.selected {
-        border-color: #3b82f6;
-        background-color: #eff6ff;
+        border-color: var(--color-primary);
+        background-color: var(--color-primary-light);
+        box-shadow: var(--shadow-sm);
       }
 
       .method-icon {
-        font-size: 32px;
-        color: #3b82f6;
-        margin-bottom: 12px;
+        font-size: 28px;
+        color: var(--color-primary);
+        margin-bottom: 8px;
       }
 
       .method-info h4 {
         margin: 0;
         font-weight: 600;
-        color: #1f2937;
+        color: var(--color-text-primary);
       }
 
       .payment-form {
-        background: #f9fafb;
-        border-radius: 12px;
-        padding: 24px;
+        background: var(--color-surface);
+        border-radius: 8px;
+        padding: 20px;
+        border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-sm);
       }
 
       .form-group {
-        margin-bottom: 20px;
+        margin-bottom: 16px;
       }
 
       .form-group label {
         display: block;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
         font-weight: 500;
-        color: #374151;
+        color: var(--color-text-primary);
       }
 
       .form-control {
         width: 100%;
-        padding: 12px;
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
+        padding: 10px 12px;
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
         font-size: 16px;
-        transition: border-color 0.3s ease;
+        transition: border-color 0.2s ease;
+        background: var(--color-surface);
       }
 
       .form-control:focus {
         outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px var(--color-ring);
       }
 
       .change-info {
-        margin-top: 8px;
-        padding: 8px 12px;
-        background-color: #dcfce7;
-        border-radius: 6px;
-        color: #166534;
+        margin-top: 6px;
+        padding: 6px 10px;
+        background-color: var(--color-success-light);
+        border-radius: 4px;
+        color: var(--color-success);
+        border: 1px solid rgba(34, 197, 94, 0.2);
       }
 
       .change-amount {
@@ -245,57 +255,58 @@ import {
 
       .form-actions {
         display: flex;
-        gap: 12px;
+        gap: 10px;
         justify-content: flex-end;
-        margin-top: 24px;
+        margin-top: 20px;
       }
 
       .btn {
-        padding: 12px 24px;
+        padding: 10px 20px;
         border: none;
-        border-radius: 8px;
-        font-size: 16px;
+        border-radius: 6px;
+        font-size: 14px;
         font-weight: 500;
         cursor: pointer;
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
       }
 
       .btn-primary {
-        background-color: #3b82f6;
-        color: white;
+        background-color: var(--color-primary);
+        color: var(--color-text-on-primary);
       }
 
       .btn-primary:hover:not(:disabled) {
-        background-color: #2563eb;
+        background-color: var(--color-secondary);
       }
 
       .btn-primary:disabled {
-        background-color: #9ca3af;
+        background-color: var(--color-muted);
         cursor: not-allowed;
+        opacity: 0.6;
       }
 
       .btn-secondary {
-        background-color: #6b7280;
-        color: white;
+        background-color: var(--color-text-secondary);
+        color: var(--color-surface);
       }
 
       .btn-secondary:hover {
-        background-color: #4b5563;
+        background-color: var(--color-text-muted);
       }
 
       .payment-processing {
         text-align: center;
-        padding: 40px;
+        padding: 32px 20px;
       }
 
       .spinner {
-        width: 48px;
-        height: 48px;
-        border: 4px solid #e5e7eb;
-        border-top: 4px solid #3b82f6;
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--color-border);
+        border-top: 3px solid var(--color-primary);
         border-radius: 50%;
         animation: spin 1s linear infinite;
-        margin: 0 auto 16px;
+        margin: 0 auto 12px;
       }
 
       @keyframes spin {
@@ -309,47 +320,48 @@ import {
 
       .payment-result {
         text-align: center;
-        padding: 40px;
+        padding: 32px 20px;
       }
 
       .result-content {
-        max-width: 400px;
+        max-width: 360px;
         margin: 0 auto;
-        padding: 32px;
-        border-radius: 12px;
+        padding: 24px;
+        border-radius: 8px;
+        border: 1px solid var(--color-border);
       }
 
       .result-content.success {
-        background-color: #dcfce7;
-        color: #166534;
+        background-color: var(--color-success-light);
+        color: var(--color-success);
       }
 
       .result-content.error {
-        background-color: #fef2f2;
-        color: #991b1b;
+        background-color: var(--color-error-light);
+        color: var(--color-error);
       }
 
       .result-icon {
-        font-size: 48px;
-        margin-bottom: 16px;
+        font-size: 40px;
+        margin-bottom: 12px;
       }
 
       .result-content h3 {
-        margin-bottom: 8px;
+        margin-bottom: 6px;
       }
 
       .change-display {
-        margin: 16px 0;
-        font-size: 18px;
+        margin: 12px 0;
+        font-size: 16px;
       }
 
       .transaction-id {
-        margin: 12px 0;
+        margin: 10px 0;
         opacity: 0.8;
       }
 
       .result-actions {
-        margin-top: 24px;
+        margin-top: 20px;
       }
     `,
   ],

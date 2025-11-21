@@ -3,20 +3,37 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 
+export interface DashboardStatItem {
+  value: number;
+  sub_value: number;
+  sub_label: string;
+}
+
 export interface OrganizationDashboardStats {
-  totalStores: number;
-  activeUsers: number;
-  monthlyOrders: number;
-  revenue: number;
-  storesGrowth: number;
-  usersGrowth: number;
-  ordersGrowth: number;
-  revenueGrowth: number;
-  revenueBreakdown: RevenueBreakdown[];
-  storeDistribution: StoreDistribution[];
-  topPerformingStores: TopStore[];
-  recentOrders: RecentOrder[];
-  userActivity: UserActivity[];
+  organization_id: number;
+  stats: {
+    total_stores: DashboardStatItem;
+    active_users: DashboardStatItem;
+    monthly_orders: DashboardStatItem;
+    revenue: DashboardStatItem;
+  };
+  metrics: {
+    active_users: number;
+    active_stores: number;
+    recent_orders: number;
+    total_revenue: number;
+    growth_trends: any[];
+  };
+  store_activity: any[]; // keeping as any for now or define strict type if known
+  recent_audit: any[];
+  profit_trend: { month: string; year: number; amount: number }[];
+  store_distribution: { type: string; count: number }[];
+  // Keep existing fields if they are still needed by other parts or mark as optional
+  revenueBreakdown?: RevenueBreakdown[];
+  storeDistribution?: StoreDistribution[];
+  topPerformingStores?: TopStore[];
+  recentOrders?: RecentOrder[];
+  userActivity?: UserActivity[];
 }
 
 export interface RevenueBreakdown {
@@ -67,10 +84,12 @@ export class OrganizationDashboardService {
 
   getDashboardStats(
     organizationId: string,
+    period?: string,
   ): Observable<OrganizationDashboardStats> {
+    const params = period ? `?period=${period}` : '';
     return this.http
       .get<OrganizationDashboardStats>(
-        `${this.apiUrl}/organizations/${organizationId}/dashboard/stats`,
+        `${this.apiUrl}/organizations/${organizationId}/stats${params}`,
       )
       .pipe(
         catchError((error) => {

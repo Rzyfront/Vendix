@@ -2,6 +2,7 @@ import { Module, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { JwtModuleOptions } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { EnvironmentSwitchService } from './environment-switch.service';
@@ -32,14 +33,17 @@ import {
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        secret:
-          configService.get<string>('JWT_SECRET') ||
-          'your-super-secret-jwt-key',
-        signOptions: {
-          expiresIn: configService.get<string>('JWT_EXPIRES_IN') || '15m',
-        },
-      }),
+      useFactory: async (configService: ConfigService) => {
+        return {
+          secret:
+            configService.get<string>('JWT_SECRET') ||
+            'your-super-secret-jwt-key',
+          signOptions: {
+            expiresIn: (configService.get<string>('JWT_EXPIRES_IN') ||
+              '15m') as any,
+          },
+        };
+      },
     }),
   ],
   controllers: [AuthController],

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
   Injectable,
   ConflictException,
@@ -60,69 +61,89 @@ export class StockLevelManager {
   /**
    * Actualiza stock de forma atómica con auditoría completa
    */
-  async updateStock(params: UpdateStockParams): Promise<StockUpdateResult> {
+  async updateStock(
+    params: UpdateStockParams,
+    tx?: Prisma.TransactionClient,
+  ): Promise<StockUpdateResult> {
+    if (tx) {
+      return this.executeStockUpdate(tx, params);
+    }
+
     return await this.prisma.$transaction(async (prisma) => {
-      // Validar contexto de organización
-      const context = RequestContextService.getContext();
-      if (!context?.organization_id && !context?.is_super_admin) {
-        throw new BadRequestException('Organization context is required');
-      }
+      return this.executeStockUpdate(prisma, params);
+    });
+  }
 
-      // 1. Obtener o crear stock level
-      const stock_level = await this.getOrCreateStockLevel(
-        prisma,
-        params.product_id,
-        params.variant_id,
-        params.location_id,
-      );
+  private async executeStockUpdate(
+    prisma: any,
+    params: UpdateStockParams,
+  ): Promise<StockUpdateResult> {
+    // Validar contexto de organización
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id && !context?.is_super_admin) {
+      throw new BadRequestException('Organization context is required');
+    }
 
-      // 2. Validar stock disponible si es necesario
-      if (
-        params.validate_availability &&
-        stock_level.quantity_available < Math.abs(params.quantity_change)
-      ) {
-        throw new ConflictException('Insufficient stock available');
-      }
+    // 1. Obtener o crear stock level
+    const stock_level = await this.getOrCreateStockLevel(
+      prisma,
+      params.product_id,
+      params.variant_id,
+      params.location_id,
+    );
 
-      // 3. Calcular nuevas cantidades
-      const new_quantity_on_hand =
-        stock_level.quantity_on_hand + params.quantity_change;
-      const new_quantity_reserved = stock_level.quantity_reserved;
-      let new_quantity_available = new_quantity_on_hand - new_quantity_reserved;
+    // 2. Validar stock disponible si es necesario
+    if (
+      params.validate_availability &&
+      stock_level.quantity_available < Math.abs(params.quantity_change)
+    ) {
+      throw new ConflictException('Insufficient stock available');
+    }
 
-      // Para ventas, reducir available directamente
-      if (params.movement_type === 'sale') {
-        new_quantity_available =
-          stock_level.quantity_available - Math.abs(params.quantity_change);
-      }
+    // 3. Calcular nuevas cantidades
+    const new_quantity_on_hand =
+      stock_level.quantity_on_hand + params.quantity_change;
+    const new_quantity_reserved = stock_level.quantity_reserved;
+    let new_quantity_available = new_quantity_on_hand - new_quantity_reserved;
 
-      // 4. Actualizar stock levels usando scoped client
-      const existing_stock_level = await prisma.stock_levels.findFirst({
-        where: {
-          product_id: params.product_id,
-          product_variant_id: params.variant_id || null,
-          location_id: params.location_id,
-        },
-      });
+    // Para ventas, reducir available directamente
+    if (params.movement_type === 'sale') {
+      new_quantity_available =
+        stock_level.quantity_available - Math.abs(params.quantity_change);
+    }
 
-      if (!existing_stock_level) {
-        throw new BadRequestException('Stock level not found');
-      }
+    // 4. Actualizar stock levels usando scoped client
+    const existing_stock_level = await prisma.stock_levels.findFirst({
+      where: {
+        product_id: params.product_id,
+        product_variant_id: params.variant_id || null,
+        location_id: params.location_id,
+      },
+    });
 
-      const updated_stock = await prisma.stock_levels.update({
-        where: {
-          id: existing_stock_level.id,
-        },
-        data: {
-          quantity_on_hand: Math.max(0, new_quantity_on_hand),
-          quantity_available: Math.max(0, new_quantity_available),
-          last_updated: new Date(),
-          updated_at: new Date(),
-        },
-      });
+    if (!existing_stock_level) {
+      throw new BadRequestException('Stock level not found');
+    }
 
-      // 5. Crear inventory transaction
-      const transaction = await this.transactionsService.createTransaction({
+    const updated_stock = await prisma.stock_levels.update({
+      where: {
+        id: existing_stock_level.id,
+      },
+      data: {
+        quantity_on_hand: Math.max(0, new_quantity_on_hand),
+        quantity_available: Math.max(0, new_quantity_available),
+        last_updated: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // 5. Crear inventory transaction
+    // Nota: transactionsService debe manejar su propia conexión o aceptar prisma client si queremos que sea parte de la misma tx.
+    // Por ahora asumimos que transactionsService.createTransaction es seguro o independiente,
+    // PERO idealmente también debería aceptar el tx.
+    // Sin embargo, para arreglar el "Product not found", lo crucial es que getOrCreateStockLevel use el tx donde el producto existe.
+    const transaction = await this.transactionsService.createTransaction(
+      {
         productId: params.product_id,
         variantId: params.variant_id,
         type:
@@ -133,36 +154,42 @@ export class StockLevelManager {
         reason: params.reason,
         userId: params.user_id,
         orderItemId: params.order_item_id,
-      });
+      },
+      prisma,
+    );
 
-      // 6. Crear inventory movement si aplica
-      if (params.create_movement) {
-        await this.createInventoryMovement(prisma, {
-          ...params,
-          transaction_id: transaction.id,
-        });
-      }
-
-      // 7. Sincronizar con products.stock_quantity
-      await this.syncProductStock(prisma, params.product_id);
-
-      // 8. Emitir evento
-      this.eventEmitter.emit('stock.updated', {
-        product_id: params.product_id,
-        variant_id: params.variant_id,
-        location_id: params.location_id,
-        new_quantity: updated_stock.quantity_available,
+    // 6. Crear inventory movement si aplica
+    if (params.create_movement) {
+      await this.createInventoryMovement(prisma, {
+        ...params,
+        // Map 'initial' to 'stock_in' for movement_type enum compliance
+        movement_type:
+          params.movement_type === 'initial'
+            ? 'stock_in'
+            : params.movement_type,
         transaction_id: transaction.id,
-        movement_type: params.movement_type,
-        user_id: params.user_id,
-      } as StockUpdatedEvent);
+      });
+    }
 
-      return {
-        stock_level: updated_stock,
-        transaction,
-        previous_quantity: stock_level.quantity_available,
-      };
-    });
+    // 7. Sincronizar con products.stock_quantity
+    await this.syncProductStock(prisma, params.product_id);
+
+    // 8. Emitir evento
+    this.eventEmitter.emit('stock.updated', {
+      product_id: params.product_id,
+      variant_id: params.variant_id,
+      location_id: params.location_id,
+      new_quantity: updated_stock.quantity_available,
+      transaction_id: transaction.id,
+      movement_type: params.movement_type,
+      user_id: params.user_id,
+    } as StockUpdatedEvent);
+
+    return {
+      stock_level: updated_stock,
+      transaction,
+      previous_quantity: stock_level.quantity_available,
+    };
   }
 
   /**
@@ -410,6 +437,10 @@ export class StockLevelManager {
       context?.organization_id ||
       (await this.getOrganizationId(params.product_id));
 
+    // Ensure movement_type is valid for the enum (map 'initial' to 'stock_in')
+    const movementType =
+      params.movement_type === 'initial' ? 'stock_in' : params.movement_type;
+
     await prisma.inventory_movements.create({
       data: {
         organization_id: organization_id,
@@ -418,7 +449,7 @@ export class StockLevelManager {
         from_location_id: params.from_location_id,
         to_location_id: params.to_location_id || params.location_id,
         quantity: Math.abs(params.quantity_change),
-        movement_type: params.movement_type,
+        movement_type: movementType,
         reason: params.reason,
         notes: params.reason,
         user_id: params.user_id,
@@ -492,18 +523,20 @@ export class StockLevelManager {
   async initializeStockLevelsForProduct(
     product_id: number,
     organization_id: number,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
+    const prisma = tx || this.prisma;
     // Validar contexto o usar el proporcionado
     const context = RequestContextService.getContext();
     const target_organization_id = context?.organization_id || organization_id;
 
-    const locations = await this.prisma.inventory_locations.findMany({
+    const locations = await prisma.inventory_locations.findMany({
       where: { organization_id: target_organization_id },
     });
 
     for (const location of locations) {
       await this.getOrCreateStockLevel(
-        this.prisma,
+        prisma,
         product_id,
         undefined,
         location.id,

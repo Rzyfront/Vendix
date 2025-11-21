@@ -33,7 +33,7 @@ export class CreatePaymentDto {
 
   @IsNumber()
   @Type(() => Number)
-  paymentMethodId: number;
+  storePaymentMethodId: number;
 
   @IsNumber()
   @Type(() => Number)

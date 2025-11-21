@@ -1,13 +1,16 @@
+
 import { Test, TestingModule } from '@nestjs/testing';
-import { PaymentsController } from '../payments.controller';
-import { PaymentsService } from '../payments.service';
+import { PaymentsController } from './payments.controller';
+import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
   RefundPaymentDto,
   PaymentQueryDto,
-} from '../dto';
+  CreatePosPaymentDto,
+  PosPaymentResponseDto,
+} from './dto';
 import { payments_state_enum } from '@prisma/client';
 
 describe('PaymentsController', () => {
@@ -69,7 +72,7 @@ describe('PaymentsController', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -79,7 +82,7 @@ describe('PaymentsController', () => {
 
       const result = await controller.processPayment(
         createPaymentDto,
-        mockUser,
+        { user: mockUser },
       );
 
       expect(service.processPayment).toHaveBeenCalledWith(
@@ -95,7 +98,7 @@ describe('PaymentsController', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
       };
 
@@ -108,7 +111,7 @@ describe('PaymentsController', () => {
       jest.spyOn(service, 'processPayment').mockRejectedValue(errorResponse);
 
       try {
-        await controller.processPayment(createPaymentDto, mockUser);
+        await controller.processPayment(createPaymentDto, { user: mockUser });
         fail('Should have thrown an error');
       } catch (error) {
         expect(error).toBeDefined();
@@ -123,7 +126,7 @@ describe('PaymentsController', () => {
         customerId: 1,
         amount: 100.0,
         currency: 'USD',
-        paymentMethodId: 1,
+        storePaymentMethodId: 1,
         storeId: 1,
         customerEmail: 'customer@example.com',
         customerName: 'John Doe',
@@ -144,7 +147,7 @@ describe('PaymentsController', () => {
 
       const result = await controller.processPaymentWithOrder(
         createOrderPaymentDto,
-        mockUser,
+        { user: mockUser },
       );
 
       expect(service.processPaymentWithOrder).toHaveBeenCalledWith(
@@ -180,7 +183,7 @@ describe('PaymentsController', () => {
       const result = await controller.refundPayment(
         'txn_1234567890_abc123',
         refundDto,
-        mockUser,
+        { user: mockUser },
       );
 
       expect(service.refundPayment).toHaveBeenCalledWith(
@@ -209,7 +212,7 @@ describe('PaymentsController', () => {
 
       const result = await controller.getPaymentStatus(
         'txn_1234567890_abc123',
-        mockUser,
+        { user: mockUser },
       );
 
       expect(service.getPaymentStatus).toHaveBeenCalledWith(
@@ -243,7 +246,7 @@ describe('PaymentsController', () => {
 
       jest.spyOn(service, 'findAll').mockResolvedValue(mockPaymentsList);
 
-      const result = await controller.findAll({ page: 1, limit: 10 }, mockUser);
+      const result = await controller.findAll({ page: 1, limit: 10 }, { user: mockUser });
 
       expect(service.findAll).toHaveBeenCalledWith(
         { page: 1, limit: 10 },
@@ -270,7 +273,7 @@ describe('PaymentsController', () => {
 
       const result = await controller.findOne(
         'txn_1234567890_abc123',
-        mockUser,
+        { user: mockUser },
       );
 
       expect(service.findOne).toHaveBeenCalledWith(
