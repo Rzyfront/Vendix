@@ -1,15 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
-import {
-  PaymentData,
-  PaymentResult,
-  PaymentStatus,
-} from './interfaces';
-import {
-  PaymentGatewayService,
-  PaymentValidatorService,
-} from './services';
+import { PaymentData, PaymentResult, PaymentStatus } from './interfaces';
+import { PaymentGatewayService, PaymentValidatorService } from './services';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { PaymentError, PaymentErrorCodes } from './utils';

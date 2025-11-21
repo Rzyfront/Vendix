@@ -140,10 +140,10 @@ describe('OrganizationsService', () => {
 
       expect(result.store_distribution.length).toBe(2);
       expect(
-        result.store_distribution.find((s) => s.type === 'physical')?.count,
+        result.store_distribution.find((s) => s.type === 'physical')?.order_count,
       ).toBe(3);
       expect(
-        result.store_distribution.find((s) => s.type === 'online')?.count,
+        result.store_distribution.find((s) => s.type === 'online')?.order_count,
       ).toBe(2);
     });
   });

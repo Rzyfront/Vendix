@@ -871,15 +871,15 @@ export class AuthService {
       });
     }
 
-    // Obtener user_settings por separado para las validaciones
-    let userSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: user.id },
-    });
-
     if (!user) {
       await this.logLoginAttempt(null, false, email);
       throw new UnauthorizedException('Credenciales inválidas');
     }
+
+    // Obtener user_settings por separado para las validaciones
+    let userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: user.id },
+    });
 
     // Transformar user_roles a roles array simple para compatibilidad con frontend
     const { user_roles, ...userWithoutRoles } = user;
@@ -921,26 +921,70 @@ export class AuthService {
       );
     }
 
+    // 🔒 VALIDACIÓN ESTRICTA DE PERTENENCIA (Organizational Chain)
+    const hasHighPrivilege = roles.some((r) =>
+      ['owner', 'admin', 'super_admin'].includes(r),
+    );
+
+    if (organization_slug) {
+      const targetOrg = await this.prismaService.organizations.findUnique({
+        where: { slug: organization_slug },
+      });
+
+      if (!targetOrg || user.organization_id !== targetOrg.id) {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Credenciales inválidas');
+      }
+    } else if (store_slug) {
+      const targetStore = await this.prismaService.stores.findUnique({
+        where: { slug: store_slug },
+        include: { organizations: true },
+      });
+
+      if (
+        !targetStore ||
+        targetStore.organization_id !== user.organization_id
+      ) {
+        await this.logLoginAttempt(user.id, false);
+        throw new UnauthorizedException('Credenciales inválidas');
+      }
+
+      if (!hasHighPrivilege) {
+        const isStoreUser = await this.prismaService.store_users.findFirst({
+          where: {
+            store_id: targetStore.id,
+            user_id: user.id,
+          },
+        });
+
+        if (!isStoreUser) {
+          await this.logLoginAttempt(user.id, false);
+          throw new UnauthorizedException('Credenciales inválidas');
+        }
+      }
+    }
+
     // 1. Lógica para STORE_ADMIN intentando login con Organization Slug
     if (organization_slug && user_app_type === 'STORE_ADMIN') {
-      const hasHighPrivilege = roles.some((r) =>
-        ['owner', 'admin', 'super_admin'].includes(r),
-      );
+      // hasHighPrivilege ya calculado arriba
 
       if (hasHighPrivilege && user.main_store) {
-        console.log('🔄 LOGIN - Auto-switching STORE_ADMIN to main_store context');
+        console.log(
+          '🔄 LOGIN - Auto-switching STORE_ADMIN to main_store context',
+        );
         effective_organization_slug = undefined;
         effective_store_slug = user.main_store.slug;
 
         // Verificar y crear relación store_users si es necesario
-        const existingStoreUser = await this.prismaService.store_users.findUnique({
-          where: {
-            store_id_user_id: {
-              store_id: user.main_store.id,
-              user_id: user.id,
+        const existingStoreUser =
+          await this.prismaService.store_users.findUnique({
+            where: {
+              store_id_user_id: {
+                store_id: user.main_store.id,
+                user_id: user.id,
+              },
             },
-          },
-        });
+          });
 
         if (!existingStoreUser) {
           await this.prismaService.store_users.create({
@@ -961,7 +1005,10 @@ export class AuthService {
       console.log('🔄 LOGIN - Switching ORG_ADMIN to STORE_ADMIN app_type');
 
       // Actualizar app_type en base de datos
-      const newConfig = { ...(userSettings.config as object), app: 'STORE_ADMIN' };
+      const newConfig = {
+        ...(userSettings.config as object),
+        app: 'STORE_ADMIN',
+      };
       userSettings = await this.prismaService.user_settings.update({
         where: { id: userSettings.id },
         data: { config: newConfig },
@@ -2528,14 +2575,15 @@ export class AuthService {
     };
 
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: this.configService.get<string>('JWT_EXPIRES_IN') || '1h',
+      expiresIn: (this.configService.get<string>('JWT_EXPIRES_IN') ||
+        '1h') as any,
     });
     const refreshToken = this.jwtService.sign(payload, {
       secret:
-        this.configService.get<string>('JWT_REFRESH_SECRET') ||
-        this.configService.get<string>('JWT_SECRET'),
-      expiresIn:
-        this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d',
+        (this.configService.get<string>('JWT_REFRESH_SECRET') ||
+          this.configService.get<string>('JWT_SECRET')) as string,
+      expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
+        '7d') as any,
     });
 
     return {
