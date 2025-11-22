@@ -49,7 +49,7 @@ export class PrismaService implements OnModuleInit {
     'tax_rates',
     'orders',
     'payments',
-    'store_payment_methods',  // NUEVO: métodos de pago por tienda
+    'store_payment_methods', // NUEVO: métodos de pago por tienda
   ];
 
   constructor() {

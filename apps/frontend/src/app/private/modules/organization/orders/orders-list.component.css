@@ -1,0 +1,589 @@
+/* Orders List Component Styles */
+:host {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Main container with containment */
+.space-y-6 {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Stats container */
+app-order-stats {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin-bottom: 1.5rem;
+}
+
+/* Orders list container */
+.bg-surface {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  border-radius: 0.5rem;
+}
+
+/* Header container */
+.px-6.py-4.border-b.border-border {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Flex containers with overflow control */
+.flex {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Search and filters container */
+.flex-col.sm\:flex-row {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Input and select elements */
+input,
+select,
+app-inputsearch {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Buttons container */
+.flex.gap-2.items-center {
+  flex-shrink: 0;
+  min-width: fit-content;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Table container */
+.p-6 {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Table responsive fixes */
+app-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  :host {
+    padding: 0 0.25rem;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .flex.gap-2.items-center {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .flex.gap-2.items-center app-button {
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    width: 100%;
+    font-size: 0.875rem;
+  }
+
+  .p-6 {
+    padding: 0.75rem;
+  }
+}
+
+/* Tablet responsive */
+@media (min-width: 641px) and (max-width: 768px) {
+  :host {
+    padding: 0 0.5rem;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .flex.gap-2.items-center {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    min-width: 140px;
+  }
+}
+
+/* Desktop responsive */
+@media (min-width: 769px) {
+  :host {
+    padding: 0;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-wrap: nowrap;
+  }
+
+  .flex.gap-2.items-center {
+    flex-wrap: nowrap;
+    justify-content: center;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    min-width: auto;
+  }
+}
+
+/* Prevent horizontal overflow at all levels */
+* {
+  box-sizing: border-box;
+}
+
+/* Ensure no element exceeds container width */
+.bg-surface * {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Specific fixes for form elements */
+select {
+  max-width: 200px;
+}
+
+input[type="date"] {
+  max-width: 150px;
+}
+
+/* Button fixes */
+app-button {
+  flex-shrink: 0;
+  min-width: fit-content;
+}
+
+/* Loading and empty states */
+.p-8 {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  text-align: center;
+}
+
+/* Icon fixes */
+app-icon {
+  flex-shrink: 0;
+}
+
+/* Main container with containment */
+.space-y-6 {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: visible !important;
+  contain: layout style;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  position: relative !important;
+}
+
+/* Stats container */
+app-order-stats {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  margin-bottom: 1.5rem;
+}
+
+/* Orders list container */
+.bg-surface {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  contain: layout style;
+  border-radius: 0.5rem;
+}
+
+/* Header container */
+.px-6.py-4.border-b.border-border {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  contain: layout style;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Flex containers with overflow control */
+.flex {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Search and filters container */
+.flex-col.sm\:flex-row {
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  contain: layout style;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  position: relative !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 0.5rem !important;
+  box-sizing: border-box !important;
+  min-height: auto !important;
+}
+
+/* Input and select elements */
+input,
+select,
+app-inputsearch {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Buttons container - centered without scroll */
+.flex.gap-2.items-center {
+  flex-shrink: 0 !important;
+  min-width: fit-content !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 0.5rem !important;
+  align-items: center !important;
+  justify-content: center !important;
+  overflow: hidden !important;
+  max-height: none !important;
+  min-height: auto !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  overflow-y: hidden !important;
+  overflow-x: hidden !important;
+  position: relative !important;
+  height: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  contain: layout style;
+  padding: 0.25rem !important;
+  margin: 0 auto !important;
+}
+
+/* Table container */
+.p-6 {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  contain: layout style;
+}
+
+/* Table responsive fixes */
+app-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Mobile responsive */
+@media (max-width: 640px) {
+  :host {
+    padding: 0 0.25rem;
+    width: 100vw;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .space-y-6 {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  .bg-surface {
+    border-radius: 0.25rem;
+    overflow-x: hidden;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-direction: column;
+    gap: 0.75rem;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .flex.gap-2.items-center {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 0.5rem;
+    overflow: hidden !important;
+    flex-wrap: wrap;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  .flex.gap-2.items-center app-button {
+    width: 100%;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    width: 100%;
+    max-width: 100%;
+    font-size: 0.875rem;
+  }
+
+  .p-6 {
+    padding: 0.75rem;
+    overflow-x: auto;
+  }
+}
+
+/* Tablet responsive */
+@media (min-width: 641px) and (max-width: 768px) {
+  :host {
+    padding: 0 0.5rem;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .flex.gap-2.items-center {
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow: hidden !important;
+    align-items: center;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    min-width: 140px;
+  }
+}
+
+/* Desktop responsive */
+@media (min-width: 769px) {
+  :host {
+    padding: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .flex-col.sm\:flex-row {
+    flex-wrap: nowrap;
+  }
+
+  .flex.gap-2.items-center {
+    flex-wrap: nowrap;
+    justify-content: center;
+    overflow: hidden !important;
+  }
+
+  input,
+  select,
+  app-inputsearch {
+    min-width: auto;
+  }
+}
+
+/* Prevent horizontal overflow at all levels */
+* {
+  box-sizing: border-box;
+}
+
+/* Ensure no element exceeds container width */
+.bg-surface * {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Specific fixes for form elements */
+select {
+  max-width: 200px;
+}
+
+input[type="date"] {
+  max-width: 150px;
+}
+
+/* Button fixes */
+app-button {
+  flex-shrink: 0 !important;
+  min-width: fit-content !important;
+  max-width: fit-content !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  display: inline-block !important;
+}
+
+/* Specific button container fixes */
+.flex.gap-2.items-center app-button {
+  flex: 0 0 auto !important;
+  max-width: fit-content !important;
+  min-width: fit-content !important;
+  width: auto !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+
+/* Loading and empty states */
+.p-8 {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  text-align: center;
+}
+
+/* Icon fixes */
+app-icon {
+  flex-shrink: 0;
+}
+
+/* Extra containment for extreme cases */
+.space-y-6 > * {
+  max-width: 100%;
+  overflow-x: hidden;
+  contain: layout style paint;
+}
+
+/* Force containment on all direct children */
+.bg-surface > * {
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: hidden !important;
+  contain: layout style;
+}
+
+/* Specific rule to eliminate any scrollable in buttons container */
+.bg-surface .flex.gap-2.items-center {
+  overflow: hidden !important;
+  overflow-x: hidden !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  max-height: none !important;
+  height: auto !important;
+  position: static !important;
+}
+
+/* Hide all scrollbars globally */
+::-webkit-scrollbar {
+  display: none !important;
+}
+
+::-moz-scrollbar {
+  display: none !important;
+}
+
+::-ms-scrollbar {
+  display: none !important;
+}
+
+::-o-scrollbar {
+  display: none !important;
+}
+
+/* Ensure table never overflows */
+app-table {
+  max-width: 100%;
+  overflow: hidden;
+  contain: layout style;
+}
+
+/* Prevent any element from exceeding container */
+* {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Specific containment for form elements */
+form {
+  max-width: 100%;
+  overflow: hidden;
+  contain: layout;
+}
+
+/* Extra mobile protection */
+@media (max-width: 480px) {
+  :host {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    position: relative;
+  }
+
+  .space-y-6 {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+
+  .bg-surface {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    border-radius: 0 !important;
+  }
+
+  * {
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+  }
+}

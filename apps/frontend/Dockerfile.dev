@@ -4,4 +4,4 @@ COPY package*.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
 EXPOSE 4200
-CMD ["npm", "run", "start"]
+CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--configuration", "development", "--poll=2000"]

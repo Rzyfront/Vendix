@@ -41,7 +41,9 @@ import { takeUntil } from 'rxjs/operators';
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
-        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
+        [style.margin-left]="
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+        "
       >
         <!-- Header (Fixed) -->
         <app-header
@@ -235,6 +237,48 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Cross-Store Analysis',
           icon: 'store',
           route: '/admin/analytics/cross-store',
+        },
+      ],
+    },
+    {
+      label: 'Orders',
+      icon: 'shopping-cart',
+      children: [
+        {
+          label: 'All Orders',
+          icon: 'file-text',
+          route: '/admin/orders',
+        },
+      ],
+    },
+    {
+      label: 'Stores',
+      icon: 'store',
+      route: '/admin/stores-management',
+    },
+    {
+      label: 'Users',
+      icon: 'users',
+      children: [
+        {
+          label: 'Global Users',
+          icon: 'user',
+          route: '/admin/users/global-users',
+        },
+        {
+          label: 'Roles & Permissions',
+          icon: 'shield',
+          route: '/admin/users/roles-permissions',
+        },
+        {
+          label: 'Store Assignments',
+          icon: 'building',
+          route: '/admin/users/store-assignments',
+        },
+        {
+          label: 'Access Audit',
+          icon: 'eye',
+          route: '/admin/users/access-audit',
         },
       ],
     },

@@ -148,7 +148,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
-
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -183,9 +182,29 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     },
     {
       label: 'Orders',
-      icon: 'cart',
-      route: '/admin/orders',
-      badge: '8',
+      icon: 'fas fa-shopping-cart',
+      children: [
+        {
+          label: 'All Orders',
+          icon: 'fas fa-circle',
+          route: '/store/orders/list',
+        },
+        {
+          label: 'Sales Orders',
+          icon: 'fas fa-circle',
+          route: '/store/orders/sales-orders',
+        },
+        {
+          label: 'Purchase Orders',
+          icon: 'fas fa-circle',
+          route: '/store/orders/purchase-orders',
+        },
+        {
+          label: 'Stock Transfers',
+          icon: 'fas fa-circle',
+          route: '/store/orders/stock-transfers',
+        },
+      ],
     },
     {
       label: 'Customers',

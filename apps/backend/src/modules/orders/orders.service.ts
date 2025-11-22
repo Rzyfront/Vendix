@@ -49,10 +49,13 @@ export class OrdersService {
         throw new NotFoundException('Store not found');
       }
 
-      return await this.prisma.orders.create({
+      // 🔧 FIX: Usar cliente sin scope para creación cuando no hay contexto
+      const client = this.prisma.withoutScope();
+
+      return await client.orders.create({
         data: {
           customer_id: createOrderDto.customer_id, // This should be user_id
-          store_id: target_store_id, // Usar store_id del contexto
+          store_id: target_store_id!, // Usar store_id del contexto (validado arriba)
           order_number: createOrderDto.order_number,
           state: createOrderDto.state || order_state_enum.created,
           subtotal_amount: createOrderDto.subtotal,
@@ -122,6 +125,8 @@ export class OrdersService {
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
+      // 🔧 FIX: Agregar store_id del query si se proporciona explícitamente
+      ...(store_id && { store_id }),
       ...(date_from &&
         date_to && {
           created_at: {
@@ -190,6 +195,7 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     await this.findOne(id);
+
     return this.prisma.orders.update({
       where: { id },
       data: { ...updateOrderDto, updated_at: new Date() },
@@ -198,7 +204,12 @@ export class OrdersService {
 
   async remove(id: number) {
     await this.findOne(id);
-    return this.prisma.orders.delete({ where: { id } });
+
+    // 🔧 FIX: Determinar si usar cliente con scope o sin scope
+    const context = RequestContextService.getContext();
+    const client = context ? this.prisma : this.prisma.withoutScope();
+
+    return client.orders.delete({ where: { id } });
   }
 
   private async generateOrderNumber(): Promise<string> {
@@ -206,7 +217,11 @@ export class OrdersService {
     const year = now.getFullYear().toString().slice(-2);
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
     const day = now.getDate().toString().padStart(2, '0');
-    const lastOrder = await this.prisma.orders.findFirst({
+
+    // 🔧 FIX: Usar cliente sin scope para generar número de orden
+    const client = this.prisma.withoutScope();
+
+    const lastOrder = await client.orders.findFirst({
       where: { order_number: { startsWith: `ORD${year}${month}${day}` } },
       orderBy: { order_number: 'desc' },
     });

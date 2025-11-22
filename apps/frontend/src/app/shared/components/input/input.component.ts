@@ -19,7 +19,8 @@ export type InputType =
   | 'number'
   | 'tel'
   | 'url'
-  | 'search';
+  | 'search'
+  | 'date';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({
