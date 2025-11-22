@@ -22,14 +22,6 @@ export const storeAdminRoutes: Routes = [
             '../../private/modules/store/dashboard/dashboard.component'
           ).then((c) => c.DashboardComponent),
       },
-      // POS Routes
-      {
-        path: 'pos',
-        loadComponent: () =>
-          import('../../private/modules/store/pos/pos.component').then(
-            (c) => c.PosComponent,
-          ),
-      },
       // Products Routes
       {
         path: 'products',
@@ -39,15 +31,29 @@ export const storeAdminRoutes: Routes = [
             pathMatch: 'full',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/components/product-list/product-list.component'
-              ).then((c) => c.ProductListComponent),
+                '../../private/modules/store/products/products.component'
+              ).then((c) => c.ProductsComponent),
           },
           {
-            path: ':id',
+            path: 'all',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/components/product-details/product-details.component'
-              ).then((c) => c.ProductDetailsComponent),
+                '../../private/modules/store/products/all/all-products.component'
+              ).then((c) => c.AllProductsComponent),
+          },
+          {
+            path: 'categories',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/categories/categories.component'
+              ).then((c) => c.CategoriesComponent),
+          },
+          {
+            path: 'inventory',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/inventory/inventory.component'
+              ).then((c) => c.InventoryComponent),
           },
         ],
       },
@@ -73,6 +79,27 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/orders/details/order-details.component'
               ).then((c) => c.OrderDetailsComponent),
+          },
+          {
+            path: 'sales-orders',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/sales-orders/sales-orders.component'
+              ).then((c) => c.SalesOrdersComponent),
+          },
+          {
+            path: 'purchase-orders',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/purchase-orders/purchase-orders.component'
+              ).then((c) => c.PurchaseOrdersComponent),
+          },
+          {
+            path: 'stock-transfers',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/stock-transfers/stock-transfers.component'
+              ).then((c) => c.StockTransfersComponent),
           },
         ],
       },
@@ -194,6 +221,38 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/settings/security/security-settings.component'
               ).then((c) => c.SecuritySettingsComponent),
+          },
+        ],
+      },
+      // POS Routes
+      {
+        path: 'pos',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'register',
+          },
+          {
+            path: 'register',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/pos/register/pos-register.component'
+              ).then((c) => c.PosRegisterComponent),
+          },
+          {
+            path: 'cart',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/pos/cart/pos-cart.component'
+              ).then((c) => c.PosCartComponent),
+          },
+          {
+            path: 'payment',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/pos/payment/pos-payment.component'
+              ).then((c) => c.PosPaymentComponent),
           },
         ],
       },
