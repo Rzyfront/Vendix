@@ -31,29 +31,22 @@ export const storeAdminRoutes: Routes = [
             pathMatch: 'full',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/products.component'
-              ).then((c) => c.ProductsComponent),
+                '../../private/modules/store/products/components/product-management.component'
+              ).then((c) => c.ProductManagementComponent),
           },
           {
-            path: 'all',
+            path: 'create',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/all/all-products.component'
-              ).then((c) => c.AllProductsComponent),
+                '../../private/modules/store/products/pages/product-create-page.component'
+              ).then((c) => c.ProductCreatePageComponent),
           },
           {
-            path: 'categories',
+            path: ':id',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/categories/categories.component'
-              ).then((c) => c.CategoriesComponent),
-          },
-          {
-            path: 'inventory',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/products/inventory/inventory.component'
-              ).then((c) => c.InventoryComponent),
+                '../../private/modules/store/products/components/product-details/product-details.component'
+              ).then((c) => c.ProductDetailsComponent),
           },
         ],
       },
@@ -64,7 +57,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'list',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/orders.component'
+              ).then((c) => c.OrdersComponent),
           },
           {
             path: 'list',
@@ -110,7 +106,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'all',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/customers/customers.component'
+              ).then((c) => c.CustomersComponent),
           },
           {
             path: 'all',
@@ -142,7 +141,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'promotions',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/marketing/marketing.component'
+              ).then((c) => c.MarketingComponent),
           },
           {
             path: 'promotions',
@@ -167,7 +169,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'sales',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/analytics/analytics.component'
+              ).then((c) => c.AnalyticsComponent),
           },
           {
             path: 'sales',
@@ -199,7 +204,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'general',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/settings.component'
+              ).then((c) => c.SettingsComponent),
           },
           {
             path: 'general',
@@ -222,6 +230,13 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/settings/security/security-settings.component'
               ).then((c) => c.SecuritySettingsComponent),
           },
+          {
+            path: 'payments',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/payments/payments-settings.component'
+              ).then((c) => c.PaymentsSettingsComponent),
+          },
         ],
       },
       // POS Routes
@@ -231,7 +246,10 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'register',
+            loadComponent: () =>
+              import('../../private/modules/store/pos/pos.component').then(
+                (c) => c.PosComponent,
+              ),
           },
           {
             path: 'register',
