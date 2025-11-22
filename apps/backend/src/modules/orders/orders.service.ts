@@ -55,7 +55,7 @@ export class OrdersService {
       return await client.orders.create({
         data: {
           customer_id: createOrderDto.customer_id, // This should be user_id
-          store_id: target_store_id, // Usar store_id del contexto
+          store_id: target_store_id!, // Usar store_id del contexto (validado arriba)
           order_number: createOrderDto.order_number,
           state: createOrderDto.state || order_state_enum.created,
           subtotal_amount: createOrderDto.subtotal,
