@@ -1,0 +1,161 @@
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Subject, takeUntil } from 'rxjs';
+import { StoreOrdersService } from '../services/store-orders.service';
+import { OrderStats } from '../interfaces/order.interface';
+
+@Component({
+  selector: 'app-order-stats',
+  standalone: true,
+  imports: [CommonModule],
+  template: \`
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div class="bg-white rounded-lg shadow-sm border p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Total Orders</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">
+              {{ orderStats?.totalOrders || 0 }}
+            </p>
+          </div>
+          <div class="p-3 bg-blue-100 rounded-full">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Total Revenue</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">
+              ${{ orderStats?.totalRevenue || 0 | number:'1.2-2' }}
+            </p>
+          </div>
+          <div class="p-3 bg-green-100 rounded-full">
+            <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Pending Orders</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">
+              {{ orderStats?.pendingOrders || 0 }}
+            </p>
+          </div>
+          <div class="p-3 bg-yellow-100 rounded-full">
+            <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow-sm border p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Completed Orders</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">
+              {{ orderStats?.completedOrders || 0 }}
+            </p>
+          </div>
+          <div class="p-3 bg-emerald-100 rounded-full">
+            <svg class="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow-sm border p-6 mb-8">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600">Average Order Value</p>
+          <p class="text-3xl font-bold text-gray-900 mt-1">
+            ${{ orderStats?.averageOrderValue || 0 | number:'1.2-2' }}
+          </p>
+        </div>
+        <div class="p-4 bg-purple-100 rounded-full">
+          <svg class="w-8 h-8 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div *ngIf="isLoading" class="flex justify-center items-center py-12">
+      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+
+    <div *ngIf="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+      <div class="flex">
+        <div class="flex-shrink-0">
+          <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+          </svg>
+        </div>
+        <div class="ml-3">
+          <h3 class="text-sm font-medium text-red-800">Error loading statistics</h3>
+          <div class="mt-2 text-sm text-red-700">
+            {{ error }}
+          </div>
+        </div>
+      </div>
+    </div>
+  \`,
+  styles: [\`
+    :host {
+      display: block;
+      width: 100%;
+    }
+  \`]
+})
+export class OrderStatsComponent implements OnInit, OnDestroy {
+  orderStats: OrderStats | null = null;
+  isLoading = false;
+  error: string | null = null;
+  
+  private destroy$ = new Subject<void>();
+
+  constructor(private storeOrdersService: StoreOrdersService) {}
+
+  ngOnInit(): void {
+    this.loadOrderStats();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  loadOrderStats(): void {
+    this.isLoading = true;
+    this.error = null;
+    
+    this.storeOrdersService.getOrderStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (stats) => {
+          this.orderStats = stats;
+          this.isLoading = false;
+        },
+        error: (err) => {
+          this.error = 'Failed to load order statistics. Please try again.';
+          this.isLoading = false;
+          console.error('Error loading order stats:', err);
+        }
+      });
+  }
+
+  refreshStats(): void {
+    this.loadOrderStats();
+  }
+}
