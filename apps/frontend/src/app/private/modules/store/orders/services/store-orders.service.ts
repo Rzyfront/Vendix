@@ -17,12 +17,13 @@ import {
   providedIn: 'root',
 })
 export class StoreOrdersService {
-  private readonly apiUrl = environment.apiUrl || 'http://localhost:3000/api';
+  private readonly apiUrl = environment.apiUrl;
+
 
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
-  ) {}
+  ) { }
 
   getOrders(query: OrderQuery = {}): Observable<PaginatedOrdersResponse> {
     // 1. Obtener ID de tienda actual
