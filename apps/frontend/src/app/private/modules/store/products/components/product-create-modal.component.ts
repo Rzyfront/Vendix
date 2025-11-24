@@ -166,7 +166,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
                 type="button"
                 class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                 (click)="isCategoryCreateOpen = true"
-                title="Create new category"
+                title="Crear nueva categoría"
               >
                 <app-icon name="plus" [size]="20"></app-icon>
               </button>
@@ -188,7 +188,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
                 type="button"
                 class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                 (click)="isBrandCreateOpen = true"
-                title="Create new brand"
+                title="Crear nueva marca"
               >
                 <app-icon name="plus" [size]="20"></app-icon>
               </button>
@@ -209,7 +209,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
             <!-- Image URL Input -->
             <div class="flex gap-2">
               <app-input
-                label="Add Image URL"
+                label="Agregar URL de Imagen"
                 placeholder="https://example.com/image.jpg"
                 formControlName="newImageUrl"
                 [helperText]="'Enter image URL or use the file upload below'"
@@ -223,7 +223,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
                 class="mt-6"
               >
                 <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                Add
+                Agregar
               </app-button>
             </div>
 
