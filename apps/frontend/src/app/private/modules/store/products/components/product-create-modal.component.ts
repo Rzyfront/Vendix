@@ -46,7 +46,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   template: `
     <app-modal
       [size]="'lg'"
-      [title]="isEditMode ? 'Edit Product' : 'Create New Product'"
+      [title]="isEditMode ? 'Editar Producto' : 'Crear Nuevo Producto'"
       [isOpen]="isOpen"
       (closed)="onCancel()"
     >
@@ -57,7 +57,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
             class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
           >
             <app-icon name="package" [size]="20" class="mr-2"></app-icon>
-            Basic Information
+            Información Básica
           </h3>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -303,7 +303,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
             (clicked)="onCancel()"
             [disabled]="isSubmitting"
           >
-            Cancel
+            Cancelar
           </app-button>
           <app-button
             variant="primary"
@@ -312,7 +312,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
             [disabled]="productForm.invalid"
           >
             <app-icon name="save" [size]="16" slot="icon"></app-icon>
-            {{ isEditMode ? 'Update Product' : 'Create Product' }}
+            {{ isEditMode ? 'Actualizar Producto' : 'Crear Producto' }}
           </app-button>
         </div>
       </div>

@@ -254,11 +254,11 @@ import {
 
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-text-secondary">
-          <span class="text-red-500">*</span> Required fields
+          <span class="text-red-500">*</span> Campos obligatorios
         </div>
         <div class="flex gap-3">
           <app-button variant="outline" (clicked)="onCancel()">
-            Cancel
+            Cancelar
           </app-button>
           <app-button
             variant="primary"
@@ -266,7 +266,7 @@ import {
             [disabled]="storeForm.invalid || isSubmitting"
             [loading]="isSubmitting"
           >
-            Create Store
+            Crear Tienda
           </app-button>
         </div>
       </div>
