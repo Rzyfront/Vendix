@@ -17,7 +17,7 @@ import slugify from 'slugify';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async create(createOrganizationDto: CreateOrganizationDto) {
     const slug = slugify(createOrganizationDto.name, {

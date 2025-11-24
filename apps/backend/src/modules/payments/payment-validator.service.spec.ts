@@ -205,7 +205,9 @@ describe('PaymentValidatorService', () => {
     });
 
     it('should reject non-existent payment method', async () => {
-      jest.spyOn(prisma.store_payment_methods, 'findFirst').mockResolvedValue(null);
+      jest
+        .spyOn(prisma.store_payment_methods, 'findFirst')
+        .mockResolvedValue(null);
 
       const result = await service.validatePaymentMethod(999, 1);
 

@@ -324,9 +324,14 @@ export class PrismaService implements OnModuleInit {
     return this.scopedClient.return_orders;
   }
   get return_order_items() {
+  get organization_payment_policies() {
+    return this.baseClient.organization_payment_policies;
+  } // GLOBAL: políticas de pago por organización
     return this.scopedClient.return_order_items;
+  get organization_payment_policies() {
+    return this.baseClient.organization_payment_policies;
+  } // GLOBAL: políticas de pago por organización
   }
-
   get organization_payment_policies() {
     return this.baseClient.organization_payment_policies;
   } // GLOBAL: políticas de pago por organización

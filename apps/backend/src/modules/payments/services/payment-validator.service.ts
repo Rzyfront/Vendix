@@ -4,7 +4,7 @@ import { OrderValidationResult } from '../interfaces';
 
 @Injectable()
 export class PaymentValidatorService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   async validateOrder(
     orderId: number,

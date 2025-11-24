@@ -3,6 +3,7 @@ import { PaymentsController } from './payments.controller';
 import { WebhookController } from './webhook.controller';
 import { SystemPaymentMethodsController } from './controllers/system-payment-methods.controller';
 import { StorePaymentMethodsController } from './controllers/store-payment-methods.controller';
+import { OrganizationPaymentPoliciesController } from './controllers/organization-payment-policies.controller';
 import { PaymentsService } from './payments.service';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { ResponseModule } from '../../common/responses/response.module';
@@ -16,6 +17,7 @@ import {
 } from './services';
 import { SystemPaymentMethodsService } from './services/system-payment-methods.service';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
+import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
 import {
   CashPaymentModule,
   StripeModule,
@@ -42,6 +44,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     WebhookController,
     SystemPaymentMethodsController,
     StorePaymentMethodsController,
+    OrganizationPaymentPoliciesController,
   ],
   providers: [
     PaymentsService,
@@ -53,6 +56,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     InventoryTransactionsService,
     SystemPaymentMethodsService,
     StorePaymentMethodsService,
+    OrganizationPaymentPoliciesService,
   ],
   exports: [
     PaymentsService,
@@ -62,6 +66,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     WebhookController,
     SystemPaymentMethodsService,
     StorePaymentMethodsService,
+    OrganizationPaymentPoliciesService,
   ],
 })
 export class PaymentsModule implements OnModuleInit {
@@ -71,7 +76,7 @@ export class PaymentsModule implements OnModuleInit {
     private stripeProcessor: StripeProcessor,
     private paypalProcessor: PaypalProcessor,
     private bankTransferProcessor: BankTransferProcessor,
-  ) { }
+  ) {}
 
   onModuleInit() {
     this.paymentGateway.registerProcessor('cash', this.cashProcessor);

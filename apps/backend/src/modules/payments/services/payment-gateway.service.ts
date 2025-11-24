@@ -17,7 +17,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: PrismaService,
     private validatorService: PaymentValidatorService,
-  ) { }
+  ) {}
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
