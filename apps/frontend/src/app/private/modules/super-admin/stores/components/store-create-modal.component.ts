@@ -6,9 +6,13 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   ModalComponent,
   InputComponent,
-  ButtonComponent
+  ButtonComponent,
 } from '../../../../../shared/components/index';
-import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.interface';
+import {
+  CreateStoreDto,
+  StoreState,
+  StoreType,
+} from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-create-modal',
@@ -19,21 +23,25 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      title="Create New Store"
-      subtitle="Fill in the details to create a new store"
+      title="Crear Nueva Tienda"
+      subtitle="Completa los detalles para crear una nueva tienda"
       (openChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Basic Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Información Básica
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="name"
@@ -98,7 +106,10 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
             ></app-input>
 
             <div class="space-y-2">
-              <label for="store_type" class="block text-sm font-medium text-text-primary">
+              <label
+                for="store_type"
+                class="block text-sm font-medium text-text-primary"
+              >
                 Store Type
               </label>
               <select
@@ -159,7 +170,10 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
           </div>
 
           <div class="space-y-2">
-            <label for="description" class="block text-sm font-medium text-text-primary">
+            <label
+              for="description"
+              class="block text-sm font-medium text-text-primary"
+            >
               Description
             </label>
             <textarea
@@ -174,10 +188,17 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
 
         <!-- Address Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Address Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Address Information
+          </h3>
+
           <div class="space-y-2">
-            <label for="address" class="block text-sm font-medium text-text-primary">
+            <label
+              for="address"
+              class="block text-sm font-medium text-text-primary"
+            >
               Address
             </label>
             <textarea
@@ -206,10 +227,17 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
 
         <!-- Store Status -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Store Status</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Store Status
+          </h3>
+
           <div class="space-y-2">
-            <label for="is_active" class="block text-sm font-medium text-text-primary">
+            <label
+              for="is_active"
+              class="block text-sm font-medium text-text-primary"
+            >
               Initial Status
             </label>
             <select
@@ -229,10 +257,7 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-          >
+          <app-button variant="outline" (clicked)="onCancel()">
             Cancel
           </app-button>
           <app-button
@@ -246,7 +271,7 @@ import { CreateStoreDto, StoreState, StoreType } from '../interfaces/store.inter
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class StoreCreateModalComponent {
   @Input() isOpen = false;
@@ -265,7 +290,14 @@ export class StoreCreateModalComponent {
   private initializeForm(): void {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
-      slug: ['', [Validators.required, Validators.minLength(2), Validators.pattern(/^[a-z0-9-]+$/)]],
+      slug: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.pattern(/^[a-z0-9-]+$/),
+        ],
+      ],
       store_code: ['', [Validators.required, Validators.minLength(2)]],
       description: [''],
       email: ['', [Validators.required, Validators.email]],
@@ -282,7 +314,7 @@ export class StoreCreateModalComponent {
       currency_code: [''],
       manager_user_id: [null],
       color_primary: [''],
-      color_secondary: ['']
+      color_secondary: [''],
     });
   }
 
@@ -296,7 +328,7 @@ export class StoreCreateModalComponent {
   onSubmit(): void {
     if (this.storeForm.invalid) {
       // Mark all fields as touched to trigger validation messages
-      Object.keys(this.storeForm.controls).forEach(key => {
+      Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });
       return;
@@ -322,7 +354,7 @@ export class StoreCreateModalComponent {
       currency_code: formData.currency_code || undefined,
       manager_user_id: formData.manager_user_id || undefined,
       color_primary: formData.color_primary || undefined,
-      color_secondary: formData.color_secondary || undefined
+      color_secondary: formData.color_secondary || undefined,
     };
 
     this.submit.emit(storeData);
@@ -352,7 +384,7 @@ export class StoreCreateModalComponent {
       currency_code: '',
       manager_user_id: null,
       color_primary: '',
-      color_secondary: ''
+      color_secondary: '',
     });
   }
 }

@@ -74,34 +74,34 @@ export class SuperAdminLayoutComponent {
   }
 
   breadcrumb = {
-    parent: 'Super Admin',
-    current: 'Dashboard',
+    parent: 'Super Administrador',
+    current: 'Panel Principal',
   };
 
   user = {
-    name: 'Admin User',
-    role: 'Super Administrator',
-    initials: 'AU',
+    name: 'Usuario Administrador',
+    role: 'Super Administrador',
+    initials: 'UA',
   };
 
   menuItems: MenuItem[] = [
     {
-      label: 'Dashboard',
+      label: 'Panel Principal',
       icon: 'home',
       route: '/super-admin/dashboard',
     },
     {
-      label: 'Organizations',
+      label: 'Organizaciones',
       icon: 'building',
       route: '/super-admin/organizations',
     },
     {
-      label: 'Stores',
+      label: 'Tiendas',
       icon: 'store',
       route: '/super-admin/stores',
     },
     {
-      label: 'Users',
+      label: 'Usuarios',
       icon: 'users',
       route: '/super-admin/users',
     },
@@ -111,7 +111,7 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/roles',
     },
     {
-      label: 'Domains',
+      label: 'Dominios',
       icon: 'globe-2',
       route: '/super-admin/domains',
     },
@@ -121,49 +121,53 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/audit',
     },
     {
-      label: 'Billing',
+      label: 'Facturación',
       icon: 'credit-card',
       route: '/super-admin/billing',
     },
     {
-      label: 'Support',
+      label: 'Soporte',
       icon: 'headset',
       route: '/super-admin/support',
       badge: '3',
     },
     {
-      label: 'Analytics',
+      label: 'Analíticas',
       icon: 'chart-line',
       children: [
         {
-          label: 'Platform Analytics',
+          label: 'Analíticas de Plataforma',
           icon: 'circle',
           route: '/super-admin/analytics/platform',
         },
         {
-          label: 'User Analytics',
+          label: 'Analíticas de Usuarios',
           icon: 'circle',
           route: '/super-admin/analytics/users',
         },
         {
-          label: 'Performance',
+          label: 'Rendimiento',
           icon: 'circle',
           route: '/super-admin/analytics/performance',
         },
       ],
     },
     {
-      label: 'System',
+      label: 'Sistema',
       icon: 'settings',
       children: [
         {
-          label: 'System Settings',
+          label: 'Configuración del Sistema',
           icon: 'circle',
           route: '/super-admin/system/settings',
         },
-        { label: 'Logs', icon: 'circle', route: '/super-admin/system/logs' },
         {
-          label: 'Backups',
+          label: 'Registros',
+          icon: 'circle',
+          route: '/super-admin/system/logs',
+        },
+        {
+          label: 'Copias de Seguridad',
           icon: 'circle',
           route: '/super-admin/system/backups',
         },
