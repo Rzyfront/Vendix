@@ -44,14 +44,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Total Stores
+            Total de Tiendas
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.total_stores?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.total_stores?.sub_value || 0 }} new this
-            month
+            {{ dashboardStats?.stats?.total_stores?.sub_value || 0 }} nuevas
+            este mes
           </p>
         </div>
 
@@ -75,13 +75,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Active Users
+            Usuarios Activos
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.active_users?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.active_users?.sub_value || 0 }} online now
+            {{ dashboardStats?.stats?.active_users?.sub_value || 0 }} en línea
+            ahora
           </p>
         </div>
 
@@ -105,14 +106,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Monthly Orders
+            Pedidos Mensuales
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.monthly_orders?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.monthly_orders?.sub_value || 0 }} orders
-            today
+            {{ dashboardStats?.stats?.monthly_orders?.sub_value || 0 }} pedidos
+            hoy
           </p>
         </div>
 

@@ -2,16 +2,16 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
-  selector: 'app-cross-store',
+  selector: 'aplicación entre tiendas',
   standalone: true,
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Cross-Store Product Analysis</h1>
+      <h1 class="text-2xl font-bold mb-6">Análisis de productos entre tiendas</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Cross-store product performance analysis will be displayed here
+          Aquí se mostrará el análisis del rendimiento de los productos entre tiendas.
         </p>
       </div>
     </div>
