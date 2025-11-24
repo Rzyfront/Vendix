@@ -56,7 +56,7 @@
             (change)="onBrandChange($event)"
             [value]="selectedBrand"
           >
-            <option value="">All Brands</option>
+            <option value="">Todas las Marcas</option>
             <option *ngFor="let brand of brands" [value]="brand.id">
               {{ brand.name }}
             </option>
@@ -68,7 +68,7 @@
               size="sm"
               (clicked)="refreshProducts()"
               [disabled]="isLoading"
-              title="Refresh"
+              title="Actualizar"
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
@@ -76,10 +76,10 @@
               variant="primary"
               size="sm"
               (clicked)="openCreateProductModal()"
-              title="New Product"
+              title="Nuevo Producto"
             >
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">New Product</span>
+              <span class="hidden sm:inline">Nuevo Producto</span>
             </app-button>
           </div>
         </div>
@@ -91,7 +91,7 @@
       <div
         class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
       ></div>
-      <p class="mt-2 text-text-secondary">Loading products...</p>
+      <p class="mt-2 text-text-secondary">Cargando productos...</p>
     </div>
 
     <!-- Empty State -->
