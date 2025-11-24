@@ -14,7 +14,7 @@
       <div class="px-6 py-4 border-b border-border">
         <div class="flex items-center justify-between">
           <h2 class="text-xl font-semibold text-text-primary">
-            Store Settings
+            Configuración de la Tienda
           </h2>
           <app-button
             (clicked)="onModalChange(false)"
@@ -32,13 +32,13 @@
           <!-- General Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              General Settings
+              Configuración General
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <!-- Theme -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Theme</label
+                  >Tema</label
                 >
                 <select
                   formControlName="theme"
@@ -56,7 +56,7 @@
               <!-- Language -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Language</label
+                  >Idioma</label
                 >
                 <select
                   formControlName="language"
@@ -74,7 +74,7 @@
               <!-- Currency -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Currency</label
+                  >Moneda</label
                 >
                 <select
                   formControlName="currency"
@@ -92,7 +92,7 @@
               <!-- Currency Format -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Currency Format</label
+                  >Formato de Moneda</label
                 >
                 <select
                   formControlName="currency_format"
@@ -110,7 +110,7 @@
               <!-- Timezone -->
               <div class="md:col-span-2">
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Timezone</label
+                  >Zona Horaria</label
                 >
                 <select
                   formControlName="timezone"
@@ -130,17 +130,17 @@
           <!-- Notification Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Notifications
+              Notificaciones
             </h3>
             <div class="space-y-4">
               <!-- General Notifications -->
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Enable Notifications</label
+                    >Activar Notificaciones</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Receive notifications about store activity
+                    Recibir notificaciones sobre la actividad de la tienda
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -159,10 +159,10 @@
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Email Notifications</label
+                    >Notificaciones por Correo</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Receive email updates
+                    Recibir actualizaciones por correo
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -181,9 +181,11 @@
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >SMS Notifications</label
+                    >Notificaciones por SMS</label
                   >
-                  <p class="text-xs text-text-secondary">Receive SMS alerts</p>
+                  <p class="text-xs text-text-secondary">
+                    Recibir alertas por SMS
+                  </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                   <input
@@ -201,10 +203,10 @@
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Inventory Alerts</label
+                    >Alertas de Inventario</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Alert when stock is low
+                    Alertar cuando el stock sea bajo
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -224,17 +226,17 @@
           <!-- Inventory Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Inventory Management
+              Gestión de Inventario
             </h3>
             <div class="space-y-4">
               <!-- Enable Inventory Tracking -->
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Enable Inventory Tracking</label
+                    >Activar Seguimiento de Inventario</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Track product inventory levels
+                    Rastrear niveles de inventario de productos
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -252,7 +254,7 @@
               <!-- Low Stock Threshold -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Low Stock Threshold</label
+                  >Umbral de Stock Bajo</label
                 >
                 <input
                   type="number"
@@ -278,17 +280,17 @@
           <!-- Checkout Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Checkout Settings
+              Configuración de Pago
             </h3>
             <div class="space-y-4">
               <!-- Guest Checkout -->
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Allow Guest Checkout</label
+                    >Permitir Compra como Invitado</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Let customers checkout without account
+                    Permitir que los clientes compren sin cuenta
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -307,10 +309,10 @@
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Require Email Verification</label
+                    >Requerir Verificación de Correo</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Verify customer email addresses
+                    Verificar direcciones de correo de clientes
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -330,17 +332,17 @@
           <!-- Tax Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Tax Settings
+              Configuración de Impuestos
             </h3>
             <div class="space-y-4">
               <!-- Enable Tax Calculation -->
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Enable Tax Calculation</label
+                    >Activar Cálculo de Impuestos</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Calculate taxes automatically
+                    Calcular impuestos automáticamente
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -358,7 +360,7 @@
               <!-- Tax Rate -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Default Tax Rate (%)</label
+                  >Tasa de Impuesto Predeterminada (%)</label
                 >
                 <input
                   type="number"
@@ -385,17 +387,17 @@
           <!-- Shipping Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Shipping Settings
+              Configuración de Envíos
             </h3>
             <div class="space-y-4">
               <!-- Enable Shipping -->
               <div class="flex items-center justify-between">
                 <div>
                   <label class="text-sm font-medium text-text-primary"
-                    >Enable Shipping</label
+                    >Activar Envíos</label
                   >
                   <p class="text-xs text-text-secondary">
-                    Enable shipping calculations
+                    Activar cálculos de envío
                   </p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
@@ -413,7 +415,7 @@
               <!-- Free Shipping Threshold -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Free Shipping Threshold</label
+                  >Umbral de Envío Gratis</label
                 >
                 <input
                   type="number"
@@ -443,7 +445,7 @@
       <div class="px-6 py-4 border-t border-border bg-gray-50">
         <div class="flex justify-end space-x-3">
           <app-button (clicked)="onCancel()" variant="outline">
-            Cancel
+            Cancelar
           </app-button>
           <app-button
             (clicked)="onSubmit()"
@@ -451,7 +453,7 @@
             variant="primary"
             [loading]="isSubmitting"
           >
-            Save Settings
+            Guardar Configuración
           </app-button>
         </div>
       </div>

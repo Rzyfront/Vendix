@@ -10,7 +10,7 @@
       >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
-            All Products ({{ products.length }})
+            Todos los Productos ({{ products.length }})
           </h2>
         </div>
 
@@ -21,7 +21,7 @@
           <app-inputsearch
             class="w-full sm:w-64"
             size="sm"
-            placeholder="Search products..."
+            placeholder="Buscar productos..."
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
@@ -32,10 +32,10 @@
             (change)="onStateChange($event)"
             [value]="selectedState"
           >
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="archived">Archived</option>
+            <option value="">Todos los Estados</option>
+            <option value="active">Activo</option>
+            <option value="inactive">Inactivo</option>
+            <option value="archived">Archivado</option>
           </select>
 
           <!-- Filtro de categoría -->
@@ -44,7 +44,7 @@
             (change)="onCategoryChange($event)"
             [value]="selectedCategory"
           >
-            <option value="">All Categories</option>
+            <option value="">Todas las Categorías</option>
             <option *ngFor="let category of categories" [value]="category.id">
               {{ category.name }}
             </option>

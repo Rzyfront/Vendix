@@ -16,7 +16,7 @@
           >
             {{ getGrowthPercentage(stats?.storesGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -44,7 +44,7 @@
           >
             {{ getGrowthPercentage(stats?.activeStoresGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -65,7 +65,7 @@
   >
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm text-text-secondary mb-1">Total Orders</p>
+        <p class="text-sm text-text-secondary mb-1">Total de Pedidos</p>
         <p class="text-2xl font-bold text-text-primary">
           {{ formatNumber(stats?.totalOrders || 0) }}
         </p>
@@ -76,7 +76,7 @@
           >
             {{ getGrowthPercentage(stats?.ordersGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -108,7 +108,7 @@
           >
             {{ getGrowthPercentage(stats?.revenueGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div

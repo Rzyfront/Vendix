@@ -13,7 +13,7 @@
       <!-- Modal Header -->
       <div class="px-6 py-4 border-b border-border">
         <div class="flex items-center justify-between">
-          <h2 class="text-xl font-semibold text-text-primary">Edit Store</h2>
+          <h2 class="text-xl font-semibold text-text-primary">Editar Tienda</h2>
           <app-button
             (clicked)="onModalChange(false)"
             variant="ghost"
@@ -30,13 +30,13 @@
           <!-- Store Information -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Store Information
+              Información de la Tienda
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <!-- Store Name -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Store Name *</label
+                  >Nombre de la Tienda *</label
                 >
                 <input
                   type="text"
@@ -45,7 +45,7 @@
                     isFieldInvalid('name') ? 'border-red-500' : 'border-border'
                   "
                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Enter store name"
+                  placeholder="Ingresa el nombre de la tienda"
                 />
                 <div
                   *ngIf="isFieldInvalid('name')"
@@ -58,7 +58,7 @@
               <!-- Domain -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Domain *</label
+                  >Dominio *</label
                 >
                 <input
                   type="text"
@@ -69,7 +69,7 @@
                       : 'border-border'
                   "
                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="store-domain"
+                  placeholder="dominio-tienda"
                 />
                 <div
                   *ngIf="isFieldInvalid('domain')"
@@ -82,7 +82,7 @@
               <!-- Email -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Email *</label
+                  >Correo Electrónico *</label
                 >
                 <input
                   type="email"
@@ -91,7 +91,7 @@
                     isFieldInvalid('email') ? 'border-red-500' : 'border-border'
                   "
                   class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="contact@store.com"
+                  placeholder="contacto@tienda.com"
                 />
                 <div
                   *ngIf="isFieldInvalid('email')"
@@ -104,41 +104,41 @@
               <!-- Phone -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Phone</label
+                  >Teléfono</label
                 >
                 <input
                   type="tel"
                   formControlName="phone"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="+1 (555) 000-0000"
+                  placeholder="+57 (1) 000-0000"
                 />
               </div>
 
               <!-- Status -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Status</label
+                  >Estado</label
                 >
                 <select
                   formControlName="status"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                 >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="maintenance">Maintenance</option>
+                  <option value="active">Activa</option>
+                  <option value="inactive">Inactiva</option>
+                  <option value="maintenance">En Mantenimiento</option>
                 </select>
               </div>
 
               <!-- Description -->
               <div class="md:col-span-2">
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Description</label
+                  >Descripción</label
                 >
                 <textarea
                   formControlName="description"
                   rows="3"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="Brief description of your store"
+                  placeholder="Breve descripción de tu tienda"
                 ></textarea>
               </div>
             </div>
@@ -147,71 +147,71 @@
           <!-- Address Information -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Address Information
+              Información de Dirección
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <!-- Street -->
               <div class="md:col-span-2">
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Street Address</label
+                  >Dirección</label
                 >
                 <input
                   type="text"
                   formControlName="address.street"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="123 Main St"
+                  placeholder="Calle 123 #45-67"
                 />
               </div>
 
               <!-- City -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >City</label
+                  >Ciudad</label
                 >
                 <input
                   type="text"
                   formControlName="address.city"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="New York"
+                  placeholder="Bogotá"
                 />
               </div>
 
               <!-- State -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >State</label
+                  >Departamento</label
                 >
                 <input
                   type="text"
                   formControlName="address.state"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="NY"
+                  placeholder="Cundinamarca"
                 />
               </div>
 
               <!-- ZIP Code -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >ZIP Code</label
+                  >Código Postal</label
                 >
                 <input
                   type="text"
                   formControlName="address.zipCode"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="10001"
+                  placeholder="110111"
                 />
               </div>
 
               <!-- Country -->
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Country</label
+                  >País</label
                 >
                 <input
                   type="text"
                   formControlName="address.country"
                   class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                  placeholder="United States"
+                  placeholder="Colombia"
                 />
               </div>
             </div>
@@ -220,7 +220,7 @@
           <!-- Store Settings -->
           <div>
             <h3 class="text-lg font-medium text-text-primary mb-4">
-              Store Settings
+              Configuración de la Tienda
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
               <!-- General Settings -->
@@ -230,7 +230,7 @@
                 <!-- Guest Checkout -->
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-text-primary"
-                    >Allow Guest Checkout</label
+                    >Permitir Compra como Invitado</label
                   >
                   <label
                     class="relative inline-flex items-center cursor-pointer"
@@ -249,7 +249,7 @@
                 <!-- Email Verification -->
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-text-primary"
-                    >Require Email Verification</label
+                    >Requerir Verificación de Correo</label
                   >
                   <label
                     class="relative inline-flex items-center cursor-pointer"
@@ -269,28 +269,29 @@
                 <div>
                   <label
                     class="block text-sm font-medium text-text-primary mb-2"
-                    >Currency</label
+                    >Moneda</label
                   >
                   <select
                     formControlName="currency"
                     class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
                   >
-                    <option value="USD">USD - US Dollar</option>
+                    <option value="COP">COP - Peso Colombiano</option>
+                    <option value="USD">USD - Dólar Americano</option>
                     <option value="EUR">EUR - Euro</option>
-                    <option value="GBP">GBP - British Pound</option>
-                    <option value="CAD">CAD - Canadian Dollar</option>
                   </select>
                 </div>
               </div>
 
               <!-- Inventory Settings -->
               <div class="space-y-4">
-                <h4 class="text-sm font-medium text-text-primary">Inventory</h4>
+                <h4 class="text-sm font-medium text-text-primary">
+                  Inventario
+                </h4>
 
                 <!-- Inventory Tracking -->
                 <div class="flex items-center justify-between">
                   <label class="text-sm text-text-primary"
-                    >Enable Inventory Tracking</label
+                    >Activar Seguimiento de Inventario</label
                   >
                   <label
                     class="relative inline-flex items-center cursor-pointer"
@@ -310,7 +311,7 @@
                 <div>
                   <label
                     class="block text-sm font-medium text-text-primary mb-2"
-                    >Low Stock Threshold</label
+                    >Umbral de Stock Bajo</label
                   >
                   <input
                     type="number"
@@ -330,7 +331,7 @@
       <div class="px-6 py-4 border-t border-border bg-gray-50">
         <div class="flex justify-end space-x-3">
           <app-button (clicked)="onCancel()" variant="outline">
-            Cancel
+            Cancelar
           </app-button>
           <app-button
             (clicked)="onSubmit()"
@@ -338,7 +339,7 @@
             variant="primary"
             [loading]="isSubmitting"
           >
-            Update Store
+            Actualizar Tienda
           </app-button>
         </div>
       </div>
