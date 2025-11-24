@@ -119,7 +119,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                   size="sm"
                   (clicked)="refreshStores()"
                   [disabled]="isLoading"
-                  title="Refresh"
+                  title="Actualizar"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
@@ -127,10 +127,10 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                   variant="primary"
                   size="sm"
                   (clicked)="openCreateStoreModal()"
-                  title="New Store"
+                  title="Nueva Tienda"
                 >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">New Store</span>
+                  <span class="hidden sm:inline">Nueva Tienda</span>
                 </app-button>
               </div>
             </div>
@@ -142,7 +142,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
-          <p class="mt-2 text-text-secondary">Loading stores...</p>
+          <p class="mt-2 text-text-secondary">Cargando tiendas...</p>
         </div>
 
         <!-- Empty State -->
