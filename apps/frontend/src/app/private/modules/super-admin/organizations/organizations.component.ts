@@ -79,7 +79,7 @@ import './organizations.component.css';
               <app-inputsearch
                 class="w-full sm:w-64"
                 size="sm"
-                placeholder="Search organizations..."
+                placeholder="Buscar organizaciones..."
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>

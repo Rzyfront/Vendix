@@ -83,7 +83,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
               <app-inputsearch
                 class="w-full sm:w-64"
                 size="sm"
-                placeholder="Search stores..."
+                placeholder="Buscar tiendas..."
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
