@@ -58,7 +58,14 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'list',
+            redirectTo: 'dashboard',
+          },
+          {
+            path: 'dashboard',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/orders/orders.component'
+              ).then((c) => c.OrdersComponent),
           },
           {
             path: 'list',
