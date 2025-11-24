@@ -1,8 +1,8 @@
 <div class="space-y-6">
-  <!-- Stats Cards -->
+  <!-- Tarjetas de Estadísticas -->
   <app-product-stats [stats]="stats"></app-product-stats>
 
-  <!-- Products List -->
+  <!-- Lista de Productos -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
       <div
@@ -86,7 +86,7 @@
       </div>
     </div>
 
-    <!-- Loading State -->
+    <!-- Estado de Carga -->
     <div *ngIf="isLoading" class="p-8 text-center">
       <div
         class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -94,7 +94,7 @@
       <p class="mt-2 text-text-secondary">Cargando productos...</p>
     </div>
 
-    <!-- Empty State -->
+    <!-- Estado Vacío -->
     <app-product-empty-state
       *ngIf="!isLoading && products.length === 0"
       [title]="getEmptyStateTitle()"
@@ -106,7 +106,7 @@
     >
     </app-product-empty-state>
 
-    <!-- Products Table -->
+    <!-- Tabla de Productos -->
     <div *ngIf="!isLoading && products.length > 0" class="p-6">
       <app-table
         [data]="products"
@@ -124,7 +124,7 @@
     </div>
   </div>
 
-  <!-- Create Product Modal -->
+  <!-- Modal Crear Producto -->
   <app-product-create-modal
     [isOpen]="isCreateModalOpen"
     [isSubmitting]="isCreatingProduct"
@@ -133,6 +133,6 @@
     (cancel)="onCreateModalCancel()"
   ></app-product-create-modal>
 
-  <!-- Edit Product Modal -->
+  <!-- Modal Editar Producto -->
   <!-- TODO: Create edit modal component when needed -->
 </div>
