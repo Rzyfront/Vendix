@@ -63,9 +63,9 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'dashboard',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/orders/orders.component'
-              ).then((c) => c.OrdersComponent),
+              import('../../private/modules/store/orders/orders').then(
+                (c) => c.OrdersComponent,
+              ),
           },
           {
             path: 'list',
