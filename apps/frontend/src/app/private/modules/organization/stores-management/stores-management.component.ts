@@ -94,11 +94,11 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                 (change)="onStoreTypeChange($event)"
                 [value]="selectedStoreType"
               >
-                <option value="">All Types</option>
-                <option value="physical">Physical</option>
-                <option value="online">Online</option>
-                <option value="hybrid">Hybrid</option>
-                <option value="popup">Popup</option>
+                <option value="">Todos los Tipos</option>
+                <option value="physical">Tienda Física</option>
+                <option value="online">Tienda Online</option>
+                <option value="hybrid">Tienda Híbrida</option>
+                <option value="popup">Tienda Temporal</option>
                 <option value="kiosko">Kiosko</option>
               </select>
 
@@ -108,9 +108,9 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                 (change)="onStateChange($event)"
                 [value]="selectedState"
               >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
+                <option value="">Todos los Estados</option>
+                <option value="active">Activa</option>
+                <option value="inactive">Inactiva</option>
               </select>
 
               <div class="flex gap-2 items-center">

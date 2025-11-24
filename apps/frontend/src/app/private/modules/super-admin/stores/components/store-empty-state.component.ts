@@ -2,7 +2,10 @@ import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 // Import shared components
-import { ButtonComponent, IconComponent } from '../../../../../shared/components';
+import {
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../shared/components';
 
 @Component({
   selector: 'app-store-empty-state',
@@ -11,7 +14,9 @@ import { ButtonComponent, IconComponent } from '../../../../../shared/components
   template: `
     <div class="flex flex-col items-center justify-center py-12 px-4">
       <!-- Icon -->
-      <div class="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mb-6">
+      <div
+        class="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mb-6"
+      >
         <app-icon name="store" [size]="48" class="text-gray-400"></app-icon>
       </div>
 
@@ -37,35 +42,31 @@ import { ButtonComponent, IconComponent } from '../../../../../shared/components
 
       <!-- Additional Actions -->
       <div class="flex gap-3 mt-4" *ngIf="showAdditionalActions">
-        <app-button
-          variant="outline"
-          (clicked)="refreshClick.emit()"
-        >
+        <app-button variant="outline" (clicked)="refreshClick.emit()">
           <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-          Refresh
+          Actualizar
         </app-button>
-        
-        <app-button
-          variant="outline"
-          (clicked)="clearFiltersClick.emit()"
-        >
+
+        <app-button variant="outline" (clicked)="clearFiltersClick.emit()">
           <app-icon name="x" [size]="16" slot="icon"></app-icon>
-          Clear Filters
+          Limpiar Filtros
         </app-button>
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class StoreEmptyStateComponent {
   @Input() title = 'No stores found';
   @Input() description = 'Get started by creating your first store.';
   @Input() showActionButton = true;
-  @Input() actionButtonText = 'Create Store';
+  @Input() actionButtonText = 'Crear Tienda';
   @Input() showAdditionalActions = false;
 
   @Output() actionClick = new EventEmitter<void>();
