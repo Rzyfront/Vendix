@@ -1,3 +1,4 @@
+// Core entities
 export interface Order {
   id: string;
   orderNumber: string;
@@ -16,6 +17,7 @@ export interface Order {
   completedAt?: string;
   total: number;
 }
+
 export interface OrderItem {
   id: string;
   productId: string;
@@ -25,12 +27,15 @@ export interface OrderItem {
   unitPrice: number;
   totalPrice: number;
 }
+
 export interface OrderSummary {
   subtotal: number;
   taxAmount: number;
   total: number;
   itemCount: number;
 }
+
+// Types and enums
 export type OrderStatus =
   | 'draft' // Borrador
   | 'pending' // Pendiente de confirmación
@@ -52,6 +57,8 @@ export type PaymentStatus =
   | 'failed' // Pago fallido
   | 'refunded' // Reembolsado
   | 'disputed'; // En disputa
+
+// Query and response interfaces
 export interface OrderQuery {
   // Búsqueda
   search?: string;
@@ -89,6 +96,7 @@ export interface OrderQuery {
   sortBy?: 'createdAt' | 'updatedAt' | 'total' | 'orderNumber' | 'customerName';
   sortOrder?: 'asc' | 'desc';
 }
+
 export interface PaginatedOrdersResponse {
   orders: Order[];
   total: number;
@@ -97,6 +105,7 @@ export interface PaginatedOrdersResponse {
   totalPages: number;
   hasMore: boolean;
 }
+
 export interface OrderStats {
   totalOrders: number;
   totalRevenue: number;
@@ -105,7 +114,7 @@ export interface OrderStats {
   averageOrderValue: number;
 }
 
-// Para creación de órdenes
+// DTOs
 export interface CreateOrderDto {
   customerId: string;
   items: CreateOrderItemDto[];
@@ -119,7 +128,6 @@ export interface CreateOrderItemDto {
   unitPrice?: number; // Opcional, usa precio del producto si no se especifica
 }
 
-// Para actualización de estados
 export interface UpdateOrderStatusDto {
   status: OrderStatus;
   notes?: string;
@@ -132,7 +140,7 @@ export interface UpdatePaymentStatusDto {
   notes?: string;
 }
 
-// Para acciones rápidas
+// UI interfaces
 export interface OrderAction {
   id: string;
   label: string;
@@ -142,7 +150,6 @@ export interface OrderAction {
   variant?: 'primary' | 'secondary' | 'danger';
 }
 
-// Para filtros en UI
 export interface OrderFilters {
   search: string;
   status: OrderStatus[];
@@ -153,7 +160,19 @@ export interface OrderFilters {
   maxAmount?: number;
 }
 
-// Para configuración de tabla
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
+}
+
+export interface FilterConfig {
+  status: FilterOption[];
+  paymentStatus: FilterOption[];
+  dateRange: FilterOption[];
+}
+
 export interface OrderTableColumn {
   key: keyof Order | 'actions';
   label: string;
@@ -161,4 +180,27 @@ export interface OrderTableColumn {
   width?: string;
   align?: 'left' | 'center' | 'right';
   transform?: (value: any, order: Order) => string;
+  badge?: {
+    type?: 'status' | 'custom';
+    colorKey?: string;
+    colorMap?: Record<string, string>;
+    size?: 'sm' | 'md' | 'lg';
+  };
+}
+
+export interface TableConfig {
+  columns: OrderTableColumn[];
+  loading: boolean;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface TableActions {
+  refresh: () => void;
+  newOrder: () => void;
+  export: () => void;
 }

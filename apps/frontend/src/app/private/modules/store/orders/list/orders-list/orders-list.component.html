@@ -1,16 +1,108 @@
 <div class="p-6">
+  <!-- Header -->
   <div class="mb-6">
-    <h1 class="text-3xl font-bold text-gray-900 mb-2">Orders List</h1>
+    <h1 class="text-3xl font-bold text-gray-900 mb-2">Orders Management</h1>
     <p class="text-gray-600">View and manage all customer orders</p>
   </div>
 
-  <div class="bg-white rounded-lg shadow-sm border p-8">
+  <!-- Filters Section -->
+  <div class="bg-white rounded-lg shadow-sm border p-6 mb-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      <!-- Search -->
+      <div class="lg:col-span-2">
+        <app-inputsearch
+          placeholder="Search by order ID, customer name, email..."
+          (search)="onSearch($event)"
+        ></app-inputsearch>
+      </div>
+
+      <!-- Status Filter -->
+      <app-selector
+        [options]="statusOptions"
+        placeholder="All Status"
+        (valueChange)="onFilterChange('status', $event)"
+      ></app-selector>
+
+      <!-- Payment Status Filter -->
+      <app-selector
+        [options]="paymentStatusOptions"
+        placeholder="All Payment Status"
+        (valueChange)="onFilterChange('paymentStatus', $event)"
+      ></app-selector>
+
+      <!-- Date Range Filter -->
+      <app-selector
+        [options]="dateRangeOptions"
+        placeholder="All Time"
+        (valueChange)="onFilterChange('dateRange', $event)"
+      ></app-selector>
+    </div>
+
+    <!-- Actions -->
+    <div class="flex justify-between items-center mt-4">
+      <div class="text-sm text-gray-600">
+        Showing {{ orders.length }} of {{ totalItems }} orders
+      </div>
+      <div class="flex gap-2">
+        <button
+          (click)="exportOrders()"
+          class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Export CSV
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orders Table -->
+  <div class="bg-white rounded-lg shadow-sm border">
+    <app-table
+      [data]="orders"
+      [columns]="columns"
+      [actions]="actions"
+      [loading]="loading"
+      (sort)="onSort($event)"
+      (rowClick)="handleViewOrder($event.id)"
+    >
+    </app-table>
+
+    <!-- Simple Pagination -->
+    <div class="border-t px-6 py-4">
+      <div class="flex justify-between items-center">
+        <div class="text-sm text-gray-600">
+          Page {{ filters.page || 1 }} of {{ totalPages }}
+        </div>
+        <div class="flex gap-2">
+          <button
+            (click)="onPageChange((filters.page || 1) - 1)"
+            [disabled]="(filters.page || 1) <= 1"
+            class="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          <button
+            (click)="onPageChange((filters.page || 1) + 1)"
+            [disabled]="(filters.page || 1) >= totalPages"
+            class="px-3 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty State -->
+  <div
+    *ngIf="!loading && orders.length === 0"
+    class="bg-white rounded-lg shadow-sm border p-8"
+  >
     <div class="text-center">
       <div
-        class="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4"
+        class="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4"
       >
         <svg
-          class="w-8 h-8 text-green-600"
+          class="w-8 h-8 text-gray-400"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -19,16 +111,14 @@
             stroke-linecap="round"
             stroke-linejoin="round"
             stroke-width="2"
-            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
           ></path>
         </svg>
       </div>
-      <h2 class="text-xl font-semibold text-gray-900 mb-2">
-        Orders Management
-      </h2>
-      <p class="text-gray-600 max-w-md mx-auto">
-        Orders list management is under development. You will be able to view,
-        filter, and manage all orders here.
+      <h3 class="text-lg font-medium text-gray-900 mb-2">No orders found</h3>
+      <p class="text-gray-500">
+        No orders match your current filters. Try adjusting your search
+        criteria.
       </p>
     </div>
   </div>

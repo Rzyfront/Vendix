@@ -2,3 +2,153 @@
   display: block;
   width: 100%;
 }
+
+/* Loading state */
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Status badges */
+.status-badge {
+  @apply px-2 py-1 text-xs font-medium rounded-full;
+}
+
+.status-draft {
+  @apply bg-gray-100 text-gray-800;
+}
+
+.status-pending {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.status-confirmed {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.status-preparing {
+  @apply bg-purple-100 text-purple-800;
+}
+
+.status-ready {
+  @apply bg-indigo-100 text-indigo-800;
+}
+
+.status-shipped {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.status-delivered {
+  @apply bg-green-100 text-green-800;
+}
+
+.status-cancelled {
+  @apply bg-red-100 text-red-800;
+}
+
+.status-refunded {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.status-returned {
+  @apply bg-gray-100 text-gray-800;
+}
+
+/* Payment status badges */
+.payment-status-pending {
+  @apply bg-yellow-100 text-yellow-800;
+}
+
+.payment-status-processing {
+  @apply bg-blue-100 text-blue-800;
+}
+
+.payment-status-paid {
+  @apply bg-green-100 text-green-800;
+}
+
+.payment-status-partial {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.payment-status-overpaid {
+  @apply bg-purple-100 text-purple-800;
+}
+
+.payment-status-failed {
+  @apply bg-red-100 text-red-800;
+}
+
+.payment-status-refunded {
+  @apply bg-orange-100 text-orange-800;
+}
+
+.payment-status-disputed {
+  @apply bg-red-100 text-red-800;
+}
+
+/* Table styles */
+.orders-table {
+  @apply w-full border-collapse;
+}
+
+.orders-table th {
+  @apply bg-gray-50 px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b;
+}
+
+.orders-table td {
+  @apply px-6 py-4 whitespace-nowrap text-sm text-gray-900 border-b;
+}
+
+.orders-table tr:hover {
+  @apply bg-gray-50;
+}
+
+/* Action buttons */
+.action-button {
+  @apply text-sm font-medium transition-colors;
+}
+
+.action-button.view {
+  @apply text-blue-600 hover:text-blue-800;
+}
+
+.action-button.edit {
+  @apply text-green-600 hover:text-green-800;
+}
+
+.action-button.delete {
+  @apply text-red-600 hover:text-red-800;
+}
+
+/* Empty state */
+.empty-state {
+  @apply text-center py-12;
+}
+
+.empty-state-icon {
+  @apply mx-auto h-12 w-12 text-gray-400;
+}
+
+.empty-state-title {
+  @apply mt-2 text-lg font-medium text-gray-900;
+}
+
+.empty-state-description {
+  @apply mt-1 text-sm text-gray-500;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .filters-grid {
+    @apply grid-cols-1;
+  }
+
+  .actions-row {
+    @apply flex-col items-start gap-4;
+  }
+
+  .pagination-row {
+    @apply flex-col items-start gap-4;
+  }
+}

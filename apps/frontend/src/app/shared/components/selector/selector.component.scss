@@ -240,6 +240,48 @@
   }
 }
 
+// Placeholder overlay
+.selector-placeholder {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 3rem);
+  z-index: 1;
+
+  // Variaciones de tamaño
+  &.selector-placeholder-sm {
+    left: constants.$padding-x-sm;
+    font-size: constants.$font-size-sm;
+    max-width: calc(100% - 2.5rem);
+  }
+
+  &.selector-placeholder-md {
+    left: constants.$padding-x-md;
+    font-size: constants.$font-size-md;
+    max-width: calc(100% - 3rem);
+  }
+
+  &.selector-placeholder-lg {
+    left: constants.$padding-x-lg;
+    font-size: constants.$font-size-lg;
+    max-width: calc(100% - 3.5rem);
+  }
+
+  // Estado deshabilitado
+  &.selector-placeholder-disabled {
+    color: var(--color-text-muted);
+    opacity: 0.6;
+  }
+}
+
 // Icono de flecha
 .selector-icon {
   position: absolute;
@@ -309,7 +351,8 @@
 }
 
 // Responsive design
-@media (max-width: 40em) {  /* 640px */
+@media (max-width: 40em) {
+  /* 640px */
   .selector-wrapper {
     &.selector-lg {
       height: 2.75rem; // Reducir tamaño en móvil
