@@ -25,7 +25,7 @@ export class BreadcrumbService {
     current: BreadcrumbItem;
     title: string;
   }>({
-    title: 'Dashboard',
+    title: 'Panel Principal',
     current: { label: 'Dashboard' },
   });
 
@@ -39,7 +39,7 @@ export class BreadcrumbService {
     // Organization Admin Dashboard
     {
       path: '/organization/dashboard',
-      title: 'Dashboard',
+      title: 'Panel Principal',
       parent: 'Organización',
       icon: 'home',
     },
@@ -48,7 +48,7 @@ export class BreadcrumbService {
     // Store Admin Dashboard
     {
       path: '/store/dashboard',
-      title: 'Dashboard',
+      title: 'Panel Principal',
       parent: 'Tienda',
       icon: 'home',
     },
@@ -58,7 +58,7 @@ export class BreadcrumbService {
     { path: '/organizations', title: 'Organizaciones', icon: 'store' },
     {
       path: '/organization/analytics',
-      title: 'Analytics',
+      title: 'Análisis',
       icon: 'chart-line',
       parent: 'Organizaciones',
     },
@@ -74,7 +74,7 @@ export class BreadcrumbService {
     },
     {
       path: '/organization/analytics/insights',
-      title: 'Insights',
+      title: 'Perspectivas',
       parent: 'Analytics',
     },
     {
@@ -195,7 +195,7 @@ export class BreadcrumbService {
     { path: '/super-admin', title: 'Super Admin', icon: 'settings' },
     {
       path: '/super-admin/dashboard',
-      title: 'Dashboard',
+      title: 'Panel Principal',
       parent: 'Super Admin',
       icon: 'home',
     },
@@ -352,7 +352,7 @@ export class BreadcrumbService {
     { path: '/admin', title: 'Panel Administrativo', icon: 'settings' },
     {
       path: '/admin/dashboard',
-      title: 'Dashboard',
+      title: 'Panel Principal',
       parent: 'Panel Administrativo',
       icon: 'home',
     },
@@ -360,31 +360,31 @@ export class BreadcrumbService {
     // Financial
     {
       path: '/admin/financial',
-      title: 'Financial',
+      title: 'Finanzas',
       parent: 'Panel Administrativo',
       icon: 'dollar-sign',
     },
     {
       path: '/admin/financial/reports',
-      title: 'Reports',
+      title: 'Reportes',
       parent: 'Financial',
       icon: 'file-text',
     },
     {
       path: '/admin/financial/billing',
-      title: 'Billing & Subscriptions',
+      title: 'Facturación y Suscripciones',
       parent: 'Financial',
       icon: 'credit-card',
     },
     {
       path: '/admin/financial/cost-analysis',
-      title: 'Cost Analysis',
+      title: 'Análisis de Costos',
       parent: 'Financial',
       icon: 'bar-chart',
     },
     {
       path: '/admin/financial/cash-flow',
-      title: 'Cash Flow',
+      title: 'Flujo de Caja',
       parent: 'Financial',
       icon: 'trending-up',
     },
@@ -392,19 +392,19 @@ export class BreadcrumbService {
     // Analytics & BI
     {
       path: '/admin/analytics',
-      title: 'Analytics & BI',
+      title: 'Análisis e Inteligencia de Negocios',
       parent: 'Panel Administrativo',
       icon: 'chart-line',
     },
     {
       path: '/admin/analytics/predictive',
-      title: 'Predictive Analysis',
+      title: 'Análisis Predictivo',
       parent: 'Analytics & BI',
       icon: 'bar-chart',
     },
     {
       path: '/admin/analytics/cross-store',
-      title: 'Cross-Store Analysis',
+      title: 'Análisis Multi-Tienda',
       parent: 'Analytics & BI',
       icon: 'store',
     },
@@ -412,7 +412,7 @@ export class BreadcrumbService {
     // Stores Management
     {
       path: '/admin/stores-management',
-      title: 'Stores',
+      title: 'Tiendas',
       parent: 'Panel Administrativo',
       icon: 'store',
     },
@@ -420,31 +420,31 @@ export class BreadcrumbService {
     // Users Management
     {
       path: '/admin/users',
-      title: 'Users',
+      title: 'Usuarios',
       parent: 'Panel Administrativo',
       icon: 'users',
     },
     {
       path: '/admin/users/global-users',
-      title: 'Global Users',
+      title: 'Usuarios Globales',
       parent: 'Users',
       icon: 'user',
     },
     {
       path: '/admin/users/roles-permissions',
-      title: 'Roles & Permissions',
+      title: 'Roles y Permisos',
       parent: 'Users',
       icon: 'shield',
     },
     {
       path: '/admin/users/store-assignments',
-      title: 'Store Assignments',
+      title: 'Asignaciones de Tienda',
       parent: 'Users',
       icon: 'building',
     },
     {
       path: '/admin/users/access-audit',
-      title: 'Access Audit',
+      title: 'Auditoría de Acceso',
       parent: 'Users',
       icon: 'eye',
     },
@@ -452,31 +452,31 @@ export class BreadcrumbService {
     // Inventory
     {
       path: '/admin/inventory',
-      title: 'Inventory',
+      title: 'Inventario',
       parent: 'Panel Administrativo',
       icon: 'warehouse',
     },
     {
       path: '/admin/inventory/stock',
-      title: 'Stock Management',
+      title: 'Gestión de Stock',
       parent: 'Inventory',
       icon: 'package',
     },
     {
       path: '/admin/inventory/transfers',
-      title: 'Stock Transfers',
+      title: 'Transferencias de Stock',
       parent: 'Inventory',
       icon: 'refresh-ccw',
     },
     {
       path: '/admin/inventory/suppliers',
-      title: 'Suppliers',
+      title: 'Proveedores',
       parent: 'Inventory',
       icon: 'truck',
     },
     {
       path: '/admin/inventory/demand-forecast',
-      title: 'Demand Forecast',
+      title: 'Pronóstico de Demanda',
       parent: 'Inventory',
       icon: 'trending-up',
     },
@@ -484,31 +484,31 @@ export class BreadcrumbService {
     // Operations
     {
       path: '/admin/operations',
-      title: 'Operations',
+      title: 'Operaciones',
       parent: 'Panel Administrativo',
       icon: 'truck',
     },
     {
       path: '/admin/operations/shipping',
-      title: 'Shipping Management',
+      title: 'Gestión de Envíos',
       parent: 'Operations',
       icon: 'truck',
     },
     {
       path: '/admin/operations/procurement',
-      title: 'Procurement',
+      title: 'Adquisiciones',
       parent: 'Operations',
       icon: 'cart',
     },
     {
       path: '/admin/operations/returns',
-      title: 'Returns Management',
+      title: 'Gestión de Devoluciones',
       parent: 'Operations',
       icon: 'rotate-ccw',
     },
     {
       path: '/admin/operations/route-optimization',
-      title: 'Route Optimization',
+      title: 'Optimización de Rutas',
       parent: 'Operations',
       icon: 'globe-2',
     },
@@ -516,31 +516,31 @@ export class BreadcrumbService {
     // Audit & Compliance
     {
       path: '/admin/audit',
-      title: 'Audit & Compliance',
+      title: 'Auditoría y Cumplimiento',
       parent: 'Panel Administrativo',
       icon: 'shield',
     },
     {
       path: '/admin/audit/logs',
-      title: 'Audit Logs',
+      title: 'Registros de Auditoría',
       parent: 'Audit & Compliance',
       icon: 'file-text',
     },
     {
       path: '/admin/audit/compliance',
-      title: 'Compliance Reports',
+      title: 'Reportes de Cumplimiento',
       parent: 'Audit & Compliance',
       icon: 'file-check',
     },
     {
       path: '/admin/audit/legal-docs',
-      title: 'Legal Documents',
+      title: 'Documentos Legales',
       parent: 'Audit & Compliance',
       icon: 'file-text',
     },
     {
       path: '/admin/audit/backup',
-      title: 'Backup & Recovery',
+      title: 'Respaldo y Recuperación',
       parent: 'Audit & Compliance',
       icon: 'backup',
     },
@@ -548,37 +548,37 @@ export class BreadcrumbService {
     // Configuration
     {
       path: '/admin/config',
-      title: 'Configuration',
+      title: 'Configuración',
       parent: 'Panel Administrativo',
       icon: 'settings',
     },
     {
       path: '/admin/config/application',
-      title: 'Application Settings',
+      title: 'Configuración de Aplicación',
       parent: 'Configuration',
       icon: 'sliders',
     },
     {
       path: '/admin/config/policies',
-      title: 'Policies',
+      title: 'Políticas',
       parent: 'Configuration',
       icon: 'file-text',
     },
     {
       path: '/admin/config/integrations',
-      title: 'Integrations',
+      title: 'Integraciones',
       parent: 'Configuration',
       icon: 'link-2',
     },
     {
       path: '/admin/config/taxes',
-      title: 'Taxes',
+      title: 'Impuestos',
       parent: 'Configuration',
       icon: 'credit-card',
     },
     {
       path: '/admin/config/domains',
-      title: 'Domains',
+      title: 'Dominios',
       parent: 'Configuration',
       icon: 'globe-2',
     },
@@ -587,7 +587,7 @@ export class BreadcrumbService {
     { path: '/store', title: 'Tienda', icon: 'store' },
     {
       path: '/store/dashboard',
-      title: 'Dashboard',
+      title: 'Panel Principal',
       parent: 'Tienda',
       icon: 'home',
     },
@@ -595,25 +595,25 @@ export class BreadcrumbService {
     // Products
     {
       path: '/store/products',
-      title: 'Products',
+      title: 'Productos',
       parent: 'Tienda',
       icon: 'package',
     },
     {
       path: '/store/products/all',
-      title: 'All Products',
+      title: 'Todos los Productos',
       parent: 'Products',
       icon: 'package',
     },
     {
       path: '/store/products/categories',
-      title: 'Categories',
+      title: 'Categorías',
       parent: 'Products',
       icon: 'tag',
     },
     {
       path: '/store/products/inventory',
-      title: 'Inventory',
+      title: 'Inventario',
       parent: 'Products',
       icon: 'archive',
     },
@@ -621,19 +621,19 @@ export class BreadcrumbService {
     // Orders
     {
       path: '/store/orders',
-      title: 'Orders',
+      title: 'Pedidos',
       parent: 'Tienda',
       icon: 'clipboard-list',
     },
     {
       path: '/store/orders/list',
-      title: 'Orders List',
+      title: 'Lista de Pedidos',
       parent: 'Orders',
       icon: 'list',
     },
     {
       path: '/store/orders/:id',
-      title: 'Order Details',
+      title: 'Detalles del Pedido',
       parent: 'Orders',
       icon: 'eye',
     },
@@ -641,25 +641,25 @@ export class BreadcrumbService {
     // Customers
     {
       path: '/store/customers',
-      title: 'Customers',
+      title: 'Clientes',
       parent: 'Tienda',
       icon: 'users',
     },
     {
       path: '/store/customers/all',
-      title: 'All Customers',
+      title: 'Todos los Clientes',
       parent: 'Customers',
       icon: 'users',
     },
     {
       path: '/store/customers/:id',
-      title: 'Customer Details',
+      title: 'Detalles del Cliente',
       parent: 'Customers',
       icon: 'user',
     },
     {
       path: '/store/customers/reviews',
-      title: 'Customer Reviews',
+      title: 'Reseñas de Clientes',
       parent: 'Customers',
       icon: 'star',
     },
@@ -667,19 +667,19 @@ export class BreadcrumbService {
     // Marketing
     {
       path: '/store/marketing',
-      title: 'Marketing',
+      title: 'Mercadeo',
       parent: 'Tienda',
       icon: 'bullhorn',
     },
     {
       path: '/store/marketing/promotions',
-      title: 'Promotions',
+      title: 'Promociones',
       parent: 'Marketing',
       icon: 'gift',
     },
     {
       path: '/store/marketing/coupons',
-      title: 'Coupons',
+      title: 'Cupones',
       parent: 'Marketing',
       icon: 'ticket',
     },
@@ -687,25 +687,25 @@ export class BreadcrumbService {
     // Analytics
     {
       path: '/store/analytics',
-      title: 'Analytics',
+      title: 'Análisis',
       parent: 'Tienda',
       icon: 'chart-line',
     },
     {
       path: '/store/analytics/sales',
-      title: 'Sales Analytics',
+      title: 'Análisis de Ventas',
       parent: 'Analytics',
       icon: 'dollar-sign',
     },
     {
       path: '/store/analytics/traffic',
-      title: 'Traffic Analytics',
+      title: 'Análisis de Tráfico',
       parent: 'Analytics',
       icon: 'globe',
     },
     {
       path: '/store/analytics/performance',
-      title: 'Performance',
+      title: 'Rendimiento',
       parent: 'Analytics',
       icon: 'trending-up',
     },
@@ -713,25 +713,25 @@ export class BreadcrumbService {
     // Settings
     {
       path: '/store/settings',
-      title: 'Settings',
+      title: 'Configuración',
       parent: 'Tienda',
       icon: 'cog',
     },
     {
       path: '/store/settings/general',
-      title: 'General Settings',
+      title: 'Configuración General',
       parent: 'Settings',
       icon: 'cog',
     },
     {
       path: '/store/settings/appearance',
-      title: 'Appearance',
+      title: 'Apariencia',
       parent: 'Settings',
       icon: 'palette',
     },
     {
       path: '/store/settings/security',
-      title: 'Security',
+      title: 'Seguridad',
       parent: 'Settings',
       icon: 'shield',
     },
@@ -739,25 +739,25 @@ export class BreadcrumbService {
     // POS (Point of Sale)
     {
       path: '/store/pos',
-      title: 'Point of Sale',
+      title: 'Punto de Venta',
       parent: 'Tienda',
       icon: 'cash-register',
     },
     {
       path: '/store/pos/register',
-      title: 'POS Register',
+      title: 'Registro POS',
       parent: 'Point of Sale',
       icon: 'register',
     },
     {
       path: '/store/pos/cart',
-      title: 'POS Cart',
+      title: 'Carrito POS',
       parent: 'Point of Sale',
       icon: 'shopping-cart',
     },
     {
       path: '/store/pos/payment',
-      title: 'POS Payment',
+      title: 'Pago POS',
       parent: 'Point of Sale',
       icon: 'credit-card',
     },
@@ -802,7 +802,7 @@ export class BreadcrumbService {
     } else {
       // Breadcrumb por defecto si no hay coincidencia
       const defaultBreadcrumb = {
-        title: 'Dashboard',
+        title: 'Panel Principal',
         parent: undefined,
         current: {
           label: 'Dashboard',

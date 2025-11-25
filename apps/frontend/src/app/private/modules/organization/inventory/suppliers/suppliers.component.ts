@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Supplier Management</h1>
+      <h1 class="text-2xl font-bold mb-6">Gestión de proveedores</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Centralized supplier management will be displayed here
+          Aquí se mostrará la gestión centralizada de proveedores
         </p>
       </div>
     </div>

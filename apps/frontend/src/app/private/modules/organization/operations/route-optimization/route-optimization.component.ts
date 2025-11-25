@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Route Optimization</h1>
+      <h1 class="text-2xl font-bold mb-6">Optimización de ruta</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Delivery route optimization will be displayed here
+         La optimización de la ruta de entrega se mostrará aquí
         </p>
       </div>
     </div>

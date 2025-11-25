@@ -72,7 +72,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                All Stores ({{ stores.length }})
+                Todas las tiendas ({{ stores.length }})
               </h2>
             </div>
 
@@ -647,7 +647,11 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     const newStatus = store.is_active ? 'inactive' : 'active';
     const action = store.is_active ? 'deactivate' : 'activate';
 
-    if (confirm(`Are you sure you want to ${action} store "${store.name}"?`)) {
+    if (
+      confirm(
+        `¿Está seguro de que desea ${action === 'deactivate' ? 'desactivar' : 'activar'} la tienda "${store.name}"?`,
+      )
+    ) {
       this.storesService
         .updateStore(store.id, { is_active: !store.is_active })
         .pipe(takeUntil(this.destroy$))
@@ -655,11 +659,15 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
           next: () => {
             store.is_active = !store.is_active;
             this.loadStats();
-            this.toastService.success(`Store ${action}d successfully`);
+            this.toastService.success(
+              `Tienda ${action === 'deactivate' ? 'desactivada' : 'activada'} exitosamente`,
+            );
           },
           error: (error) => {
             console.error('Error toggling store status:', error);
-            this.toastService.error(`Failed to ${action} store`);
+            this.toastService.error(
+              `Error al ${action === 'deactivate' ? 'desactivar' : 'activar'} la tienda`,
+            );
           },
         });
     }
@@ -668,7 +676,7 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
   deleteStore(store: StoreListItem): void {
     if (
       confirm(
-        `Are you sure you want to delete store "${store.name}"? This action cannot be undone.`,
+        `¿Está seguro de que desea eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
       )
     ) {
       this.storesService

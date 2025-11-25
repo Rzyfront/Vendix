@@ -29,7 +29,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(storeName$ | async) || storeName"
-        subtitle="Store Admin"
+        subtitle="Administrador de Tienda"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"

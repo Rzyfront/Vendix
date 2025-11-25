@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Billing & Subscriptions</h1>
+      <h1 class="text-2xl font-bold mb-6">Facturación y suscripciones</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Billing and subscription management will be displayed here
+          La gestión de facturación y suscripciones se mostrará aquí.
         </p>
       </div>
     </div>

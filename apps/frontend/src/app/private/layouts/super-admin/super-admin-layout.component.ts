@@ -20,7 +20,7 @@ import { Observable } from 'rxjs';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(organizationName$ | async) || platformTitle"
-        subtitle="Super Admin"
+        subtitle="Super Administrador"
         [vlink]="(organizationSlug$ | async) || currentVlink"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"

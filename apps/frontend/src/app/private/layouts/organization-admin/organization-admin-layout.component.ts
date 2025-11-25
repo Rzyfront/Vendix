@@ -30,7 +30,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(organizationName$ | async) || organizationName"
-        subtitle="Organization Admin"
+        subtitle="Administrador de Organización"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"

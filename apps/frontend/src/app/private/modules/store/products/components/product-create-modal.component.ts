@@ -62,8 +62,8 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
-              label="Product Name"
-              placeholder="Enter product name"
+              label="Nombre del Producto"
+              placeholder="Ingrese el nombre del producto"
               formControlName="name"
               [error]="getErrorMessage('name')"
               [required]="true"
@@ -72,36 +72,38 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
 
             <app-input
               label="SKU"
-              placeholder="Enter SKU (optional)"
+              placeholder="Ingrese SKU (opcional)"
               formControlName="sku"
               [error]="getErrorMessage('sku')"
-              [helperText]="'Leave empty to auto-generate'"
+              [helperText]="'Dejar vacío para autogenerar'"
             >
             </app-input>
           </div>
 
           <app-input
             label="Slug"
-            placeholder="Enter slug (optional)"
+            placeholder="Ingrese slug (opcional)"
             formControlName="slug"
             [error]="getErrorMessage('slug')"
-            [helperText]="'URL-friendly version of the name'"
+            [helperText]="'Versión amigable para URL del nombre'"
           >
           </app-input>
 
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-2">
-              Description
+              Descripción
             </label>
             <textarea
               formControlName="description"
               rows="4"
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              placeholder="Enter product description"
+              placeholder="Ingrese la descripción del producto"
             >
             </textarea>
             @if (description?.invalid && description?.touched) {
-              <p class="mt-1 text-sm text-red-600">Description is required</p>
+              <p class="mt-1 text-sm text-red-600">
+                La descripción es requerida
+              </p>
             }
           </div>
         </div>

@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Stock Management</h1>
+      <h1 class="text-2xl font-bold mb-6">Gestión de stock</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Consolidated stock management across all stores will be displayed here
+          Aquí se mostrará la gestión de stock consolidada de todas las tiendas.
         </p>
       </div>
     </div>

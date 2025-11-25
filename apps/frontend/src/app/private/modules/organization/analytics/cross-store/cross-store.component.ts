@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
-  selector: 'aplicación entre tiendas',
+  selector: 'app-cross-store',
   standalone: true,
   imports: [CommonModule],
   template: `
