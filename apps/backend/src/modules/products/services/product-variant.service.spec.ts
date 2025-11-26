@@ -83,47 +83,51 @@ describe('ProductVariantService', () => {
         ],
       };
 
-      mockPrismaService.product_variants.findFirst.mockResolvedValue(expectedVariant);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(
+        expectedVariant,
+      );
 
       const result = await service.findUniqueVariantBySlug(1, 'test-product');
 
       expect(result).toEqual(expectedVariant);
-      expect(mockPrismaService.product_variants.findFirst).toHaveBeenCalledWith({
-        where: {
-          products: {
-            store_id: 1,
-            slug: 'test-product',
-            state: 'active',
+      expect(mockPrismaService.product_variants.findFirst).toHaveBeenCalledWith(
+        {
+          where: {
+            products: {
+              store_id: 1,
+              slug: 'test-product',
+              state: 'active',
+            },
           },
-        },
-        include: {
-          products: {
-            include: {
-              stores: true,
-              brands: true,
-              product_images: true,
-              product_categories: {
-                include: {
-                  categories: true,
+          include: {
+            products: {
+              include: {
+                stores: true,
+                brands: true,
+                product_images: true,
+                product_categories: {
+                  include: {
+                    categories: true,
+                  },
                 },
               },
             },
+            product_images: true,
           },
-          product_images: true,
         },
-      });
+      );
     });
 
     it('should throw NotFoundException if variant not found', async () => {
       mockPrismaService.product_variants.findFirst.mockResolvedValue(null);
 
-      await expect(service.findUniqueVariantBySlug(1, 'nonexistent-slug')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.findUniqueVariantBySlug(1, 'nonexistent-slug'),
+      ).rejects.toThrow(NotFoundException);
 
-      await expect(service.findUniqueVariantBySlug(1, 'nonexistent-slug')).rejects.toThrow(
-        'Variante de producto no encontrada',
-      );
+      await expect(
+        service.findUniqueVariantBySlug(1, 'nonexistent-slug'),
+      ).rejects.toThrow('Variante de producto no encontrada');
     });
 
     it('should only find variants from active products', async () => {
@@ -138,20 +142,24 @@ describe('ProductVariantService', () => {
         },
       };
 
-      mockPrismaService.product_variants.findFirst.mockResolvedValue(expectedVariant);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(
+        expectedVariant,
+      );
 
       await service.findUniqueVariantBySlug(1, 'test-product');
 
-      expect(mockPrismaService.product_variants.findFirst).toHaveBeenCalledWith({
-        where: {
-          products: {
-            store_id: 1,
-            slug: 'test-product',
-            state: 'active', // Should only include active products
+      expect(mockPrismaService.product_variants.findFirst).toHaveBeenCalledWith(
+        {
+          where: {
+            products: {
+              store_id: 1,
+              slug: 'test-product',
+              state: 'active', // Should only include active products
+            },
           },
+          include: expect.any(Object),
         },
-        include: expect.any(Object),
-      });
+      );
     });
 
     it('should handle variants with complex attributes', async () => {
@@ -180,12 +188,23 @@ describe('ProductVariantService', () => {
         product_images: [],
       };
 
-      mockPrismaService.product_variants.findFirst.mockResolvedValue(variantWithComplexAttributes);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(
+        variantWithComplexAttributes,
+      );
 
-      const result = await service.findUniqueVariantBySlug(1, 'complex-product');
+      const result = await service.findUniqueVariantBySlug(
+        1,
+        'complex-product',
+      );
 
-      expect(result.attributes).toEqual(variantWithComplexAttributes.attributes);
-      expect(result.attributes.dimensions).toEqual({ length: 30, width: 20, height: 5 });
+      expect(result.attributes).toEqual(
+        variantWithComplexAttributes.attributes,
+      );
+      expect(result.attributes.dimensions).toEqual({
+        length: 30,
+        width: 20,
+        height: 5,
+      });
     });
 
     it('should include all related product data', async () => {
@@ -250,7 +269,9 @@ describe('ProductVariantService', () => {
         ],
       };
 
-      mockPrismaService.product_variants.findFirst.mockResolvedValue(variantWithFullRelations);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(
+        variantWithFullRelations,
+      );
 
       const result = await service.findUniqueVariantBySlug(1, 'full-product');
 
@@ -264,19 +285,21 @@ describe('ProductVariantService', () => {
     describe('Error Handling', () => {
       it('should handle database errors gracefully', async () => {
         const databaseError = new Error('Database connection failed');
-        mockPrismaService.product_variants.findFirst.mockRejectedValue(databaseError);
-
-        await expect(service.findUniqueVariantBySlug(1, 'test-product')).rejects.toThrow(
+        mockPrismaService.product_variants.findFirst.mockRejectedValue(
           databaseError,
         );
+
+        await expect(
+          service.findUniqueVariantBySlug(1, 'test-product'),
+        ).rejects.toThrow(databaseError);
       });
 
       it('should handle invalid store IDs', async () => {
         mockPrismaService.product_variants.findFirst.mockResolvedValue(null);
 
-        await expect(service.findUniqueVariantBySlug(-1, 'test-product')).rejects.toThrow(
-          NotFoundException,
-        );
+        await expect(
+          service.findUniqueVariantBySlug(-1, 'test-product'),
+        ).rejects.toThrow(NotFoundException);
       });
 
       it('should handle empty slug strings', async () => {
@@ -324,17 +347,23 @@ describe('ProductVariantService', () => {
         };
 
         // Should return variant from store 1 when querying store 1
-        mockPrismaService.product_variants.findFirst.mockResolvedValueOnce(variantFromStore1);
+        mockPrismaService.product_variants.findFirst.mockResolvedValueOnce(
+          variantFromStore1,
+        );
         const result1 = await service.findUniqueVariantBySlug(1, 'product-a');
         expect(result1.products.stores.id).toBe(1);
 
         // Should return variant from store 2 when querying store 2
-        mockPrismaService.product_variants.findFirst.mockResolvedValueOnce(variantFromStore2);
+        mockPrismaService.product_variants.findFirst.mockResolvedValueOnce(
+          variantFromStore2,
+        );
         const result2 = await service.findUniqueVariantBySlug(2, 'product-a');
         expect(result2.products.stores.id).toBe(2);
 
         // Both queries should include the store_id filter
-        expect(mockPrismaService.product_variants.findFirst).toHaveBeenNthCalledWith(1, {
+        expect(
+          mockPrismaService.product_variants.findFirst,
+        ).toHaveBeenNthCalledWith(1, {
           where: {
             products: {
               store_id: 1,
@@ -345,7 +374,9 @@ describe('ProductVariantService', () => {
           include: expect.any(Object),
         });
 
-        expect(mockPrismaService.product_variants.findFirst).toHaveBeenNthCalledWith(2, {
+        expect(
+          mockPrismaService.product_variants.findFirst,
+        ).toHaveBeenNthCalledWith(2, {
           where: {
             products: {
               store_id: 2,

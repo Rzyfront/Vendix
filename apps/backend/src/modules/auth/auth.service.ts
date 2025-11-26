@@ -31,7 +31,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
-  ) { }
+  ) {}
 
   async registerOwner(
     registerOwnerDto: RegisterOwnerDto,
@@ -2579,9 +2579,8 @@ export class AuthService {
         '1h') as any,
     });
     const refreshToken = this.jwtService.sign(payload, {
-      secret:
-        (this.configService.get<string>('JWT_REFRESH_SECRET') ||
-          this.configService.get<string>('JWT_SECRET')) as string,
+      secret: (this.configService.get<string>('JWT_REFRESH_SECRET') ||
+        this.configService.get<string>('JWT_SECRET')) as string,
       expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ||
         '7d') as any,
     });

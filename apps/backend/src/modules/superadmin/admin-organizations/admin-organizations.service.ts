@@ -4,14 +4,14 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CreateOrganizationDto,
   UpdateOrganizationDto,
   AdminOrganizationQueryDto,
-  OrganizationDashboardDto,
   OrganizationState,
-} from 'src/modules/organizations/dto';
+  OrganizationDashboardDto,
+} from '../../organizations/dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 

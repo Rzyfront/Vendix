@@ -475,7 +475,10 @@ describe('ProductsController', () => {
         message: 'Insufficient permissions',
       });
 
-      const result = await controller.create({} as CreateProductDto, mockRequest);
+      const result = await controller.create(
+        {} as CreateProductDto,
+        mockRequest,
+      );
 
       expect(responseService.error).toHaveBeenCalledWith(
         'Insufficient permissions',
