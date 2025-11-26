@@ -1,19 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {
-  TableComponent,
-  TableColumn,
-  TableAction,
-} from '../../../../../shared/components/table/table.component';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
-import { OrdersService } from '../services/orders.service';
-import { SalesOrder } from '../interfaces/order.interface';
 
 @Component({
   selector: 'app-orders-list',
   standalone: true,
-  imports: [CommonModule, TableComponent, ButtonComponent, ModalComponent],
+  imports: [CommonModule],
   template: `
     <div class="p-6">
       <div class="mb-6">
@@ -50,15 +41,7 @@ import { SalesOrder } from '../interfaces/order.interface';
             filtrar y gestionar todos los pedidos aquí.
           </p>
         </div>
-        <div slot="footer" class="flex justify-end space-x-2">
-          <app-button (clicked)="closeCreateModal()" variant="ghost"
-            >Cancel</app-button
-          >
-          <app-button (clicked)="createOrder()" variant="primary"
-            >Create Order</app-button
-          >
-        </div>
-      </app-modal>
+      </div>
     </div>
   `,
   styles: [
