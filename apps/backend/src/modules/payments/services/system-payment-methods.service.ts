@@ -151,20 +151,20 @@ export class SystemPaymentMethodsService {
 
     const method = await this.prisma.system_payment_methods.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: { store_payment_methods: true },
-        },
-      },
     });
 
     if (!method) {
       throw new NotFoundException('System payment method not found');
     }
 
-    if (method._count.store_payment_methods > 0) {
+    // Check if method is being used by any stores
+    const usageCount = await this.prisma.store_payment_methods.count({
+      where: { system_payment_method_id: id },
+    });
+
+    if (usageCount > 0) {
       throw new BadRequestException(
-        `Cannot delete system payment method '${method.name}' because it is being used by ${method._count.store_payment_methods} store(s)`,
+        `Cannot delete system payment method '${method.name}' because it is being used by ${usageCount} store(s)`,
       );
     }
 

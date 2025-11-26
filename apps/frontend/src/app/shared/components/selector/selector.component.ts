@@ -80,6 +80,15 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           </option>
         </select>
 
+        <!-- Placeholder overlay para mostrar cuando no hay valor seleccionado -->
+        <div
+          *ngIf="placeholder && !selectedValue"
+          class="selector-placeholder"
+          [class]="placeholderClasses"
+        >
+          {{ placeholder }}
+        </div>
+
         <div class="selector-icon" [class]="iconClasses">
           <app-icon name="chevron-down" [size]="iconSize"></app-icon>
         </div>
@@ -208,6 +217,16 @@ export class SelectorComponent
 
   get iconClasses(): string {
     return ['selector-icon'].filter(Boolean).join(' ');
+  }
+
+  get placeholderClasses(): string {
+    return [
+      'selector-placeholder',
+      this.size && `selector-placeholder-${this.size}`,
+      this.disabled ? 'selector-placeholder-disabled' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   get iconSize(): number {

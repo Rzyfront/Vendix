@@ -1,151 +1,206 @@
-export interface SalesOrder {
-  id: number;
+// Core entities
+export interface Order {
+  id: string;
   orderNumber: string;
-  customerId: number;
-  storeId: number;
-  status: 'PENDING' | 'CONFIRMED' | 'SHIPPED' | 'INVOICED' | 'CANCELLED';
+  customer: {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+  } | null;
+  items: OrderItem[];
+  summary: OrderSummary;
+  status: OrderStatus;
+  paymentStatus: PaymentStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  total: number;
+}
+
+export interface OrderItem {
+  id: string;
+  productId: string;
+  productName: string;
+  productSku: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+export interface OrderSummary {
   subtotal: number;
   taxAmount: number;
-  totalAmount: number;
-  expectedDate?: string;
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-  customer?: Customer;
-  store?: Store;
-  items?: SalesOrderItem[];
+  total: number;
+  itemCount: number;
 }
 
-export interface SalesOrderItem {
-  id: number;
-  salesOrderId: number;
-  productId: number;
+// Types and enums
+export type OrderStatus =
+  | 'draft' // Borrador
+  | 'pending' // Pendiente de confirmación
+  | 'confirmed' // Confirmado, listo para preparar
+  | 'preparing' // En preparación
+  | 'ready' // Listo para envío
+  | 'shipped' // Enviado
+  | 'delivered' // Entregado
+  | 'cancelled' // Cancelado
+  | 'refunded' // Reembolsado
+  | 'returned'; // Devuelto
+
+export type PaymentStatus =
+  | 'pending' // Pendiente de pago
+  | 'processing' // Procesando pago
+  | 'paid' // Pagado completamente
+  | 'partial' // Pagado parcialmente
+  | 'overpaid' // Pagado de más
+  | 'failed' // Pago fallido
+  | 'refunded' // Reembolsado
+  | 'disputed'; // En disputa
+
+// Query and response interfaces
+export interface OrderQuery {
+  // Búsqueda
+  search?: string;
+
+  // Filtros principales
+  status?: OrderStatus | OrderStatus[];
+  paymentStatus?: PaymentStatus | PaymentStatus[];
+
+  // Filtros de fecha
+  dateFrom?: string;
+  dateTo?: string;
+  dateRange?:
+    | 'today'
+    | 'yesterday'
+    | 'thisWeek'
+    | 'lastWeek'
+    | 'thisMonth'
+    | 'lastMonth'
+    | 'thisYear'
+    | 'lastYear';
+
+  // Filtros de cliente
+  customerId?: string;
+  customerEmail?: string;
+
+  // Filtros de monto
+  minAmount?: number;
+  maxAmount?: number;
+
+  // Paginación
+  page?: number;
+  limit?: number;
+
+  // Ordenamiento
+  sortBy?: 'createdAt' | 'updatedAt' | 'total' | 'orderNumber' | 'customerName';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedOrdersResponse {
+  orders: Order[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
+export interface OrderStats {
+  totalOrders: number;
+  totalRevenue: number;
+  pendingOrders: number;
+  completedOrders: number;
+  averageOrderValue: number;
+}
+
+// DTOs
+export interface CreateOrderDto {
+  customerId: string;
+  items: CreateOrderItemDto[];
+  notes?: string;
+  paymentMethod?: string;
+}
+
+export interface CreateOrderItemDto {
+  productId: string;
   quantity: number;
-  unitPrice: number;
-  totalPrice: number;
-  product?: Product;
+  unitPrice?: number; // Opcional, usa precio del producto si no se especifica
 }
 
-export interface PurchaseOrder {
-  id: number;
-  orderNumber: string;
-  supplierId: number;
-  locationId: number;
-  status: 'draft' | 'sent' | 'received' | 'cancelled';
-  totalAmount: number;
-  expectedDate?: string;
+export interface UpdateOrderStatusDto {
+  status: OrderStatus;
   notes?: string;
-  createdAt: string;
-  updatedAt: string;
-  supplier?: Supplier;
-  location?: InventoryLocation;
-  items?: PurchaseOrderItem[];
+  notifyCustomer?: boolean;
 }
 
-export interface PurchaseOrderItem {
-  id: number;
-  purchaseOrderId: number;
-  productId: number;
-  quantity: number;
-  unitPrice: number;
-  totalPrice: number;
-  product?: Product;
-}
-
-export interface StockTransfer {
-  id: number;
-  transferNumber: string;
-  fromLocationId: string;
-  toLocationId: string;
-  status: 'PENDING' | 'IN_TRANSIT' | 'COMPLETED' | 'CANCELLED';
-  expectedDate?: string;
+export interface UpdatePaymentStatusDto {
+  paymentStatus: PaymentStatus;
+  transactionId?: string;
   notes?: string;
-  createdAt: string;
-  updatedAt: string;
-  fromLocation?: InventoryLocation;
-  toLocation?: InventoryLocation;
-  items?: StockTransferItem[];
 }
 
-export interface StockTransferItem {
-  id: number;
-  stockTransferId: number;
-  productId: number;
-  quantity: number;
-  notes?: string;
-  product?: Product;
-}
-
-// Interfaces auxiliares
-export interface Customer {
-  id: number;
-  name: string;
-  email: string;
-  phone?: string;
-}
-
-export interface Supplier {
-  id: number;
-  name: string;
-  email: string;
-  phone?: string;
-}
-
-export interface Product {
-  id: number;
-  name: string;
-  sku: string;
-  price: number;
-  stock: number;
-  description?: string;
-}
-
-export interface Store {
-  id: number;
-  name: string;
-}
-
-export interface InventoryLocation {
+// UI interfaces
+export interface OrderAction {
   id: string;
-  name: string;
-  type: string;
-  address?: string;
-  isActive?: boolean;
+  label: string;
+  icon?: string;
+  action: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'secondary' | 'danger';
 }
 
-// Interfaces para creación/actualización
-export interface CreateSalesOrderRequest {
-  customer_id: number;
-  location_id: number;
-  expected_date?: string;
-  notes?: string;
-  items: {
-    product_id: number;
-    quantity: number;
-    unit_price: number;
-  }[];
+export interface OrderFilters {
+  search: string;
+  status: OrderStatus[];
+  paymentStatus: PaymentStatus[];
+  dateRange: string;
+  customerId?: string;
+  minAmount?: number;
+  maxAmount?: number;
 }
 
-export interface CreatePurchaseOrderRequest {
-  supplier_id: number;
-  location_id: number;
-  expected_date?: string;
-  notes?: string;
-  items: {
-    product_id: number;
-    quantity: number;
-    unit_price: number;
-  }[];
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
 }
 
-export interface CreateStockTransferRequest {
-  fromLocationId: string;
-  toLocationId: string;
-  expectedDate?: string;
-  notes?: string;
-  items: {
-    productId: string;
-    quantity: number;
-    notes?: string;
-  }[];
+export interface FilterConfig {
+  status: FilterOption[];
+  paymentStatus: FilterOption[];
+  dateRange: FilterOption[];
+}
+
+export interface OrderTableColumn {
+  key: keyof Order | 'actions';
+  label: string;
+  sortable?: boolean;
+  width?: string;
+  align?: 'left' | 'center' | 'right';
+  transform?: (value: any, order: Order) => string;
+  badge?: {
+    type?: 'status' | 'custom';
+    colorKey?: string;
+    colorMap?: Record<string, string>;
+    size?: 'sm' | 'md' | 'lg';
+  };
+}
+
+export interface TableConfig {
+  columns: OrderTableColumn[];
+  loading: boolean;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface TableActions {
+  refresh: () => void;
+  newOrder: () => void;
+  export: () => void;
 }
