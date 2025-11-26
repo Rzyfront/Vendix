@@ -16,6 +16,7 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { Public } from '../auth/decorators/public.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '../../common/interfaces/authenticated-request.interface';
 import { ResponseService } from '../../common/responses/response.service';
@@ -27,6 +28,24 @@ export class OrdersController {
     private readonly ordersService: OrdersService,
     private readonly responseService: ResponseService,
   ) {}
+
+  @Get()
+  @Permissions('orders:read')
+  async findAll(@Query() query: OrderQueryDto) {
+    try {
+      const result = await this.ordersService.findAll(query);
+      return this.responseService.success(
+        result,
+        'Órdenes obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las órdenes',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
 
   @Post()
   @Permissions('orders:create')
@@ -40,33 +59,6 @@ export class OrdersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al crear la orden',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
-  }
-
-  @Get()
-  @Permissions('orders:read')
-  async findAll(@Query() query: OrderQueryDto) {
-    try {
-      const result = await this.ordersService.findAll(query);
-      if (result.data && result.pagination) {
-        return this.responseService.paginated(
-          result.data,
-          result.pagination.total,
-          result.pagination.page,
-          result.pagination.limit,
-          'Órdenes obtenidas exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
-        'Órdenes obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las órdenes',
         error.response?.message || error.message,
         error.status || 400,
       );

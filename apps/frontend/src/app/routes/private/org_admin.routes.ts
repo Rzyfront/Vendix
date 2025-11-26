@@ -180,11 +180,24 @@ export const orgAdminRoutes: Routes = [
         ],
       },
       {
-        path: 'users',
-        loadComponent: () =>
-          import(
-            '../../private/modules/organization/users/users.component'
-          ).then((c) => c.UsersComponent),
+        path: 'orders',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            loadComponent: () =>
+              import(
+                '../../private/modules/organization/orders/orders-list.component'
+              ).then((c) => c.OrdersListComponent),
+          },
+          {
+            path: ':id',
+            loadComponent: () =>
+              import(
+                '../../private/modules/organization/orders/components/order-details.component'
+              ).then((c) => c.OrderDetailsComponent),
+          },
+        ],
       },
       {
         path: 'operations',
