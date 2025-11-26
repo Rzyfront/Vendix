@@ -12,7 +12,7 @@ import {
 
 @Injectable()
 export class SystemPaymentMethodsService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   /**
    * Get all system payment methods
