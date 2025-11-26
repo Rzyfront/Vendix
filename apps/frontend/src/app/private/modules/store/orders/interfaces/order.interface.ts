@@ -204,3 +204,125 @@ export interface TableActions {
   newOrder: () => void;
   export: () => void;
 }
+
+// Order Types
+export interface SalesOrder extends Order {
+  orderType: 'sales';
+  customer: {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: {
+      street: string;
+      city: string;
+      state: string;
+      zipCode: string;
+      country: string;
+    };
+  };
+  shippingAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    country: string;
+  };
+  billingAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    country: string;
+  };
+  salesRep?: {
+    id: string;
+    name: string;
+  };
+  commission?: number;
+}
+
+export interface PurchaseOrder extends Order {
+  orderType: 'purchase';
+  supplier: {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: {
+      street: string;
+      city: string;
+      state: string;
+      zipCode: string;
+      country: string;
+    };
+  };
+  expectedDeliveryDate?: string;
+  purchaseRep?: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface StockTransfer extends Order {
+  orderType: 'transfer';
+  fromLocation: {
+    id: string;
+    name: string;
+    type: 'warehouse' | 'store';
+  };
+  toLocation: {
+    id: string;
+    name: string;
+    type: 'warehouse' | 'store';
+  };
+  transferReason?: string;
+  approvedBy?: {
+    id: string;
+    name: string;
+  };
+  receivedBy?: {
+    id: string;
+    name: string;
+  };
+}
+
+// Create Request DTOs
+export interface CreateSalesOrderRequest {
+  customerId: string;
+  items: CreateOrderItemDto[];
+  shippingAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    country: string;
+  };
+  billingAddress?: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+    country: string;
+  };
+  notes?: string;
+  paymentMethod?: string;
+  salesRepId?: string;
+  commission?: number;
+}
+
+export interface CreatePurchaseOrderRequest {
+  supplierId: string;
+  items: CreateOrderItemDto[];
+  expectedDeliveryDate?: string;
+  notes?: string;
+  purchaseRepId?: string;
+}
+
+export interface CreateStockTransferRequest {
+  fromLocationId: string;
+  toLocationId: string;
+  items: CreateOrderItemDto[];
+  transferReason?: string;
+  notes?: string;
+}

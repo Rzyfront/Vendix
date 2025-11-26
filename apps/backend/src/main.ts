@@ -30,6 +30,9 @@ async function bootstrap() {
   const corsOrigins = process.env.CORS_ORIGIN?.split(',') || [
     'http://localhost:4200',
     'http://localhost',
+    // HTTP origins for local development
+    'http://vendix.com',
+    'http://www.vendix.com',
     // Production origins for base domain
     `https://${baseDomain}`,
     `https://www.${baseDomain}`,

@@ -1,8 +1,8 @@
 export const environment = {
   production: false,
   // apiUrl points to local backend for development
-  apiUrl: 'http://localhost:3000/api',
-  vendixDomain: 'localhost:4200',
+  apiUrl: 'https://api.vendix.com/api',
+  vendixDomain: 'vendix.com',
 
   // Configuración para desarrollo
   debugDomainDetection: true,
