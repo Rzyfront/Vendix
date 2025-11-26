@@ -25,22 +25,17 @@ services:
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
+      CHOKIDAR_USEPOLLING: "true"
     depends_on:
       - db
     ports:
       - "3000:3000"
     volumes:
-      - ./apps/backend/src:/app/src
-      - ./apps/backend/prisma:/app/prisma
-      - ./apps/backend/package.json:/app/package.json
-      - ./apps/backend/package-lock.json:/app/package-lock.json
-      - ./apps/backend/tsconfig.json:/app/tsconfig.json
-      - ./apps/backend/tsconfig.*.json:/app/tsconfig.*.json
-      - ./apps/backend/nest-cli.json:/app/nest-cli.json
-      - ./apps/backend/.env:/app/.env
-      - backend_node_modules:/app/node_modules
+      - ./apps/backend:/app
+      - /app/node_modules
     networks:
       - vendix_net
+    command: sh -c "npx prisma migrate deploy && npm run start:dev"
 
   frontend:
     build:
@@ -50,22 +45,17 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=development
-      - BACKEND_URL=http://localhost:3000
-      - CHOKIDAR_USEPOLLING=true
+      - BACKEND_URL=http://api.vendix.com
     depends_on:
       - backend
     ports:
       - "4200:4200"
     volumes:
-      - ./apps/frontend/src:/app/src
-      - ./apps/frontend/package.json:/app/package.json
-      - ./apps/frontend/package-lock.json:/app/package-lock.json
-      - ./apps/frontend/angular.json:/app/angular.json
-      - ./apps/frontend/tsconfig.json:/app/tsconfig.json
-      - ./apps/frontend/tsconfig.*.json:/app/tsconfig.*.json
-      - node_modules:/app/node_modules
+      - ./apps/frontend:/app
+      - /app/node_modules
     networks:
       - vendix_net
+    command: sh -c "npx ng serve --host 0.0.0.0 --poll 2000"
 
   nginx:
     image: nginx:alpine
@@ -86,8 +76,6 @@ services:
 
 volumes:
   vendix_pgdata:
-  node_modules:
-  backend_node_modules:
 
 networks:
   vendix_net:

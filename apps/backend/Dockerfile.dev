@@ -1,8 +1,10 @@
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install
 COPY . .
 RUN npx prisma generate
+# Opcional: Ejecutar migraciones si es necesario
+# RUN npx prisma migrate deploy
 EXPOSE 3000
-CMD ["npx", "nest", "start", "--watch"]
+CMD ["npm", "run", "start:dev"]
