@@ -35,7 +35,10 @@ export class AuditInterceptor implements NestInterceptor {
             await this.logCreateOperation(userId, url, data);
           } else if (method === 'PUT' && this.isUpdateOperation(url, method)) {
             await this.logUpdateOperation(userId, url, request.body, data);
-          } else if (method === 'DELETE' && this.isDeleteOperation(url)) {
+          } else if (
+            method === 'DELETE' &&
+            this.isDeleteOperation(url, method)
+          ) {
             await this.logDeleteOperation(userId, url);
           }
         } catch (error) {
@@ -47,16 +50,28 @@ export class AuditInterceptor implements NestInterceptor {
 
   private isCreateOperation(url: string): boolean {
     return (
-      url.includes('/create') || url.includes('/register') || !url.includes('/')
+      url.includes('/create') ||
+      url.includes('/register') ||
+      (url.includes('/api/') &&
+        !url.includes('/update') &&
+        !url.includes('/edit') &&
+        !url.includes('/delete'))
     );
   }
 
   private isUpdateOperation(url: string, method: string): boolean {
-    return url.includes('/update') || url.includes('/edit') || method === 'PUT';
+    return (
+      url.includes('/update') ||
+      url.includes('/edit') ||
+      (method === 'PUT' &&
+        !url.includes('/create') &&
+        !url.includes('/register') &&
+        !url.includes('/delete'))
+    );
   }
 
-  private isDeleteOperation(method: string): boolean {
-    return method === 'DELETE';
+  private isDeleteOperation(url: string, method: string): boolean {
+    return method === 'DELETE' || url.includes('/delete');
   }
 
   private async logCreateOperation(userId: number, url: string, data: any) {

@@ -175,9 +175,7 @@ describe('WebhookHandlerService', () => {
 
       await service['updatePaymentStatus']('pi_1234567890', 'succeeded', {});
 
-      expect(updateSpy).toHaveBeenCalledWith(
-        (expect as any).any(Object),
-      );
+      expect(updateSpy).toHaveBeenCalledWith((expect as any).any(Object));
     });
   });
 
@@ -202,9 +200,7 @@ describe('WebhookHandlerService', () => {
 
       await service['updateOrderStatus'](1);
 
-      expect(updateSpy).toHaveBeenCalledWith(
-        (expect as any).any(Object),
-      );
+      expect(updateSpy).toHaveBeenCalledWith((expect as any).any(Object));
     });
 
     it('should not update order status if already processing', async () => {

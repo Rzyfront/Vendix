@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model users {
@@ -217,34 +216,35 @@ model audit_logs {
 }
 
 model organizations {
-  id                    Int                     @id @default(autoincrement())
-  name                  String                  @db.VarChar(255)
-  slug                  String                  @unique @db.VarChar(255)
-  legal_name            String?                 @db.VarChar(255)
-  tax_id                String?                 @unique @db.VarChar(50)
-  email                 String                  @db.VarChar(255)
-  phone                 String?                 @db.VarChar(50)
-  website               String?                 @db.VarChar(255)
-  description           String?
-  state                 organization_state_enum @default(draft)
-  created_at            DateTime?               @default(now()) @db.Timestamp(6)
-  updated_at            DateTime?               @default(now()) @db.Timestamp(6)
-  onboarding            Boolean                 @default(false)
-  addresses             addresses[]
-  audit_logs            audit_logs[]
-  domain_settings       domain_settings[]
-  inventory_adjustments inventory_adjustments[]
-  inventory_locations   inventory_locations[]
-  inventory_movements   inventory_movements[]
-  organization_settings organization_settings?
-  purchase_orders       purchase_orders[]
-  return_orders         return_orders[]
-  sales_orders          sales_orders[]
-  stock_reservations    stock_reservations[]
-  stock_transfers       stock_transfers[]
-  stores                stores[]
-  suppliers             suppliers[]
-  users                 users[]
+  id                            Int                            @id @default(autoincrement())
+  name                          String                         @db.VarChar(255)
+  slug                          String                         @unique @db.VarChar(255)
+  legal_name                    String?                        @db.VarChar(255)
+  tax_id                        String?                        @unique @db.VarChar(50)
+  email                         String                         @db.VarChar(255)
+  phone                         String?                        @db.VarChar(50)
+  website                       String?                        @db.VarChar(255)
+  description                   String?
+  state                         organization_state_enum        @default(draft)
+  created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
+  onboarding                    Boolean                        @default(false)
+  addresses                     addresses[]
+  audit_logs                    audit_logs[]
+  domain_settings               domain_settings[]
+  inventory_adjustments         inventory_adjustments[]
+  inventory_locations           inventory_locations[]
+  inventory_movements           inventory_movements[]
+  organization_settings         organization_settings?
+  organization_payment_policies organization_payment_policies?
+  purchase_orders               purchase_orders[]
+  return_orders                 return_orders[]
+  sales_orders                  sales_orders[]
+  stock_reservations            stock_reservations[]
+  stock_transfers               stock_transfers[]
+  stores                        stores[]
+  suppliers                     suppliers[]
+  users                         users[]
 
   @@index([onboarding])
 }
@@ -256,6 +256,34 @@ model organization_settings {
   created_at      DateTime?     @default(now()) @db.Timestamp(6)
   updated_at      DateTime?     @default(now()) @db.Timestamp(6)
   organization    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+}
+
+model organization_payment_policies {
+  id              Int @id @default(autoincrement())
+  organization_id Int @unique
+
+  // Configuración de métodos permitidos
+  allowed_methods String[] // IDs de system_payment_methods permitidos para la organización
+
+  // Configuración base para nuevas tiendas
+  default_config Json? // Configuración base que heredan las tiendas
+
+  // Políticas organizacionales
+  enforce_policies      Boolean @default(false) // Si se aplican las políticas a todas las tiendas
+  allow_store_overrides Boolean @default(true) // Si las tiendas pueden modificar configuraciones
+
+  // Configuraciones globales
+  min_order_amount Decimal? @db.Decimal(12, 2) // Monto mínimo global para pedidos
+  max_order_amount Decimal? @db.Decimal(12, 2) // Monto máximo global para pedidos
+
+  // Auditoría
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  // Relaciones
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
 }
 
 model stores {

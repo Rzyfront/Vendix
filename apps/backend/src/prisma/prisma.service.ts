@@ -5,6 +5,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 import {
   RequestContextService,
   RequestContext,
@@ -49,11 +51,16 @@ export class PrismaService implements OnModuleInit {
     'tax_rates',
     'orders',
     'payments',
-    'store_payment_methods',  // NUEVO: métodos de pago por tienda
+    'store_payment_methods', // NUEVO: métodos de pago por tienda
   ];
 
   constructor() {
+    const connectionString = process.env.DATABASE_URL!;
+    const pool = new Pool({ connectionString });
+    const adapter = new PrismaPg(pool);
+
     this.baseClient = new PrismaClient({
+      adapter,
       log:
         process.env.NODE_ENV === 'development'
           ? ['query', 'error', 'warn']
@@ -326,6 +333,10 @@ export class PrismaService implements OnModuleInit {
   get return_order_items() {
     return this.scopedClient.return_order_items;
   }
+
+  get organization_payment_policies() {
+    return this.baseClient.organization_payment_policies;
+  } // GLOBAL: políticas de pago por organización
 
   // Métodos especiales - algunos delegados al baseClient para compatibilidad total
   $on: (...args: any[]) => any = (...args) => {

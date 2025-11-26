@@ -148,7 +148,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
-
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();

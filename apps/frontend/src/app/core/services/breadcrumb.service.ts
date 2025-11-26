@@ -163,8 +163,19 @@ export class BreadcrumbService {
     { path: '/products/categories', title: 'Categorías', parent: 'Productos' },
 
     // Pedidos
-    { path: '/orders', title: 'Pedidos', icon: 'credit-card' },
-    { path: '/orders/:id', title: 'Detalles del Pedido', parent: 'Pedidos' },
+    { path: '/orders', title: 'Orders', icon: 'credit-card' },
+    { path: '/orders/:id', title: 'Order Details', parent: 'Orders' },
+    {
+      path: '/admin/orders',
+      title: 'Orders',
+      icon: 'credit-card',
+      parent: 'Organización',
+    },
+    {
+      path: '/admin/orders/:id',
+      title: 'Order Details',
+      parent: 'Orders',
+    },
 
     // Configuración
     { path: '/settings', title: 'Configuración', icon: 'settings' },

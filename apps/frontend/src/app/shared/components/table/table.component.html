@@ -135,6 +135,7 @@
             <ng-template #defaultActions>
               <div class="table-actions">
                 <ng-container *ngFor="let action of actions">
+                  <!-- Debug: {{ action.icon ? 'Icon: ' + action.icon : 'No icon' }} -->
                   <button
                     *ngIf="isActionVisible(action, item)"
                     [class]="getActionClasses(action, item)"

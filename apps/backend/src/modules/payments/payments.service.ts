@@ -25,7 +25,7 @@ export class PaymentsService {
     private prisma: PrismaService,
     private paymentGateway: PaymentGatewayService,
     private stockLevelManager: StockLevelManager,
-  ) { }
+  ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -372,7 +372,8 @@ export class PaymentsService {
     console.error(
       `Access denied: User ${user.id} (Roles: ${JSON.stringify(
         user.roles,
-      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${store?.organization_id
+      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${
+        store?.organization_id
       }). Allowed stores: ${JSON.stringify(userStoreIds)}`,
     );
     throw new ForbiddenException('Access denied to this store');
@@ -438,13 +439,17 @@ export class PaymentsService {
           },
           payment: payment
             ? {
-              id: payment.id,
-              amount: payment.amount,
-              payment_method: payment.store_payment_method?.display_name || payment.store_payment_method?.system_payment_method?.display_name || 'Unknown',
-              status: payment.status,
-              transaction_id: payment.transaction_id,
-              change: payment.change,
-            }
+                id: payment.id,
+                amount: payment.amount,
+                payment_method:
+                  payment.store_payment_method?.display_name ||
+                  payment.store_payment_method?.system_payment_method
+                    ?.display_name ||
+                  'Unknown',
+                status: payment.status,
+                transaction_id: payment.transaction_id,
+                change: payment.change,
+              }
             : undefined,
         };
       });
@@ -550,7 +555,10 @@ export class PaymentsService {
 
     // Calculate change for cash payments
     let change = 0;
-    if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+    if (
+      paymentMethod.system_payment_method.type === 'cash' &&
+      dto.amount_received
+    ) {
       change = dto.amount_received - dto.total_amount;
     }
 
@@ -751,4 +759,3 @@ export class PaymentsService {
     );
   }
 }
-

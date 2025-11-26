@@ -1,4 +1,3 @@
-
 import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
@@ -80,10 +79,9 @@ describe('PaymentsController', () => {
         .spyOn(service, 'processPayment')
         .mockResolvedValue(mockPaymentResult);
 
-      const result = await controller.processPayment(
-        createPaymentDto,
-        { user: mockUser },
-      );
+      const result = await controller.processPayment(createPaymentDto, {
+        user: mockUser,
+      });
 
       expect(service.processPayment).toHaveBeenCalledWith(
         createPaymentDto,
@@ -246,7 +244,10 @@ describe('PaymentsController', () => {
 
       jest.spyOn(service, 'findAll').mockResolvedValue(mockPaymentsList);
 
-      const result = await controller.findAll({ page: 1, limit: 10 }, { user: mockUser });
+      const result = await controller.findAll(
+        { page: 1, limit: 10 },
+        { user: mockUser },
+      );
 
       expect(service.findAll).toHaveBeenCalledWith(
         { page: 1, limit: 10 },
@@ -271,10 +272,9 @@ describe('PaymentsController', () => {
 
       jest.spyOn(service, 'findOne').mockResolvedValue(mockPayment);
 
-      const result = await controller.findOne(
-        'txn_1234567890_abc123',
-        { user: mockUser },
-      );
+      const result = await controller.findOne('txn_1234567890_abc123', {
+        user: mockUser,
+      });
 
       expect(service.findOne).toHaveBeenCalledWith(
         'txn_1234567890_abc123',

@@ -16,6 +16,7 @@ import {
   IsNumber,
   Min,
   ValidateNested,
+  IsNotEmpty,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -737,4 +738,99 @@ export class UpdateVariantWithStockDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+}
+
+// Bulk Upload DTOs
+export class BulkProductItemDto {
+  @IsNotEmpty({ message: 'Product name is required' })
+  @IsString()
+  name: string;
+
+  @IsNotEmpty({ message: 'Base price is required' })
+  @IsNumber({}, { message: 'Base price must be a number' })
+  @Min(0, { message: 'Base price must be positive' })
+  base_price: number;
+
+  @IsNotEmpty({ message: 'SKU is required' })
+  @IsString()
+  sku: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsInt()
+  brand_id?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  category_ids?: number[];
+
+  @IsOptional()
+  @IsNumber({}, { message: 'Stock quantity must be a number' })
+  @Min(0, { message: 'Stock quantity must be positive' })
+  stock_quantity?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'Cost price must be a number' })
+  @Min(0, { message: 'Cost price must be positive' })
+  cost_price?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'Weight must be a number' })
+  @Min(0, { message: 'Weight must be positive' })
+  weight?: number;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductVariantDto)
+  variants?: CreateProductVariantDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StockByLocationDto)
+  stock_by_location?: StockByLocationDto[];
+}
+
+export class BulkProductUploadDto {
+  @IsNotEmpty({ message: 'Products array is required' })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BulkProductItemDto)
+  products: BulkProductItemDto[];
+}
+
+export class BulkUploadItemResultDto {
+  product: any;
+  status: 'success' | 'error';
+  message: string;
+  error?: string;
+}
+
+export class BulkUploadResultDto {
+  success: boolean;
+  total_processed: number;
+  successful: number;
+  failed: number;
+  results: BulkUploadItemResultDto[];
+}
+
+export class BulkValidationResultDto {
+  isValid: boolean;
+  errors: string[];
+  validProducts: BulkProductItemDto[];
+}
+
+export class BulkUploadTemplateDto {
+  headers: string[];
+  sample_data: any[];
+  instructions: string;
 }

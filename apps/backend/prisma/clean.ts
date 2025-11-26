@@ -1,6 +1,16 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import * as pg from 'pg';
 
-const prisma = new PrismaClient();
+// Create PostgreSQL connection pool
+const connectionString = process.env.DATABASE_URL || 'postgresql://username:password@localhost:5432/vendix_db?schema=public';
+const pool = new pg.Pool({ connectionString });
+
+// Create adapter
+const adapter = new PrismaPg(pool);
+
+// Initialize Prisma client with adapter
+const prisma = new PrismaClient({ adapter });
 
 async function cleanDatabase() {
   console.log('🧹 Iniciando limpieza completa de la base de datos...');

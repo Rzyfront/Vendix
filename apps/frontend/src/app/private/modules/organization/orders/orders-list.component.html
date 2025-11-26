@@ -1,0 +1,171 @@
+<div class="space-y-6">
+  <!-- Stats Cards -->
+  <app-order-stats [stats]="stats"></app-order-stats>
+
+  <!-- Orders List -->
+  <div
+    class="bg-surface rounded-card shadow-card border border-border overflow-hidden"
+    style="
+      overflow: hidden !important;
+      overflow-y: hidden !important;
+      overflow-x: hidden !important;
+    "
+  >
+    <div class="px-6 py-4 border-b border-border">
+      <div class="flex flex-col gap-4">
+        <!-- Action Buttons -->
+        <div class="flex justify-start gap-3">
+          <app-button variant="primary" size="sm" (clicked)="createOrder()">
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            Create Order
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="refreshOrders()">
+            <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="exportOrders()">
+            <app-icon name="file-check" [size]="16" slot="icon"></app-icon>
+            Export
+          </app-button>
+        </div>
+
+        <!-- Title and Filters -->
+        <div
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        >
+          <div class="flex-1 min-w-0">
+            <h2 class="text-lg font-semibold text-text-primary">
+              Orders ({{ orders.length }})
+            </h2>
+          </div>
+
+          <div
+            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto overflow-x-hidden"
+          >
+            <!-- Search Input -->
+            <app-inputsearch
+              class="w-full sm:w-64"
+              size="sm"
+              placeholder="Search orders..."
+              [debounceTime]="1000"
+              (searchChange)="onSearchChange($event)"
+            ></app-inputsearch>
+
+            <!-- Store Filter -->
+            <select
+              class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+              (change)="onStoreChange($event)"
+              [value]="selectedStore"
+            >
+              <option value="">All Stores</option>
+              <option *ngFor="let store of availableStores" [value]="store.id">
+                {{ store.name }}
+              </option>
+            </select>
+
+            <!-- Status filter -->
+            <select
+              class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+              (change)="onStatusChange($event)"
+              [value]="selectedStatus"
+            >
+              <option value="">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="processing">Processing</option>
+              <option value="shipped">Shipped</option>
+              <option value="delivered">Delivered</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="refunded">Refunded</option>
+            </select>
+
+            <!-- Payment status filter -->
+            <select
+              class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+              (change)="onPaymentStatusChange($event)"
+              [value]="selectedPaymentStatus"
+            >
+              <option value="">All Payment</option>
+              <option value="pending">Pending</option>
+              <option value="paid">Paid</option>
+              <option value="failed">Failed</option>
+              <option value="refunded">Refunded</option>
+              <option value="partially_refunded">Partially Refunded</option>
+            </select>
+
+            <!-- Date filters -->
+            <div class="flex gap-2 flex-shrink-0">
+              <input
+                type="date"
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onDateFromChange($event)"
+                [value]="selectedDateFrom"
+                placeholder="From"
+              />
+
+              <input
+                type="date"
+                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                (change)="onDateToChange($event)"
+                [value]="selectedDateTo"
+                placeholder="To"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading State -->
+      <div *ngIf="isLoading" class="p-8 text-center">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="mt-2 text-text-secondary">Loading orders...</p>
+      </div>
+
+      <!-- Empty State -->
+      <div *ngIf="!isLoading && orders.length === 0" class="p-8 text-center">
+        <app-icon
+          name="shopping-cart"
+          [size]="48"
+          class="text-text-secondary mx-auto mb-4"
+        ></app-icon>
+        <h3 class="text-lg font-medium text-text-primary mb-2">
+          {{ getEmptyStateTitle() }}
+        </h3>
+        <p class="text-text-secondary mb-4">{{ getEmptyStateDescription() }}</p>
+        <div *ngIf="hasFilters" class="flex gap-2 justify-center">
+          <app-button variant="outline" size="sm" (clicked)="clearFilters()">
+            Clear Filters
+          </app-button>
+          <app-button variant="primary" size="sm" (clicked)="refreshOrders()">
+            Refresh
+          </app-button>
+        </div>
+      </div>
+
+      <!-- Orders Table -->
+      <div *ngIf="!isLoading && orders.length > 0" class="p-6 overflow-x-auto">
+        <app-table
+          [data]="orders"
+          [columns]="tableColumns"
+          [actions]="tableActions"
+          [loading]="isLoading"
+          [sortable]="true"
+          [hoverable]="true"
+          [striped]="true"
+          size="md"
+          (sort)="onTableSort($event)"
+          (rowClick)="viewOrderDetails($event)"
+        ></app-table>
+      </div>
+    </div>
+
+    <!-- Create Order Modal -->
+    <app-order-create-modal
+      [isOpen]="showCreateOrderModal"
+      [storeOptions]="storeOptionsForModal"
+      (openChange)="onCreateOrderModalChange($event)"
+      (orderCreated)="onOrderCreated($event)"
+    ></app-order-create-modal>
+  </div>
+</div>
