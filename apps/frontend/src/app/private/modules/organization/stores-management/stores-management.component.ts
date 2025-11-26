@@ -72,7 +72,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                All Stores ({{ stores.length }})
+                Todas las tiendas ({{ stores.length }})
               </h2>
             </div>
 
@@ -83,7 +83,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
               <app-inputsearch
                 class="w-full sm:w-64"
                 size="sm"
-                placeholder="Search stores..."
+                placeholder="Buscar tiendas..."
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
@@ -94,11 +94,11 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                 (change)="onStoreTypeChange($event)"
                 [value]="selectedStoreType"
               >
-                <option value="">All Types</option>
-                <option value="physical">Physical</option>
-                <option value="online">Online</option>
-                <option value="hybrid">Hybrid</option>
-                <option value="popup">Popup</option>
+                <option value="">Todos los Tipos</option>
+                <option value="physical">Tienda Física</option>
+                <option value="online">Tienda Online</option>
+                <option value="hybrid">Tienda Híbrida</option>
+                <option value="popup">Tienda Temporal</option>
                 <option value="kiosko">Kiosko</option>
               </select>
 
@@ -108,9 +108,9 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                 (change)="onStateChange($event)"
                 [value]="selectedState"
               >
-                <option value="">All Status</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
+                <option value="">Todos los Estados</option>
+                <option value="active">Activa</option>
+                <option value="inactive">Inactiva</option>
               </select>
 
               <div class="flex gap-2 items-center">
@@ -119,7 +119,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                   size="sm"
                   (clicked)="refreshStores()"
                   [disabled]="isLoading"
-                  title="Refresh"
+                  title="Actualizar"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
@@ -127,10 +127,10 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
                   variant="primary"
                   size="sm"
                   (clicked)="openCreateStoreModal()"
-                  title="New Store"
+                  title="Nueva Tienda"
                 >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">New Store</span>
+                  <span class="hidden sm:inline">Nueva Tienda</span>
                 </app-button>
               </div>
             </div>
@@ -142,7 +142,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
-          <p class="mt-2 text-text-secondary">Loading stores...</p>
+          <p class="mt-2 text-text-secondary">Cargando tiendas...</p>
         </div>
 
         <!-- Empty State -->
@@ -647,7 +647,11 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
     const newStatus = store.is_active ? 'inactive' : 'active';
     const action = store.is_active ? 'deactivate' : 'activate';
 
-    if (confirm(`Are you sure you want to ${action} store "${store.name}"?`)) {
+    if (
+      confirm(
+        `¿Está seguro de que desea ${action === 'deactivate' ? 'desactivar' : 'activar'} la tienda "${store.name}"?`,
+      )
+    ) {
       this.storesService
         .updateStore(store.id, { is_active: !store.is_active })
         .pipe(takeUntil(this.destroy$))
@@ -655,11 +659,15 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
           next: () => {
             store.is_active = !store.is_active;
             this.loadStats();
-            this.toastService.success(`Store ${action}d successfully`);
+            this.toastService.success(
+              `Tienda ${action === 'deactivate' ? 'desactivada' : 'activada'} exitosamente`,
+            );
           },
           error: (error) => {
             console.error('Error toggling store status:', error);
-            this.toastService.error(`Failed to ${action} store`);
+            this.toastService.error(
+              `Error al ${action === 'deactivate' ? 'desactivar' : 'activar'} la tienda`,
+            );
           },
         });
     }
@@ -668,7 +676,7 @@ export class StoresManagementComponent implements OnInit, OnDestroy {
   deleteStore(store: StoreListItem): void {
     if (
       confirm(
-        `Are you sure you want to delete store "${store.name}"? This action cannot be undone.`,
+        `¿Está seguro de que desea eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
       )
     ) {
       this.storesService

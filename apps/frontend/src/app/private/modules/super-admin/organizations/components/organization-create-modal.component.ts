@@ -6,7 +6,7 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   ModalComponent,
   InputComponent,
-  ButtonComponent
+  ButtonComponent,
 } from '../../../../../shared/components/index';
 import { CreateOrganizationDto } from '../services/organizations.service';
 
@@ -19,25 +19,29 @@ import { CreateOrganizationDto } from '../services/organizations.service';
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      title="Create New Organization"
-      subtitle="Fill in the details to create a new organization"
+      title="Crear Nueva Organización"
+      subtitle="Completa los detalles para crear una nueva organización"
       (openChange)="onModalChange($event)"
     >
       <form [formGroup]="organizationForm" class="space-y-6">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Basic Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Información Básica
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="name"
-              label="Organization Name"
+              label="Nombre de la Organización"
               placeholder="Enter organization name"
               [required]="true"
               [control]="organizationForm.get('name')"
@@ -45,7 +49,7 @@ import { CreateOrganizationDto } from '../services/organizations.service';
 
             <app-input
               formControlName="email"
-              label="Email"
+              label="Correo Electrónico"
               type="email"
               placeholder="organization@example.com"
               [required]="true"
@@ -56,21 +60,24 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="phone"
-              label="Phone"
+              label="Teléfono"
               type="tel"
               placeholder="+1 (555) 123-4567"
             ></app-input>
 
             <app-input
               formControlName="website"
-              label="Website"
+              label="Sitio Web"
               type="url"
               placeholder="https://example.com"
             ></app-input>
           </div>
 
           <div class="space-y-2">
-            <label for="description" class="block text-sm font-medium text-text-primary">
+            <label
+              for="description"
+              class="block text-sm font-medium text-text-primary"
+            >
               Description
             </label>
             <textarea
@@ -85,18 +92,22 @@ import { CreateOrganizationDto } from '../services/organizations.service';
 
         <!-- Legal Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Legal Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Legal Information
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="legalName"
-              label="Legal Name"
+              label="Nombre Legal"
               placeholder="Legal entity name"
             ></app-input>
 
             <app-input
               formControlName="taxId"
-              label="Tax ID"
+              label="ID Fiscal"
               placeholder="Tax identification number"
             ></app-input>
           </div>
@@ -104,10 +115,17 @@ import { CreateOrganizationDto } from '../services/organizations.service';
 
         <!-- Organization Status -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Organization Status</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Organization Status
+          </h3>
+
           <div class="space-y-2">
-            <label for="state" class="block text-sm font-medium text-text-primary">
+            <label
+              for="state"
+              class="block text-sm font-medium text-text-primary"
+            >
               Initial Status
             </label>
             <select
@@ -128,11 +146,8 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-          >
-            Cancel
+          <app-button variant="outline" (clicked)="onCancel()">
+            Cancelar
           </app-button>
           <app-button
             variant="primary"
@@ -140,12 +155,12 @@ import { CreateOrganizationDto } from '../services/organizations.service';
             [disabled]="organizationForm.invalid || isSubmitting"
             [loading]="isSubmitting"
           >
-            Create Organization
+            Crear Organización
           </app-button>
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class OrganizationCreateModalComponent {
   @Input() isOpen = false;
@@ -170,7 +185,7 @@ export class OrganizationCreateModalComponent {
       description: [''],
       legalName: [''],
       taxId: [''],
-      state: ['active']
+      state: ['active'],
     });
   }
 
@@ -184,7 +199,7 @@ export class OrganizationCreateModalComponent {
   onSubmit(): void {
     if (this.organizationForm.invalid) {
       // Mark all fields as touched to trigger validation messages
-      Object.keys(this.organizationForm.controls).forEach(key => {
+      Object.keys(this.organizationForm.controls).forEach((key) => {
         this.organizationForm.get(key)?.markAsTouched();
       });
       return;
@@ -199,7 +214,7 @@ export class OrganizationCreateModalComponent {
       description: formData.description || undefined,
       legal_name: formData.legalName || undefined,
       tax_id: formData.taxId || undefined,
-      state: formData.state
+      state: formData.state,
     };
 
     this.submit.emit(organizationData);
@@ -218,7 +233,7 @@ export class OrganizationCreateModalComponent {
       description: '',
       legalName: '',
       taxId: '',
-      state: 'active'
+      state: 'active',
     });
   }
 }

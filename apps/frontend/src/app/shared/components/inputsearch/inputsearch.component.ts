@@ -1,6 +1,18 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, forwardRef } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnInit,
+  OnDestroy,
+  forwardRef,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ControlValueAccessor, NG_VALUE_ACCESSOR, ReactiveFormsModule } from '@angular/forms';
+import {
+  ControlValueAccessor,
+  NG_VALUE_ACCESSOR,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 
 export type InputSearchSize = 'sm' | 'md' | 'lg';
@@ -13,8 +25,8 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
     {
       provide: NG_VALUE_ACCESSOR,
       useExisting: forwardRef(() => InputsearchComponent),
-      multi: true
-    }
+      multi: true,
+    },
   ],
   styleUrl: './inputsearch.component.scss',
   template: `
@@ -22,20 +34,20 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
       <div class="inputsearch-wrapper" [class]="wrapperClasses">
         <!-- Icono de lupa -->
         <div class="inputsearch-icon" [class]="iconClasses">
-          <svg 
-            class="search-icon" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-width="2" 
-            stroke-linecap="round" 
+          <svg
+            class="search-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
             stroke-linejoin="round"
           >
             <circle cx="11" cy="11" r="8"></circle>
             <path d="m21 21-4.35-4.35"></path>
           </svg>
         </div>
-        
+
         <!-- Input de búsqueda -->
         <input
           [type]="type"
@@ -50,7 +62,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
           (keyup.enter)="onEnter()"
           (keyup.escape)="onEscape()"
         />
-        
+
         <!-- Botón de limpiar (opcional) -->
         <button
           *ngIf="showClear && value"
@@ -60,13 +72,13 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
           (click)="clearInput()"
           [disabled]="disabled"
         >
-          <svg 
-            class="clear-icon" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            stroke-width="2" 
-            stroke-linecap="round" 
+          <svg
+            class="clear-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
             stroke-linejoin="round"
           >
             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -74,22 +86,28 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
           </svg>
         </button>
       </div>
-      
+
       <!-- Mensaje de ayuda o error -->
-      <div 
-        *ngIf="helpText || errorMessage" 
+      <div
+        *ngIf="helpText || errorMessage"
         class="inputsearch-help"
         [class]="helpClasses"
       >
-        <span *ngIf="errorMessage" class="error-message">{{ errorMessage }}</span>
-        <span *ngIf="!errorMessage && helpText" class="help-text">{{ helpText }}</span>
+        <span *ngIf="errorMessage" class="error-message">{{
+          errorMessage
+        }}</span>
+        <span *ngIf="!errorMessage && helpText" class="help-text">{{
+          helpText
+        }}</span>
       </div>
     </div>
-  `
+  `,
 })
-export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAccessor {
+export class InputsearchComponent
+  implements OnInit, OnDestroy, ControlValueAccessor
+{
   @Input() type: 'text' | 'search' | 'email' | 'url' = 'text';
-  @Input() placeholder = 'Search...';
+  @Input() placeholder = 'Buscar...';
   @Input() disabled = false;
   @Input() readonly = false;
   @Input() required = false;
@@ -124,9 +142,9 @@ export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAcce
       .pipe(
         debounceTime(this.debounceTime),
         distinctUntilChanged(),
-        takeUntil(this.destroy$)
+        takeUntil(this.destroy$),
       )
-      .subscribe(searchValue => {
+      .subscribe((searchValue) => {
         this.searchChange.emit(searchValue);
         this.search.emit(searchValue);
       });
@@ -158,10 +176,10 @@ export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAcce
   onInputChange(event: Event): void {
     const target = event.target as HTMLInputElement;
     this.value = target.value;
-    
+
     // Emitir el cambio inmediato para ControlValueAccessor
     this.onChange(this.value);
-    
+
     // Emitir al subject para el debounce
     this.searchSubject$.next(this.value);
   }
@@ -195,23 +213,23 @@ export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAcce
   // Clases CSS dinámicas
   get containerClasses(): string {
     const baseClasses = ['inputsearch-container'];
-    
+
     const sizeClasses = {
       sm: ['inputsearch-container-sm'],
       md: ['inputsearch-container-md'],
-      lg: ['inputsearch-container-lg']
+      lg: ['inputsearch-container-lg'],
     };
 
     const stateClasses = [
       this.disabled ? 'inputsearch-disabled' : '',
       this.errorMessage ? 'inputsearch-error' : '',
-      this.isFocused ? 'inputsearch-focused' : ''
+      this.isFocused ? 'inputsearch-focused' : '',
     ].filter(Boolean);
 
     const classes = [
       ...baseClasses,
       ...sizeClasses[this.size],
-      ...stateClasses
+      ...stateClasses,
     ];
 
     if (this.customClasses) {
@@ -223,90 +241,77 @@ export class InputsearchComponent implements OnInit, OnDestroy, ControlValueAcce
 
   get wrapperClasses(): string {
     const baseClasses = ['inputsearch-wrapper'];
-    
+
     const sizeClasses = {
       sm: ['inputsearch-wrapper-sm'],
       md: ['inputsearch-wrapper-md'],
-      lg: ['inputsearch-wrapper-lg']
+      lg: ['inputsearch-wrapper-lg'],
     };
 
     const stateClasses = [
       this.disabled ? 'inputsearch-wrapper-disabled' : '',
       this.errorMessage ? 'inputsearch-wrapper-error' : '',
-      this.isFocused ? 'inputsearch-wrapper-focused' : ''
+      this.isFocused ? 'inputsearch-wrapper-focused' : '',
     ].filter(Boolean);
 
-    return [
-      ...baseClasses,
-      ...sizeClasses[this.size],
-      ...stateClasses
-    ].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size], ...stateClasses].join(
+      ' ',
+    );
   }
 
   get inputClasses(): string {
     const baseClasses = ['inputsearch-input'];
-    
+
     const sizeClasses = {
       sm: ['inputsearch-input-sm'],
       md: ['inputsearch-input-md'],
-      lg: ['inputsearch-input-lg']
+      lg: ['inputsearch-input-lg'],
     };
 
     const stateClasses = [
       this.disabled ? 'inputsearch-input-disabled' : '',
       this.errorMessage ? 'inputsearch-input-error' : '',
-      this.isFocused ? 'inputsearch-input-focused' : ''
+      this.isFocused ? 'inputsearch-input-focused' : '',
     ].filter(Boolean);
 
-    return [
-      ...baseClasses,
-      ...sizeClasses[this.size],
-      ...stateClasses
-    ].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size], ...stateClasses].join(
+      ' ',
+    );
   }
 
   get iconClasses(): string {
     const baseClasses = ['inputsearch-icon'];
-    
+
     const sizeClasses = {
       sm: ['inputsearch-icon-sm'],
       md: ['inputsearch-icon-md'],
-      lg: ['inputsearch-icon-lg']
+      lg: ['inputsearch-icon-lg'],
     };
 
-    return [
-      ...baseClasses,
-      ...sizeClasses[this.size]
-    ].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
   }
 
   get clearButtonClasses(): string {
     const baseClasses = ['inputsearch-clear'];
-    
+
     const sizeClasses = {
       sm: ['inputsearch-clear-sm'],
       md: ['inputsearch-clear-md'],
-      lg: ['inputsearch-clear-lg']
+      lg: ['inputsearch-clear-lg'],
     };
 
-    const classes = [
-      ...baseClasses,
-      ...sizeClasses[this.size]
-    ];
+    const classes = [...baseClasses, ...sizeClasses[this.size]];
 
     return classes.join(' ');
   }
 
   get helpClasses(): string {
     const baseClasses = ['inputsearch-help'];
-    
+
     const stateClasses = [
-      this.errorMessage ? 'inputsearch-help-error' : ''
+      this.errorMessage ? 'inputsearch-help-error' : '',
     ].filter(Boolean);
 
-    return [
-      ...baseClasses,
-      ...stateClasses
-    ].join(' ');
+    return [...baseClasses, ...stateClasses].join(' ');
   }
 }

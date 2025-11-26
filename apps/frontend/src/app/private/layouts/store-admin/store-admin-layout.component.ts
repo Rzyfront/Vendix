@@ -29,7 +29,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(storeName$ | async) || storeName"
-        subtitle="Store Admin"
+        subtitle="Administrador de Tienda"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"
@@ -154,69 +154,49 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   }
 
   breadcrumb = {
-    parent: 'Store',
-    current: 'Dashboard',
+    parent: 'Tienda',
+    current: 'Panel Principal',
   };
 
   user = {
     name: 'Jane Smith',
-    role: 'Store Manager',
+    role: 'Administrador de Tienda',
     initials: 'JS',
   };
 
   menuItems: MenuItem[] = [
     {
-      label: 'Dashboard',
+      label: 'Panel Principal',
       icon: 'home',
       route: '/admin/dashboard',
     },
     {
-      label: 'POS',
+      label: 'Punto de Venta',
       icon: 'store',
       route: '/admin/pos',
     },
     {
-      label: 'Products',
+      label: 'Productos',
       icon: 'package',
       route: '/admin/products',
     },
     {
-      label: 'Orders',
-      icon: 'fas fa-shopping-cart',
-      children: [
-        {
-          label: 'All Orders',
-          icon: 'fas fa-circle',
-          route: '/store/orders/list',
-        },
-        {
-          label: 'Sales Orders',
-          icon: 'fas fa-circle',
-          route: '/store/orders/sales-orders',
-        },
-        {
-          label: 'Purchase Orders',
-          icon: 'fas fa-circle',
-          route: '/store/orders/purchase-orders',
-        },
-        {
-          label: 'Stock Transfers',
-          icon: 'fas fa-circle',
-          route: '/store/orders/stock-transfers',
-        },
-      ],
+      label: 'Pedidos',
+      icon: 'cart',
+      route: '/admin/orders',
+      badge: '8',
     },
     {
-      label: 'Customers',
+      label: 'Clientes',
       icon: 'users',
       children: [
         {
-          label: 'All Customers',
+          label: 'Todos los Clientes',
           icon: 'circle',
           route: '/admin/customers/all',
         },
         {
-          label: 'Reviews',
+          label: 'Reseñas',
           icon: 'circle',
           route: '/admin/customers/reviews',
         },
@@ -227,40 +207,40 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       icon: 'megaphone',
       children: [
         {
-          label: 'Promotions',
+          label: 'Promociones',
           icon: 'circle',
           route: '/admin/marketing/promotions',
         },
         {
-          label: 'Coupons',
+          label: 'Cupones',
           icon: 'circle',
           route: '/admin/marketing/coupons',
         },
       ],
     },
     {
-      label: 'Analytics',
+      label: 'Analíticas',
       icon: 'chart-line',
       children: [
         {
-          label: 'Sales',
+          label: 'Ventas',
           icon: 'circle',
           route: '/admin/analytics/sales',
         },
         {
-          label: 'Traffic',
+          label: 'Tráfico',
           icon: 'circle',
           route: '/admin/analytics/traffic',
         },
         {
-          label: 'Performance',
+          label: 'Rendimiento',
           icon: 'circle',
           route: '/admin/analytics/performance',
         },
       ],
     },
     {
-      label: 'Settings',
+      label: 'Configuración',
       icon: 'settings',
       children: [
         {
@@ -269,12 +249,12 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/settings/general',
         },
         {
-          label: 'Appearance',
+          label: 'Apariencia',
           icon: 'circle',
           route: '/admin/settings/appearance',
         },
         {
-          label: 'Security',
+          label: 'Seguridad',
           icon: 'circle',
           route: '/admin/settings/security',
         },

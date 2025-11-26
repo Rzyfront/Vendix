@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Cash Flow Management</h1>
+      <h1 class="text-2xl font-bold mb-6">Gestión del flujo de caja</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Organizational cash flow analysis will be displayed here
+          Aquí se mostrará el análisis del flujo de caja de la organización.
         </p>
       </div>
     </div>

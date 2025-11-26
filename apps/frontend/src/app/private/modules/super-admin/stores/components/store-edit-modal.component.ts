@@ -6,9 +6,14 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   ModalComponent,
   InputComponent,
-  ButtonComponent
+  ButtonComponent,
 } from '../../../../../shared/components/index';
-import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfaces/store.interface';
+import {
+  StoreListItem,
+  UpdateStoreDto,
+  StoreState,
+  StoreType,
+} from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-edit-modal',
@@ -19,21 +24,25 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      title="Edit Store"
-      subtitle="Update the store information"
+      title="Editar Tienda"
+      subtitle="Actualizar la información de la tienda"
       (openChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6" *ngIf="store">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Basic Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Basic Information
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="name"
@@ -82,8 +91,11 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
               <label class="block text-sm font-medium text-text-primary">
                 Organization
               </label>
-              <div class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary">
-                {{ store.organizations?.name || 'N/A' }} (ID: {{ store.organization_id }})
+              <div
+                class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary"
+              >
+                {{ store.organizations?.name || 'N/A' }} (ID:
+                {{ store.organization_id }})
               </div>
             </div>
           </div>
@@ -97,7 +109,10 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
             ></app-input>
 
             <div class="space-y-2">
-              <label for="store_type" class="block text-sm font-medium text-text-primary">
+              <label
+                for="store_type"
+                class="block text-sm font-medium text-text-primary"
+              >
                 Store Type
               </label>
               <select
@@ -158,7 +173,10 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
           </div>
 
           <div class="space-y-2">
-            <label for="description" class="block text-sm font-medium text-text-primary">
+            <label
+              for="description"
+              class="block text-sm font-medium text-text-primary"
+            >
               Description
             </label>
             <textarea
@@ -173,10 +191,17 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
 
         <!-- Address Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Address Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Address Information
+          </h3>
+
           <div class="space-y-2">
-            <label for="address" class="block text-sm font-medium text-text-primary">
+            <label
+              for="address"
+              class="block text-sm font-medium text-text-primary"
+            >
               Address
             </label>
             <textarea
@@ -205,10 +230,17 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
 
         <!-- Store Status -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Store Status</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Store Status
+          </h3>
+
           <div class="space-y-2">
-            <label for="is_active" class="block text-sm font-medium text-text-primary">
+            <label
+              for="is_active"
+              class="block text-sm font-medium text-text-primary"
+            >
               Status
             </label>
             <select
@@ -228,10 +260,7 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-          >
+          <app-button variant="outline" (clicked)="onCancel()">
             Cancel
           </app-button>
           <app-button
@@ -245,7 +274,7 @@ import { StoreListItem, UpdateStoreDto, StoreState, StoreType } from '../interfa
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class StoreEditModalComponent {
   @Input() isOpen = false;
@@ -265,7 +294,14 @@ export class StoreEditModalComponent {
   private initializeForm(): void {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
-      slug: ['', [Validators.required, Validators.minLength(2), Validators.pattern(/^[a-z0-9-]+$/)]],
+      slug: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.pattern(/^[a-z0-9-]+$/),
+        ],
+      ],
       store_code: ['', [Validators.required, Validators.minLength(2)]],
       description: [''],
       email: ['', [Validators.required, Validators.email]],
@@ -281,7 +317,7 @@ export class StoreEditModalComponent {
       currency_code: [''],
       manager_user_id: [null],
       color_primary: [''],
-      color_secondary: ['']
+      color_secondary: [''],
     });
   }
 
@@ -295,7 +331,9 @@ export class StoreEditModalComponent {
     if (!this.store) return;
 
     // Get primary address if available
-    const primaryAddress = this.store.addresses?.find(addr => addr.is_primary) || this.store.addresses?.[0];
+    const primaryAddress =
+      this.store.addresses?.find((addr) => addr.is_primary) ||
+      this.store.addresses?.[0];
 
     this.storeForm.patchValue({
       name: this.store.name,
@@ -309,13 +347,14 @@ export class StoreEditModalComponent {
       city: primaryAddress?.city || '',
       country: primaryAddress?.country_code || '',
       store_type: this.store.store_type || StoreType.PHYSICAL,
-      is_active: this.store.is_active !== undefined ? this.store.is_active : true,
+      is_active:
+        this.store.is_active !== undefined ? this.store.is_active : true,
       domain: '',
       timezone: this.store.timezone || '',
       currency_code: '',
       manager_user_id: this.store.manager_user_id || null,
       color_primary: '',
-      color_secondary: ''
+      color_secondary: '',
     });
   }
 
@@ -329,7 +368,7 @@ export class StoreEditModalComponent {
   onSubmit(): void {
     if (!this.store || this.storeForm.invalid) {
       // Mark all fields as touched to trigger validation messages
-      Object.keys(this.storeForm.controls).forEach(key => {
+      Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });
       return;
@@ -352,7 +391,7 @@ export class StoreEditModalComponent {
       currency_code: formData.currency_code || undefined,
       manager_user_id: formData.manager_user_id || undefined,
       color_primary: formData.color_primary || undefined,
-      color_secondary: formData.color_secondary || undefined
+      color_secondary: formData.color_secondary || undefined,
     };
 
     this.submit.emit(storeData);
@@ -381,7 +420,7 @@ export class StoreEditModalComponent {
       currency_code: '',
       manager_user_id: null,
       color_primary: '',
-      color_secondary: ''
+      color_secondary: '',
     });
   }
 }

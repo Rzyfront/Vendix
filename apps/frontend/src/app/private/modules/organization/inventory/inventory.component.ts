@@ -8,7 +8,7 @@ import { RouterModule } from '@angular/router';
   imports: [CommonModule, RouterModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Inventory Management</h1>
+      <h1 class="text-2xl font-bold mb-6">Gestión de inventario</h1>
 
       <!-- Navigation Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -16,16 +16,16 @@ import { RouterModule } from '@angular/router';
           routerLink="/organization/inventory/stock"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Stock Management</h3>
-          <p class="text-gray-600">Monitor stock levels</p>
+          <h3 class="text-lg font-semibold mb-2">Gestión de stock</h3>
+          <p class="text-gray-600">Stock Monitor de gestión de niveles de stock</p>
         </a>
 
         <a
           routerLink="/organization/inventory/transfers"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Stock Transfers</h3>
-          <p class="text-gray-600">Manage transfers between stores</p>
+          <h3 class="text-lg font-semibold mb-2">Transferencias de acciones</h3>
+          <p class="text-gray-600">Gestionar transferencias entre tiendas</p>
         </a>
 
         <a
@@ -33,15 +33,15 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Suppliers</h3>
-          <p class="text-gray-600">Supplier management</p>
+          <p class="text-gray-600">Gestión de proveedoresGestión de proveedores</p>
         </a>
 
         <a
           routerLink="/organization/inventory/demand-forecast"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Demand Forecast</h3>
-          <p class="text-gray-600">Predict demand trends</p>
+          <h3 class="text-lg font-semibold mb-2">Previsión de demanda</h3>
+          <p class="text-gray-600">Predecir las tendencias de la demanda</p>
         </a>
       </div>
     </div>

@@ -43,12 +43,12 @@ import {
       <div class="flex gap-3 mt-4" *ngIf="showAdditionalActions">
         <app-button variant="outline" (clicked)="refreshClick.emit()">
           <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-          Refresh
+          Actualizar
         </app-button>
 
         <app-button variant="outline" (clicked)="clearFiltersClick.emit()">
           <app-icon name="x" [size]="16" slot="icon"></app-icon>
-          Clear Filters
+          Limpiar Filtros
         </app-button>
       </div>
     </div>
@@ -65,7 +65,7 @@ export class StoreEmptyStateComponent {
   @Input() title = 'No stores found';
   @Input() description = 'Get started by creating your first store.';
   @Input() showActionButton = true;
-  @Input() actionButtonText = 'Create Store';
+  @Input() actionButtonText = 'Crear Tienda';
   @Input() showAdditionalActions = false;
 
   @Output() actionClick = new EventEmitter<void>();

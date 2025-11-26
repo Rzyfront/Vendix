@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Organizational Policies</h1>
+      <h1 class="text-2xl font-bold mb-6">Políticas organizacionales</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Policy management and configuration will be displayed here
+          La gestión y configuración de políticas se mostrará aquí
         </p>
       </div>
     </div>

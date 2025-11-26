@@ -8,7 +8,7 @@ import { RouterModule } from '@angular/router';
   imports: [CommonModule, RouterModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Financial Management</h1>
+      <h1 class="text-2xl font-bold mb-6">Gestión Financiera</h1>
 
       <!-- Navigation Cards -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -17,23 +17,23 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Reports</h3>
-          <p class="text-gray-600">View financial reports and analytics</p>
+          <p class="text-gray-600">Ver informes financieros y análisis</p>
         </a>
 
         <a
           routerLink="/organization/financial/billing"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Billing & Subscriptions</h3>
-          <p class="text-gray-600">Manage invoices and subscriptions</p>
+          <h3 class="text-lg font-semibold mb-2">Facturación y suscripciones</h3>
+          <p class="text-gray-600">Gestionar facturas y suscripciones</p>
         </a>
 
         <a
           routerLink="/organization/financial/cost-analysis"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Cost Analysis</h3>
-          <p class="text-gray-600">Analyze costs and margins</p>
+          <h3 class="text-lg font-semibold mb-2">Análisis de costos</h3>
+          <p class="text-gray-600">Analizar costos y márgenes</p>
         </a>
 
         <a
@@ -41,7 +41,7 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Cash Flow</h3>
-          <p class="text-gray-600">Monitor organizational cash flow</p>
+          <p class="text-gray-600">Monitorear el flujo de caja organizacional</p>
         </a>
       </div>
     </div>

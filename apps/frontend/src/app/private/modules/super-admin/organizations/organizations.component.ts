@@ -79,7 +79,7 @@ import './organizations.component.css';
               <app-inputsearch
                 class="w-full sm:w-64"
                 size="sm"
-                placeholder="Search organizations..."
+                placeholder="Buscar organizaciones..."
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
@@ -120,7 +120,7 @@ import './organizations.component.css';
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
-          <p class="mt-2 text-text-secondary">Loading organizations...</p>
+          <p class="mt-2 text-text-secondary">Cargando organizaciones...</p>
         </div>
 
         <!-- Empty State -->

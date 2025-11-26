@@ -1,8 +1,8 @@
 <div class="space-y-6">
-  <!-- Stats Cards -->
+  <!-- Tarjetas de Estadísticas -->
   <app-product-stats [stats]="stats"></app-product-stats>
 
-  <!-- Products List -->
+  <!-- Lista de Productos -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
       <div
@@ -10,7 +10,7 @@
       >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
-            All Products ({{ products.length }})
+            Todos los Productos ({{ products.length }})
           </h2>
         </div>
 
@@ -21,7 +21,7 @@
           <app-inputsearch
             class="w-full sm:w-64"
             size="sm"
-            placeholder="Search products..."
+            placeholder="Buscar productos..."
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
@@ -32,10 +32,10 @@
             (change)="onStateChange($event)"
             [value]="selectedState"
           >
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="archived">Archived</option>
+            <option value="">Todos los Estados</option>
+            <option value="active">Activo</option>
+            <option value="inactive">Inactivo</option>
+            <option value="archived">Archivado</option>
           </select>
 
           <!-- Filtro de categoría -->
@@ -44,7 +44,7 @@
             (change)="onCategoryChange($event)"
             [value]="selectedCategory"
           >
-            <option value="">All Categories</option>
+            <option value="">Todas las Categorías</option>
             <option *ngFor="let category of categories" [value]="category.id">
               {{ category.name }}
             </option>
@@ -56,7 +56,7 @@
             (change)="onBrandChange($event)"
             [value]="selectedBrand"
           >
-            <option value="">All Brands</option>
+            <option value="">Todas las Marcas</option>
             <option *ngFor="let brand of brands" [value]="brand.id">
               {{ brand.name }}
             </option>
@@ -68,7 +68,7 @@
               size="sm"
               (clicked)="refreshProducts()"
               [disabled]="isLoading"
-              title="Refresh"
+              title="Actualizar"
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
@@ -76,25 +76,25 @@
               variant="primary"
               size="sm"
               (clicked)="openCreateProductModal()"
-              title="New Product"
+              title="Nuevo Producto"
             >
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">New Product</span>
+              <span class="hidden sm:inline">Nuevo Producto</span>
             </app-button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Loading State -->
+    <!-- Estado de Carga -->
     <div *ngIf="isLoading" class="p-8 text-center">
       <div
         class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
       ></div>
-      <p class="mt-2 text-text-secondary">Loading products...</p>
+      <p class="mt-2 text-text-secondary">Cargando productos...</p>
     </div>
 
-    <!-- Empty State -->
+    <!-- Estado Vacío -->
     <app-product-empty-state
       *ngIf="!isLoading && products.length === 0"
       [title]="getEmptyStateTitle()"
@@ -106,7 +106,7 @@
     >
     </app-product-empty-state>
 
-    <!-- Products Table -->
+    <!-- Tabla de Productos -->
     <div *ngIf="!isLoading && products.length > 0" class="p-6">
       <app-table
         [data]="products"
@@ -124,7 +124,7 @@
     </div>
   </div>
 
-  <!-- Create Product Modal -->
+  <!-- Modal Crear Producto -->
   <app-product-create-modal
     [isOpen]="isCreateModalOpen"
     [isSubmitting]="isCreatingProduct"
@@ -133,6 +133,6 @@
     (cancel)="onCreateModalCancel()"
   ></app-product-create-modal>
 
-  <!-- Edit Product Modal -->
+  <!-- Modal Editar Producto -->
   <!-- TODO: Create edit modal component when needed -->
 </div>

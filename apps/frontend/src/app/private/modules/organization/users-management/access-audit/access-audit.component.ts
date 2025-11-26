@@ -7,11 +7,11 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Access Audit</h1>
+      <h1 class="text-2xl font-bold mb-6">Auditoría de acceso</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Access audit logs and security reports will be displayed here
+         Los registros de auditoría de acceso y los informes de seguridad se mostrarán aquí.
         </p>
       </div>
     </div>

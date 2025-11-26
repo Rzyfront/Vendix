@@ -151,7 +151,7 @@ export class ProductListComponent implements OnInit, OnDestroy {
       variant: 'secondary',
     },
     {
-      label: 'Delete',
+      label: 'Eliminar',
       icon: 'trash-2',
       action: (product: Product) => this.deleteProduct(product),
       variant: 'danger',
@@ -566,10 +566,10 @@ export class ProductListComponent implements OnInit, OnDestroy {
   deleteProduct(product: Product): void {
     this.dialogService
       .confirm({
-        title: 'Delete Product',
-        message: `Are you sure you want to delete "${product.name}"? This action cannot be undone.`,
-        confirmText: 'Delete',
-        cancelText: 'Cancel',
+        title: 'Eliminar Producto',
+        message: `¿Está seguro de que desea eliminar "${product.name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
       .then((confirmed: boolean) => {

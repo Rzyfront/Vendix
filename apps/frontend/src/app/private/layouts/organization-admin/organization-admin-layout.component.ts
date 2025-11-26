@@ -30,7 +30,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(organizationName$ | async) || organizationName"
-        subtitle="Organization Admin"
+        subtitle="Administrador de Organización"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"
@@ -152,240 +152,198 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   breadcrumb = {
     parent: { label: 'Panel Administrativo', url: '/admin' },
-    current: { label: 'Dashboard' },
+    current: { label: 'Panel Principal' },
   };
 
   user = {
-    name: 'Admin User',
-    role: 'Organization Admin',
-    initials: 'AU',
+    name: 'Usuario Administrador',
+    role: 'Administrador de Organización',
+    initials: 'UA',
   };
 
   menuItems: MenuItem[] = [
     {
-      label: 'Dashboard',
+      label: 'Panel Principal',
       icon: 'home',
       route: '/admin/dashboard',
     },
     {
-      label: 'Stores',
+      label: 'Tiendas',
       icon: 'store',
       route: '/admin/stores-management',
     },
     {
-      label: 'Users',
+      label: 'Usuarios',
       icon: 'users',
       children: [
         {
-          label: 'Global Users',
+          label: 'Usuarios Globales',
           icon: 'user',
           route: '/admin/users/global-users',
         },
         {
-          label: 'Roles & Permissions',
+          label: 'Roles y Permisos',
           icon: 'shield',
           route: '/admin/users/roles-permissions',
         },
         {
-          label: 'Store Assignments',
+          label: 'Asignaciones de Tienda',
           icon: 'building',
           route: '/admin/users/store-assignments',
         },
         {
-          label: 'Access Audit',
+          label: 'Auditoría de Acceso',
           icon: 'eye',
           route: '/admin/users/access-audit',
         },
       ],
     },
     {
-      label: 'Financial',
+      label: 'Finanzas',
       icon: 'dollar-sign',
       children: [
         {
-          label: 'Reports',
+          label: 'Reportes',
           icon: 'file-text',
           route: '/admin/financial/reports',
         },
         {
-          label: 'Billing & Subscriptions',
+          label: 'Facturación y Suscripciones',
           icon: 'credit-card',
           route: '/admin/financial/billing',
         },
         {
-          label: 'Cost Analysis',
+          label: 'Análisis de Costos',
           icon: 'bar-chart',
           route: '/admin/financial/cost-analysis',
         },
         {
-          label: 'Cash Flow',
+          label: 'Flujo de Caja',
           icon: 'trending-up',
           route: '/admin/financial/cash-flow',
         },
       ],
     },
     {
-      label: 'Analytics & BI',
+      label: 'Analíticas e Inteligencia',
       icon: 'chart-line',
       children: [
         {
-          label: 'Predictive Analysis',
+          label: 'Análisis Predictivo',
           icon: 'bar-chart',
           route: '/admin/analytics/predictive',
         },
         {
-          label: 'Cross-Store Analysis',
+          label: 'Análisis Multi-Tienda',
           icon: 'store',
           route: '/admin/analytics/cross-store',
         },
       ],
     },
     {
-      label: 'Orders',
-      icon: 'shopping-cart',
-      children: [
-        {
-          label: 'All Orders',
-          icon: 'file-text',
-          route: '/admin/orders',
-        },
-      ],
-    },
-    {
-      label: 'Stores',
-      icon: 'store',
-      route: '/admin/stores-management',
-    },
-    {
-      label: 'Users',
-      icon: 'users',
-      children: [
-        {
-          label: 'Global Users',
-          icon: 'user',
-          route: '/admin/users/global-users',
-        },
-        {
-          label: 'Roles & Permissions',
-          icon: 'shield',
-          route: '/admin/users/roles-permissions',
-        },
-        {
-          label: 'Store Assignments',
-          icon: 'building',
-          route: '/admin/users/store-assignments',
-        },
-        {
-          label: 'Access Audit',
-          icon: 'eye',
-          route: '/admin/users/access-audit',
-        },
-      ],
-    },
-    {
-      label: 'Inventory',
+      label: 'Inventario',
       icon: 'warehouse',
       children: [
         {
-          label: 'Stock Management',
+          label: 'Gestión de Stock',
           icon: 'package',
           route: '/admin/inventory/stock',
         },
         {
-          label: 'Stock Transfers',
+          label: 'Transferencias de Stock',
           icon: 'refresh-ccw',
           route: '/admin/inventory/transfers',
         },
         {
-          label: 'Suppliers',
+          label: 'Proveedores',
           icon: 'truck',
           route: '/admin/inventory/suppliers',
         },
         {
-          label: 'Demand Forecast',
+          label: 'Pronóstico de Demanda',
           icon: 'trending-up',
           route: '/admin/inventory/demand-forecast',
         },
       ],
     },
     {
-      label: 'Operations',
+      label: 'Operaciones',
       icon: 'truck',
       children: [
         {
-          label: 'Shipping Management',
+          label: 'Gestión de Envíos',
           icon: 'truck',
           route: '/admin/operations/shipping',
         },
         {
-          label: 'Procurement',
+          label: 'Compras',
           icon: 'cart',
           route: '/admin/operations/procurement',
         },
         {
-          label: 'Returns Management',
+          label: 'Gestión de Devoluciones',
           icon: 'rotate-ccw',
           route: '/admin/operations/returns',
         },
         {
-          label: 'Route Optimization',
+          label: 'Optimización de Rutas',
           icon: 'globe-2',
           route: '/admin/operations/route-optimization',
         },
       ],
     },
     {
-      label: 'Audit & Compliance',
+      label: 'Auditoría y Cumplimiento',
       icon: 'shield',
       children: [
         {
-          label: 'Audit Logs',
+          label: 'Registros de Auditoría',
           icon: 'file-text',
           route: '/admin/audit/logs',
         },
         {
-          label: 'Compliance Reports',
+          label: 'Reportes de Cumplimiento',
           icon: 'file-check',
           route: '/admin/audit/compliance',
         },
         {
-          label: 'Legal Documents',
+          label: 'Documentos Legales',
           icon: 'file-text',
           route: '/admin/audit/legal-docs',
         },
         {
-          label: 'Backup & Recovery',
+          label: 'Copia de Seguridad y Recuperación',
           icon: 'backup',
           route: '/admin/audit/backup',
         },
       ],
     },
     {
-      label: 'Configuration',
+      label: 'Configuración',
       icon: 'settings',
       children: [
         {
-          label: 'Application Settings',
+          label: 'Configuración de Aplicación',
           icon: 'sliders',
           route: '/admin/config/application',
         },
         {
-          label: 'Policies',
+          label: 'Políticas',
           icon: 'file-text',
           route: '/admin/config/policies',
         },
         {
-          label: 'Integrations',
+          label: 'Integraciones',
           icon: 'link-2',
           route: '/admin/config/integrations',
         },
         {
-          label: 'Taxes',
+          label: 'Impuestos',
           icon: 'credit-card',
           route: '/admin/config/taxes',
         },
         {
-          label: 'Domains',
+          label: 'Dominios',
           icon: 'globe-2',
           route: '/admin/config/domains',
         },

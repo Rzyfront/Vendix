@@ -5,53 +5,59 @@
   <!-- Stores List -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
-            All Stores ({{ stores.length }})
+            Todas las Tiendas ({{ stores.length }})
           </h2>
         </div>
-        
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
           <!-- Input de búsqueda compacto -->
           <app-inputsearch
             class="w-full sm:w-64"
             size="sm"
-            placeholder="Search stores..."
+            placeholder="Buscar tiendas..."
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
-          
+
           <!-- Filtro de tipo de tienda -->
           <select
             class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
             (change)="onStoreTypeChange($event)"
-            [value]="selectedStoreType">
-            <option value="">All Types</option>
-            <option value="physical">Physical</option>
-            <option value="online">Online</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="popup">Popup</option>
-            <option value="kiosko">Kiosko</option>
+            [value]="selectedStoreType"
+          >
+            <option value="">Todos los Tipos</option>
+            <option value="physical">Tienda Física</option>
+            <option value="online">Tienda Online</option>
+            <option value="hybrid">Tienda Híbrida</option>
+            <option value="popup">Tienda Temporal</option>
+            <option value="kiosko">Kiosco</option>
           </select>
 
           <!-- Filtro de estado -->
           <select
             class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
             (change)="onStateChange($event)"
-            [value]="selectedState">
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
+            [value]="selectedState"
+          >
+            <option value="">Todos los Estados</option>
+            <option value="active">Activa</option>
+            <option value="inactive">Inactiva</option>
           </select>
-          
+
           <div class="flex gap-2 items-center">
             <app-button
               variant="outline"
               size="sm"
               (clicked)="refreshStores()"
               [disabled]="isLoading"
-              title="Refresh"
+              title="Actualizar lista"
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
@@ -59,21 +65,22 @@
               variant="primary"
               size="sm"
               (clicked)="openCreateStoreModal()"
-              title="New Store"
+              title="Crear Nueva Tienda"
             >
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">New Store</span>
+              <span class="hidden sm:inline">Nueva Tienda</span>
             </app-button>
           </div>
         </div>
-        
       </div>
     </div>
 
     <!-- Loading State -->
     <div *ngIf="isLoading" class="p-8 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Loading stores...</p>
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Cargando tiendas...</p>
     </div>
 
     <!-- Empty State -->
@@ -84,7 +91,8 @@
       [showAdditionalActions]="hasFilters"
       (actionClick)="openCreateStoreModal()"
       (refreshClick)="refreshStores()"
-      (clearFiltersClick)="clearFilters()">
+      (clearFiltersClick)="clearFilters()"
+    >
     </app-store-empty-state>
 
     <!-- Stores Table -->
@@ -99,7 +107,8 @@
         [striped]="true"
         size="md"
         (sort)="onTableSort($event)"
-        (rowClick)="viewStore($event)">
+        (rowClick)="viewStore($event)"
+      >
       </app-table>
     </div>
   </div>

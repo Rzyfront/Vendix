@@ -6,7 +6,7 @@
   [title]="'Procesar Pago'"
   [subtitle]="'Selecciona un método de pago para completar la venta'"
 >
-  <!-- Order Summary -->
+  <!-- Resumen del Pedido -->
   <div class="mb-6">
     <app-card
       [shadow]="'sm'"
@@ -56,7 +56,7 @@
     </app-card>
   </div>
 
-  <!-- Payment Options -->
+  <!-- Opciones de Pago -->
   <div class="mb-6">
     <h3
       class="text-lg font-semibold text-[var(--color-text-primary)] mb-4 flex items-center gap-2"
@@ -69,7 +69,7 @@
       Opciones de Venta
     </h3>
 
-    <!-- Credit Sale Option -->
+    <!-- Opción de Venta a Crédito -->
     <div class="mb-4">
       <div
         (click)="processCreditSale()"
@@ -92,7 +92,7 @@
       </div>
     </div>
 
-    <!-- Payment Methods -->
+    <!-- Métodos de Pago -->
     <div>
       <h4 class="text-md font-medium text-[var(--color-text-primary)] mb-3">
         Pagos Inmediatos
@@ -122,7 +122,7 @@
     </div>
   </div>
 
-  <!-- Payment Details Form -->
+  <!-- Formulario de Detalles de Pago -->
   <div *ngIf="paymentState.selectedMethod" class="mb-6">
     <app-card [shadow]="'sm'">
       <div class="p-4">
@@ -130,7 +130,7 @@
           Detalles de Pago - {{ paymentState.selectedMethod.name }}
         </h4>
 
-        <!-- Cash Payment -->
+        <!-- Pago en Efectivo -->
         <div
           *ngIf="paymentState.selectedMethod.type === 'cash'"
           class="space-y-4"
@@ -158,7 +158,7 @@
             </div>
           </div>
 
-          <!-- Quick Amount Buttons -->
+          <!-- Botones de Montos Rápidos -->
           <div class="grid grid-cols-4 gap-2">
             <button
               *ngFor="let amount of quickCashAmounts"
@@ -170,7 +170,7 @@
             </button>
           </div>
 
-          <!-- Change Display -->
+          <!-- Visualización de Cambio -->
           <div
             *ngIf="paymentState.change > 0"
             class="p-3 bg-[var(--color-success-light)]/20 border border-[var(--color-success)]/30 rounded-sm"
@@ -186,7 +186,7 @@
           </div>
         </div>
 
-        <!-- Card/Transfer/Digital Wallet Payment -->
+        <!-- Pago con Tarjeta/Transferencia/Billetera Digital -->
         <div
           *ngIf="paymentState.selectedMethod.requiresReference"
           class="space-y-4"
@@ -207,7 +207,7 @@
     </app-card>
   </div>
 
-  <!-- Numeric Keypad -->
+  <!-- Teclado Numérico -->
   <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="mb-6">
     <app-card [shadow]="'sm'">
       <div class="p-4">
@@ -239,7 +239,7 @@
     </app-card>
   </div>
 
-  <!-- Action Buttons -->
+  <!-- Botones de Acción -->
   <div slot="footer" class="flex justify-between items-center">
     <app-button
       variant="outline"

@@ -7,10 +7,10 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Financial Reports</h1>
+      <h1 class="text-2xl font-bold mb-6">Informes financieros</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
-        <p class="text-gray-600">Financial reports will be displayed here</p>
+        <p class="text-gray-600">Los informes financieros se mostrarán aquí.</p>
       </div>
     </div>
   `,

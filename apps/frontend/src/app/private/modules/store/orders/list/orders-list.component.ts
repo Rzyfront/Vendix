@@ -16,37 +16,38 @@ import { SalesOrder } from '../interfaces/order.interface';
   imports: [CommonModule, TableComponent, ButtonComponent, ModalComponent],
   template: `
     <div class="p-6">
-      <div class="mb-6 flex justify-between items-center">
-        <div>
-          <h1 class="text-3xl font-bold text-gray-900 mb-2">Sales Orders</h1>
-          <p class="text-gray-600">Manage customer orders and fulfillment</p>
-        </div>
-        <app-button (clicked)="openCreateOrderModal()" variant="primary">
-          <span slot="icon">+</span> Create Order
-        </app-button>
+      <div class="mb-6">
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Lista de Pedidos</h1>
+        <p class="text-gray-600">
+          Ver y gestionar todos los pedidos de clientes
+        </p>
       </div>
 
-      <app-table
-        [data]="orders"
-        [columns]="columns"
-        [actions]="actions"
-        [loading]="loading"
-        (sort)="onSort($event)"
-        (rowClick)="viewOrder($event)"
-      ></app-table>
-
-      <!-- Create Order Modal -->
-      <app-modal
-        [(isOpen)]="showCreateModal"
-        title="Create Sales Order"
-        size="lg"
-        (closed)="closeCreateModal()"
-      >
-        <div class="space-y-4">
-          <p>Create order functionality will be implemented here.</p>
-          <p>
-            This will include customer selection, product selection, and order
-            details.
+      <div class="bg-white rounded-lg shadow-sm border p-8">
+        <div class="text-center">
+          <div
+            class="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4"
+          >
+            <svg
+              class="w-8 h-8 text-green-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+              ></path>
+            </svg>
+          </div>
+          <h2 class="text-xl font-semibold text-gray-900 mb-2">
+            Gestión de Pedidos
+          </h2>
+          <p class="text-gray-600 max-w-md mx-auto">
+            La gestión de lista de pedidos está en desarrollo. Podrás ver,
+            filtrar y gestionar todos los pedidos aquí.
           </p>
         </div>
         <div slot="footer" class="flex justify-end space-x-2">
@@ -69,127 +70,4 @@ import { SalesOrder } from '../interfaces/order.interface';
     `,
   ],
 })
-export class OrdersListComponent implements OnInit {
-  orders: SalesOrder[] = [];
-  loading = false;
-  showCreateModal = false;
-
-  columns: TableColumn[] = [
-    {
-      key: 'orderNumber',
-      label: 'Order #',
-      sortable: true,
-      width: '120px',
-    },
-    {
-      key: 'customer.name',
-      label: 'Customer',
-      sortable: true,
-    },
-    {
-      key: 'totalAmount',
-      label: 'Total',
-      sortable: true,
-      align: 'right',
-      width: '120px',
-      transform: (value: number) => `$${value.toFixed(2)}`,
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      sortable: true,
-      width: '120px',
-      badge: true,
-      badgeConfig: {
-        type: 'status',
-        size: 'sm',
-      },
-      transform: (value: string) =>
-        value.charAt(0) + value.slice(1).toLowerCase(),
-    },
-    {
-      key: 'createdAt',
-      label: 'Created',
-      sortable: true,
-      width: '150px',
-      transform: (value: string) => new Date(value).toLocaleDateString(),
-    },
-  ];
-
-  actions: TableAction[] = [
-    {
-      label: 'View',
-      icon: '👁️',
-      action: (order: SalesOrder) => this.viewOrder(order),
-      variant: 'ghost',
-    },
-    {
-      label: 'Edit',
-      icon: '✏️',
-      action: (order: SalesOrder) => this.editOrder(order),
-      variant: 'ghost',
-      disabled: (order: SalesOrder) => order.status === 'CANCELLED',
-    },
-    {
-      label: 'Delete',
-      icon: '🗑️',
-      action: (order: SalesOrder) => this.deleteOrder(order),
-      variant: 'danger',
-      disabled: (order: SalesOrder) => order.status !== 'PENDING',
-    },
-  ];
-
-  constructor(private ordersService: OrdersService) {}
-
-  ngOnInit() {
-    this.loadOrders();
-  }
-
-  loadOrders() {
-    this.loading = true;
-    this.ordersService.getSalesOrders().subscribe({
-      next: (response) => {
-        this.orders = response.data;
-        this.loading = false;
-      },
-      error: (error) => {
-        console.error('Error loading orders:', error);
-        this.loading = false;
-      },
-    });
-  }
-
-  onSort(event: { column: string; direction: 'asc' | 'desc' | null }) {
-    console.log('Sort:', event);
-    // Implement sorting logic
-  }
-
-  viewOrder(order: SalesOrder) {
-    console.log('View order:', order);
-    // Navigate to order details
-  }
-
-  editOrder(order: SalesOrder) {
-    console.log('Edit order:', order);
-    // Open edit modal
-  }
-
-  deleteOrder(order: SalesOrder) {
-    console.log('Delete order:', order);
-    // Show confirmation dialog
-  }
-
-  openCreateOrderModal() {
-    this.showCreateModal = true;
-  }
-
-  closeCreateModal() {
-    this.showCreateModal = false;
-  }
-
-  createOrder() {
-    console.log('Creating order...');
-    // Implement create order logic
-    this.closeCreateModal();
-  }
-}
+export class OrdersListComponent {}
