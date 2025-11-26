@@ -146,16 +146,8 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    try {
-      const result = await this.authService.login(loginDto, client_info);
-      return this.responseService.success(result, 'Login exitoso');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al iniciar sesión',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.authService.login(loginDto, client_info);
+    return this.responseService.success(result, 'Login exitoso');
   }
 
   @Public() // ✅ Permitir renovar token sin autenticación previa

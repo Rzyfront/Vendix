@@ -17,12 +17,12 @@ import {
   UpdateOrganizationDto,
   AdminOrganizationQueryDto,
   OrganizationDashboardDto,
-} from 'src/modules/organizations/dto';
-import { RolesGuard } from 'src/modules/auth/guards/roles.guard';
-import { JwtAuthGuard } from 'src/modules/auth/guards/jwt-auth.guard';
-import { Roles } from 'src/modules/auth/decorators/roles.decorator';
-import { UserRole } from 'src/modules/auth/enums/user-role.enum';
-import { ResponseService } from 'src/common/responses/response.service';
+} from '../../organizations/dto';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { UserRole } from '../../auth/enums/user-role.enum';
+import { ResponseService } from '../../../common/responses/response.service';
 
 @ApiTags('Admin Organizations')
 @Controller('admin/organizations')
