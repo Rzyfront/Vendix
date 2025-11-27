@@ -176,6 +176,15 @@ describe('AuthService Login Flow', () => {
       store_slug: 'store-a',
     });
     expect(result).toBeDefined();
+    expect(mockPrismaService.stores.findUnique).toHaveBeenCalledWith({
+      where: {
+        organization_id_slug: {
+          organization_id: user.organization_id,
+          slug: 'store-a',
+        },
+      },
+      include: { organizations: true },
+    });
   });
 
   it('should throw UnauthorizedException for Low Privilege user accessing store without direct link', async () => {

@@ -31,7 +31,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
-  ) {}
+  ) { }
 
   async registerOwner(
     registerOwnerDto: RegisterOwnerDto,
@@ -937,7 +937,12 @@ export class AuthService {
       }
     } else if (store_slug) {
       const targetStore = await this.prismaService.stores.findUnique({
-        where: { slug: store_slug },
+        where: {
+          organization_id_slug: {
+            organization_id: user.organization_id,
+            slug: store_slug,
+          },
+        },
         include: { organizations: true },
       });
 
