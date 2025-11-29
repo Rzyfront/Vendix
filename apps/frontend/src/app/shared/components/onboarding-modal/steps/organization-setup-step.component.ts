@@ -2,11 +2,12 @@ import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from 
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
+import { InputComponent } from '../../input/input.component';
 
 @Component({
   selector: 'app-organization-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent, InputComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     .organization-step {
@@ -279,7 +280,7 @@ import { IconComponent } from '../../index';
         </div>
 
         <!-- Organization Form -->
-        <div class="organization-form">
+        <form class="organization-form" [formGroup]="formGroup">
           <!-- Basic Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -298,7 +299,7 @@ import { IconComponent } from '../../index';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('name')"
+                  formControlName="name"
                   placeholder="Mi Empresa S.A. de C.V."
                 />
               </div>
@@ -311,22 +312,19 @@ import { IconComponent } from '../../index';
                 <input
                   type="email"
                   class="field-input"
-                  [formControl]="formGroup.get('email')"
+                  formControlName="email"
                   placeholder="contacto@miempresa.com"
                 />
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Teléfono
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
+                <app-input
+                  label="Teléfono"
+                  formControlName="phone"
                   type="tel"
-                  class="field-input"
-                  [formControl]="formGroup.get('phone')"
-                  placeholder="+52 (555) 123-4567"
-                />
+                  placeholder="+57 123 456 7890"
+                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-md focus:!border-green-500 focus:!ring-green-500/20"
+                ></app-input>
               </div>
 
               <div class="form-field">
@@ -337,7 +335,7 @@ import { IconComponent } from '../../index';
                 <input
                   type="url"
                   class="field-input"
-                  [formControl]="formGroup.get('website')"
+                  formControlName="website"
                   placeholder="https://miempresa.com"
                 />
               </div>
@@ -362,7 +360,7 @@ import { IconComponent } from '../../index';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('legal_name')"
+                  formControlName="legal_name"
                   placeholder="Nombre legal de la empresa"
                 />
               </div>
@@ -375,7 +373,7 @@ import { IconComponent } from '../../index';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('tax_id')"
+                  formControlName="tax_id"
                   placeholder="RFC000000000"
                 />
               </div>
@@ -398,7 +396,7 @@ import { IconComponent } from '../../index';
               </label>
               <textarea
                 class="field-textarea"
-                [formControl]="formGroup.get('description')"
+                formControlName="description"
                 placeholder="Describe brevemente qué hace tu empresa, tus productos o servicios..."
                 rows="4"
               ></textarea>
@@ -408,7 +406,7 @@ import { IconComponent } from '../../index';
               </div>
             </div>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   `,
