@@ -68,55 +68,6 @@
       </div>
       <h3 class="text-lg font-medium text-gray-900 mb-4">No orders found</h3>
 
-      <!-- Filters Section (moved here from header) -->
-      <div class="mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
-          <!-- Search -->
-          <div class="lg:col-span-2">
-            <app-inputsearch
-              placeholder="Search by order ID, customer name, email..."
-              (search)="onSearch($event)"
-            ></app-inputsearch>
-          </div>
-
-          <!-- Status Filter -->
-          <app-selector
-            [options]="statusOptions"
-            placeholder="All Status"
-            (valueChange)="onFilterChange('status', $event)"
-          ></app-selector>
-
-          <!-- Payment Status Filter -->
-          <app-selector
-            [options]="paymentStatusOptions"
-            placeholder="All Payment Status"
-            (valueChange)="onFilterChange('paymentStatus', $event)"
-          ></app-selector>
-
-          <!-- Date Range Filter -->
-          <app-selector
-            [options]="dateRangeOptions"
-            placeholder="All Time"
-            (valueChange)="onFilterChange('dateRange', $event)"
-          ></app-selector>
-        </div>
-
-        <!-- Actions -->
-        <div class="flex justify-between items-center">
-          <div class="text-sm text-gray-600">
-            Showing {{ orders.length }} of {{ totalItems }} orders
-          </div>
-          <div class="flex gap-2">
-            <button
-              (click)="exportOrders()"
-              class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Export CSV
-            </button>
-          </div>
-        </div>
-      </div>
-
       <p class="text-gray-500">
         No orders match your current filters. Try adjusting your search
         criteria.

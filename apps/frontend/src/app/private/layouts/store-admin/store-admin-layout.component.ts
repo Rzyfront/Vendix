@@ -249,6 +249,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/settings/general',
         },
         {
+          label: 'Métodos de Pago',
+          icon: 'circle',
+          route: '/admin/settings/payments',
+        },
+        {
           label: 'Apariencia',
           icon: 'circle',
           route: '/admin/settings/appearance',

@@ -2,15 +2,16 @@ import {
   Component,
   OnInit,
   OnDestroy,
+  Input,
   Output,
   EventEmitter,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
-import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
-import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
 import {
   TableComponent,
   TableColumn,
@@ -32,18 +33,24 @@ import {
 @Component({
   selector: 'app-orders-list',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    InputsearchComponent,
-    SelectorComponent,
-    TableComponent,
-  ],
+  imports: [CommonModule, FormsModule, TableComponent],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],
 })
-export class OrdersListComponent implements OnInit, OnDestroy {
+export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
+  @Input() filters: OrderQuery = {
+    search: '',
+    status: undefined,
+    payment_status: undefined,
+    date_range: undefined,
+    page: 1,
+    limit: 10,
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  };
+
   @Output() viewOrder = new EventEmitter<string>();
+  @Output() ordersLoaded = new EventEmitter<any>();
   private destroy$ = new Subject<void>();
 
   // Data
@@ -51,29 +58,17 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   totalItems = 0;
   loading = false;
 
-  // Filters
-  filters: OrderQuery = {
-    search: '',
-    status: undefined,
-    paymentStatus: undefined,
-    dateRange: undefined,
-    page: 1,
-    limit: 10,
-    sortBy: 'createdAt',
-    sortOrder: 'desc',
-  };
-
   // Table configuration
   columns: TableColumn[] = [
-    { key: 'orderNumber', label: 'Order ID', sortable: true },
+    { key: 'order_number', label: 'Order ID', sortable: true },
     {
-      key: 'customer',
-      label: 'Customer',
+      key: 'customer_id',
+      label: 'Customer ID',
       sortable: true,
-      transform: (order: Order) => order.customer?.name || 'N/A',
+      transform: (order: Order) => order.customer_id?.toString() || 'N/A',
     },
     {
-      key: 'status',
+      key: 'state',
       label: 'Status',
       sortable: true,
       badge: true,
@@ -81,110 +76,52 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         type: 'custom',
         size: 'sm',
         colorMap: {
-          draft: '#6b7280',
-          pending: '#f59e0b',
-          confirmed: '#3b82f6',
-          preparing: '#8b5cf6',
-          ready: '#6366f1',
+          created: '#6b7280',
+          pending_payment: '#f59e0b',
+          processing: '#3b82f6',
           shipped: '#06b6d4',
           delivered: '#10b981',
           cancelled: '#ef4444',
           refunded: '#f97316',
-          returned: '#ec4899',
+          finished: '#8b5cf6',
         },
       },
-      transform: (order: Order) => this.formatStatus(order.status),
+      transform: (order: Order) => this.formatStatus(order.state),
     },
     {
-      key: 'paymentStatus',
-      label: 'Payment',
-      sortable: true,
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          pending: '#f59e0b',
-          processing: '#3b82f6',
-          paid: '#10b981',
-          partial: '#f59e0b',
-          overpaid: '#8b5cf6',
-          failed: '#ef4444',
-          refunded: '#f97316',
-          disputed: '#ef4444',
-        },
-      },
-      transform: (order: Order) =>
-        this.formatPaymentStatus(order.paymentStatus),
-    },
-    {
-      key: 'total',
+      key: 'grand_total',
       label: 'Total',
       sortable: true,
-      transform: (order: Order) => `$${order.total.toFixed(2)}`,
+      transform: (order: Order) => `$${order.grand_total.toFixed(2)}`,
     },
     {
-      key: 'createdAt',
+      key: 'created_at',
       label: 'Date',
       sortable: true,
       transform: (order: Order) =>
-        new Date(order.createdAt).toLocaleDateString(),
+        new Date(order.created_at).toLocaleDateString(),
     },
   ];
 
   actions: TableAction[] = [
     {
       label: 'View',
-      action: (order: Order) => this.handleViewOrder(order.id),
+      action: (order: Order) => this.handleViewOrder(order.id.toString()),
       variant: 'ghost',
     },
     {
       label: 'Edit',
-      action: (order: Order) => this.editOrder(order.id),
+      action: (order: Order) => this.editOrder(order.id.toString()),
       variant: 'ghost',
     },
     {
       label: 'Delete',
-      action: (order: Order) => this.deleteOrder(order.id),
+      action: (order: Order) => this.deleteOrder(order.id.toString()),
       variant: 'danger',
     },
   ];
 
-  // Filter options
-  statusOptions: FilterOption[] = [
-    { value: 'draft', label: 'Draft' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'confirmed', label: 'Confirmed' },
-    { value: 'preparing', label: 'Preparing' },
-    { value: 'ready', label: 'Ready' },
-    { value: 'shipped', label: 'Shipped' },
-    { value: 'delivered', label: 'Delivered' },
-    { value: 'cancelled', label: 'Cancelled' },
-    { value: 'refunded', label: 'Refunded' },
-    { value: 'returned', label: 'Returned' },
-  ];
-
-  paymentStatusOptions: FilterOption[] = [
-    { value: 'pending', label: 'Pending' },
-    { value: 'processing', label: 'Processing' },
-    { value: 'paid', label: 'Paid' },
-    { value: 'partial', label: 'Partial' },
-    { value: 'overpaid', label: 'Overpaid' },
-    { value: 'failed', label: 'Failed' },
-    { value: 'refunded', label: 'Refunded' },
-    { value: 'disputed', label: 'Disputed' },
-  ];
-
-  dateRangeOptions: FilterOption[] = [
-    { value: 'today', label: 'Today' },
-    { value: 'yesterday', label: 'Yesterday' },
-    { value: 'thisWeek', label: 'This Week' },
-    { value: 'lastWeek', label: 'Last Week' },
-    { value: 'thisMonth', label: 'This Month' },
-    { value: 'lastMonth', label: 'Last Month' },
-    { value: 'thisYear', label: 'This Year' },
-    { value: 'lastYear', label: 'Last Year' },
-  ];
+  // Filter options (now handled by parent component)
 
   constructor(
     private ordersService: StoreOrdersService,
@@ -194,6 +131,12 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadOrders();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['filters'] && !changes['filters'].firstChange) {
+      this.loadOrders();
+    }
   }
 
   ngOnDestroy(): void {
@@ -210,9 +153,14 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: PaginatedOrdersResponse) => {
-          this.orders = response.orders;
-          this.totalItems = response.total;
+          this.orders = response.data;
+          this.totalItems = response.pagination.total;
           this.loading = false;
+          this.ordersLoaded.emit({
+            orders: this.orders,
+            totalItems: this.totalItems,
+            filters: this.filters,
+          });
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
@@ -223,25 +171,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   // Event handlers
-  onSearch(searchTerm: string): void {
-    this.filters.search = searchTerm;
-    this.filters.page = 1;
-    this.loadOrders();
-  }
-
-  onFilterChange(
-    filterType: keyof OrderQuery,
-    value: string | number | null,
-  ): void {
-    if (!value || value === '') {
-      this.filters[filterType] = undefined;
-    } else {
-      this.filters[filterType] = value as any;
-    }
-    this.filters.page = 1;
-    this.loadOrders();
-  }
-
   onPageChange(page: number): void {
     if (this.filters.page !== undefined) {
       this.filters.page = page;
@@ -251,8 +180,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {
     if (event.direction) {
-      this.filters.sortBy = event.column as any;
-      this.filters.sortOrder = event.direction;
+      this.filters.sort_by = event.column as any;
+      this.filters.sort_order = event.direction;
       this.loadOrders();
     }
   }
@@ -272,7 +201,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.dialogService
       .confirm({
         title: 'Delete Order',
-        message: 'Are you sure you want to delete this order? This action cannot be undone.',
+        message:
+          'Are you sure you want to delete this order? This action cannot be undone.',
         confirmText: 'Delete',
         cancelText: 'Cancel',
         confirmVariant: 'danger',
@@ -289,7 +219,9 @@ export class OrdersListComponent implements OnInit, OnDestroy {
               },
               error: (error: any) => {
                 console.error('Error deleting order:', error);
-                this.toastService.error('Failed to delete order. Please try again.');
+                this.toastService.error(
+                  'Failed to delete order. Please try again.',
+                );
               },
             });
         }

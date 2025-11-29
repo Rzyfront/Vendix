@@ -1,62 +1,106 @@
-// Core entities
+// Core entities - Aligned with backend models
 export interface Order {
-  id: string;
-  orderNumber: string;
-  customer: {
-    id: string;
+  id: number;
+  customer_id: number;
+  store_id: number;
+  order_number: string;
+  state: OrderState;
+  subtotal_amount: number;
+  tax_amount: number;
+  shipping_cost: number;
+  discount_amount: number;
+  grand_total: number;
+  currency: string;
+  billing_address_id?: number;
+  shipping_address_id?: number;
+  internal_notes?: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string;
+  stores?: {
+    id: number;
     name: string;
-    email?: string;
-    phone?: string;
-  } | null;
-  items: OrderItem[];
-  summary: OrderSummary;
-  status: OrderStatus;
-  paymentStatus: PaymentStatus;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string;
-  total: number;
+    store_code: string;
+  };
+  order_items?: OrderItem[];
+  addresses_orders_billing_address_idToaddresses?: Address;
+  addresses_orders_shipping_address_idToaddresses?: Address;
+  payments?: Payment[];
 }
 
 export interface OrderItem {
-  id: string;
-  productId: string;
-  productName: string;
-  productSku: string;
+  id: number;
+  order_id: number;
+  product_id: number;
+  product_variant_id?: number;
+  product_name: string;
+  variant_sku?: string;
+  variant_attributes?: string;
   quantity: number;
-  unitPrice: number;
-  totalPrice: number;
+  unit_price: number;
+  total_price: number;
+  tax_rate?: number;
+  tax_amount_item?: number;
+  created_at: string;
+  updated_at: string;
+  products?: Product;
+  product_variants?: ProductVariant;
 }
 
-export interface OrderSummary {
-  subtotal: number;
-  taxAmount: number;
-  total: number;
-  itemCount: number;
+export interface Address {
+  id: number;
+  street: string;
+  city: string;
+  state: string;
+  zip_code: string;
+  country: string;
 }
 
-// Types and enums
-export type OrderStatus =
-  | 'draft' // Borrador
-  | 'pending' // Pendiente de confirmación
-  | 'confirmed' // Confirmado, listo para preparar
-  | 'preparing' // En preparación
-  | 'ready' // Listo para envío
-  | 'shipped' // Enviado
-  | 'delivered' // Entregado
-  | 'cancelled' // Cancelado
-  | 'refunded' // Reembolsado
-  | 'returned'; // Devuelto
+export interface Product {
+  id: number;
+  name: string;
+  description?: string;
+  sku: string;
+  price: number;
+}
+
+export interface ProductVariant {
+  id: number;
+  sku: string;
+  price: number;
+  attributes?: string;
+}
+
+export interface Payment {
+  id: number;
+  order_id: number;
+  amount: number;
+  currency: string;
+  status: PaymentStatus;
+  payment_method: string;
+  transaction_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Types and enums - Aligned with backend enums
+export type OrderState =
+  | 'created'
+  | 'pending_payment'
+  | 'processing'
+  | 'shipped'
+  | 'delivered'
+  | 'cancelled'
+  | 'refunded'
+  | 'finished';
 
 export type PaymentStatus =
-  | 'pending' // Pendiente de pago
-  | 'processing' // Procesando pago
-  | 'paid' // Pagado completamente
-  | 'partial' // Pagado parcialmente
-  | 'overpaid' // Pagado de más
-  | 'failed' // Pago fallido
-  | 'refunded' // Reembolsado
-  | 'disputed'; // En disputa
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'refunded'
+  | 'cancelled';
 
 // Query and response interfaces
 export interface OrderQuery {
@@ -64,54 +108,42 @@ export interface OrderQuery {
   search?: string;
 
   // Filtros principales
-  status?: OrderStatus | OrderStatus[];
-  paymentStatus?: PaymentStatus | PaymentStatus[];
+  status?: OrderState;
+  customer_id?: number;
+  store_id?: number;
+  payment_status?: PaymentStatus;
+  date_range?: string;
 
   // Filtros de fecha
-  dateFrom?: string;
-  dateTo?: string;
-  dateRange?:
-    | 'today'
-    | 'yesterday'
-    | 'thisWeek'
-    | 'lastWeek'
-    | 'thisMonth'
-    | 'lastMonth'
-    | 'thisYear'
-    | 'lastYear';
-
-  // Filtros de cliente
-  customerId?: string;
-  customerEmail?: string;
-
-  // Filtros de monto
-  minAmount?: number;
-  maxAmount?: number;
+  date_from?: string;
+  date_to?: string;
 
   // Paginación
   page?: number;
   limit?: number;
 
   // Ordenamiento
-  sortBy?: 'createdAt' | 'updatedAt' | 'total' | 'orderNumber' | 'customerName';
-  sortOrder?: 'asc' | 'desc';
+  sort?: string; // Format: 'field:direction' e.g., 'created_at:desc'
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface PaginatedOrdersResponse {
-  orders: Order[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-  hasMore: boolean;
+  data: Order[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
 }
 
 export interface OrderStats {
-  totalOrders: number;
-  totalRevenue: number;
-  pendingOrders: number;
-  completedOrders: number;
-  averageOrderValue: number;
+  total_orders: number;
+  total_revenue: number;
+  pending_orders: number;
+  completed_orders: number;
+  average_order_value: number;
 }
 
 // DTOs
@@ -129,7 +161,7 @@ export interface CreateOrderItemDto {
 }
 
 export interface UpdateOrderStatusDto {
-  status: OrderStatus;
+  status: OrderState;
   notes?: string;
   notifyCustomer?: boolean;
 }
@@ -152,7 +184,7 @@ export interface OrderAction {
 
 export interface OrderFilters {
   search: string;
-  status: OrderStatus[];
+  status: OrderState[];
   paymentStatus: PaymentStatus[];
   dateRange: string;
   customerId?: string;

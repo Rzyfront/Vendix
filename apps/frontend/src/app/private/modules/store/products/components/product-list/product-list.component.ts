@@ -23,9 +23,9 @@ import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade'
 
 // Import existing components
 import {
-  ProductStatsComponent,
   ProductEmptyStateComponent,
   ProductCreateModalComponent,
+  ProductFilterDropdownComponent,
 } from '../index';
 
 // Import shared components
@@ -38,6 +38,7 @@ import {
   ToastService,
   TableColumn,
   TableAction,
+  StatsComponent,
 } from '../../../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -51,9 +52,10 @@ import './product-list.component.css';
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
-    ProductStatsComponent,
+    StatsComponent,
     ProductEmptyStateComponent,
     ProductCreateModalComponent,
+    ProductFilterDropdownComponent,
     InputsearchComponent,
     IconComponent,
     TableComponent,
@@ -484,6 +486,16 @@ export class ProductListComponent implements OnInit, OnDestroy {
     this.loadProducts();
   }
 
+  onFilterDropdownChange(query: ProductQueryDto): void {
+    // Update local state from dropdown query (excluding search)
+    this.selectedState = query.state || '';
+    this.selectedCategory = query.category_id?.toString() || '';
+    this.selectedBrand = query.brand_id?.toString() || '';
+
+    // Reload products with new filters
+    this.loadProducts();
+  }
+
   onTableSort(sortEvent: {
     column: string;
     direction: 'asc' | 'desc' | null;
@@ -627,5 +639,28 @@ export class ProductListComponent implements OnInit, OnDestroy {
       return 'Try adjusting your search terms or filters';
     }
     return 'Get started by creating your first product.';
+  }
+
+  // Formatear número para visualización (movido desde ProductStatsComponent)
+  formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+
+  // Calcular porcentaje de crecimiento (movido desde ProductStatsComponent)
+  getGrowthPercentage(growthRate: number): string {
+    const sign = growthRate >= 0 ? '+' : '';
+    return `${sign}${growthRate.toFixed(1)}%`;
+  }
+
+  // Determinar clase CSS según el crecimiento (movido desde ProductStatsComponent)
+  getGrowthClass(growthRate: number): string {
+    if (growthRate > 0) return 'text-green-600';
+    if (growthRate < 0) return 'text-red-600';
+    return 'text-gray-600';
   }
 }

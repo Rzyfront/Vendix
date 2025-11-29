@@ -1,6 +1,7 @@
 // Components
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
+export { StatsComponent } from './stats/stats.component';
 export { ChartComponent } from './chart';
 export { InputComponent } from './input/input.component';
 export { SpinnerComponent } from './spinner/spinner.component';

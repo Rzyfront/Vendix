@@ -6,7 +6,6 @@ import {
   PaymentMethodStats,
   StorePaymentMethod,
 } from './interfaces/payment-methods.interface';
-import { PaymentMethodsStatsComponent } from './components/payment-methods-stats.component';
 import { PaymentMethodsListComponent } from './components/payment-methods-list.component';
 import { PaymentMethodsEmptyStateComponent } from './components/payment-methods-empty-state.component';
 import {
@@ -14,6 +13,7 @@ import {
   ModalComponent,
   ToastService,
   IconComponent,
+  StatsComponent,
 } from '../../../../../../app/shared/components/index';
 
 @Component({
@@ -21,85 +21,109 @@ import {
   standalone: true,
   imports: [
     CommonModule,
-    PaymentMethodsStatsComponent,
     PaymentMethodsListComponent,
     PaymentMethodsEmptyStateComponent,
     ButtonComponent,
     ModalComponent,
     IconComponent,
+    StatsComponent,
   ],
   template: `
-    <div class="p-6">
-      <div class="mb-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-3xl font-bold text-gray-900 mb-2">
-              Payment Methods
-            </h1>
-            <p class="text-gray-600">
-              Configure payment methods and processing settings for your store
-            </p>
-          </div>
-          <app-button
-            variant="primary"
-            (clicked)="openEnablePaymentMethodModal()"
-            [loading]="is_loading"
-          >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Add Payment Method
-          </app-button>
-        </div>
+    <div class="space-y-6">
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <app-stats
+          title="Total de Métodos"
+          [value]="payment_method_stats?.total_methods || 0"
+          iconName="credit-card"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+        <app-stats
+          title="Métodos Activos"
+          [value]="payment_method_stats?.enabled_methods || 0"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+        <app-stats
+          title="Requieren Configuración"
+          [value]="payment_method_stats?.requires_config || 0"
+          iconName="settings"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
+        ></app-stats>
+        <app-stats
+          title="Transacciones Exitosas"
+          [value]="payment_method_stats?.successful_transactions || 0"
+          iconName="check"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
       </div>
 
-      <!-- Statistics Section -->
-      <app-payment-methods-stats
-        [stats]="payment_method_stats"
-        [is_loading]="is_loading_stats"
-      >
-      </app-payment-methods-stats>
-
       <!-- Payment Methods List -->
-      <div class="mt-8">
-        <div class="bg-white rounded-lg shadow-sm border">
-          <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">
-              Enabled Payment Methods
-            </h2>
-            <p class="text-sm text-gray-600 mt-1">
-              Manage payment methods available to your customers
-            </p>
-          </div>
-
-          <div class="p-6">
-            <!-- Loading State -->
-            <div
-              *ngIf="is_loading"
-              class="flex items-center justify-center py-12"
-            >
-              <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
-              ></div>
+      <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
+        <div class="px-6 py-4 border-b border-border">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-semibold text-text-primary">
+                Métodos de Pago ({{ payment_methods.length }})
+              </h2>
             </div>
 
-            <!-- Empty State -->
-            <app-payment-methods-empty-state
-              *ngIf="!is_loading && payment_methods.length === 0"
-              (addPaymentMethod)="openEnablePaymentMethodModal()"
-            >
-            </app-payment-methods-empty-state>
-
-            <!-- Payment Methods List -->
-            <app-payment-methods-list
-              *ngIf="!is_loading && payment_methods.length > 0"
-              [payment_methods]="payment_methods"
-              [is_loading]="is_loading"
-              (edit)="openEditPaymentMethodModal($event)"
-              (toggle)="togglePaymentMethod($event)"
-              (delete)="deletePaymentMethod($event)"
-              (reorder)="reorderPaymentMethods($event)"
-            >
-            </app-payment-methods-list>
+            <div class="flex gap-2 items-center ml-auto">
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="loadPaymentMethods()"
+                [disabled]="is_loading"
+                title="Actualizar"
+              >
+                <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+              </app-button>
+              <app-button
+                variant="primary"
+                size="sm"
+                (clicked)="openEnablePaymentMethodModal()"
+                [disabled]="is_loading"
+                title="Agregar Método de Pago"
+              >
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <span class="hidden sm:inline">Agregar Método</span>
+              </app-button>
+            </div>
           </div>
+        </div>
+
+        <!-- Estado de Carga -->
+        <div *ngIf="is_loading" class="p-8 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando métodos de pago...</p>
+        </div>
+
+        <!-- Estado Vacío -->
+        <app-payment-methods-empty-state
+          *ngIf="!is_loading && payment_methods.length === 0"
+          (addPaymentMethod)="openEnablePaymentMethodModal()"
+        >
+        </app-payment-methods-empty-state>
+
+        <!-- Payment Methods List -->
+        <div *ngIf="!is_loading && payment_methods.length > 0" class="p-6">
+          <app-payment-methods-list
+            [payment_methods]="payment_methods"
+            [is_loading]="is_loading"
+            (edit)="openEditPaymentMethodModal($event)"
+            (toggle)="togglePaymentMethod($event)"
+            (delete)="deletePaymentMethod($event)"
+            (reorder)="reorderPaymentMethods($event)"
+          >
+          </app-payment-methods-list>
         </div>
       </div>
 

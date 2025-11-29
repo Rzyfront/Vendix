@@ -1,156 +1,149 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { catchError } from 'rxjs/operators';
+import { environment } from '../../../../../../environments/environment';
 import {
-  SalesOrder,
-  PurchaseOrder,
-  StockTransfer,
-  CreateSalesOrderRequest,
-  CreatePurchaseOrderRequest,
-  CreateStockTransferRequest,
+  Order,
+  OrderQuery,
+  PaginatedOrdersResponse,
+  OrderStats,
 } from '../interfaces/order.interface';
 
 @Injectable({
   providedIn: 'root',
 })
 export class OrdersService {
-  private baseUrl = '/api'; // Ajustar según configuración
+  private readonly api_url = environment.apiUrl;
 
   constructor(private http: HttpClient) {}
 
-  // SALES ORDERS
-  getSalesOrders(params?: {
-    page?: number;
-    limit?: number;
-    status?: string;
-  }): Observable<{ data: SalesOrder[]; meta: any }> {
-    let httpParams = new HttpParams();
-    if (params?.page)
-      httpParams = httpParams.set('page', params.page.toString());
-    if (params?.limit)
-      httpParams = httpParams.set('limit', params.limit.toString());
-    if (params?.status) httpParams = httpParams.set('status', params.status);
+  /**
+   * Get paginated orders with filters
+   */
+  getOrders(query: OrderQuery = {}): Observable<PaginatedOrdersResponse> {
+    let params = new HttpParams();
 
-    return this.http.get<{ data: SalesOrder[]; meta: any }>(
-      `${this.baseUrl}/sales-orders`,
-      { params: httpParams },
+    // Add query parameters
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params = params.append(key, value.toString());
+      }
+    });
+
+    return this.http
+      .get<PaginatedOrdersResponse>(`${this.api_url}/orders`, {
+        params,
+      })
+      .pipe(
+        catchError((error) => {
+          console.error('Error fetching orders:', error);
+          throw error;
+        }),
+      );
+  }
+
+  /**
+   * Get order by ID
+   */
+  getOrderById(id: number): Observable<Order> {
+    return this.http.get<Order>(`${this.api_url}/orders/${id}`).pipe(
+      catchError((error) => {
+        console.error('Error fetching order:', error);
+        throw error;
+      }),
     );
   }
 
-  getSalesOrder(id: number): Observable<SalesOrder> {
-    return this.http.get<SalesOrder>(`${this.baseUrl}/sales-orders/${id}`);
-  }
-
-  createSalesOrder(order: CreateSalesOrderRequest): Observable<SalesOrder> {
-    return this.http.post<SalesOrder>(
-      `${this.baseUrl}/orders/sales-orders`,
-      order,
+  /**
+   * Create a new order
+   */
+  createOrder(order: Partial<Order>): Observable<Order> {
+    return this.http.post<Order>(`${this.api_url}/orders`, order).pipe(
+      catchError((error) => {
+        console.error('Error creating order:', error);
+        throw error;
+      }),
     );
   }
 
-  updateSalesOrder(
-    id: number,
-    order: Partial<SalesOrder>,
-  ): Observable<SalesOrder> {
-    return this.http.put<SalesOrder>(
-      `${this.baseUrl}/sales-orders/${id}`,
-      order,
+  /**
+   * Update an existing order
+   */
+  updateOrder(id: number, order: Partial<Order>): Observable<Order> {
+    return this.http.patch<Order>(`${this.api_url}/orders/${id}`, order).pipe(
+      catchError((error) => {
+        console.error('Error updating order:', error);
+        throw error;
+      }),
     );
   }
 
-  deleteSalesOrder(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/sales-orders/${id}`);
-  }
-
-  // PURCHASE ORDERS
-  getPurchaseOrders(params?: {
-    page?: number;
-    limit?: number;
-  }): Observable<{ data: PurchaseOrder[]; meta: any }> {
-    let httpParams = new HttpParams();
-    if (params?.page)
-      httpParams = httpParams.set('page', params.page.toString());
-    if (params?.limit)
-      httpParams = httpParams.set('limit', params.limit.toString());
-
-    return this.http.get<{ data: PurchaseOrder[]; meta: any }>(
-      `${this.baseUrl}/purchase-orders`,
-      { params: httpParams },
+  /**
+   * Delete an order
+   */
+  deleteOrder(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.api_url}/orders/${id}`).pipe(
+      catchError((error) => {
+        console.error('Error deleting order:', error);
+        throw error;
+      }),
     );
   }
 
-  getPurchaseOrder(id: number): Observable<PurchaseOrder> {
-    return this.http.get<PurchaseOrder>(
-      `${this.baseUrl}/purchase-orders/${id}`,
+  /**
+   * Get order statistics
+   */
+  getOrderStats(): Observable<OrderStats> {
+    return this.http.get<OrderStats>(`${this.api_url}/orders/stats`).pipe(
+      catchError((error) => {
+        console.error('Error fetching order stats:', error);
+        throw error;
+      }),
     );
   }
 
-  createPurchaseOrder(
-    order: CreatePurchaseOrderRequest,
-  ): Observable<PurchaseOrder> {
-    return this.http.post<PurchaseOrder>(
-      `${this.baseUrl}/orders/purchase-orders`,
-      order,
-    );
+  /**
+   * Update order status
+   */
+  updateOrderStatus(id: number, status: string): Observable<Order> {
+    return this.http
+      .patch<Order>(`${this.api_url}/orders/${id}/status`, {
+        status,
+      })
+      .pipe(
+        catchError((error) => {
+          console.error('Error updating order status:', error);
+          throw error;
+        }),
+      );
   }
 
-  updatePurchaseOrder(
-    id: number,
-    order: Partial<PurchaseOrder>,
-  ): Observable<PurchaseOrder> {
-    return this.http.put<PurchaseOrder>(
-      `${this.baseUrl}/purchase-orders/${id}`,
-      order,
-    );
-  }
+  /**
+   * Get orders by customer
+   */
+  getOrdersByCustomer(
+    customer_id: number,
+    query: OrderQuery = {},
+  ): Observable<PaginatedOrdersResponse> {
+    let params = new HttpParams();
 
-  deletePurchaseOrder(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/purchase-orders/${id}`);
-  }
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params = params.append(key, value.toString());
+      }
+    });
 
-  // STOCK TRANSFERS
-  getStockTransfers(params?: {
-    page?: number;
-    limit?: number;
-  }): Observable<{ data: StockTransfer[]; meta: any }> {
-    let httpParams = new HttpParams();
-    if (params?.page)
-      httpParams = httpParams.set('page', params.page.toString());
-    if (params?.limit)
-      httpParams = httpParams.set('limit', params.limit.toString());
-
-    return this.http.get<{ data: StockTransfer[]; meta: any }>(
-      `${this.baseUrl}/stock-transfers`,
-      { params: httpParams },
-    );
-  }
-
-  getStockTransfer(id: number): Observable<StockTransfer> {
-    return this.http.get<StockTransfer>(
-      `${this.baseUrl}/stock-transfers/${id}`,
-    );
-  }
-
-  createStockTransfer(
-    transfer: CreateStockTransferRequest,
-  ): Observable<StockTransfer> {
-    return this.http.post<StockTransfer>(
-      `${this.baseUrl}/stock-transfers`,
-      transfer,
-    );
-  }
-
-  updateStockTransfer(
-    id: number,
-    transfer: Partial<StockTransfer>,
-  ): Observable<StockTransfer> {
-    return this.http.put<StockTransfer>(
-      `${this.baseUrl}/stock-transfers/${id}`,
-      transfer,
-    );
-  }
-
-  deleteStockTransfer(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/stock-transfers/${id}`);
+    return this.http
+      .get<PaginatedOrdersResponse>(
+        `${this.api_url}/orders?customer_id=${customer_id}`,
+        { params },
+      )
+      .pipe(
+        catchError((error) => {
+          console.error('Error fetching customer orders:', error);
+          throw error;
+        }),
+      );
   }
 }

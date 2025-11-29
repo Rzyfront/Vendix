@@ -11,7 +11,7 @@ import { Subject, takeUntil } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
-  OrderStatus,
+  OrderState,
   PaymentStatus,
 } from '../../interfaces/order.interface';
 
@@ -34,17 +34,22 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
   // Status constants for template
   readonly orderStatusOptions = [
-    'confirmed',
-    'preparing',
-    'ready',
+    'created',
+    'pending_payment',
+    'processing',
     'shipped',
     'delivered',
+    'cancelled',
+    'refunded',
+    'finished',
   ] as const;
   readonly paymentStatusOptions = [
     'pending',
     'processing',
-    'paid',
+    'completed',
     'failed',
+    'refunded',
+    'cancelled',
   ] as const;
 
   private destroy$ = new Subject<void>();
@@ -98,7 +103,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     if (!this.order) return;
 
     this.ordersService
-      .updateOrderStatus(this.order.id, newStatus as OrderStatus)
+      .updateOrderStatus(this.order.id.toString(), newStatus as OrderState)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (updatedOrder: Order) => {
@@ -116,7 +121,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     if (!this.order) return;
 
     this.ordersService
-      .updatePaymentStatus(this.order.id, {
+      .updatePaymentStatus(this.order.id.toString(), {
         paymentStatus: newStatus as PaymentStatus,
       })
       .pipe(takeUntil(this.destroy$))
@@ -151,7 +156,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     return `
       <html>
         <head>
-          <title>Order #${this.order.orderNumber}</title>
+          <title>Order #${this.order.order_number}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 20px; }
             .header { border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
@@ -162,35 +167,38 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
         </head>
         <body>
           <div class="header">
-            <h1>Order #${this.order.orderNumber}</h1>
-            <p>Date: ${new Date(this.order.createdAt).toLocaleDateString()}</p>
-            <p>Status: ${this.order.status}</p>
-            <p>Payment Status: ${this.order.paymentStatus}</p>
+            <h1>Order #${this.order.order_number}</h1>
+            <p>Date: ${new Date(this.order.created_at).toLocaleDateString()}</p>
+            <p>Status: ${this.order.state}</p>
+            <p>Store: ${this.order.stores?.name || 'N/A'}</p>
           </div>
           
           <div class="section">
-            <h2>Customer Information</h2>
-            <p>Name: ${this.order.customer?.name || 'N/A'}</p>
-            <p>Email: ${this.order.customer?.email || 'N/A'}</p>
-            <p>Phone: ${this.order.customer?.phone || 'N/A'}</p>
+            <h2>Order Summary</h2>
+            <p>Subtotal: $${this.order.subtotal_amount.toFixed(2)}</p>
+            <p>Tax: $${this.order.tax_amount.toFixed(2)}</p>
+            <p>Shipping: $${this.order.shipping_cost.toFixed(2)}</p>
+            <p>Discount: $${this.order.discount_amount.toFixed(2)}</p>
           </div>
           
           <div class="section">
             <h2>Order Items</h2>
-            ${this.order.items
-              .map(
-                (item) => `
+            ${
+              this.order.order_items
+                ?.map(
+                  (item) => `
               <div class="item">
-                <div>${item.productName} (${item.productSku})</div>
-                <div>Quantity: ${item.quantity} × $${item.unitPrice.toFixed(2)} = $${item.totalPrice.toFixed(2)}</div>
+                <div>${item.product_name} (${item.variant_sku || 'N/A'})</div>
+                <div>Quantity: ${item.quantity} × $${item.unit_price.toFixed(2)} = $${item.total_price.toFixed(2)}</div>
               </div>
             `,
-              )
-              .join('')}
+                )
+                .join('') || 'No items'
+            }
           </div>
           
           <div class="section">
-            <div class="total">Total: $${this.order.total.toFixed(2)}</div>
+            <div class="total">Grand Total: $${this.order.grand_total.toFixed(2)}</div>
           </div>
         </body>
       </html>
@@ -198,7 +206,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   // Helper methods for status display
-  getStatusColor(status: OrderStatus | PaymentStatus): string {
+  getStatusColor(status: OrderState | PaymentStatus): string {
     const statusColors: Record<string, string> = {
       // Order Status
       draft: 'bg-gray-100 text-gray-800',

@@ -189,6 +189,13 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.GeneralSettingsComponent),
           },
           {
+            path: 'payments',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/payments/payments-settings.component'
+              ).then((c) => c.PaymentsSettingsComponent),
+          },
+          {
             path: 'appearance',
             loadComponent: () =>
               import(

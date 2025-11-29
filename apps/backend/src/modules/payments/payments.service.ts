@@ -478,8 +478,7 @@ export class PaymentsService {
     const orderItems = dto.items.map((item) => {
       const orderItem: any = {
         product_name: item.product_name,
-        product_sku: item.product_sku,
-        variant_sku: item.variant_sku,
+        variant_sku: item.product_sku, // Mapear product_sku del frontend a variant_sku del backend
         variant_attributes: item.variant_attributes
           ? JSON.stringify(item.variant_attributes)
           : undefined,
@@ -730,14 +729,10 @@ export class PaymentsService {
         store_id: storeId,
         state: 'enabled',
       },
-      select: {
-        id: true,
-        name: true,
-        type: true,
-        provider: true,
-        state: true,
+      include: {
+        system_payment_method: true,
       },
-      orderBy: { name: 'asc' },
+      orderBy: { display_order: 'asc' },
     });
   }
 

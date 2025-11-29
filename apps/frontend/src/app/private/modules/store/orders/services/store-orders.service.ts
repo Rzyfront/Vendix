@@ -10,7 +10,7 @@ import {
   OrderQuery,
   PaginatedOrdersResponse,
   OrderStats,
-  OrderStatus,
+  OrderState,
   PaymentStatus,
   CreateOrderDto,
   CreateOrderItemDto,
@@ -191,7 +191,7 @@ export class StoreOrdersService {
     );
   }
 
-  updateOrderStatus(orderId: string, status: OrderStatus): Observable<Order> {
+  updateOrderStatus(orderId: string, status: OrderState): Observable<Order> {
     const storeId = this.storeContextService.getStoreIdOrThrow();
     const url = `${this.apiUrl}/stores/${storeId}/orders/${orderId}/status`;
 

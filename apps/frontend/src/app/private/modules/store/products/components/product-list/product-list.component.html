@@ -1,9 +1,60 @@
 <div class="space-y-6">
   <!-- Tarjetas de Estadísticas -->
-  <app-product-stats [stats]="stats"></app-product-stats>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <!-- Total de Productos -->
+    <app-stats
+      title="Total de Productos"
+      [value]="formatNumber(stats.total_products)"
+      [smallText]="
+        getGrowthPercentage(stats.productsGrowthRate || 0) + ' vs mes anterior'
+      "
+      iconName="package"
+      iconBgColor="bg-primary/10"
+      iconColor="text-primary"
+    ></app-stats>
+
+    <!-- Productos Activos -->
+    <app-stats
+      title="Productos Activos"
+      [value]="formatNumber(stats.active_products)"
+      [smallText]="
+        getGrowthPercentage(stats.activeProductsGrowthRate || 0) +
+        ' vs mes anterior'
+      "
+      iconName="check-circle"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    ></app-stats>
+
+    <!-- Productos con Stock Bajo -->
+    <app-stats
+      title="Productos con Stock Bajo"
+      [value]="formatNumber(stats.low_stock_products)"
+      [smallText]="
+        getGrowthPercentage(stats.lowStockGrowthRate || 0) + ' vs mes anterior'
+      "
+      iconName="alert-triangle"
+      iconBgColor="bg-yellow-100"
+      iconColor="text-yellow-600"
+    ></app-stats>
+
+    <!-- Productos sin Imágenes -->
+    <app-stats
+      title="Productos sin Imágenes"
+      [value]="formatNumber(stats.products_without_images || 0)"
+      [smallText]="
+        getGrowthPercentage(stats.noImagesGrowthRate || 0) + ' vs mes anterior'
+      "
+      iconName="image-off"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+  </div>
 
   <!-- Lista de Productos -->
-  <div class="bg-surface rounded-card shadow-card border border-border">
+  <div
+    class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+  >
     <div class="px-6 py-4 border-b border-border">
       <div
         class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
@@ -17,52 +68,31 @@
         <div
           class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
         >
-          <!-- Input de búsqueda compacto -->
+          <!-- Quick search input -->
           <app-inputsearch
-            class="w-full sm:w-64"
+            class="w-full sm:w-64 flex-shrink-0"
             size="sm"
             placeholder="Buscar productos..."
             [debounceTime]="1000"
-            (searchChange)="onSearchChange($event)"
+            [(ngModel)]="searchTerm"
+            (ngModelChange)="onSearchChange($event)"
           ></app-inputsearch>
 
-          <!-- Filtro de estado -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onStateChange($event)"
-            [value]="selectedState"
-          >
-            <option value="">Todos los Estados</option>
-            <option value="active">Activo</option>
-            <option value="inactive">Inactivo</option>
-            <option value="archived">Archivado</option>
-          </select>
+          <!-- Filter dropdown -->
+          <app-product-filter-dropdown
+            [searchTerm]="searchTerm"
+            [selectedState]="selectedState"
+            [selectedCategory]="selectedCategory"
+            [selectedBrand]="selectedBrand"
+            [categories]="categories"
+            [brands]="brands"
+            [isLoading]="isLoading"
+            (filterChange)="onFilterDropdownChange($event)"
+            (clearAllFilters)="clearFilters()"
+          ></app-product-filter-dropdown>
 
-          <!-- Filtro de categoría -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onCategoryChange($event)"
-            [value]="selectedCategory"
-          >
-            <option value="">Todas las Categorías</option>
-            <option *ngFor="let category of categories" [value]="category.id">
-              {{ category.name }}
-            </option>
-          </select>
-
-          <!-- Filtro de marca -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onBrandChange($event)"
-            [value]="selectedBrand"
-          >
-            <option value="">Todas las Marcas</option>
-            <option *ngFor="let brand of brands" [value]="brand.id">
-              {{ brand.name }}
-            </option>
-          </select>
-
-          <div class="flex gap-2 items-center">
+          <!-- Action buttons -->
+          <div class="flex gap-2 items-center ml-auto">
             <app-button
               variant="outline"
               size="sm"

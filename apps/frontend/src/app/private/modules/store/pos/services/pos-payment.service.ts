@@ -139,7 +139,7 @@ export class PosPaymentService {
       discount_amount: 0,
       total_amount: Number(parseFloat(request.amount.toString()).toFixed(2)),
       requires_payment: true,
-      payment_method_id: parseInt(request.paymentMethod.id),
+      store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: Number(
         parseFloat((request.cashReceived || request.amount).toString()).toFixed(
           2,
@@ -220,7 +220,7 @@ export class PosPaymentService {
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
       requires_payment: true,
-      payment_method_id: parseInt(paymentRequest.paymentMethod.id),
+      store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
       amount_received: Number(
         parseFloat(
           (paymentRequest.cashReceived || cartState.summary.total).toString(),
@@ -349,7 +349,6 @@ export class PosPaymentService {
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false,
-      draft: true,
       register_id: 'POS_REGISTER_001',
       seller_user_id: createdBy,
       internal_notes: cartState.notes || '',

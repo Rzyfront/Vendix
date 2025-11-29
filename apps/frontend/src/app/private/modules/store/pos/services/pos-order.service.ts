@@ -227,7 +227,7 @@ export class PosOrderService {
       discount_amount: Number((request.discountAmount || 0).toFixed(2)),
       total_amount: Number(request.amount.toFixed(2)),
       requires_payment: true, // Cash sale
-      payment_method_id: parseInt(request.paymentMethod.id),
+      store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: request.cashReceived
         ? Number(request.cashReceived.toFixed(2))
         : undefined,
