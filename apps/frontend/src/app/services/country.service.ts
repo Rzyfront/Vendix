@@ -11,6 +11,19 @@ export interface Timezone {
   countryCode: string;
 }
 
+// NUEVO
+export interface Department {
+  id: number;
+  name: string;
+}
+
+// NUEVO
+export interface City {
+  id: number;
+  name: string;
+  departmentId: number;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -82,5 +95,35 @@ export class CountryService {
   getTimezoneLabel(value: string): string {
     const timezone = this.timezones.find((tz) => tz.value === value);
     return timezone ? timezone.label : value;
+  }
+
+  // ----------------------------------------------------------------
+  // 🚀 NUEVOS MÉTODOS PARA DEPARTAMENTOS Y CIUDADES (API Colombia)
+  // ----------------------------------------------------------------
+
+  /** Obtiene todos los departamentos */
+  async getDepartments(): Promise<Department[]> {
+    try {
+      const response = await fetch('https://api-colombia.com/api/v1/Department');
+      const data = await response.json();
+      return data;
+
+    } catch (error) {
+      console.error('Error getting departments', error);
+      return [];
+    }
+  }
+
+  /** Obtiene ciudades por ID del departamento */
+  async getCitiesByDepartment(departmentId: number): Promise<City[]> {
+    try {
+      const response = await fetch(
+        `https://api-colombia.com/api/v1/Department/${departmentId}/cities`
+      );
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting cities', error);
+      return [];
+    }
   }
 }
