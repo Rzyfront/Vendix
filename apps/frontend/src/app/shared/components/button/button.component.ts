@@ -5,6 +5,7 @@ export type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'outline'
+  | 'outline-danger'
   | 'ghost'
   | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -131,6 +132,14 @@ export class ButtonComponent {
         'hover:bg-[var(--color-primary)]',
         'hover:text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-primary)]/50',
+      ],
+      'outline-danger': [
+        'border-2',
+        'border-[var(--color-destructive)]',
+        'text-[var(--color-destructive)]',
+        'hover:bg-[var(--color-destructive)]',
+        'hover:text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-destructive)]/50',
       ],
       ghost: [
         'text-[var(--color-text-primary)]',

@@ -1,44 +1,74 @@
-import { Component, ViewChild, OnInit } from '@angular/core';
+import { Component, ViewChild, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
-import { OrdersListComponent } from '../list/orders-list';
-import { OrderDetailsComponent } from '../details/order-details';
-import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
-import { SelectorComponent } from '../../../../../shared/components/selector/selector.component';
-import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { FormsModule } from '@angular/forms';
+import { Subject, takeUntil } from 'rxjs';
+
+// Import components
+import { OrdersListComponent } from '../components/orders-list';
+import { OrderDetailsComponent } from '../components/order-details';
+import { OrderEmptyStateComponent } from '../components/order-empty-state';
+import { OrderFilterDropdownComponent } from '../components/order-filter-dropdown';
+import { OrderStatsComponent } from '../components/order-stats';
+
+// Import shared components
+import {
+  InputsearchComponent,
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../shared/components';
+
+// Import interfaces and services
 import {
   Order,
   OrderQuery,
-  FilterOption,
-  OrderStats,
+  ExtendedOrderStats,
 } from '../interfaces/order.interface';
 import { StoreOrdersService } from '../services/store-orders.service';
-import { Subject, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'app-orders',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     OrdersListComponent,
     OrderDetailsComponent,
+    OrderEmptyStateComponent,
+    OrderFilterDropdownComponent,
+    OrderStatsComponent,
     InputsearchComponent,
-    SelectorComponent,
-    StatsComponent,
+    ButtonComponent,
+    IconComponent,
   ],
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.css'],
 })
-export class OrdersComponent implements OnInit {
+export class OrdersComponent implements OnInit, OnDestroy {
   selectedOrderId: string | null = null;
   showOrderDetails = false;
 
   @ViewChild(OrdersListComponent) ordersList!: OrdersListComponent;
 
   // Stats data
-  orderStats: OrderStats | null = null;
-  isLoadingStats = false;
-  private destroy$ = new Subject<void>();
+  orderStats: ExtendedOrderStats = {
+    total_orders: 0,
+    total_revenue: 0,
+    pending_orders: 0,
+    completed_orders: 0,
+    average_order_value: 0,
+    ordersGrowthRate: 0,
+    pendingGrowthRate: 0,
+    completedGrowthRate: 0,
+    revenueGrowthRate: 0,
+  };
+
+  // Local state for filters
+  searchTerm = '';
+  selectedStatus = '';
+  selectedPaymentStatus = '';
+  selectedDateRange = '';
+  isLoading = false;
 
   // Filters
   filters: OrderQuery = {
@@ -52,41 +82,10 @@ export class OrdersComponent implements OnInit {
     sort_order: 'desc',
   };
 
-  // Filter options
-  statusOptions: FilterOption[] = [
-    { value: 'draft', label: 'Draft' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'confirmed', label: 'Confirmed' },
-    { value: 'preparing', label: 'Preparing' },
-    { value: 'ready', label: 'Ready' },
-    { value: 'shipped', label: 'Shipped' },
-    { value: 'delivered', label: 'Delivered' },
-    { value: 'cancelled', label: 'Cancelled' },
-    { value: 'refunded', label: 'Refunded' },
-    { value: 'returned', label: 'Returned' },
-  ];
+  orders: Order[] = [];
+  totalItems = 0;
 
-  paymentStatusOptions: FilterOption[] = [
-    { value: 'pending', label: 'Pending' },
-    { value: 'processing', label: 'Processing' },
-    { value: 'paid', label: 'Paid' },
-    { value: 'partial', label: 'Partial' },
-    { value: 'overpaid', label: 'Overpaid' },
-    { value: 'failed', label: 'Failed' },
-    { value: 'refunded', label: 'Refunded' },
-    { value: 'disputed', label: 'Disputed' },
-  ];
-
-  dateRangeOptions: FilterOption[] = [
-    { value: 'today', label: 'Today' },
-    { value: 'yesterday', label: 'Yesterday' },
-    { value: 'thisWeek', label: 'This Week' },
-    { value: 'lastWeek', label: 'Last Week' },
-    { value: 'thisMonth', label: 'This Month' },
-    { value: 'lastMonth', label: 'Last Month' },
-    { value: 'thisYear', label: 'This Year' },
-    { value: 'lastYear', label: 'Last Year' },
-  ];
+  private destroy$ = new Subject<void>();
 
   constructor(
     private router: Router,
@@ -103,20 +102,41 @@ export class OrdersComponent implements OnInit {
   }
 
   loadOrderStats(): void {
-    this.isLoadingStats = true;
     this.ordersService
       .getOrderStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (stats: OrderStats) => {
-          this.orderStats = stats;
-          this.isLoadingStats = false;
+        next: (stats: any) => {
+          this.orderStats = {
+            ...stats,
+            ordersGrowthRate: 5.2, // Mock data - should come from backend
+            pendingGrowthRate: -2.1,
+            completedGrowthRate: 8.7,
+            revenueGrowthRate: 12.3,
+          };
         },
         error: (err: any) => {
           console.error('Error loading order stats:', err);
-          this.isLoadingStats = false;
         },
       });
+  }
+
+  get hasFilters(): boolean {
+    return !!(this.searchTerm || this.selectedStatus || this.selectedPaymentStatus || this.selectedDateRange);
+  }
+
+  getEmptyStateTitle(): string {
+    if (this.hasFilters) {
+      return 'No orders match your filters';
+    }
+    return 'No orders found';
+  }
+
+  getEmptyStateDescription(): string {
+    if (this.hasFilters) {
+      return 'Try adjusting your search terms or filters';
+    }
+    return 'Get started by creating your first order.';
   }
 
   // Navigate to POS for new order
@@ -138,30 +158,51 @@ export class OrdersComponent implements OnInit {
 
   // Handle order update from details modal
   onOrderUpdated(updatedOrder: Order): void {
-    // The orders list will automatically refresh when the modal closes
-    // You could emit an event to refresh the list if needed
     console.log('Order updated:', updatedOrder);
   }
 
   // Search functionality
-  onSearch(searchTerm: string): void {
+  onSearchChange(searchTerm: string): void {
+    this.searchTerm = searchTerm;
     this.filters.search = searchTerm;
     this.filters.page = 1;
     this.ordersList.loadOrders();
   }
 
-  // Filter changes
-  onFilterChange(
-    filterType: keyof OrderQuery,
-    value: string | number | null,
-  ): void {
-    if (!value || value === '') {
-      this.filters[filterType] = undefined;
-    } else {
-      this.filters[filterType] = value as any;
-    }
+  // Filter dropdown change
+  onFilterDropdownChange(query: OrderQuery): void {
+    this.selectedStatus = query.status || '';
+    this.selectedPaymentStatus = query.payment_status || '';
+    this.selectedDateRange = query.date_range || '';
+
+    this.filters.status = query.status;
+    this.filters.payment_status = query.payment_status;
+    this.filters.date_range = query.date_range;
     this.filters.page = 1;
+
     this.ordersList.loadOrders();
+  }
+
+  // Clear all filters
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.selectedStatus = '';
+    this.selectedPaymentStatus = '';
+    this.selectedDateRange = '';
+
+    this.filters.search = '';
+    this.filters.status = undefined;
+    this.filters.payment_status = undefined;
+    this.filters.date_range = undefined;
+    this.filters.page = 1;
+
+    this.ordersList.loadOrders();
+  }
+
+  // Refresh orders
+  refreshOrders(): void {
+    this.ordersList.loadOrders();
+    this.loadOrderStats();
   }
 
   // Export orders
@@ -171,8 +212,8 @@ export class OrdersComponent implements OnInit {
 
   // Handle orders loaded event
   onOrdersLoaded(event: any): void {
-    // Handle any post-loading logic if needed
-    console.log('Orders loaded:', event);
+    this.orders = event.orders;
+    this.totalItems = event.totalItems;
   }
 
   // Format currency helper

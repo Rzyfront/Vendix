@@ -1,0 +1,317 @@
+<app-modal
+  [size]="'xl'"
+  [title]="isEditMode ? 'Editar Producto' : 'Crear Nuevo Producto'"
+  [isOpen]="isOpen"
+  (closed)="onCancel()"
+>
+  <!-- Contenedor con scroll unificado -->
+  <div class="modal-content-wrapper">
+    <form [formGroup]="productForm" class="product-form">
+    <!-- Grid principal de 2 columnas -->
+    <div class="form-grid">
+      <!-- Columna Izquierda -->
+      <div class="form-column">
+        <!-- Información Básica -->
+        <div class="form-section">
+          <div class="section-header">
+            <app-icon
+              name="package"
+              [size]="18"
+              class="section-icon"
+            ></app-icon>
+            <h3 class="section-title">Información Básica</h3>
+          </div>
+
+          <div class="form-fields">
+            <app-input
+              label="Nombre del Producto"
+              placeholder="Ingrese el nombre"
+              formControlName="name"
+              [error]="getErrorMessage('name')"
+              [required]="true"
+              size="sm"
+            >
+            </app-input>
+
+            <div class="form-row">
+              <app-input
+                label="SKU"
+                placeholder="Autogenerado"
+                formControlName="sku"
+                [error]="getErrorMessage('sku')"
+                [helperText]="'Opcional'"
+                size="sm"
+                class="flex-1"
+              >
+              </app-input>
+
+              <app-input
+                label="Estado"
+                formControlName="state"
+                [error]="getErrorMessage('state')"
+                size="sm"
+                class="flex-1"
+              >
+              </app-input>
+            </div>
+
+            <app-input
+              label="Slug URL"
+              placeholder="nombre-del-producto"
+              formControlName="slug"
+              [error]="getErrorMessage('slug')"
+              [helperText]="'Amigable para SEO'"
+              size="sm"
+            >
+            </app-input>
+          </div>
+        </div>
+
+        <!-- Pricing -->
+        <div class="form-section">
+          <div class="section-header">
+            <app-icon
+              name="dollar-sign"
+              [size]="18"
+              class="section-icon"
+            ></app-icon>
+            <h3 class="section-title">Precios y Inventario</h3>
+          </div>
+
+          <div class="form-fields">
+            <div class="form-row">
+              <app-input
+                label="Precio Base"
+                type="number"
+                placeholder="0.00"
+                formControlName="base_price"
+                [error]="getErrorMessage('base_price')"
+                [required]="true"
+                [step]="'0.01'"
+                [helperText]="'Sin impuestos'"
+                size="sm"
+                class="flex-1"
+              >
+              </app-input>
+
+              <app-input
+                label="Stock Inicial"
+                type="number"
+                placeholder="0"
+                formControlName="stock_quantity"
+                [error]="getErrorMessage('stock_quantity')"
+                [helperText]="'Unidades disponibles'"
+                size="sm"
+                class="flex-1"
+              >
+              </app-input>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Columna Derecha -->
+      <div class="form-column">
+        <!-- Categorización -->
+        <div class="form-section">
+          <div class="section-header">
+            <app-icon name="tag" [size]="18" class="section-icon"></app-icon>
+            <h3 class="section-title">Categorización</h3>
+          </div>
+
+          <div class="form-fields">
+            <div class="selector-row">
+              <div class="selector-wrapper">
+                <app-selector
+                  label="Categoría"
+                  placeholder="Seleccionar"
+                  [options]="categoryOptions"
+                  formControlName="category_id"
+                  [errorText]="getErrorMessage('category_id')"
+                  [helpText]="'Categoría principal'"
+                  size="sm"
+                >
+                </app-selector>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="isCategoryCreateOpen = true"
+                  class="quick-create-btn"
+                  title="Crear categoría"
+                >
+                  <app-icon name="plus" [size]="14"></app-icon>
+                </app-button>
+              </div>
+
+              <div class="selector-wrapper">
+                <app-selector
+                  label="Marca"
+                  placeholder="Seleccionar"
+                  [options]="brandOptions"
+                  formControlName="brand_id"
+                  [errorText]="getErrorMessage('brand_id')"
+                  [helpText]="'Marca del producto'"
+                  size="sm"
+                >
+                </app-selector>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="isBrandCreateOpen = true"
+                  class="quick-create-btn"
+                  title="Crear marca"
+                >
+                  <app-icon name="plus" [size]="14"></app-icon>
+                </app-button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Imágenes -->
+        <div class="form-section">
+          <div class="section-header">
+            <app-icon name="image" [size]="18" class="section-icon"></app-icon>
+            <h3 class="section-title">Imágenes del Producto</h3>
+          </div>
+
+          <div class="form-fields">
+            <!-- Input de URL -->
+            <div class="image-url-input">
+              <app-input
+                label="Agregar URL de imagen"
+                placeholder="https://ejemplo.com/imagen.jpg"
+                formControlName="newImageUrl"
+                [helperText]="'o arrastre archivos abajo'"
+                size="sm"
+              >
+              </app-input>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="addImageUrl()"
+                [disabled]="!productForm.get('newImageUrl')?.value"
+                class="add-url-btn"
+              >
+                <app-icon name="plus" [size]="14"></app-icon>
+              </app-button>
+            </div>
+
+            <!-- Upload area -->
+            <div class="upload-area" (click)="triggerFileUpload()">
+              <app-icon
+                name="upload"
+                [size]="32"
+                class="upload-icon"
+              ></app-icon>
+              <p class="upload-text">Arrastre imágenes aquí</p>
+              <p class="upload-subtext">o haga clic para seleccionar</p>
+              <input
+                type="file"
+                multiple
+                accept="image/*"
+                (change)="onFileSelect($event)"
+                class="file-input"
+                #fileInput
+              />
+            </div>
+
+            <!-- Preview de imágenes -->
+            <div *ngIf="imageUrls.length > 0" class="images-preview">
+              <div class="images-grid">
+                <div
+                  *ngFor="
+                    let imageUrl of imageUrls;
+                    track imageUrl;
+                    let i = index
+                  "
+                  class="image-item"
+                  [class.main-image]="i === 0"
+                >
+                  <img
+                    [src]="imageUrl"
+                    [alt]="'Imagen ' + (i + 1)"
+                    class="image-thumbnail"
+                    (error)="onImageError($event)"
+                  />
+                  <div class="image-overlay">
+                    <button
+                      type="button"
+                      (click)="removeImage(i)"
+                      class="remove-image-btn"
+                      title="Eliminar imagen"
+                    >
+                      <app-icon name="x" [size]="12"></app-icon>
+                    </button>
+                    <div *ngIf="i === 0" class="main-badge">Principal</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <!-- Descripción (ancho completo) - fuera del grid -->
+  <div class="form-section full-width description-section">
+    <div class="section-header">
+      <app-icon name="file-text" [size]="18" class="section-icon"></app-icon>
+      <h3 class="section-title">Descripción del Producto</h3>
+    </div>
+
+    <div class="form-fields">
+      <app-input
+        label="Descripción detallada"
+        placeholder="Describa las características, beneficios y usos del producto..."
+        formControlName="description"
+        [error]="getErrorMessage('description')"
+        [helperText]="'Incluya detalles que ayuden al cliente a decidir'"
+        size="sm"
+      >
+      </app-input>
+    </div>
+  </div>
+  </div>
+
+  <!-- Footer del modal usando slot del componente app-modal -->
+  <div slot="footer" class="modal-footer">
+    <div class="footer-actions">
+      <app-button
+        variant="outline-danger"
+        size="md"
+        (clicked)="onCancel()"
+        [disabled]="isSubmitting"
+      >
+        Cancelar
+      </app-button>
+
+      <app-button
+        variant="primary"
+        size="md"
+        (clicked)="onSubmit()"
+        [loading]="isSubmitting"
+        [disabled]="productForm.invalid"
+      >
+        <app-icon name="save" [size]="16" slot="icon"></app-icon>
+        {{ isEditMode ? "Actualizar Producto" : "Crear Producto" }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>
+
+<!-- Modales auxiliares -->
+<app-category-quick-create
+  [isOpen]="isCategoryCreateOpen"
+  (openChange)="isCategoryCreateOpen = $event"
+  (created)="onCategoryCreated($event)"
+  (cancel)="isCategoryCreateOpen = false"
+></app-category-quick-create>
+
+<app-brand-quick-create
+  [isOpen]="isBrandCreateOpen"
+  (openChange)="isBrandCreateOpen = $event"
+  (created)="onBrandCreated($event)"
+  (cancel)="isBrandCreateOpen = false"
+></app-brand-quick-create>

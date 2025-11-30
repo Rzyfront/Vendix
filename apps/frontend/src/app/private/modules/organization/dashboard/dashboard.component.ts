@@ -5,6 +5,7 @@ import {
   ChartData,
   ChartOptions,
   IconComponent,
+  CHART_THEMES,
 } from '../../../../shared/components';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
 import { ActivatedRoute } from '@angular/router';
@@ -226,9 +227,10 @@ import { takeUntil } from 'rxjs/operators';
           <div class="p-6">
             <app-chart
               [data]="revenueChartData"
-              type="line"
+              type="area"
               size="medium"
-              [options]="revenueChartOptions"
+              [theme]="CHART_THEMES['corporate']"
+              [animated]="true"
             >
             </app-chart>
           </div>
@@ -253,7 +255,8 @@ import { takeUntil } from 'rxjs/operators';
                 [data]="storeDistributionData"
                 type="doughnut"
                 size="small"
-                [options]="pieChartOptions"
+                [theme]="CHART_THEMES['vibrant']"
+                [animated]="true"
               >
               </app-chart>
               <!-- Center Text Overlay -->
@@ -496,7 +499,7 @@ import { takeUntil } from 'rxjs/operators';
                       Sucursal del aeropuerto
                     </p>
                     <p class="text-xs" style="color: var(--muted-foreground);">
-                     Servicios
+                      Servicios
                     </p>
                   </div>
                 </div>
@@ -536,6 +539,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     '#ec4899',
   ];
   storeDistributionLegend: any[] = [];
+  CHART_THEMES = CHART_THEMES;
 
   // Revenue Chart Data - Stacked Line Chart
   revenueChartData: ChartData = {

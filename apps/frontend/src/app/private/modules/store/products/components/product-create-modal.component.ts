@@ -17,11 +17,11 @@ import {
 } from '../../../../../shared/components';
 import {
   CreateProductDto,
-  UpdateProductDto,
   CreateProductImageDto,
   ProductCategory,
   Brand,
   Product,
+  ProductState,
 } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
@@ -43,304 +43,8 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
   ],
-  template: `
-    <app-modal
-      [size]="'lg'"
-      [title]="isEditMode ? 'Editar Producto' : 'Crear Nuevo Producto'"
-      [isOpen]="isOpen"
-      (closed)="onCancel()"
-    >
-      <form [formGroup]="productForm" class="space-y-6">
-        <!-- Basic Information -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
-          >
-            <app-icon name="package" [size]="20" class="mr-2"></app-icon>
-            Información Básica
-          </h3>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Nombre del Producto"
-              placeholder="Ingrese el nombre del producto"
-              formControlName="name"
-              [error]="getErrorMessage('name')"
-              [required]="true"
-            >
-            </app-input>
-
-            <app-input
-              label="SKU"
-              placeholder="Ingrese SKU (opcional)"
-              formControlName="sku"
-              [error]="getErrorMessage('sku')"
-              [helperText]="'Dejar vacío para autogenerar'"
-            >
-            </app-input>
-          </div>
-
-          <app-input
-            label="Slug"
-            placeholder="Ingrese slug (opcional)"
-            formControlName="slug"
-            [error]="getErrorMessage('slug')"
-            [helperText]="'Versión amigable para URL del nombre'"
-          >
-          </app-input>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">
-              Descripción
-            </label>
-            <textarea
-              formControlName="description"
-              rows="4"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              placeholder="Ingrese la descripción del producto"
-            >
-            </textarea>
-            @if (description?.invalid && description?.touched) {
-              <p class="mt-1 text-sm text-red-600">
-                La descripción es requerida
-              </p>
-            }
-          </div>
-        </div>
-
-        <!-- Pricing and Inventory -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
-          >
-            <app-icon name="dollar-sign" [size]="20" class="mr-2"></app-icon>
-            Pricing & Inventory
-          </h3>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Base Price"
-              type="number"
-              placeholder="0.00"
-              formControlName="base_price"
-              [error]="getErrorMessage('base_price')"
-              [required]="true"
-              [helperText]="'Base price without taxes'"
-              [step]="'0.01'"
-            >
-            </app-input>
-
-            <app-input
-              label="Initial Stock"
-              type="number"
-              placeholder="0"
-              formControlName="stock_quantity"
-              [error]="getErrorMessage('stock_quantity')"
-              [helperText]="'Initial stock quantity'"
-            >
-            </app-input>
-          </div>
-        </div>
-
-        <!-- Categories and Brand -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
-          >
-            <app-icon name="tag" [size]="20" class="mr-2"></app-icon>
-            Categories & Brand
-          </h3>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="flex items-start gap-2">
-              <div class="flex-grow">
-                <app-selector
-                  label="Primary Category"
-                  placeholder="Select a category (optional)"
-                  [options]="categoryOptions"
-                  formControlName="category_id"
-                  [helpText]="'Primary product category'"
-                  [errorText]="getErrorMessage('category_id')"
-                >
-                </app-selector>
-              </div>
-              <button
-                type="button"
-                class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                (click)="isCategoryCreateOpen = true"
-                title="Crear nueva categoría"
-              >
-                <app-icon name="plus" [size]="20"></app-icon>
-              </button>
-            </div>
-
-            <div class="flex items-start gap-2">
-              <div class="flex-grow">
-                <app-selector
-                  label="Brand"
-                  placeholder="Select a brand (optional)"
-                  [options]="brandOptions"
-                  formControlName="brand_id"
-                  [helpText]="'Product brand (optional)'"
-                  [errorText]="getErrorMessage('brand_id')"
-                >
-                </app-selector>
-              </div>
-              <button
-                type="button"
-                class="mt-7 p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                (click)="isBrandCreateOpen = true"
-                title="Crear nueva marca"
-              >
-                <app-icon name="plus" [size]="20"></app-icon>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Product Images -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2"
-          >
-            <app-icon name="image" [size]="20" class="mr-2"></app-icon>
-            Product Images
-          </h3>
-
-          <div class="space-y-4">
-            <!-- Image URL Input -->
-            <div class="flex gap-2">
-              <app-input
-                label="Agregar URL de Imagen"
-                placeholder="https://example.com/image.jpg"
-                formControlName="newImageUrl"
-                [helperText]="'Enter image URL or use the file upload below'"
-                class="flex-1"
-              >
-              </app-input>
-              <app-button
-                variant="outline"
-                (clicked)="addImageUrl()"
-                [disabled]="!productForm.get('newImageUrl')?.value"
-                class="mt-6"
-              >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                Agregar
-              </app-button>
-            </div>
-
-            <!-- File Upload -->
-            <div
-              class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors"
-            >
-              <app-icon
-                name="upload"
-                [size]="48"
-                class="mx-auto text-gray-400 mb-4"
-              ></app-icon>
-              <p class="text-sm text-gray-600 mb-2">
-                Drag and drop images here, or click to select files
-              </p>
-              <input
-                type="file"
-                multiple
-                accept="image/*"
-                (change)="onFileSelect($event)"
-                class="hidden"
-                #fileInput
-              />
-              <app-button
-                variant="outline"
-                (clicked)="fileInput.click()"
-                type="button"
-              >
-                <app-icon name="folder-open" [size]="16" slot="icon"></app-icon>
-                Select Files
-              </app-button>
-            </div>
-
-            <!-- Image Preview -->
-            @if (imageUrls.length > 0) {
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                @for (imageUrl of imageUrls; track imageUrl; let i = $index) {
-                  <div class="relative group">
-                    <img
-                      [src]="imageUrl"
-                      [alt]="'Product image ' + (i + 1)"
-                      class="w-full h-32 object-cover rounded-lg border border-gray-200"
-                      (error)="onImageError($event)"
-                    />
-                    <button
-                      type="button"
-                      (click)="removeImage(i)"
-                      class="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <app-icon name="x" [size]="16"></app-icon>
-                    </button>
-                    @if (i === 0) {
-                      <div
-                        class="absolute bottom-2 left-2 bg-blue-500 text-white text-xs px-2 py-1 rounded"
-                      >
-                        Main
-                      </div>
-                    }
-                  </div>
-                }
-              </div>
-            }
-          </div>
-        </div>
-      </form>
-
-      <div
-        class="flex justify-between items-center pt-6 border-t border-gray-200"
-      >
-        <div class="text-sm text-gray-500">
-          <app-icon name="info" [size]="14" class="mr-1"></app-icon>
-          Required fields are marked with *
-        </div>
-        <div class="flex space-x-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-            [disabled]="isSubmitting"
-          >
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [loading]="isSubmitting"
-            [disabled]="productForm.invalid"
-          >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
-            {{ isEditMode ? 'Actualizar Producto' : 'Crear Producto' }}
-          </app-button>
-        </div>
-      </div>
-    </app-modal>
-
-    <app-category-quick-create
-      [isOpen]="isCategoryCreateOpen"
-      (openChange)="isCategoryCreateOpen = $event"
-      (created)="onCategoryCreated($event)"
-      (cancel)="isCategoryCreateOpen = false"
-    ></app-category-quick-create>
-
-    <app-brand-quick-create
-      [isOpen]="isBrandCreateOpen"
-      (openChange)="isBrandCreateOpen = $event"
-      (created)="onBrandCreated($event)"
-      (cancel)="isBrandCreateOpen = false"
-    ></app-brand-quick-create>
-  `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-    `,
-  ],
+  templateUrl: './product-create-modal/product-create-modal.component.html',
+  styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
 })
 export class ProductCreateModalComponent {
   @Input() isOpen = false;
@@ -353,6 +57,7 @@ export class ProductCreateModalComponent {
   get isEditMode(): boolean {
     return !!this.product;
   }
+
   productForm: FormGroup;
   imageUrls: string[] = [];
   categoryOptions: SelectorOption[] = [];
@@ -390,6 +95,7 @@ export class ProductCreateModalComponent {
       stock_quantity: [0, [Validators.min(0)]],
       category_id: [null],
       brand_id: [null],
+      state: [ProductState.ACTIVE],
       newImageUrl: [''],
     });
   }
@@ -412,6 +118,7 @@ export class ProductCreateModalComponent {
       stock_quantity: this.product.stock_quantity || 0,
       category_id: this.product.category_id || null,
       brand_id: this.product.brand_id || null,
+      state: this.product.state || ProductState.ACTIVE,
     });
 
     // Load existing images
@@ -476,6 +183,11 @@ export class ProductCreateModalComponent {
     this.cancel.emit();
   }
 
+  triggerFileUpload(): void {
+    const fileInput = document.querySelector('.file-input') as HTMLInputElement;
+    fileInput?.click();
+  }
+
   addImageUrl(): void {
     const urlControl = this.productForm.get('newImageUrl');
     const url = urlControl?.value?.trim();
@@ -515,7 +227,7 @@ export class ProductCreateModalComponent {
   onImageError(event: Event): void {
     const img = event.target as HTMLImageElement;
     img.src =
-      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0xMiA2VjEwTDEwIDhMMTIgNlpNMTIgNlYxMEwxNCA4TDEyIDZaIiBmaWxsPSIjOUNBM0FGIi8+CjxwYXRoIGQ9Ik0xMiAxNFYxOEwxMCAxNkwxMiAxNFpNMTIgMTRWMThMMTQgMTZMMTIgMTRaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPgo=';
+      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjRNEY2Ii8+CjxwYXRoIGQ9Ik0xMiA2VjEwTDEwIDhMMTIgNlpNMTIgNlYxMEwxNCA4TDEyIDZaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPgo=';
   }
 
   private isValidUrl(string: string): boolean {
@@ -555,6 +267,7 @@ export class ProductCreateModalComponent {
           : undefined,
       category_id: formValue.category_id ? Number(formValue.category_id) : null,
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
+      state: formValue.state || ProductState.ACTIVE,
       images: images.length > 0 ? images : undefined,
     };
 
@@ -610,34 +323,5 @@ export class ProductCreateModalComponent {
     }
 
     return 'Invalid input';
-  }
-
-  // Getters for template access
-  get name() {
-    return this.productForm.get('name');
-  }
-  get slug() {
-    return this.productForm.get('slug');
-  }
-  get description() {
-    return this.productForm.get('description');
-  }
-  get base_price() {
-    return this.productForm.get('base_price');
-  }
-  get sku() {
-    return this.productForm.get('sku');
-  }
-  get stock_quantity() {
-    return this.productForm.get('stock_quantity');
-  }
-  get category_id() {
-    return this.productForm.get('category_id');
-  }
-  get brand_id() {
-    return this.productForm.get('brand_id');
-  }
-  get newImageUrl() {
-    return this.productForm.get('newImageUrl');
   }
 }

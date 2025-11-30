@@ -48,4 +48,10 @@ export type {
   SelectorSize,
   SelectorVariant,
 } from './selector/selector.component';
-export type { ChartData, ChartOptions } from './chart';
+export type {
+  ChartData,
+  ChartOptions,
+  ExtendedChartType,
+  ChartTheme,
+} from './chart';
+export { CHART_THEMES } from './chart';

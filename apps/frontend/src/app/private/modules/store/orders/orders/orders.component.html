@@ -1,140 +1,107 @@
-<div class="p-6">
-  <!-- Header -->
-  <div class="mb-6">
-    <h1 class="text-3xl font-bold text-gray-900 mb-2">Orders Management</h1>
-    <p class="text-gray-600">
-      Manage customer orders, fulfillment, and tracking
-    </p>
-  </div>
+<div class="space-y-6">
+  <!-- Tarjetas de Estadísticas -->
+  <app-order-stats [stats]="orderStats"></app-order-stats>
 
-  <!-- Order Statistics -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-    <!-- Total Orders -->
-    <app-stats
-      title="Total Orders"
-      [value]="orderStats?.total_orders || 0"
-      iconName="shopping-cart"
-      iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"
-    >
-    </app-stats>
-
-    <!-- Total Revenue -->
-    <app-stats
-      title="Total Revenue"
-      [value]="formatCurrency(orderStats?.total_revenue || 0)"
-      iconName="dollar-sign"
-      iconBgColor="bg-green-100"
-      iconColor="text-green-600"
-    >
-    </app-stats>
-
-    <!-- Pending Orders -->
-    <app-stats
-      title="Pending Orders"
-      [value]="orderStats?.pending_orders || 0"
-      iconName="clock"
-      iconBgColor="bg-yellow-100"
-      iconColor="text-yellow-600"
-    >
-    </app-stats>
-
-    <!-- Completed Orders -->
-    <app-stats
-      title="Completed Orders"
-      [value]="orderStats?.completed_orders || 0"
-      iconName="check-circle"
-      iconBgColor="bg-emerald-100"
-      iconColor="text-emerald-600"
-    >
-    </app-stats>
-  </div>
-
-  <!-- Loading State -->
-  <div *ngIf="isLoadingStats" class="flex justify-center items-center py-12">
-    <div
-      class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
-    ></div>
-  </div>
-
-  <!-- Main Orders Card -->
-  <div class="bg-white rounded-lg shadow-sm border">
-    <!-- Card Header with Search, Filters and Actions -->
-    <div class="border-b px-6 py-4">
+  <!-- Lista de Órdenes -->
+  <div
+    class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+  >
+    <div class="px-6 py-4 border-b border-border">
       <div
-        class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
       >
-        <!-- Search and Filters -->
-        <div
-          class="flex-1 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4"
-        >
-          <!-- Search -->
-          <div class="lg:col-span-2">
-            <app-inputsearch
-              placeholder="Search by order ID, customer name, email..."
-              (search)="onSearch($event)"
-            ></app-inputsearch>
-          </div>
-
-          <!-- Status Filter -->
-          <app-selector
-            [options]="statusOptions"
-            placeholder="All Status"
-            (valueChange)="onFilterChange('status', $event)"
-          ></app-selector>
-
-          <!-- Payment Status Filter -->
-          <app-selector
-            [options]="paymentStatusOptions"
-            placeholder="All Payment Status"
-            (valueChange)="onFilterChange('payment_status', $event)"
-          ></app-selector>
-
-          <!-- Date Range Filter -->
-          <app-selector
-            [options]="dateRangeOptions"
-            placeholder="All Time"
-            (valueChange)="onFilterChange('date_range', $event)"
-          ></app-selector>
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            Todas las Órdenes ({{ totalItems }})
+          </h2>
         </div>
 
-        <!-- Actions -->
-        <div class="flex items-center gap-2">
-          <button
-            (click)="exportOrders()"
-            class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Export CSV
-          </button>
-          <button
-            (click)="createNewOrder()"
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-          >
-            <svg
-              class="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
+          <!-- Quick search input -->
+          <app-inputsearch
+            class="w-full sm:w-64 flex-shrink-0"
+            size="sm"
+            placeholder="Buscar órdenes..."
+            [debounceTime]="1000"
+            [(ngModel)]="searchTerm"
+            (ngModelChange)="onSearchChange($event)"
+          ></app-inputsearch>
+
+          <!-- Filter dropdown -->
+          <app-order-filter-dropdown
+            [selectedStatus]="selectedStatus"
+            [selectedPaymentStatus]="selectedPaymentStatus"
+            [selectedDateRange]="selectedDateRange"
+            [isLoading]="isLoading"
+            (filterChange)="onFilterDropdownChange($event)"
+            (clearAllFilters)="clearFilters()"
+          ></app-order-filter-dropdown>
+
+          <!-- Action buttons -->
+          <div class="flex gap-2 items-center ml-auto">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshOrders()"
+              [disabled]="isLoading"
+              title="Actualizar"
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 4v16m8-8H4"
-              ></path>
-            </svg>
-            New Order
-          </button>
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="exportOrders()"
+              title="Exportar CSV"
+            >
+              <app-icon name="download" [size]="16" slot="icon"></app-icon>
+              <span class="hidden sm:inline">Exportar CSV</span>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="createNewOrder()"
+              title="Nueva Orden"
+            >
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <span class="hidden sm:inline">Nueva Orden</span>
+            </app-button>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Orders Table -->
-    <app-orders-list
-      [filters]="filters"
-      (viewOrder)="viewOrderDetails($event)"
-      (ordersLoaded)="onOrdersLoaded($event)"
-    ></app-orders-list>
+    <!-- Estado de Carga -->
+    <div *ngIf="isLoading" class="p-8 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Cargando órdenes...</p>
+    </div>
+
+    <!-- Estado Vacío -->
+    <app-order-empty-state
+      *ngIf="!isLoading && orders.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      [showAdditionalActions]="hasFilters"
+      [actionButtonText]="'Crear Primera Orden'"
+      (actionClick)="createNewOrder()"
+      (refreshClick)="refreshOrders()"
+      (clearFiltersClick)="clearFilters()"
+    >
+    </app-order-empty-state>
+
+    <!-- Tabla de Órdenes -->
+    <div *ngIf="!isLoading && orders.length > 0" class="p-6">
+      <app-orders-list
+        [filters]="filters"
+        (viewOrder)="viewOrderDetails($event)"
+        (ordersLoaded)="onOrdersLoaded($event)"
+      ></app-orders-list>
+    </div>
   </div>
 
   <!-- Order Details Modal -->

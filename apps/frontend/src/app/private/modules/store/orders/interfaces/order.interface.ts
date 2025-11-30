@@ -358,3 +358,14 @@ export interface CreateStockTransferRequest {
   transferReason?: string;
   notes?: string;
 }
+
+// Extended OrderStats with growth rates
+// Note: These properties are calculated on the frontend
+// and not part of the backend response
+
+export interface ExtendedOrderStats extends OrderStats {
+  ordersGrowthRate?: number;
+  pendingGrowthRate?: number;
+  completedGrowthRate?: number;
+  revenueGrowthRate?: number;
+}

@@ -1181,6 +1181,7 @@ enum payment_methods_type_enum {
   card
   paypal
   bank_transfer
+  voucher
 }
 
 enum fee_type_enum {

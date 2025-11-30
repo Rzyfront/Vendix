@@ -116,6 +116,44 @@ async function seedSystemPaymentMethods() {
       },
       supported_currencies: ['USD', 'MXN', 'COP'],
     },
+    {
+      name: 'payment_vouchers',
+      display_name: 'Vouchers de Pago',
+      description: 'Vouchers o cupones de pago prepagados',
+      type: 'voucher',
+      provider: 'internal',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['allow_validation'],
+        properties: {
+          allow_validation: {
+            type: 'boolean',
+            description: 'Permitir validación de vouchers',
+          },
+          require_verification: {
+            type: 'boolean',
+            description: 'Requerir verificación de vouchers',
+          },
+          voucher_prefix: {
+            type: 'string',
+            description: 'Prefijo para códigos de voucher',
+          },
+          min_amount: {
+            type: 'number',
+            description: 'Monto mínimo del voucher',
+          },
+          max_amount: {
+            type: 'number',
+            description: 'Monto máximo del voucher',
+          },
+        },
+      },
+      supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
+      processing_fee_type: 'fixed',
+      processing_fee_value: 0,
+    },
   ];
 
   for (const method of systemMethods) {

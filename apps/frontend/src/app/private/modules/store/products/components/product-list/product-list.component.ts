@@ -24,8 +24,8 @@ import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade'
 // Import existing components
 import {
   ProductEmptyStateComponent,
-  ProductCreateModalComponent,
   ProductFilterDropdownComponent,
+  ProductCreateModalComponent,
 } from '../index';
 
 // Import shared components

@@ -1,0 +1,362 @@
+// Modal de Creación de Producto - Diseño Compacto y Simétrico
+@use "../../../../../../shared/components/_constants.scss" as constants;
+
+// Contenedor principal sin scroll (el modal ya lo maneja)
+.modal-content-wrapper {
+  display: flex;
+  flex-direction: column;
+  // Sin max-height ni overflow para usar el scroll del modal
+}
+
+.product-form {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  gap: 1.5rem;
+  font-family: var(--font-primary);
+}
+
+// Grid principal de 2 columnas
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  min-height: 0; // Para que las columnas crezcan igual
+}
+
+.form-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-height: 0; // Permitir que las columnas se contraigan
+}
+
+// Secciones del formulario
+.form-section {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  transition: all 0.2s ease;
+  flex-shrink: 0; // Evitar que las secciones se compriman excesivamente
+
+  &:hover {
+    border-color: var(--color-primary) / 20;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+
+  &.full-width {
+    grid-column: 1 / -1; // Ocupa todo el ancho (solo aplica dentro del grid)
+  }
+
+  &.description-section {
+    margin: 1.5rem; // Mantener espaciado consistente con el formulario
+    margin-bottom: 0; // Reducir espacio inferior antes del footer
+  }
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.section-icon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.section-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+// Filas de formularios compactos
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+// Selectores con botones de creación rápida
+.selector-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.selector-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  position: relative;
+
+  .quick-create-btn {
+    position: absolute;
+    top: 1.75rem;
+    right: 0.5rem;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    z-index: 10;
+  }
+}
+
+// Input de URL de imagen
+.image-url-input {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+
+  .add-url-btn {
+    flex-shrink: 0;
+    margin-bottom: 0.25rem; // Alineación con el input
+  }
+}
+
+// Área de upload de imágenes
+.upload-area {
+  border: 2px dashed var(--color-border);
+  border-radius: 0.5rem;
+  padding: 2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  background-color: var(--color-surface);
+
+  &:hover {
+    border-color: var(--color-primary);
+    background-color: var(--color-primary) / 5;
+  }
+
+  .upload-icon {
+    color: var(--color-text-secondary);
+    margin-bottom: 0.75rem;
+  }
+
+  .upload-text {
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--color-text-primary);
+    margin: 0 0 0.25rem 0;
+  }
+
+  .upload-subtext {
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+    margin: 0;
+  }
+
+  .file-input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+}
+
+// Preview de imágenes
+.images-preview {
+  margin-top: 1rem;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0.75rem;
+}
+
+.image-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--color-primary);
+    transform: scale(1.05);
+  }
+
+  &.main-image {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary) / 20;
+  }
+}
+
+.image-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0.25rem;
+}
+
+.image-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 60%, rgba(0, 0, 0, 0.7));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  border-radius: 0.375rem;
+
+  .image-item:hover & {
+    opacity: 1;
+  }
+}
+
+.remove-image-btn {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  background-color: var(--color-destructive);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background-color: var(--color-destructive) / 80;
+    transform: scale(1.1);
+  }
+}
+
+.main-badge {
+  position: absolute;
+  bottom: 0.25rem;
+  left: 0.25rem;
+  background-color: var(--color-primary);
+  color: var(--color-text-on-primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+// Estilos para el footer dentro del modal
+[slot="footer"] {
+  // Forzar alineación a la derecha con mayor especificidad
+  div.modal-footer {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 0.875rem;
+    padding: 1rem 1.5rem;
+  }
+
+  .footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+}
+
+// Responsive design
+@media (max-width: 1024px) {
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .selector-row {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .selector-wrapper .quick-create-btn {
+    position: static;
+    width: auto;
+    margin-top: 0.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .product-form {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .form-section {
+    padding: 0.75rem;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .footer-actions {
+    justify-content: stretch;
+  }
+
+  .footer-actions app-button {
+    flex: 1;
+  }
+}
+
+// Mejoras de contraste y accesibilidad
+.form-section {
+  // Asegurar buen contraste
+  .section-title {
+    color: var(--color-text-primary);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  // Estados focus mejorados
+  &:focus-within {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary) / 20;
+  }
+}
+
+// Animaciones sutiles
+.form-section {
+  animation: slideInUp 0.3s ease-out;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// Optimización para imágenes grandes
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0.75rem;
+  padding: 0.25rem;
+}

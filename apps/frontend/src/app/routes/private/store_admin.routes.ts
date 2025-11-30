@@ -71,14 +71,14 @@ export const storeAdminRoutes: Routes = [
             path: 'list',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/list/orders-list'
+                '../../private/modules/store/orders/components/orders-list'
               ).then((c) => c.OrdersListComponent),
           },
           {
             path: ':id',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/details/order-details'
+                '../../private/modules/store/orders/components/order-details'
               ).then((c) => c.OrderDetailsComponent),
           },
         ],
