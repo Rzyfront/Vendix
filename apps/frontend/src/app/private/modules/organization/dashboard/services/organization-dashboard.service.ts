@@ -89,125 +89,13 @@ export class OrganizationDashboardService {
     const params = period ? `?period=${period}` : '';
     return this.http
       .get<OrganizationDashboardStats>(
-        `${this.apiUrl}/organizations/${organizationId}/stats${params}`,
+        `${this.apiUrl}/organization/organizations/${organizationId}/stats${params}`,
       )
       .pipe(
         catchError((error) => {
           console.error('Error fetching organization dashboard stats:', error);
           return throwError(
             () => new Error('Failed to fetch organization dashboard stats'),
-          );
-        }),
-      );
-  }
-
-  getStoresStats(organizationId: string): Observable<any> {
-    return this.http
-      .get(`${this.apiUrl}/organizations/${organizationId}/stores/stats`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching organization stores stats:', error);
-          return throwError(() => new Error('Failed to fetch stores stats'));
-        }),
-      );
-  }
-
-  getUsersStats(organizationId: string): Observable<any> {
-    return this.http
-      .get(`${this.apiUrl}/organizations/${organizationId}/users/stats`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching organization users stats:', error);
-          return throwError(() => new Error('Failed to fetch users stats'));
-        }),
-      );
-  }
-
-  getOrdersStats(organizationId: string): Observable<any> {
-    return this.http
-      .get(`${this.apiUrl}/organizations/${organizationId}/orders/stats`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching organization orders stats:', error);
-          return throwError(() => new Error('Failed to fetch orders stats'));
-        }),
-      );
-  }
-
-  getRevenueStats(
-    organizationId: string,
-    period: 'week' | 'month' | 'year' = 'month',
-  ): Observable<any> {
-    return this.http
-      .get(
-        `${this.apiUrl}/organizations/${organizationId}/revenue/stats?period=${period}`,
-      )
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching organization revenue stats:', error);
-          return throwError(() => new Error('Failed to fetch revenue stats'));
-        }),
-      );
-  }
-
-  getTopStores(
-    organizationId: string,
-    limit: number = 5,
-  ): Observable<TopStore[]> {
-    return this.http
-      .get<
-        TopStore[]
-      >(`${this.apiUrl}/organizations/${organizationId}/stores/top?limit=${limit}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching top stores:', error);
-          return throwError(() => new Error('Failed to fetch top stores'));
-        }),
-      );
-  }
-
-  getRecentOrders(
-    organizationId: string,
-    limit: number = 10,
-  ): Observable<RecentOrder[]> {
-    return this.http
-      .get<
-        RecentOrder[]
-      >(`${this.apiUrl}/organizations/${organizationId}/orders/recent?limit=${limit}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching recent orders:', error);
-          return throwError(() => new Error('Failed to fetch recent orders'));
-        }),
-      );
-  }
-
-  getUserActivity(
-    organizationId: string,
-    period: 'week' | 'month' = 'week',
-  ): Observable<UserActivity[]> {
-    return this.http
-      .get<
-        UserActivity[]
-      >(`${this.apiUrl}/organizations/${organizationId}/users/activity?period=${period}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching user activity:', error);
-          return throwError(() => new Error('Failed to fetch user activity'));
-        }),
-      );
-  }
-
-  getStoreCategories(organizationId: string): Observable<StoreDistribution[]> {
-    return this.http
-      .get<
-        StoreDistribution[]
-      >(`${this.apiUrl}/organizations/${organizationId}/stores/categories`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching store categories:', error);
-          return throwError(
-            () => new Error('Failed to fetch store categories'),
           );
         }),
       );

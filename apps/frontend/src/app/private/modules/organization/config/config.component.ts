@@ -16,7 +16,9 @@ import { RouterModule } from '@angular/router';
           routerLink="/organization/config/application"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Configuración de la aplicación</h3>
+          <h3 class="text-lg font-semibold mb-2">
+            Configuración de la aplicación
+          </h3>
           <p class="text-gray-600">Configuración general de la aplicación</p>
         </a>
 

@@ -108,7 +108,7 @@
   right: 0;
   bottom: 0;
   background-color: #ccc;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 34px;
 }
 
@@ -120,7 +120,7 @@
   left: 4px;
   bottom: 4px;
   background-color: white;
-  transition: .4s;
+  transition: 0.4s;
   border-radius: 50%;
 }
 
@@ -136,14 +136,16 @@ input:checked + .slider:before {
   display: grid;
   gap: 1rem;
 
-  @media (min-width: 48em) {  /* 768px */
+  @media (min-width: 48em) {
+    /* 768px */
     grid-template-columns: repeat(2, 1fr);
   }
 }
 
 .form-field {
   &.full-width {
-    @media (min-width: 48em) {  /* 768px */
+    @media (min-width: 48em) {
+      /* 768px */
       grid-column: span 2;
     }
   }
@@ -177,7 +179,7 @@ input:checked + .slider:before {
   position: relative;
 
   &::after {
-    content: '';
+    content: "";
     position: absolute;
     top: 50%;
     right: 0.75rem;

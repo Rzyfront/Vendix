@@ -28,7 +28,7 @@ export interface Permission {
 export enum PermissionStatus {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
-  DEPRECATED = 'deprecated'
+  DEPRECATED = 'deprecated',
 }
 
 export interface CreateRoleDto {
@@ -65,7 +65,7 @@ export enum HttpMethod {
   DELETE = 'DELETE',
   PATCH = 'PATCH',
   OPTIONS = 'OPTIONS',
-  HEAD = 'HEAD'
+  HEAD = 'HEAD',
 }
 
 export interface RoleQueryDto {

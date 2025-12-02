@@ -627,7 +627,8 @@
 }
 
 // Responsive design mejorado
-@media (max-width: 48em) {  /* 768px */
+@media (max-width: 48em) {
+  /* 768px */
   .table-container {
     border-radius: var(--radius-sm);
 
@@ -662,7 +663,8 @@
   }
 }
 
-@media (max-width: 30em) {  /* 480px */
+@media (max-width: 30em) {
+  /* 480px */
   .table-container {
     border-radius: var(--radius-sm);
 

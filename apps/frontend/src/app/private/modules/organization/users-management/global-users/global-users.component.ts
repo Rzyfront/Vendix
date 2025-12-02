@@ -8,7 +8,7 @@ import {
   UserState,
   PaginatedUsersResponse,
 } from '../../users/interfaces/user.interface';
-import { GlobalUsersService } from './services/global-users.service';
+import { GlobalUsersService } from '../../../super-admin/users/services/global-users.service';
 import { UserStatsService } from './services/user-stats.service';
 import {
   UserStatsComponent,

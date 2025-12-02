@@ -11,7 +11,8 @@ import { CommonModule } from '@angular/common';
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Aquí se mostrarán las previsiones de demanda y los análisis predictivos.
+          Aquí se mostrarán las previsiones de demanda y los análisis
+          predictivos.
         </p>
       </div>
     </div>

@@ -6,42 +6,42 @@ export function createBaseSelectors<T>(featureName: string) {
 
   const selectData = createSelector(
     selectFeatureState,
-    (state: BaseState<T>): T | null => state.data
+    (state: BaseState<T>): T | null => state.data,
   );
 
   const selectLoading = createSelector(
     selectFeatureState,
-    (state: BaseState<T>): boolean => state.loading
+    (state: BaseState<T>): boolean => state.loading,
   );
 
   const selectError = createSelector(
     selectFeatureState,
-    (state: BaseState<T>): any => state.error
+    (state: BaseState<T>): any => state.error,
   );
 
   const selectLastUpdated = createSelector(
     selectFeatureState,
-    (state: BaseState<T>): Date | null => state.lastUpdated
+    (state: BaseState<T>): Date | null => state.lastUpdated,
   );
 
   const selectHasData = createSelector(
     selectData,
-    (data: T | null): boolean => data !== null
+    (data: T | null): boolean => data !== null,
   );
 
   const selectIsLoading = createSelector(
     selectLoading,
-    (loading: boolean): boolean => loading
+    (loading: boolean): boolean => loading,
   );
 
   const selectHasError = createSelector(
     selectError,
-    (error: any): boolean => error !== null
+    (error: any): boolean => error !== null,
   );
 
   const selectState = createSelector(
     selectFeatureState,
-    (state: BaseState<T>) => state
+    (state: BaseState<T>) => state,
   );
 
   return {
@@ -53,22 +53,24 @@ export function createBaseSelectors<T>(featureName: string) {
     selectHasData,
     selectIsLoading,
     selectHasError,
-    selectState
+    selectState,
   };
 }
 
 // Utility selectors for common patterns
-export const selectDataById = (id: string) => createSelector(
-  (state: any) => state.data,
-  (data: any[]) => data?.find(item => item.id === id) || null
-);
+export const selectDataById = (id: string) =>
+  createSelector(
+    (state: any) => state.data,
+    (data: any[]) => data?.find((item) => item.id === id) || null,
+  );
 
-export const selectDataByProperty = (property: string, value: any) => createSelector(
-  (state: any) => state.data,
-  (data: any[]) => data?.filter(item => item[property] === value) || []
-);
+export const selectDataByProperty = (property: string, value: any) =>
+  createSelector(
+    (state: any) => state.data,
+    (data: any[]) => data?.filter((item) => item[property] === value) || [],
+  );
 
 export const selectDataCount = createSelector(
   (state: any) => state.data,
-  (data: any[]) => data?.length || 0
+  (data: any[]) => data?.length || 0,
 );

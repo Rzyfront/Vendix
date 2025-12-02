@@ -69,7 +69,7 @@
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
-    min-width: 17.5rem;  /* 280px */
+    min-width: 17.5rem; /* 280px */
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: 0.75rem;
@@ -187,7 +187,8 @@
   }
 }
 
-@media (max-width: 48em) {  /* 768px */
+@media (max-width: 48em) {
+  /* 768px */
   .user-dropdown-container {
     .user-trigger {
       padding: 6px 8px;
@@ -205,7 +206,7 @@
     }
 
     .dropdown-menu {
-      min-width: 15rem;  /* 240px */
+      min-width: 15rem; /* 240px */
       right: -0.75rem;
     }
   }

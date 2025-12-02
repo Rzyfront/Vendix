@@ -3,7 +3,7 @@ import { BehaviorSubject, fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class FullscreenService implements OnDestroy {
   private isFullscreen$ = new BehaviorSubject<boolean>(false);
@@ -97,21 +97,25 @@ export class FullscreenService implements OnDestroy {
    * Verifica si el navegador soporta fullscreen
    */
   isFullscreenSupported(): boolean {
-    return !!(document.fullscreenEnabled ||
-             (document as any).webkitFullscreenEnabled ||
-             (document as any).mozFullScreenEnabled ||
-             (document as any).msFullscreenEnabled);
+    return !!(
+      document.fullscreenEnabled ||
+      (document as any).webkitFullscreenEnabled ||
+      (document as any).mozFullScreenEnabled ||
+      (document as any).msFullscreenEnabled
+    );
   }
 
   /**
    * Obtiene el elemento actualmente en fullscreen
    */
   getFullscreenElement(): Element | null {
-    return document.fullscreenElement ||
-           (document as any).webkitFullscreenElement ||
-           (document as any).mozFullScreenElement ||
-           (document as any).msFullscreenElement ||
-           null;
+    return (
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement ||
+      null
+    );
   }
 
   /**
@@ -126,10 +130,10 @@ export class FullscreenService implements OnDestroy {
       'fullscreenchange',
       'webkitfullscreenchange',
       'mozfullscreenchange',
-      'MSFullscreenChange'
+      'MSFullscreenChange',
     ];
 
-    events.forEach(eventName => {
+    events.forEach((eventName) => {
       const cleanup = this.ngZone.runOutsideAngular(() => {
         return fromEvent(document, eventName).subscribe(() => {
           this.ngZone.run(() => {
@@ -168,32 +172,38 @@ export class FullscreenService implements OnDestroy {
   /**
    * Obtiene el método correcto para requestFullscreen según el navegador
    */
-  private getRequestFullscreenMethod(element: Element): ((element: Element) => Promise<void>) | null {
-    return (element as any).requestFullscreen ||
-           (element as any).webkitRequestFullscreen ||
-           (element as any).webkitRequestFullScreen ||
-           (element as any).mozRequestFullScreen ||
-           (element as any).msRequestFullscreen ||
-           null;
+  private getRequestFullscreenMethod(
+    element: Element,
+  ): ((element: Element) => Promise<void>) | null {
+    return (
+      (element as any).requestFullscreen ||
+      (element as any).webkitRequestFullscreen ||
+      (element as any).webkitRequestFullScreen ||
+      (element as any).mozRequestFullScreen ||
+      (element as any).msRequestFullscreen ||
+      null
+    );
   }
 
   /**
    * Obtiene el método correcto para exitFullscreen según el navegador
    */
   private getExitFullscreenMethod(): (() => Promise<void>) | null {
-    return (document as any).exitFullscreen ||
-           (document as any).webkitExitFullscreen ||
-           (document as any).webkitCancelFullScreen ||
-           (document as any).mozCancelFullScreen ||
-           (document as any).msExitFullscreen ||
-           null;
+    return (
+      (document as any).exitFullscreen ||
+      (document as any).webkitExitFullscreen ||
+      (document as any).webkitCancelFullScreen ||
+      (document as any).mozCancelFullScreen ||
+      (document as any).msExitFullscreen ||
+      null
+    );
   }
 
   /**
    * Limpia los event listeners al destruir el servicio
    */
   ngOnDestroy(): void {
-    this.eventListeners.forEach(cleanup => cleanup());
+    this.eventListeners.forEach((cleanup) => cleanup());
     this.eventListeners = [];
   }
 }

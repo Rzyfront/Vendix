@@ -1,7 +1,7 @@
 import { Controller, Get, Post, HttpCode, HttpStatus } from '@nestjs/common';
 import { AppService } from './app.service';
-import { Public } from './modules/auth/decorators/public.decorator';
-import { PrismaService } from './prisma/prisma.service';
+import { Public } from './domains/auth/decorators/public.decorator';
+import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -11,7 +11,7 @@ const execPromise = promisify(exec);
 export class AppController {
   constructor(
     private readonly appService: AppService,
-    private readonly prisma: PrismaService,
+    private readonly prisma: GlobalPrismaService,
   ) {}
 
   @Public()

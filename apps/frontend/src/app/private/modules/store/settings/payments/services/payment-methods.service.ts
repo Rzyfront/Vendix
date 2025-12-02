@@ -16,7 +16,7 @@ import {
   providedIn: 'root',
 })
 export class PaymentMethodsService {
-  private readonly api_base_url = 'api';
+  private readonly api_base_url = 'store';
   private current_store_id = new BehaviorSubject<string | null>(null);
 
   constructor(private http: HttpClient) {}

@@ -27,7 +27,7 @@ export type {
   StoreTableColumn,
   StoreTableAction,
   StoreStats,
-  PaginatedStoresResponse
+  PaginatedStoresResponse,
 } from './interfaces/store.interface';
 
 // Enums

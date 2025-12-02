@@ -11,7 +11,8 @@ import { CommonModule } from '@angular/common';
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-         Los registros de auditoría de acceso y los informes de seguridad se mostrarán aquí.
+          Los registros de auditoría de acceso y los informes de seguridad se
+          mostrarán aquí.
         </p>
       </div>
     </div>

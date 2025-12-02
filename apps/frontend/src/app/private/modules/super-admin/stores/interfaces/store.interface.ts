@@ -3,7 +3,7 @@ export enum StoreType {
   ONLINE = 'online',
   HYBRID = 'hybrid',
   POPUP = 'popup',
-  KIOSKO = 'kiosko'
+  KIOSKO = 'kiosko',
 }
 
 export enum StoreState {
@@ -11,7 +11,7 @@ export enum StoreState {
   INACTIVE = 'inactive',
   DRAFT = 'draft',
   SUSPENDED = 'suspended',
-  ARCHIVED = 'archived'
+  ARCHIVED = 'archived',
 }
 
 export interface Store {

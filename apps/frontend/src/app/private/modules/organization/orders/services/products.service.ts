@@ -97,16 +97,22 @@ export class ProductsService {
     if (request.sort_by) params.set('sort_by', request.sort_by);
     if (request.sort_order) params.set('sort_order', request.sort_order);
 
-    return this.http.get<ProductSearchResponse>(`${this.baseUrl}/products`, {
-      params,
-    });
+    return this.http.get<ProductSearchResponse>(
+      `${this.baseUrl}/organization/products`,
+      {
+        params,
+      },
+    );
   }
 
   getProductById(id: number, store_id?: number): Observable<Product> {
     const params = new HttpParams();
     if (store_id) params.set('store_id', store_id.toString());
 
-    return this.http.get<Product>(`${this.baseUrl}/products/${id}`, { params });
+    return this.http.get<Product>(
+      `${this.baseUrl}/organization/products/${id}`,
+      { params },
+    );
   }
 
   getProductVariants(
@@ -117,7 +123,7 @@ export class ProductsService {
     if (store_id) params.set('store_id', store_id.toString());
 
     return this.http.get<ProductVariant[]>(
-      `${this.baseUrl}/products/${productId}/variants`,
+      `${this.baseUrl}/organization/products/${productId}/variants`,
       { params },
     );
   }
@@ -137,7 +143,7 @@ export class ProductsService {
     if (store_id) params.set('store_id', store_id.toString());
 
     return this.http.get<any>(
-      `${this.baseUrl}/products/${productId}/inventory`,
+      `${this.baseUrl}/organization/products/${productId}/inventory`,
       { params },
     );
   }

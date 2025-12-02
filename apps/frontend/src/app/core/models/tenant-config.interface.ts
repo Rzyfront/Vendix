@@ -110,19 +110,19 @@ export interface FeatureFlags {
   // Vendix features
   onboarding: boolean;
   superAdmin: boolean;
-  
+
   // Organization features
   multiStore: boolean;
   userManagement: boolean;
   analytics: boolean;
-  
+
   // Store features
   inventory: boolean;
   pos: boolean;
   orders: boolean;
   customers: boolean;
   reports: boolean;
-  
+
   // E-commerce features
   guestCheckout: boolean;
   wishlist: boolean;
@@ -130,7 +130,7 @@ export interface FeatureFlags {
   coupons: boolean;
   shipping: boolean;
   payments: boolean;
-  
+
   // Dynamic features
   [key: string]: boolean;
 }

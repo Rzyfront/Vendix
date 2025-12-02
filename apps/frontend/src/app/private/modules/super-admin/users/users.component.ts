@@ -9,6 +9,7 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
+import { GlobalUsersService } from './services/global-users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,

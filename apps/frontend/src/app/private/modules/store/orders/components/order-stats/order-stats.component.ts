@@ -10,7 +10,7 @@ import { ExtendedOrderStats } from '../../interfaces/order.interface';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   templateUrl: './order-stats.component.html',
-  styleUrls: ['./order-stats.component.scss']
+  styleUrls: ['./order-stats.component.scss'],
 })
 export class OrderStatsComponent {
   @Input() stats: ExtendedOrderStats = {

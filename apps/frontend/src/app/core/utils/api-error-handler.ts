@@ -1,6 +1,6 @@
 /**
  * Utilidad para manejo de errores de API con estructura estandarizada
- * 
+ *
  * Estructura de respuesta de API:
  * {
  *   success: boolean,
@@ -41,7 +41,12 @@ export interface NormalizedApiPayload {
 export function extractApiErrorMessage(response: any): string {
   // Algunos errores HTTP vienen envueltos en un HttpErrorResponse donde
   // el body real está en `response.error`. Normalizamos ese caso primero.
-  if (response && typeof response === 'object' && response.error && typeof response.error === 'object') {
+  if (
+    response &&
+    typeof response === 'object' &&
+    response.error &&
+    typeof response.error === 'object'
+  ) {
     // Reemplazamos `response` por su body para continuar con la extracción
     response = response.error;
   }
@@ -52,7 +57,11 @@ export function extractApiErrorMessage(response: any): string {
 
     if (!apiResponse.success) {
       // Caso 1: Si hay un objeto error con mensaje
-      if (apiResponse.error && typeof apiResponse.error === 'object' && apiResponse.error.message) {
+      if (
+        apiResponse.error &&
+        typeof apiResponse.error === 'object' &&
+        apiResponse.error.message
+      ) {
         return apiResponse.error.message;
       }
       // Caso 2: Si error es un string
@@ -72,7 +81,7 @@ export function extractApiErrorMessage(response: any): string {
       return apiResponse.message || 'Operación completada';
     }
   }
-  
+
   // Para errores HTTP estándar
   if (response && typeof response === 'object' && 'status' in response) {
     switch (response.status) {
@@ -98,12 +107,12 @@ export function extractApiErrorMessage(response: any): string {
         return `Error ${response.status}: ${response.message || 'Error desconocido'}`;
     }
   }
-  
+
   // Para errores genéricos
   if (response && typeof response === 'object' && 'message' in response) {
     return response.message as string;
   }
-  
+
   // Valor por defecto
   return 'Error desconocido';
 }
@@ -138,7 +147,11 @@ export function normalizeApiPayload(response: any): NormalizedApiPayload {
   // Extraer `error` si existe y es string o contiene message
   if (typeof response.error === 'string') {
     payload.error = response.error;
-  } else if (response.error && typeof response.error === 'object' && response.error.message) {
+  } else if (
+    response.error &&
+    typeof response.error === 'object' &&
+    response.error.message
+  ) {
     payload.error = response.error.message;
   }
 

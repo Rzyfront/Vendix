@@ -24,7 +24,7 @@ export type {
   providedIn: 'root',
 })
 export class PosPaymentService {
-  private readonly apiUrl = `${environment.apiUrl}/payments/pos`;
+  private readonly apiUrl = `${environment.apiUrl}/store/payments/pos`;
   private readonly PAYMENT_METHODS: PaymentMethod[] = [
     {
       id: 'cash',

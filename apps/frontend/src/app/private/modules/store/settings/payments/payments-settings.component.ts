@@ -63,7 +63,9 @@ import {
       </div>
 
       <!-- Payment Methods List -->
-      <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
+      <div
+        class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+      >
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"

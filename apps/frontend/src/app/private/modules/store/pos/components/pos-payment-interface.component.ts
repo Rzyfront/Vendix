@@ -80,12 +80,20 @@ interface PaymentState {
       }
 
       .payment-method-card:hover::before {
-        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
       }
 
       .payment-method-card.selected {
         border-color: var(--color-primary);
-        background: linear-gradient(135deg, var(--color-primary-light), rgba(126, 215, 165, 0.05));
+        background: linear-gradient(
+          135deg,
+          var(--color-primary-light),
+          rgba(126, 215, 165, 0.05)
+        );
         box-shadow:
           var(--shadow-md),
           0 0 0 1px rgba(126, 215, 165, 0.2),
@@ -93,7 +101,11 @@ interface PaymentState {
       }
 
       .payment-method-card.selected::before {
-        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
       }
 
       /* Enhanced Keypad Buttons with Better Accessibility */
@@ -105,7 +117,11 @@ interface PaymentState {
         font-family: var(--font-primary);
         border: 2px solid var(--color-border);
         border-radius: var(--radius-md);
-        background: linear-gradient(135deg, var(--color-surface), rgba(248, 250, 252, 0.8));
+        background: linear-gradient(
+          135deg,
+          var(--color-surface),
+          rgba(248, 250, 252, 0.8)
+        );
         color: var(--color-text-primary);
         cursor: pointer;
         transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -124,7 +140,11 @@ interface PaymentState {
       }
 
       .keypad-btn:hover:not(:disabled) {
-        background: linear-gradient(135deg, var(--color-primary-light), rgba(126, 215, 165, 0.15));
+        background: linear-gradient(
+          135deg,
+          var(--color-primary-light),
+          rgba(126, 215, 165, 0.15)
+        );
         border-color: var(--color-primary);
         transform: translateY(-1px);
         box-shadow: var(--shadow-md);
@@ -143,7 +163,8 @@ interface PaymentState {
 
       /* Credit Sale Special Styling */
       .credit-sale-card {
-        background: linear-gradient(135deg,
+        background: linear-gradient(
+          135deg,
           rgba(251, 146, 60, 0.08),
           rgba(251, 146, 60, 0.02)
         );
@@ -163,7 +184,8 @@ interface PaymentState {
 
       /* Enhanced Payment Summary Card */
       .payment-summary-enhanced {
-        background: linear-gradient(135deg,
+        background: linear-gradient(
+          135deg,
           var(--color-surface),
           rgba(126, 215, 165, 0.02)
         );
@@ -180,12 +202,17 @@ interface PaymentState {
         left: 0;
         right: 0;
         height: 2px;
-        background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
       }
 
       /* Enhanced Change Display */
       .change-display-enhanced {
-        background: linear-gradient(135deg,
+        background: linear-gradient(
+          135deg,
           rgba(34, 197, 94, 0.12),
           rgba(34, 197, 94, 0.04)
         );
@@ -230,7 +257,9 @@ interface PaymentState {
         background: rgba(126, 215, 165, 0.1);
         border-radius: 50%;
         transform: translate(-50%, -50%);
-        transition: width 0.3s ease, height 0.3s ease;
+        transition:
+          width 0.3s ease,
+          height 0.3s ease;
       }
 
       .quick-amount-btn:hover::before {
@@ -267,13 +296,18 @@ interface PaymentState {
         transform: translateY(-50%);
         width: 4px;
         height: 1.5rem;
-        background: linear-gradient(180deg, var(--color-primary), var(--color-accent));
+        background: linear-gradient(
+          180deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
         border-radius: 2px;
       }
 
       /* Enhanced Payment Details Section */
       .payment-details-enhanced {
-        background: linear-gradient(135deg,
+        background: linear-gradient(
+          135deg,
           var(--color-surface),
           rgba(6, 182, 212, 0.02)
         );
@@ -290,7 +324,11 @@ interface PaymentState {
         left: 0;
         right: 0;
         height: 2px;
-        background: linear-gradient(90deg, var(--color-accent), var(--color-primary));
+        background: linear-gradient(
+          90deg,
+          var(--color-accent),
+          var(--color-primary)
+        );
       }
 
       /* Enhanced Input Styling */

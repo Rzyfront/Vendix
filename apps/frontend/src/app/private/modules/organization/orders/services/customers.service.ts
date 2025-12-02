@@ -72,18 +72,23 @@ export class CustomersService {
     if (request.sort_by) params.set('sort_by', request.sort_by);
     if (request.sort_order) params.set('sort_order', request.sort_order);
 
-    return this.http.get<CustomerSearchResponse>(`${this.baseUrl}/customers`, {
-      params,
-    });
+    return this.http.get<CustomerSearchResponse>(
+      `${this.baseUrl}/organization/customers`,
+      {
+        params,
+      },
+    );
   }
 
   getCustomerById(id: number): Observable<Customer> {
-    return this.http.get<Customer>(`${this.baseUrl}/customers/${id}`);
+    return this.http.get<Customer>(
+      `${this.baseUrl}/organization/customers/${id}`,
+    );
   }
 
   getCustomerAddresses(customerId: number): Observable<CustomerAddress[]> {
     return this.http.get<CustomerAddress[]>(
-      `${this.baseUrl}/customers/${customerId}/addresses`,
+      `${this.baseUrl}/organization/customers/${customerId}/addresses`,
     );
   }
 

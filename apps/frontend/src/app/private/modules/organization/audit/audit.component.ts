@@ -40,7 +40,9 @@ import { RouterModule } from '@angular/router';
           routerLink="/organization/audit/backup"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Copia de seguridad y recuperación</h3>
+          <h3 class="text-lg font-semibold mb-2">
+            Copia de seguridad y recuperación
+          </h3>
           <p class="text-gray-600">Gestión de copias de seguridad de datos</p>
         </a>
       </div>

@@ -59,7 +59,7 @@ export class StoresService {
     if (query?.organization_id)
       params = params.set('organization_id', query.organization_id.toString());
 
-    const url = `${this.apiUrl}/admin/stores`;
+    const url = `${this.apiUrl}/superadmin/stores`;
     console.log(
       'Fetching stores from:',
       url,
@@ -75,7 +75,7 @@ export class StoresService {
    */
   getStoreById(id: number): Observable<ApiResponse<Store>> {
     return this.http.get<ApiResponse<Store>>(
-      `${this.apiUrl}/admin/stores/${id}`,
+      `${this.apiUrl}/superadmin/stores/${id}`,
     );
   }
 
@@ -84,7 +84,7 @@ export class StoresService {
    */
   getStoreBySlug(slug: string): Observable<ApiResponse<Store>> {
     return this.http.get<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/slug/${slug}`,
+      `${this.apiUrl}/superadmin/stores/slug/${slug}`,
     );
   }
 
@@ -93,7 +93,7 @@ export class StoresService {
    */
   createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
     return this.http.post<ApiResponse<Store>>(
-      `${this.apiUrl}/admin/stores`,
+      `${this.apiUrl}/superadmin/stores`,
       data,
     );
   }
@@ -106,7 +106,7 @@ export class StoresService {
     data: UpdateStoreDto,
   ): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/admin/stores/${id}`,
+      `${this.apiUrl}/superadmin/stores/${id}`,
       data,
     );
   }
@@ -116,7 +116,7 @@ export class StoresService {
    */
   deleteStore(id: number): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(
-      `${this.apiUrl}/admin/stores/${id}`,
+      `${this.apiUrl}/superadmin/stores/${id}`,
     );
   }
 
@@ -135,7 +135,7 @@ export class StoresService {
       params = params.set('end_date', dashboardData.end_date);
 
     return this.http.get<ApiResponse<StoreDashboardResponse>>(
-      `${this.apiUrl}/stores/${id}/stats`,
+      `${this.apiUrl}/superadmin/stores/${id}/stats`,
       { params },
     );
   }
@@ -153,7 +153,7 @@ export class StoresService {
     }>
   > {
     return this.http.get<ApiResponse<any>>(
-      `${this.apiUrl}/admin/stores/dashboard`,
+      `${this.apiUrl}/superadmin/stores/dashboard`,
     );
   }
 
@@ -190,7 +190,7 @@ export class StoresService {
     formData.append('logo', file);
 
     return this.http.post<ApiResponse<{ logo_url: string }>>(
-      `${this.apiUrl}/stores/${storeId}/logo`,
+      `${this.apiUrl}/superadmin/stores/${storeId}/logo`,
       formData,
     );
   }
@@ -206,7 +206,7 @@ export class StoresService {
     formData.append('banner', file);
 
     return this.http.post<ApiResponse<{ banner_url: string }>>(
-      `${this.apiUrl}/stores/${storeId}/banner`,
+      `${this.apiUrl}/superadmin/stores/${storeId}/banner`,
       formData,
     );
   }
@@ -219,7 +219,7 @@ export class StoresService {
     settingsData: StoreSettingsUpdateDto,
   ): Observable<ApiResponse<Store['settings']>> {
     return this.http.patch<ApiResponse<Store['settings']>>(
-      `${this.apiUrl}/stores/${storeId}/settings`,
+      `${this.apiUrl}/superadmin/stores/${storeId}/settings`,
       settingsData,
     );
   }
@@ -229,7 +229,7 @@ export class StoresService {
    */
   activateStore(id: number): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}/activate`,
+      `${this.apiUrl}/superadmin/stores/${id}/activate`,
       {},
     );
   }
@@ -239,7 +239,7 @@ export class StoresService {
    */
   deactivateStore(id: number): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}/deactivate`,
+      `${this.apiUrl}/superadmin/stores/${id}/deactivate`,
       {},
     );
   }
@@ -250,7 +250,7 @@ export class StoresService {
   suspendStore(id: number, reason?: string): Observable<ApiResponse<Store>> {
     const body = reason ? { reason } : {};
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}/suspend`,
+      `${this.apiUrl}/superadmin/stores/${id}/suspend`,
       body,
     );
   }
@@ -260,7 +260,7 @@ export class StoresService {
    */
   archiveStore(id: number): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}/archive`,
+      `${this.apiUrl}/superadmin/stores/${id}/archive`,
       {},
     );
   }

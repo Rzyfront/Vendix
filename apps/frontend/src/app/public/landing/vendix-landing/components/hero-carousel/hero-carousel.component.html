@@ -1,8 +1,10 @@
 <div class="hero-carousel-container">
   <!-- Slide Display -->
-  <div class="hero-slide"
-       *ngFor="let slide of slides; let i = index"
-       [class.active]="i === currentSlideIndex">
+  <div
+    class="hero-slide"
+    *ngFor="let slide of slides; let i = index"
+    [class.active]="i === currentSlideIndex"
+  >
     <div class="slide-image-container">
       <img [src]="slide.image" [alt]="slide.message" class="slide-image" />
       <div class="slide-overlay"></div>
@@ -21,9 +23,18 @@
               <a
                 [href]="slide.buttonLink"
                 class="slide-btn-primary"
-                [routerLink]="slide.buttonLink.startsWith('/') ? slide.buttonLink : null"
-                [attr.target]="slide.buttonLink.startsWith('mailto') ? '_blank' : null"
-                [attr.rel]="slide.buttonLink.startsWith('mailto') ? 'noopener noreferrer' : null">
+                [routerLink]="
+                  slide.buttonLink.startsWith('/') ? slide.buttonLink : null
+                "
+                [attr.target]="
+                  slide.buttonLink.startsWith('mailto') ? '_blank' : null
+                "
+                [attr.rel]="
+                  slide.buttonLink.startsWith('mailto')
+                    ? 'noopener noreferrer'
+                    : null
+                "
+              >
                 {{ slide.buttonText }}
               </a>
             } @else {
@@ -36,8 +47,17 @@
               <a
                 [href]="slide.secondaryButtonLink"
                 class="slide-btn-secondary"
-                [attr.target]="slide.secondaryButtonLink.startsWith('mailto') ? '_blank' : null"
-                [attr.rel]="slide.secondaryButtonLink.startsWith('mailto') ? 'noopener noreferrer' : null">
+                [attr.target]="
+                  slide.secondaryButtonLink.startsWith('mailto')
+                    ? '_blank'
+                    : null
+                "
+                [attr.rel]="
+                  slide.secondaryButtonLink.startsWith('mailto')
+                    ? 'noopener noreferrer'
+                    : null
+                "
+              >
                 {{ slide.secondaryButtonText }}
               </a>
             } @else {
@@ -51,7 +71,6 @@
     </div>
   </div>
 
-  
   <!-- Pagination -->
   <div class="carousel-pagination">
     <button
@@ -59,7 +78,7 @@
       class="pagination-bullet"
       [class.active]="i === currentSlideIndex"
       (click)="goToSlide(i)"
-      [attr.aria-label]="'Go to slide ' + (i + 1)">
-    </button>
+      [attr.aria-label]="'Go to slide ' + (i + 1)"
+    ></button>
   </div>
 </div>

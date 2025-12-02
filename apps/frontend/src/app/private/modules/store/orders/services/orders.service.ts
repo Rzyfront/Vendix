@@ -32,7 +32,7 @@ export class OrdersService {
     });
 
     return this.http
-      .get<PaginatedOrdersResponse>(`${this.api_url}/orders`, {
+      .get<PaginatedOrdersResponse>(`${this.api_url}/store/orders`, {
         params,
       })
       .pipe(
@@ -47,7 +47,7 @@ export class OrdersService {
    * Get order by ID
    */
   getOrderById(id: number): Observable<Order> {
-    return this.http.get<Order>(`${this.api_url}/orders/${id}`).pipe(
+    return this.http.get<Order>(`${this.api_url}/store/orders/${id}`).pipe(
       catchError((error) => {
         console.error('Error fetching order:', error);
         throw error;
@@ -59,7 +59,7 @@ export class OrdersService {
    * Create a new order
    */
   createOrder(order: Partial<Order>): Observable<Order> {
-    return this.http.post<Order>(`${this.api_url}/orders`, order).pipe(
+    return this.http.post<Order>(`${this.api_url}/store/orders`, order).pipe(
       catchError((error) => {
         console.error('Error creating order:', error);
         throw error;
@@ -71,19 +71,21 @@ export class OrdersService {
    * Update an existing order
    */
   updateOrder(id: number, order: Partial<Order>): Observable<Order> {
-    return this.http.patch<Order>(`${this.api_url}/orders/${id}`, order).pipe(
-      catchError((error) => {
-        console.error('Error updating order:', error);
-        throw error;
-      }),
-    );
+    return this.http
+      .patch<Order>(`${this.api_url}/store/orders/${id}`, order)
+      .pipe(
+        catchError((error) => {
+          console.error('Error updating order:', error);
+          throw error;
+        }),
+      );
   }
 
   /**
    * Delete an order
    */
   deleteOrder(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.api_url}/orders/${id}`).pipe(
+    return this.http.delete<void>(`${this.api_url}/store/orders/${id}`).pipe(
       catchError((error) => {
         console.error('Error deleting order:', error);
         throw error;
@@ -95,7 +97,7 @@ export class OrdersService {
    * Get order statistics
    */
   getOrderStats(): Observable<OrderStats> {
-    return this.http.get<OrderStats>(`${this.api_url}/orders/stats`).pipe(
+    return this.http.get<OrderStats>(`${this.api_url}/store/orders/stats`).pipe(
       catchError((error) => {
         console.error('Error fetching order stats:', error);
         throw error;
@@ -108,7 +110,7 @@ export class OrdersService {
    */
   updateOrderStatus(id: number, status: string): Observable<Order> {
     return this.http
-      .patch<Order>(`${this.api_url}/orders/${id}/status`, {
+      .patch<Order>(`${this.api_url}/store/orders/${id}/status`, {
         status,
       })
       .pipe(
@@ -136,7 +138,7 @@ export class OrdersService {
 
     return this.http
       .get<PaginatedOrdersResponse>(
-        `${this.api_url}/orders?customer_id=${customer_id}`,
+        `${this.api_url}/store/orders?customer_id=${customer_id}`,
         { params },
       )
       .pipe(

@@ -18,7 +18,7 @@ import {
 })
 export class ProductService {
   private readonly http = inject(HttpClient);
-  private readonly API_URL = `${environment.apiUrl}/products`;
+  private readonly API_URL = `${environment.apiUrl}/store/products`;
 
   // BehaviorSubject for real-time updates
   private productsSubject = new BehaviorSubject<Product[]>([]);

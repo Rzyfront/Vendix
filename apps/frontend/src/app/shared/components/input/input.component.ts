@@ -40,7 +40,10 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <label
         *ngIf="label"
         [for]="inputId"
-        [class]="'block text-sm font-medium text-[var(--color-text-primary)] mb-2 ' + customLabelClass"
+        [class]="
+          'block text-sm font-medium text-[var(--color-text-primary)] mb-2 ' +
+          customLabelClass
+        "
       >
         {{ label }}
         <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"

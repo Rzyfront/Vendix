@@ -68,7 +68,7 @@ export class OrganizationStoresService {
 
     // Organization scoping is handled automatically by backend
     return this.http.get<PaginatedResponse<StoreListItem[]>>(
-      `${this.apiUrl}/stores`,
+      `${this.apiUrl}/organization/stores`,
       { params },
     );
   }
@@ -81,7 +81,7 @@ export class OrganizationStoresService {
   ): Observable<ApiResponse<Store>> {
     // Organization scoping is handled automatically by backend
     return this.http.post<ApiResponse<Store>>(
-      `${this.apiUrl}/stores`,
+      `${this.apiUrl}/organization/stores`,
       storeData,
     );
   }
@@ -94,7 +94,7 @@ export class OrganizationStoresService {
     storeData: UpdateStoreDto,
   ): Observable<ApiResponse<Store>> {
     return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/stores/${id}`,
+      `${this.apiUrl}/organization/stores/${id}`,
       storeData,
     );
   }
@@ -103,7 +103,9 @@ export class OrganizationStoresService {
    * Delete a store (only if belongs to current organization)
    */
   deleteStore(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(`${this.apiUrl}/stores/${id}`);
+    return this.http.delete<ApiResponse<void>>(
+      `${this.apiUrl}/organization/stores/${id}`,
+    );
   }
 
   /**
@@ -125,7 +127,7 @@ export class OrganizationStoresService {
     }
 
     return this.http.get<ApiResponse<StoreDashboardResponse>>(
-      `${this.apiUrl}/stores/${id}/stats`,
+      `${this.apiUrl}/organization/stores/${id}/stats`,
       { params },
     );
   }
@@ -135,7 +137,7 @@ export class OrganizationStoresService {
    */
   getOrganizationStoreStats(): Observable<ApiResponse<StoreStats>> {
     return this.http.get<ApiResponse<StoreStats>>(
-      `${this.apiUrl}/stores/stats`,
+      `${this.apiUrl}/organization/stores/stats`,
     );
   }
 
@@ -147,7 +149,7 @@ export class OrganizationStoresService {
     settings: StoreSettingsUpdateDto,
   ): Observable<ApiResponse<any>> {
     return this.http.patch<ApiResponse<any>>(
-      `${this.apiUrl}/stores/${id}/settings`,
+      `${this.apiUrl}/organization/stores/${id}/settings`,
       settings,
     );
   }

@@ -21,23 +21,30 @@ export class ConfigEffects {
       switchMap(() =>
         // Usamos from() para convertir la Promise de setupConfig en un Observable
         from(this.appConfigService.setupConfig()).pipe(
-          map(config => ConfigActions.initializeAppSuccess({ config })),
-          catchError(error => of(ConfigActions.initializeAppFailure({ error })))
-        )
-      )
-    )
+          map((config) => ConfigActions.initializeAppSuccess({ config })),
+          catchError((error) =>
+            of(ConfigActions.initializeAppFailure({ error })),
+          ),
+        ),
+      ),
+    ),
   );
 
-  initializeAppSuccess$ = createEffect(() =>
-    this.actions$.pipe(
-      ofType(ConfigActions.initializeAppSuccess),
-      tap(({ config }) => {
-        // Una vez que la configuración es exitosa, podemos realizar tareas secundarias
-        // como aplicar el tema y actualizar otros stores.
-        this.themeService.applyAppConfiguration(config);
-        this.store.dispatch(TenantActions.setDomainConfig({ domainConfig: config.domainConfig }));
-      })
-    ),
-    { dispatch: false } // No despachamos nuevas acciones desde aquí
+  initializeAppSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(ConfigActions.initializeAppSuccess),
+        tap(({ config }) => {
+          // Una vez que la configuración es exitosa, podemos realizar tareas secundarias
+          // como aplicar el tema y actualizar otros stores.
+          this.themeService.applyAppConfiguration(config);
+          this.store.dispatch(
+            TenantActions.setDomainConfig({
+              domainConfig: config.domainConfig,
+            }),
+          );
+        }),
+      ),
+    { dispatch: false }, // No despachamos nuevas acciones desde aquí
   );
 }

@@ -60,7 +60,7 @@ export interface SearchResult {
   providedIn: 'root',
 })
 export class PosProductService {
-  private readonly apiUrl = `${environment.apiUrl}/products`;
+  private readonly apiUrl = `${environment.apiUrl}/store/products`;
   private categories: Category[] = [];
   private brands: Brand[] = [];
   private searchHistory$ = new BehaviorSubject<string[]>([]);

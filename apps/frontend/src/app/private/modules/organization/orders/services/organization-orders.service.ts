@@ -68,7 +68,7 @@ export class OrganizationOrdersService {
     if (query?.sort) params = params.set('sort', query.sort);
     if (query?.order) params = params.set('order', query.order);
 
-    const url = `${this.apiUrl}/orders`;
+    const url = `${this.apiUrl}/organization/orders`;
     console.log(
       'Fetching orders from:',
       url,
@@ -83,7 +83,9 @@ export class OrganizationOrdersService {
    * Get order by ID
    */
   getOrderById(id: string): Observable<OrderResponse> {
-    return this.http.get<OrderResponse>(`${this.apiUrl}/orders/${id}`);
+    return this.http.get<OrderResponse>(
+      `${this.apiUrl}/organization/orders/${id}`,
+    );
   }
 
   /**
@@ -91,7 +93,7 @@ export class OrganizationOrdersService {
    */
   getOrderByNumber(orderNumber: string): Observable<OrderResponse> {
     return this.http.get<OrderResponse>(
-      `${this.apiUrl}/orders/number/${orderNumber}`,
+      `${this.apiUrl}/organization/orders/number/${orderNumber}`,
     );
   }
 
@@ -99,21 +101,29 @@ export class OrganizationOrdersService {
    * Create a new order
    */
   createOrder(data: CreateOrderDto): Observable<OrderResponse> {
-    return this.http.post<OrderResponse>(`${this.apiUrl}/orders`, data);
+    return this.http.post<OrderResponse>(
+      `${this.apiUrl}/organization/orders`,
+      data,
+    );
   }
 
   /**
    * Update an existing order
    */
   updateOrder(id: string, data: UpdateOrderDto): Observable<OrderResponse> {
-    return this.http.patch<OrderResponse>(`${this.apiUrl}/orders/${id}`, data);
+    return this.http.patch<OrderResponse>(
+      `${this.apiUrl}/organization/orders/${id}`,
+      data,
+    );
   }
 
   /**
    * Delete an order
    */
   deleteOrder(id: string): Observable<OrderResponse> {
-    return this.http.delete<OrderResponse>(`${this.apiUrl}/orders/${id}`);
+    return this.http.delete<OrderResponse>(
+      `${this.apiUrl}/organization/orders/${id}`,
+    );
   }
 
   /**
@@ -130,9 +140,12 @@ export class OrganizationOrdersService {
     if (dateTo) params = params.set('date_to', dateTo);
     if (storeId) params = params.set('store_id', storeId);
 
-    return this.http.get<OrderStatsResponse>(`${this.apiUrl}/orders/stats`, {
-      params,
-    });
+    return this.http.get<OrderStatsResponse>(
+      `${this.apiUrl}/organization/orders/stats`,
+      {
+        params,
+      },
+    );
   }
 
   /**
@@ -163,7 +176,7 @@ export class OrganizationOrdersService {
     if (query?.order) params = params.set('order', query.order);
 
     return this.http.get<OrderListResponse>(
-      `${this.apiUrl}/stores/${storeId}/orders`,
+      `${this.apiUrl}/organization/stores/${storeId}/orders`,
       { params },
     );
   }
@@ -195,7 +208,7 @@ export class OrganizationOrdersService {
     if (query?.order) params = params.set('order', query.order);
 
     return this.http.get<OrderListResponse>(
-      `${this.apiUrl}/customers/${customerId}/orders`,
+      `${this.apiUrl}/organization/customers/${customerId}/orders`,
       { params },
     );
   }
@@ -210,7 +223,7 @@ export class OrganizationOrdersService {
   ): Observable<OrderResponse> {
     const body = reason ? { status, reason } : { status };
     return this.http.patch<OrderResponse>(
-      `${this.apiUrl}/orders/${id}/status`,
+      `${this.apiUrl}/organization/orders/${id}/status`,
       body,
     );
   }
@@ -227,7 +240,7 @@ export class OrganizationOrdersService {
       ? { payment_status: paymentStatus, reason }
       : { payment_status: paymentStatus };
     return this.http.patch<OrderResponse>(
-      `${this.apiUrl}/orders/${id}/payment-status`,
+      `${this.apiUrl}/organization/orders/${id}/payment-status`,
       body,
     );
   }
@@ -236,9 +249,12 @@ export class OrganizationOrdersService {
    * Cancel order
    */
   cancelOrder(id: string, reason: string): Observable<OrderResponse> {
-    return this.http.post<OrderResponse>(`${this.apiUrl}/orders/${id}/cancel`, {
-      reason,
-    });
+    return this.http.post<OrderResponse>(
+      `${this.apiUrl}/organization/orders/${id}/cancel`,
+      {
+        reason,
+      },
+    );
   }
 
   /**
@@ -251,7 +267,7 @@ export class OrganizationOrdersService {
   ): Observable<OrderResponse> {
     const body = amount ? { amount, reason } : { reason };
     return this.http.post<OrderResponse>(
-      `${this.apiUrl}/orders/${id}/refund`,
+      `${this.apiUrl}/organization/orders/${id}/refund`,
       body,
     );
   }
@@ -271,7 +287,7 @@ export class OrganizationOrdersService {
       ...(estimatedDelivery && { estimated_delivery: estimatedDelivery }),
     };
     return this.http.post<OrderResponse>(
-      `${this.apiUrl}/orders/${id}/tracking`,
+      `${this.apiUrl}/organization/orders/${id}/tracking`,
       body,
     );
   }
@@ -297,7 +313,7 @@ export class OrganizationOrdersService {
     if (query?.max_amount)
       params = params.set('max_amount', query.max_amount.toString());
 
-    return this.http.get(`${this.apiUrl}/orders/export`, {
+    return this.http.get(`${this.apiUrl}/organization/orders/export`, {
       params,
       responseType: 'blob',
     });
@@ -307,7 +323,7 @@ export class OrganizationOrdersService {
    * Print order invoice
    */
   printInvoice(id: string): Observable<Blob> {
-    return this.http.get(`${this.apiUrl}/orders/${id}/invoice`, {
+    return this.http.get(`${this.apiUrl}/organization/orders/${id}/invoice`, {
       responseType: 'blob',
     });
   }
@@ -316,8 +332,11 @@ export class OrganizationOrdersService {
    * Print order packing slip
    */
   printPackingSlip(id: string): Observable<Blob> {
-    return this.http.get(`${this.apiUrl}/orders/${id}/packing-slip`, {
-      responseType: 'blob',
-    });
+    return this.http.get(
+      `${this.apiUrl}/organization/orders/${id}/packing-slip`,
+      {
+        responseType: 'blob',
+      },
+    );
   }
 }

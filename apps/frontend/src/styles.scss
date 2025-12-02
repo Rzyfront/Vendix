@@ -228,80 +228,79 @@ body {
   }
 }
 
-  /* Apply mobile font sizes to all text elements */
-  h1 {
-    font-size: var(--fs-3xl-mobile);
-  }
-  h2 {
-    font-size: var(--fs-2xl-mobile);
-  }
-  h3 {
-    font-size: var(--fs-xl-mobile);
-  }
-  h4 {
-    font-size: var(--fs-lg-mobile);
-  }
-  h5 {
-    font-size: var(--fs-base-mobile);
-  }
-  h6 {
-    font-size: var(--fs-sm-mobile);
-  }
-  p,
-  span,
-  div {
-    font-size: inherit;
-  }
-  small {
-    font-size: var(--fs-xs-mobile);
-  }
+/* Apply mobile font sizes to all text elements */
+h1 {
+  font-size: var(--fs-3xl-mobile);
+}
+h2 {
+  font-size: var(--fs-2xl-mobile);
+}
+h3 {
+  font-size: var(--fs-xl-mobile);
+}
+h4 {
+  font-size: var(--fs-lg-mobile);
+}
+h5 {
+  font-size: var(--fs-base-mobile);
+}
+h6 {
+  font-size: var(--fs-sm-mobile);
+}
+p,
+span,
+div {
+  font-size: inherit;
+}
+small {
+  font-size: var(--fs-xs-mobile);
+}
 
-  /* Mobile spacing adjustments for common elements */
-  .container,
-  .section {
-    padding: var(--spacing-md-mobile);
-  }
+/* Mobile spacing adjustments for common elements */
+.container,
+.section {
+  padding: var(--spacing-md-mobile);
+}
 
-  .card,
-  .panel {
-    margin: var(--spacing-sm-mobile);
-    padding: var(--spacing-md-mobile);
-  }
+.card,
+.panel {
+  margin: var(--spacing-sm-mobile);
+  padding: var(--spacing-md-mobile);
+}
 
-  .button {
-    padding: var(--control-padding-mobile);
-    margin: var(--spacing-xs-mobile);
-  }
+.button {
+  padding: var(--control-padding-mobile);
+  margin: var(--spacing-xs-mobile);
+}
 
-  .form-group {
-    margin-bottom: var(--spacing-md-mobile);
-  }
+.form-group {
+  margin-bottom: var(--spacing-md-mobile);
+}
 
-  .form-input {
-    padding: var(--control-padding-mobile);
-  }
+.form-input {
+  padding: var(--control-padding-mobile);
+}
 
-  /* Compact mobile layouts */
-  .grid,
-  .flex {
-    gap: var(--spacing-sm-mobile);
-  }
+/* Compact mobile layouts */
+.grid,
+.flex {
+  gap: var(--spacing-sm-mobile);
+}
 
-  .list-item {
-    padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
-  }
+.list-item {
+  padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
+}
 
-  /* Header and navigation mobile spacing */
-  header,
-  nav {
-    padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
-  }
+/* Header and navigation mobile spacing */
+header,
+nav {
+  padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
+}
 
-  /* Footer mobile spacing */
-  footer {
-    padding: var(--spacing-lg-mobile) var(--spacing-md-mobile);
-  }
-
+/* Footer mobile spacing */
+footer {
+  padding: var(--spacing-lg-mobile) var(--spacing-md-mobile);
+}
 
 @media (max-width: 480px) {
   /* Extra compact spacing for very small screens */

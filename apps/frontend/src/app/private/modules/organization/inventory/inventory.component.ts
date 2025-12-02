@@ -17,7 +17,9 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Gestión de stock</h3>
-          <p class="text-gray-600">Stock Monitor de gestión de niveles de stock</p>
+          <p class="text-gray-600">
+            Stock Monitor de gestión de niveles de stock
+          </p>
         </a>
 
         <a
@@ -33,7 +35,9 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Suppliers</h3>
-          <p class="text-gray-600">Gestión de proveedoresGestión de proveedores</p>
+          <p class="text-gray-600">
+            Gestión de proveedoresGestión de proveedores
+          </p>
         </a>
 
         <a

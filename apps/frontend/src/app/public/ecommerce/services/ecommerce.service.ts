@@ -43,7 +43,7 @@ export interface Order {
 }
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class EcommerceService {
   private apiUrl = `${environment.apiUrl}/ecommerce`;
@@ -58,11 +58,18 @@ export class EcommerceService {
     limit?: number;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
-  }): Observable<{ products: Product[]; total: number; page: number; limit: number }> {
-    return this.http.get<{ products: Product[]; total: number; page: number; limit: number }>(
-      `${this.apiUrl}/products`,
-      { params: params as any }
-    );
+  }): Observable<{
+    products: Product[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    return this.http.get<{
+      products: Product[];
+      total: number;
+      page: number;
+      limit: number;
+    }>(`${this.apiUrl}/products`, { params: params as any });
   }
 
   getProduct(id: number): Observable<Product> {
@@ -73,9 +80,11 @@ export class EcommerceService {
     return this.http.get<Product[]>(`${this.apiUrl}/products/featured`);
   }
 
-  getCategories(): Observable<{ id: string; name: string; productCount: number }[]> {
+  getCategories(): Observable<
+    { id: string; name: string; productCount: number }[]
+  > {
     return this.http.get<{ id: string; name: string; productCount: number }[]>(
-      `${this.apiUrl}/categories`
+      `${this.apiUrl}/categories`,
     );
   }
 
@@ -83,7 +92,7 @@ export class EcommerceService {
   getCart(): Observable<CartItem[]> {
     // En producción, esto vendría del backend
     const cart = localStorage.getItem('ecommerce_cart');
-    return new Observable(observer => {
+    return new Observable((observer) => {
       if (cart) {
         observer.next(JSON.parse(cart));
       } else {
@@ -95,9 +104,11 @@ export class EcommerceService {
 
   addToCart(product: Product, quantity: number = 1): Observable<CartItem[]> {
     return this.getCart().pipe(
-      map(cart => {
-        const existingItem = cart.find(item => item.product.id === product.id);
-        
+      map((cart) => {
+        const existingItem = cart.find(
+          (item) => item.product.id === product.id,
+        );
+
         if (existingItem) {
           existingItem.quantity += quantity;
         } else {
@@ -106,15 +117,17 @@ export class EcommerceService {
 
         localStorage.setItem('ecommerce_cart', JSON.stringify(cart));
         return cart;
-      })
+      }),
     );
   }
 
   updateCartItem(productId: number, quantity: number): Observable<CartItem[]> {
     return this.getCart().pipe(
-      map(cart => {
-        const itemIndex = cart.findIndex(item => item.product.id === productId);
-        
+      map((cart) => {
+        const itemIndex = cart.findIndex(
+          (item) => item.product.id === productId,
+        );
+
         if (itemIndex > -1) {
           if (quantity <= 0) {
             cart.splice(itemIndex, 1);
@@ -125,23 +138,25 @@ export class EcommerceService {
 
         localStorage.setItem('ecommerce_cart', JSON.stringify(cart));
         return cart;
-      })
+      }),
     );
   }
 
   removeFromCart(productId: number): Observable<CartItem[]> {
     return this.getCart().pipe(
-      map(cart => {
-        const filteredCart = cart.filter(item => item.product.id !== productId);
+      map((cart) => {
+        const filteredCart = cart.filter(
+          (item) => item.product.id !== productId,
+        );
         localStorage.setItem('ecommerce_cart', JSON.stringify(filteredCart));
         return filteredCart;
-      })
+      }),
     );
   }
 
   clearCart(): Observable<CartItem[]> {
     localStorage.removeItem('ecommerce_cart');
-    return new Observable(observer => {
+    return new Observable((observer) => {
       observer.next([]);
       observer.complete();
     });
@@ -174,7 +189,7 @@ export class EcommerceService {
   // Wishlist
   getWishlist(): Observable<Product[]> {
     const wishlist = localStorage.getItem('ecommerce_wishlist');
-    return new Observable(observer => {
+    return new Observable((observer) => {
       if (wishlist) {
         observer.next(JSON.parse(wishlist));
       } else {
@@ -186,43 +201,51 @@ export class EcommerceService {
 
   addToWishlist(product: Product): Observable<Product[]> {
     return this.getWishlist().pipe(
-      map(wishlist => {
-        const existingProduct = wishlist.find(p => p.id === product.id);
-        
+      map((wishlist) => {
+        const existingProduct = wishlist.find((p) => p.id === product.id);
+
         if (!existingProduct) {
           wishlist.push(product);
           localStorage.setItem('ecommerce_wishlist', JSON.stringify(wishlist));
         }
 
         return wishlist;
-      })
+      }),
     );
   }
 
   removeFromWishlist(productId: number): Observable<Product[]> {
     return this.getWishlist().pipe(
-      map(wishlist => {
-        const filteredWishlist = wishlist.filter(p => p.id !== productId);
-        localStorage.setItem('ecommerce_wishlist', JSON.stringify(filteredWishlist));
+      map((wishlist) => {
+        const filteredWishlist = wishlist.filter((p) => p.id !== productId);
+        localStorage.setItem(
+          'ecommerce_wishlist',
+          JSON.stringify(filteredWishlist),
+        );
         return filteredWishlist;
-      })
+      }),
     );
   }
 
   // Búsqueda y Filtros
   searchProducts(query: string): Observable<Product[]> {
     return this.http.get<Product[]>(`${this.apiUrl}/products/search`, {
-      params: { q: query }
+      params: { q: query },
     });
   }
 
   getProductsByCategory(categoryId: string): Observable<Product[]> {
-    return this.http.get<Product[]>(`${this.apiUrl}/categories/${categoryId}/products`);
+    return this.http.get<Product[]>(
+      `${this.apiUrl}/categories/${categoryId}/products`,
+    );
   }
 
   // Utilidades
   calculateCartTotal(cart: CartItem[]): number {
-    return cart.reduce((total, item) => total + (item.product.price * item.quantity), 0);
+    return cart.reduce(
+      (total, item) => total + item.product.price * item.quantity,
+      0,
+    );
   }
 
   getCartItemCount(cart: CartItem[]): number {

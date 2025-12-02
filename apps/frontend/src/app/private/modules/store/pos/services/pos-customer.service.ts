@@ -29,8 +29,8 @@ export class PosCustomerService {
   private readonly selectedCustomer$ = new BehaviorSubject<PosCustomer | null>(
     null,
   );
-  private readonly apiUrl = `${environment.apiUrl}/users`;
-  private readonly registerUrl = `${environment.apiUrl}/auth/register-customer`;
+  private readonly apiUrl = `${environment.apiUrl}/store/users`;
+  private readonly registerUrl = `${environment.apiUrl}/store/auth/register-customer`;
 
   constructor(private http: HttpClient) {
     // Initialize with mock data for development if needed

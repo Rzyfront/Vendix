@@ -1,5 +1,8 @@
 import { createReducer, on } from '@ngrx/store';
-import { DomainConfig, AppEnvironment } from '../../models/domain-config.interface';
+import {
+  DomainConfig,
+  AppEnvironment,
+} from '../../models/domain-config.interface';
 import { TenantConfig } from '../../models/tenant-config.interface';
 import * as TenantActions from './tenant.actions';
 
@@ -18,7 +21,7 @@ export const initialTenantState: TenantState = {
   environment: null,
   loading: false,
   error: null,
-  initialized: false
+  initialized: false,
 };
 
 export const tenantReducer = createReducer(
@@ -27,48 +30,53 @@ export const tenantReducer = createReducer(
   on(TenantActions.initTenant, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
-  on(TenantActions.initTenantSuccess, (state, { tenantConfig, domainConfig }) => ({
-    ...state,
-    domainConfig,
-    tenantConfig,
-    environment: domainConfig.environment,
-    loading: false,
-    initialized: true,
-    error: null
-  })),
+  on(
+    TenantActions.initTenantSuccess,
+    (state, { tenantConfig, domainConfig }) => ({
+      ...state,
+      domainConfig,
+      tenantConfig,
+      environment: domainConfig.environment,
+      loading: false,
+      initialized: true,
+      error: null,
+    }),
+  ),
 
   on(TenantActions.initTenantFailure, (state, { error }) => ({
     ...state,
     loading: false,
     error,
-    initialized: false
+    initialized: false,
   })),
 
   on(TenantActions.loadTenantConfig, (state) => ({
     ...state,
     loading: true,
-    error: null
+    error: null,
   })),
 
   on(TenantActions.loadTenantConfigSuccess, (state, { tenantConfig }) => ({
     ...state,
     tenantConfig,
     loading: false,
-    error: null
+    error: null,
   })),
 
   on(TenantActions.loadTenantConfigFailure, (state, { error }) => ({
     ...state,
     loading: false,
-    error
+    error,
   })),
 
   on(TenantActions.updateTenantConfig, (state, { config }) => ({
     ...state,
-    tenantConfig: state.tenantConfig ? { ...state.tenantConfig, ...config } : null
+    tenantConfig: state.tenantConfig
+      ? { ...state.tenantConfig, ...config }
+      : null,
   })),
 
   on(TenantActions.clearTenantConfig, (state) => ({
@@ -77,12 +85,12 @@ export const tenantReducer = createReducer(
     domainConfig: null,
     environment: null,
     initialized: false,
-    error: null
+    error: null,
   })),
 
   on(TenantActions.setCurrentEnvironment, (state, { environment }) => ({
     ...state,
-    environment
+    environment,
   })),
 
   on(TenantActions.setDomainConfig, (state, { domainConfig }) => ({
@@ -90,6 +98,6 @@ export const tenantReducer = createReducer(
     domainConfig,
     environment: domainConfig.environment,
     initialized: true,
-    error: null
-  }))
+    error: null,
+  })),
 );

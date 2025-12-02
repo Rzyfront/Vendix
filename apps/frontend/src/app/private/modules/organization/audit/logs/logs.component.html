@@ -2,14 +2,18 @@
   <!-- Logs List -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
             Audit Logs ({{ logs.length }})
           </h2>
         </div>
-        
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
           <!-- Input de búsqueda compacto -->
           <app-inputsearch
             class="w-full sm:w-64"
@@ -18,12 +22,13 @@
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
-          
+
           <!-- Filtro de módulo -->
           <select
             class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
             (change)="onModuleChange($event)"
-            [value]="selectedModule">
+            [value]="selectedModule"
+          >
             <option value="">All Modules</option>
             <option value="users">Users</option>
             <option value="orders">Orders</option>
@@ -36,7 +41,8 @@
           <select
             class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
             (change)="onSeverityChange($event)"
-            [value]="selectedSeverity">
+            [value]="selectedSeverity"
+          >
             <option value="">All Severities</option>
             <option value="low">Low</option>
             <option value="medium">Medium</option>
@@ -61,7 +67,7 @@
             [value]="selectedDateTo"
             placeholder="To"
           />
-          
+
           <div class="flex gap-2 items-center">
             <app-button
               variant="outline"
@@ -89,28 +95,28 @@
 
     <!-- Loading State -->
     <div *ngIf="isLoading" class="p-8 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
       <p class="mt-2 text-text-secondary">Loading audit logs...</p>
     </div>
 
     <!-- Empty State -->
     <div *ngIf="!isLoading && logs.length === 0" class="p-8 text-center">
-      <app-icon name="file-text" [size]="48" class="text-text-secondary mx-auto mb-4"></app-icon>
-      <h3 class="text-lg font-medium text-text-primary mb-2">{{ getEmptyStateTitle() }}</h3>
+      <app-icon
+        name="file-text"
+        [size]="48"
+        class="text-text-secondary mx-auto mb-4"
+      ></app-icon>
+      <h3 class="text-lg font-medium text-text-primary mb-2">
+        {{ getEmptyStateTitle() }}
+      </h3>
       <p class="text-text-secondary mb-4">{{ getEmptyStateDescription() }}</p>
       <div *ngIf="hasFilters" class="flex gap-2 justify-center">
-        <app-button
-          variant="outline"
-          size="sm"
-          (clicked)="clearFilters()"
-        >
+        <app-button variant="outline" size="sm" (clicked)="clearFilters()">
           Clear Filters
         </app-button>
-        <app-button
-          variant="primary"
-          size="sm"
-          (clicked)="refreshLogs()"
-        >
+        <app-button variant="primary" size="sm" (clicked)="refreshLogs()">
           Refresh
         </app-button>
       </div>
@@ -128,7 +134,8 @@
         [striped]="true"
         size="md"
         (sort)="onTableSort($event)"
-        (rowClick)="viewLogDetails($event)">
+        (rowClick)="viewLogDetails($event)"
+      >
       </app-table>
     </div>
   </div>

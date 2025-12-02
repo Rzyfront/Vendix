@@ -3,11 +3,11 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 
 @Injectable()
 export class AccessValidationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: GlobalPrismaService) {}
 
   /**
    * Valida si un usuario tiene acceso a una tienda específica

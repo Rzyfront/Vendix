@@ -104,10 +104,11 @@ export class CountryService {
   /** Obtiene todos los departamentos */
   async getDepartments(): Promise<Department[]> {
     try {
-      const response = await fetch('https://api-colombia.com/api/v1/Department');
+      const response = await fetch(
+        'https://api-colombia.com/api/v1/Department',
+      );
       const data = await response.json();
       return data;
-
     } catch (error) {
       console.error('Error getting departments', error);
       return [];
@@ -118,7 +119,7 @@ export class CountryService {
   async getCitiesByDepartment(departmentId: number): Promise<City[]> {
     try {
       const response = await fetch(
-        `https://api-colombia.com/api/v1/Department/${departmentId}/cities`
+        `https://api-colombia.com/api/v1/Department/${departmentId}/cities`,
       );
       return await response.json();
     } catch (error) {

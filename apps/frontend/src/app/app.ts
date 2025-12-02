@@ -14,13 +14,19 @@ Chart.register(...registerables);
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, CommonModule, CardComponent, SpinnerComponent, ToastContainerComponent],
+  imports: [
+    RouterOutlet,
+    CommonModule,
+    CardComponent,
+    SpinnerComponent,
+    ToastContainerComponent,
+  ],
   templateUrl: './app.html',
-  styleUrl: './app.scss'
+  styleUrl: './app.scss',
 })
 export class App {
   protected title = 'vendix';
-  
+
   public readonly isLoading$: Observable<boolean>;
   public readonly error$: Observable<any>;
 

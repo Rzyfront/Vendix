@@ -51,7 +51,7 @@ export class SuperAdminDashboardService {
 
   getDashboardStats(): Observable<SuperAdminStats> {
     return this.http
-      .get<SuperAdminStats>(`${this.apiUrl}/admin/dashboard/stats`)
+      .get<SuperAdminStats>(`${this.apiUrl}/superadmin/dashboard/stats`)
       .pipe(
         catchError((error) => {
           console.error('Error fetching super admin dashboard stats:', error);
@@ -61,18 +61,20 @@ export class SuperAdminDashboardService {
   }
 
   getOrganizationsStats(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/organizations/dashboard`).pipe(
-      catchError((error) => {
-        console.error('Error fetching organizations stats:', error);
-        return throwError(
-          () => new Error('Failed to fetch organizations stats'),
-        );
-      }),
-    );
+    return this.http
+      .get(`${this.apiUrl}/superadmin/organizations/dashboard`)
+      .pipe(
+        catchError((error) => {
+          console.error('Error fetching organizations stats:', error);
+          return throwError(
+            () => new Error('Failed to fetch organizations stats'),
+          );
+        }),
+      );
   }
 
   getUsersStats(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/users/dashboard`).pipe(
+    return this.http.get(`${this.apiUrl}/superadmin/users/dashboard`).pipe(
       catchError((error) => {
         console.error('Error fetching users stats:', error);
         return throwError(() => new Error('Failed to fetch users stats'));
@@ -81,7 +83,7 @@ export class SuperAdminDashboardService {
   }
 
   getStoresStats(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/stores/dashboard`).pipe(
+    return this.http.get(`${this.apiUrl}/superadmin/stores/dashboard`).pipe(
       catchError((error) => {
         console.error('Error fetching stores stats:', error);
         return throwError(() => new Error('Failed to fetch stores stats'));
@@ -90,7 +92,7 @@ export class SuperAdminDashboardService {
   }
 
   getDomainsStats(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/domains/dashboard`).pipe(
+    return this.http.get(`${this.apiUrl}/superadmin/domains/dashboard`).pipe(
       catchError((error) => {
         console.error('Error fetching domains stats:', error);
         return throwError(() => new Error('Failed to fetch domains stats'));
@@ -99,7 +101,7 @@ export class SuperAdminDashboardService {
   }
 
   getRolesStats(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/roles/dashboard`).pipe(
+    return this.http.get(`${this.apiUrl}/superadmin/roles/dashboard`).pipe(
       catchError((error) => {
         console.error('Error fetching roles stats:', error);
         return throwError(() => new Error('Failed to fetch roles stats'));

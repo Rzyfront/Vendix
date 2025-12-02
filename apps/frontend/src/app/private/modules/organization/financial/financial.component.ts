@@ -24,7 +24,9 @@ import { RouterModule } from '@angular/router';
           routerLink="/organization/financial/billing"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
-          <h3 class="text-lg font-semibold mb-2">Facturación y suscripciones</h3>
+          <h3 class="text-lg font-semibold mb-2">
+            Facturación y suscripciones
+          </h3>
           <p class="text-gray-600">Gestionar facturas y suscripciones</p>
         </a>
 
@@ -41,7 +43,9 @@ import { RouterModule } from '@angular/router';
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Cash Flow</h3>
-          <p class="text-gray-600">Monitorear el flujo de caja organizacional</p>
+          <p class="text-gray-600">
+            Monitorear el flujo de caja organizacional
+          </p>
         </a>
       </div>
     </div>

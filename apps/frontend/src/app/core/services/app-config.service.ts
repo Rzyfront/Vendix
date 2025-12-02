@@ -166,7 +166,7 @@ export class AppConfigService {
   ): Promise<DomainResolution | null> {
     const response = await this.http
       .get<DomainResolutionResponse>(
-        `${environment.apiUrl}/domains/resolve/${hostname}`,
+        `${environment.apiUrl}/public/domains/resolve/${hostname}`,
       )
       .pipe(catchError(() => of(null)))
       .toPromise();

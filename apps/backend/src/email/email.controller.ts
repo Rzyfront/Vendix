@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { EmailService } from './email.service';
 import { Req } from '@nestjs/common';
-import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 
 @Controller('email')
 export class EmailController {

@@ -5,11 +5,13 @@
 .grid {
   --grid-cols: 1;
 
-  @media (min-width: 48em) {  /* 768px */
+  @media (min-width: 48em) {
+    /* 768px */
     --grid-cols: 2;
   }
 
-  @media (min-width: 64em) {  /* 1024px */
+  @media (min-width: 64em) {
+    /* 1024px */
     --grid-cols: 4;
   }
 }

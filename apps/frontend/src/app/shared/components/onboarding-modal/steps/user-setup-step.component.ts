@@ -10,13 +10,24 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
-import { CountryService, Country, Department, City } from '../../../../services/country.service';
+import {
+  CountryService,
+  Country,
+  Department,
+  City,
+} from '../../../../services/country.service';
 import { InputComponent } from '../../input/input.component';
 
 @Component({
   selector: 'app-user-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent, InputComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    IconComponent,
+    InputComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -400,11 +411,7 @@ import { InputComponent } from '../../input/input.component';
                   Departamento
                   <span class="field-optional">(opcional)</span>
                 </label>
-                <select
-                  class="field-input"
-                  formControlName="state_province"
-                  
-                >
+                <select class="field-input" formControlName="state_province">
                   <option value="">Selecciona un departamento</option>
                   <option *ngFor="let dep of departments" [value]="dep.id">
                     {{ dep.name }}
@@ -418,11 +425,7 @@ import { InputComponent } from '../../input/input.component';
                   Ciudad
                   <span class="field-optional">(opcional)</span>
                 </label>
-                <select
-                  class="field-input"
-                  formControlName="city"
-                  
-                >
+                <select class="field-input" formControlName="city">
                   <option value="">Selecciona una ciudad</option>
                   <option *ngFor="let city of cities" [value]="city.id">
                     {{ city.name }}
@@ -470,7 +473,7 @@ export class UserSetupStepComponent implements OnInit {
 
   constructor(
     private countryService: CountryService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -526,5 +529,3 @@ export class UserSetupStepComponent implements OnInit {
     this.cdr.markForCheck();
   }
 }
-
-

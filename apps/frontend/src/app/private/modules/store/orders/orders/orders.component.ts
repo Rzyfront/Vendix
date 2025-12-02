@@ -122,7 +122,12 @@ export class OrdersComponent implements OnInit, OnDestroy {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedStatus || this.selectedPaymentStatus || this.selectedDateRange);
+    return !!(
+      this.searchTerm ||
+      this.selectedStatus ||
+      this.selectedPaymentStatus ||
+      this.selectedDateRange
+    );
   }
 
   getEmptyStateTitle(): string {

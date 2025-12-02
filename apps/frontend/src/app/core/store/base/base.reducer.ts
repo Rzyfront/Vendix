@@ -12,12 +12,12 @@ export const initialBaseState: BaseState = {
   data: null,
   loading: false,
   error: null,
-  lastUpdated: null
+  lastUpdated: null,
 };
 
 export function createBaseReducer<T>(
   featureName: string,
-  additionalReducers?: any
+  additionalReducers?: any,
 ) {
   return createReducer(
     initialBaseState,
@@ -26,7 +26,7 @@ export function createBaseReducer<T>(
     on(BaseActions.loadData, (state) => ({
       ...state,
       loading: true,
-      error: null
+      error: null,
     })),
 
     on(BaseActions.loadDataSuccess, (state, { data }) => ({
@@ -34,20 +34,20 @@ export function createBaseReducer<T>(
       data,
       loading: false,
       error: null,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
     })),
 
     on(BaseActions.loadDataFailure, (state, { error }) => ({
       ...state,
       loading: false,
-      error
+      error,
     })),
 
     // Create actions
     on(BaseActions.createData, (state) => ({
       ...state,
       loading: true,
-      error: null
+      error: null,
     })),
 
     on(BaseActions.createDataSuccess, (state, { data }) => ({
@@ -55,20 +55,20 @@ export function createBaseReducer<T>(
       data,
       loading: false,
       error: null,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
     })),
 
     on(BaseActions.createDataFailure, (state, { error }) => ({
       ...state,
       loading: false,
-      error
+      error,
     })),
 
     // Update actions
     on(BaseActions.updateData, (state) => ({
       ...state,
       loading: true,
-      error: null
+      error: null,
     })),
 
     on(BaseActions.updateDataSuccess, (state, { data }) => ({
@@ -76,20 +76,20 @@ export function createBaseReducer<T>(
       data,
       loading: false,
       error: null,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
     })),
 
     on(BaseActions.updateDataFailure, (state, { error }) => ({
       ...state,
       loading: false,
-      error
+      error,
     })),
 
     // Delete actions
     on(BaseActions.deleteData, (state) => ({
       ...state,
       loading: true,
-      error: null
+      error: null,
     })),
 
     on(BaseActions.deleteDataSuccess, (state) => ({
@@ -97,13 +97,13 @@ export function createBaseReducer<T>(
       data: null,
       loading: false,
       error: null,
-      lastUpdated: new Date()
+      lastUpdated: new Date(),
     })),
 
     on(BaseActions.deleteDataFailure, (state, { error }) => ({
       ...state,
       loading: false,
-      error
+      error,
     })),
 
     // Utility actions
@@ -111,25 +111,25 @@ export function createBaseReducer<T>(
       ...state,
       data: null,
       error: null,
-      lastUpdated: null
+      lastUpdated: null,
     })),
 
     on(BaseActions.setLoading, (state, { loading }) => ({
       ...state,
-      loading
+      loading,
     })),
 
     on(BaseActions.setError, (state, { error }) => ({
       ...state,
-      error
+      error,
     })),
 
     on(BaseActions.clearError, (state) => ({
       ...state,
-      error: null
+      error: null,
     })),
 
     // Allow additional reducers to be passed in
-    ...(additionalReducers || [])
+    ...(additionalReducers || []),
   );
 }

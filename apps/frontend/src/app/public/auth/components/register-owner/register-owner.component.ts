@@ -232,7 +232,14 @@ export class RegisterOwnerComponent {
     first_name: ['', [Validators.required]],
     last_name: ['', [Validators.required]],
     email: ['', [Validators.required, Validators.email]],
-    phone: ['', [Validators.pattern(/^[0-9+ ]+$/),Validators.minLength(8), Validators.maxLength(15)]],
+    phone: [
+      '',
+      [
+        Validators.pattern(/^[0-9+ ]+$/),
+        Validators.minLength(8),
+        Validators.maxLength(15),
+      ],
+    ],
     password: ['', [Validators.required, passwordValidator]],
   });
 

@@ -56,7 +56,7 @@ export class DomainsService {
       params = params.set('organization_id', query.organization_id.toString());
 
     return this.http.get<PaginatedResponse<DomainListItem[]>>(
-      `${this.apiUrl}/admin/domains`,
+      `${this.apiUrl}/superadmin/domains`,
       { params },
     );
   }
@@ -66,7 +66,7 @@ export class DomainsService {
    */
   getDomainById(id: number): Observable<ApiResponse<Domain>> {
     return this.http.get<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains/${id}`,
+      `${this.apiUrl}/superadmin/domains/${id}`,
     );
   }
 
@@ -75,7 +75,7 @@ export class DomainsService {
    */
   createDomain(data: CreateDomainDto): Observable<ApiResponse<Domain>> {
     return this.http.post<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains`,
+      `${this.apiUrl}/superadmin/domains`,
       data,
     );
   }
@@ -88,7 +88,7 @@ export class DomainsService {
     data: UpdateDomainDto,
   ): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains/${id}`,
+      `${this.apiUrl}/superadmin/domains/${id}`,
       data,
     );
   }
@@ -98,7 +98,7 @@ export class DomainsService {
    */
   deleteDomain(id: number): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(
-      `${this.apiUrl}/admin/domains/${id}`,
+      `${this.apiUrl}/superadmin/domains/${id}`,
     );
   }
 
@@ -106,32 +106,34 @@ export class DomainsService {
    * Get domain statistics (simplified version for dashboard)
    */
   getDomainStatsList(): Observable<ApiResponse<DomainStats>> {
-    return this.http.get<any>(`${this.apiUrl}/admin/domains/dashboard`).pipe(
-      map((response: any) => {
-        if (response.success && response.data) {
-          // Map backend response to frontend interface
-          const mappedData: DomainStats = {
-            total_domains: response.data.total || 0,
-            active_domains: response.data.active || 0,
-            pending_domains: response.data.pending || 0,
-            verified_domains: response.data.verified || 0,
-            customer_domains: response.data.customDomains || 0,
-            primary_domains: response.data.platformSubdomains || 0,
-            alias_domains: response.data.aliasDomains || 0,
-            vendix_subdomains: response.data.platformSubdomains || 0,
-            customer_custom_domains: response.data.customDomains || 0,
-            customer_subdomains: response.data.clientSubdomains || 0,
-          };
+    return this.http
+      .get<any>(`${this.apiUrl}/superadmin/domains/dashboard`)
+      .pipe(
+        map((response: any) => {
+          if (response.success && response.data) {
+            // Map backend response to frontend interface
+            const mappedData: DomainStats = {
+              total_domains: response.data.total || 0,
+              active_domains: response.data.active || 0,
+              pending_domains: response.data.pending || 0,
+              verified_domains: response.data.verified || 0,
+              customer_domains: response.data.customDomains || 0,
+              primary_domains: response.data.platformSubdomains || 0,
+              alias_domains: response.data.aliasDomains || 0,
+              vendix_subdomains: response.data.platformSubdomains || 0,
+              customer_custom_domains: response.data.customDomains || 0,
+              customer_subdomains: response.data.clientSubdomains || 0,
+            };
 
-          return {
-            success: response.success,
-            data: mappedData,
-            message: response.message,
-          };
-        }
-        return response;
-      }),
-    );
+            return {
+              success: response.success,
+              data: mappedData,
+              message: response.message,
+            };
+          }
+          return response;
+        }),
+      );
   }
 
   /**
@@ -139,7 +141,7 @@ export class DomainsService {
    */
   verifyDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.post<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains/${id}/verify`,
+      `${this.apiUrl}/superadmin/domains/${id}/verify`,
       {},
     );
   }
@@ -149,7 +151,7 @@ export class DomainsService {
    */
   activateDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains/${id}/activate`,
+      `${this.apiUrl}/superadmin/domains/${id}/activate`,
       {},
     );
   }
@@ -159,7 +161,7 @@ export class DomainsService {
    */
   deactivateDomain(id: number): Observable<ApiResponse<Domain>> {
     return this.http.patch<ApiResponse<Domain>>(
-      `${this.apiUrl}/admin/domains/${id}/deactivate`,
+      `${this.apiUrl}/superadmin/domains/${id}/deactivate`,
       {},
     );
   }
@@ -213,7 +215,7 @@ export class DomainsService {
    */
   resolveDomain(hostname: string): Observable<ApiResponse<Domain>> {
     return this.http.get<ApiResponse<Domain>>(
-      `${this.apiUrl}/public/domains/resolve/${hostname}`,
+      `${this.apiUrl}/domains/resolve/${hostname}`,
     );
   }
 }

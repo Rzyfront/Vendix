@@ -13,7 +13,9 @@ export class BaseFacade<T = any> {
   readonly data$ = this.store.select((state: BaseState<T>) => state.data);
   readonly loading$ = this.store.select((state: BaseState<T>) => state.loading);
   readonly error$ = this.store.select((state: BaseState<T>) => state.error);
-  readonly lastUpdated$ = this.store.select((state: BaseState<T>) => state.lastUpdated);
+  readonly lastUpdated$ = this.store.select(
+    (state: BaseState<T>) => state.lastUpdated,
+  );
 
   // Actions
   loadData(id?: string, params?: any): void {
@@ -51,28 +53,30 @@ export class BaseFacade<T = any> {
   // Synchronous getters for templates
   getCurrentData(): T | null {
     let result: T | null = null;
-    this.data$.subscribe(data => result = data).unsubscribe();
+    this.data$.subscribe((data) => (result = data)).unsubscribe();
     return result;
   }
 
   isLoading(): boolean {
     let result = false;
-    this.loading$.subscribe(loading => result = loading).unsubscribe();
+    this.loading$.subscribe((loading) => (result = loading)).unsubscribe();
     return result;
   }
 
   getCurrentError(): any {
     let result: any = null;
-    this.error$.subscribe(error => {
-      if (error === null) {
-        result = null;
-      } else if (typeof error === 'string') {
-        result = error;
-      } else {
-        // Handle NormalizedApiPayload by extracting the message
-        result = extractApiErrorMessage(error);
-      }
-    }).unsubscribe();
+    this.error$
+      .subscribe((error) => {
+        if (error === null) {
+          result = null;
+        } else if (typeof error === 'string') {
+          result = error;
+        } else {
+          // Handle NormalizedApiPayload by extracting the message
+          result = extractApiErrorMessage(error);
+        }
+      })
+      .unsubscribe();
     return result;
   }
 

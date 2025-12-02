@@ -1,17 +1,19 @@
 <div class="space-y-6">
-    <!-- Stats Cards -->
-    <app-user-stats [stats]="userStats"></app-user-stats>
+  <!-- Stats Cards -->
+  <app-user-stats [stats]="userStats"></app-user-stats>
 
-    <!-- Users Table Container -->
-    <div class="bg-surface rounded-card shadow-card border border-border">
+  <!-- Users Table Container -->
+  <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
             Todos los Usuarios ({{ pagination.total }})
           </h2>
         </div>
-        
+
         <div class="filter-compact">
           <!-- Input de búsqueda compacto -->
           <app-inputsearch
@@ -21,7 +23,7 @@
             [debounceTime]="1000"
             (searchChange)="onSearchChange($event)"
           ></app-inputsearch>
-          
+
           <form [formGroup]="filterForm">
             <!-- State Filter -->
             <select
@@ -33,7 +35,7 @@
                 {{ state.label }}
               </option>
             </select>
-            
+
             <!-- Organization Filter -->
             <input
               type="number"
@@ -43,7 +45,7 @@
               [disabled]="isLoading"
             />
           </form>
-          
+
           <div class="flex gap-2 items-center">
             <app-button
               variant="outline"
@@ -65,7 +67,7 @@
             </app-button>
           </div>
         </div>
-        
+
         <!-- Paginación info -->
         <div class="flex items-center gap-2 mt-2 sm:mt-0">
           <span class="text-sm text-text-secondary">
@@ -74,19 +76,22 @@
         </div>
       </div>
     </div>
-      <!-- Loading State -->
-      <div *ngIf="isLoading" class="p-8 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Loading users...</p>
-      </div>
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="p-8 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Loading users...</p>
+    </div>
 
-      <!-- Empty State -->
-      <app-user-empty-state
-        *ngIf="!isLoading && users.length === 0"
-        [title]="getEmptyStateTitle()"
-        [description]="getEmptyStateDescription()"
-        (actionClick)="createUser()">
-      </app-user-empty-state>
+    <!-- Empty State -->
+    <app-user-empty-state
+      *ngIf="!isLoading && users.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      (actionClick)="createUser()"
+    >
+    </app-user-empty-state>
 
     <div *ngIf="users.length > 0" class="p-6">
       <app-table
@@ -112,10 +117,12 @@
             <app-icon
               name="shield"
               class="w-4 h-4"
-              [ngClass]="item.two_factor_enabled ? 'text-green-500' : 'text-gray-400'"
+              [ngClass]="
+                item.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
+              "
             ></app-icon>
             <span class="text-sm text-text">
-              {{ item.two_factor_enabled ? 'Sí' : 'No' }}
+              {{ item.two_factor_enabled ? "Sí" : "No" }}
             </span>
           </div>
         </ng-template>
@@ -126,10 +133,12 @@
             <app-icon
               name="check"
               class="w-4 h-4"
-              [ngClass]="item.email_verified ? 'text-green-500' : 'text-yellow-500'"
+              [ngClass]="
+                item.email_verified ? 'text-green-500' : 'text-yellow-500'
+              "
             ></app-icon>
             <span class="text-sm text-text">
-              {{ item.email_verified ? 'Verificado' : 'Pendiente' }}
+              {{ item.email_verified ? "Verificado" : "Pendiente" }}
             </span>
           </div>
         </ng-template>
@@ -155,12 +164,13 @@
                   ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
                   : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
               "
-              [title]="item.state === 'active' ? 'Archivar usuario' : 'Reactivar usuario'"
+              [title]="
+                item.state === 'active'
+                  ? 'Archivar usuario'
+                  : 'Reactivar usuario'
+              "
             >
-              <app-icon
-                name="archive"
-                class="w-4 h-4"
-              ></app-icon>
+              <app-icon name="archive" class="w-4 h-4"></app-icon>
             </button>
 
             <!-- Delete Button -->
@@ -175,7 +185,7 @@
         </ng-template>
       </app-table>
     </div>
-    </div>
+  </div>
 
   <!-- Create User Modal -->
   <app-user-create-modal
@@ -193,5 +203,4 @@
     (onClose)="showEditModal = false"
     (onUserUpdated)="onUserUpdated()"
   ></app-user-edit-modal>
-
 </div>

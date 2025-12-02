@@ -11,7 +11,7 @@ import { CommonModule } from '@angular/common';
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-         La gestión de envíos y entregas se mostrará aquí.
+          La gestión de envíos y entregas se mostrará aquí.
         </p>
       </div>
     </div>

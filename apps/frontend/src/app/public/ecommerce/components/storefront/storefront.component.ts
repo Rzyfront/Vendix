@@ -9,22 +9,28 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
 @Component({
   selector: 'app-storefront',
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonComponent, CardComponent, InputComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ButtonComponent,
+    CardComponent,
+    InputComponent,
+  ],
   template: `
     <div class="storefront-container">
       <!-- Header -->
       <header class="storefront-header">
         <div class="header-content">
           <div class="store-logo">
-            <img 
-              *ngIf="branding?.logo" 
-              [src]="branding.logo" 
+            <img
+              *ngIf="branding?.logo"
+              [src]="branding.logo"
               [alt]="storeName + ' Logo'"
               class="logo-image"
-            >
+            />
             <h1 *ngIf="!branding?.logo">{{ storeName }}</h1>
           </div>
-          
+
           <nav class="store-nav">
             <div class="search-bar">
               <app-input
@@ -52,7 +58,11 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
           <div class="banner-content">
             <h2>{{ heroTitle }}</h2>
             <p>{{ heroDescription }}</p>
-            <app-button (click)="scrollToProducts()" variant="primary" size="lg">
+            <app-button
+              (click)="scrollToProducts()"
+              variant="primary"
+              size="lg"
+            >
               Ver Productos
             </app-button>
           </div>
@@ -62,8 +72,8 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
         <section *ngIf="categories.length" class="categories-section">
           <h3>Categorías</h3>
           <div class="categories-grid">
-            <div 
-              *ngFor="let category of categories" 
+            <div
+              *ngFor="let category of categories"
               class="category-card"
               (click)="filterByCategory(category.id)"
               [class.active]="selectedCategory === category.id"
@@ -92,28 +102,42 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
             <div *ngFor="let product of filteredProducts" class="product-card">
               <app-card class="product-card-content">
                 <div class="product-image">
-                  <img [src]="product.image" [alt]="product.name" class="product-img">
+                  <img
+                    [src]="product.image"
+                    [alt]="product.name"
+                    class="product-img"
+                  />
                   <div *ngIf="product.onSale" class="sale-badge">Oferta</div>
                 </div>
                 <div class="product-info">
                   <h4 class="product-name">{{ product.name }}</h4>
                   <p class="product-description">{{ product.description }}</p>
                   <div class="product-pricing">
-                    <span class="current-price">{{ product.price | currency:'USD':'symbol':'1.2-2' }}</span>
+                    <span class="current-price">{{
+                      product.price | currency: 'USD' : 'symbol' : '1.2-2'
+                    }}</span>
                     <span *ngIf="product.originalPrice" class="original-price">
-                      {{ product.originalPrice | currency:'USD':'symbol':'1.2-2' }}
+                      {{
+                        product.originalPrice
+                          | currency: 'USD' : 'symbol' : '1.2-2'
+                      }}
                     </span>
                   </div>
                   <div class="product-actions">
-                    <app-button 
-                      (click)="addToCart(product)" 
-                      variant="primary" 
+                    <app-button
+                      (click)="addToCart(product)"
+                      variant="primary"
                       size="sm"
                       [disabled]="product.stock === 0"
                     >
-                      {{ product.stock > 0 ? 'Agregar al Carrito' : 'Sin Stock' }}
+                      {{
+                        product.stock > 0 ? 'Agregar al Carrito' : 'Sin Stock'
+                      }}
                     </app-button>
-                    <button class="wishlist-btn" (click)="toggleWishlist(product)">
+                    <button
+                      class="wishlist-btn"
+                      (click)="toggleWishlist(product)"
+                    >
                       ♡
                     </button>
                   </div>
@@ -136,22 +160,27 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
         </div>
         <div class="cart-items">
           <div *ngFor="let item of cartItems" class="cart-item">
-            <img [src]="item.image" [alt]="item.name" class="cart-item-image">
+            <img [src]="item.image" [alt]="item.name" class="cart-item-image" />
             <div class="cart-item-info">
               <h5>{{ item.name }}</h5>
-              <p>{{ item.price | currency:'USD':'symbol':'1.2-2' }} × {{ item.quantity }}</p>
+              <p>
+                {{ item.price | currency: 'USD' : 'symbol' : '1.2-2' }} ×
+                {{ item.quantity }}
+              </p>
             </div>
             <div class="cart-item-actions">
               <button (click)="updateQuantity(item, -1)">-</button>
               <span>{{ item.quantity }}</span>
               <button (click)="updateQuantity(item, 1)">+</button>
-              <button class="remove-btn" (click)="removeFromCart(item)">×</button>
+              <button class="remove-btn" (click)="removeFromCart(item)">
+                ×
+              </button>
             </div>
           </div>
         </div>
         <div class="cart-footer">
           <div class="cart-total">
-            Total: {{ cartTotal | currency:'USD':'symbol':'1.2-2' }}
+            Total: {{ cartTotal | currency: 'USD' : 'symbol' : '1.2-2' }}
           </div>
           <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
             Proceder al Pago
@@ -178,7 +207,7 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
       </footer>
     </div>
   `,
-  styleUrls: ['./storefront.component.scss']
+  styleUrls: ['./storefront.component.scss'],
 })
 export class StorefrontComponent implements OnInit {
   storeName = 'Tienda';
@@ -188,12 +217,12 @@ export class StorefrontComponent implements OnInit {
   heroDescription = 'Descubre los mejores productos con precios increíbles';
   contactInfo = 'Tel: +1 234 567 8900 | Email: info@tienda.com';
   storeHours = 'Lunes a Viernes: 9:00 AM - 6:00 PM';
-  
+
   searchTerm = '';
   selectedCategory: string | null = null;
   sortBy = 'name';
   showCart = false;
-  
+
   categories: any[] = [];
   products: any[] = [];
   filteredProducts: any[] = [];
@@ -201,7 +230,10 @@ export class StorefrontComponent implements OnInit {
   wishlist: any[] = [];
 
   get cartTotal(): number {
-    return this.cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    return this.cartItems.reduce(
+      (total, item) => total + item.price * item.quantity,
+      0,
+    );
   }
 
   private configFacade = inject(ConfigFacade);
@@ -209,18 +241,20 @@ export class StorefrontComponent implements OnInit {
   async ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn('[STOREFRONT] App config not available, using default values');
+      console.warn(
+        '[STOREFRONT] App config not available, using default values',
+      );
       this.loadDefaultData();
       return;
     }
 
     const domainConfig = appConfig.domainConfig;
-  // const tenantConfig = appConfig.tenantConfig;
-    
+    // const tenantConfig = appConfig.tenantConfig;
+
     this.storeName = domainConfig.store_slug || 'Tienda';
-  // this.branding = tenantConfig?.branding || {};
-  // this.storeDescription = tenantConfig?.store?.description || '';
-    
+    // this.branding = tenantConfig?.branding || {};
+    // this.storeDescription = tenantConfig?.store?.description || '';
+
     // Cargar datos de ejemplo
     this.categories = this.generateSampleCategories();
     this.products = this.generateSampleProducts();
@@ -239,7 +273,7 @@ export class StorefrontComponent implements OnInit {
       { id: 'clothing', name: 'Ropa', icon: '👕' },
       { id: 'home', name: 'Hogar', icon: '🏠' },
       { id: 'sports', name: 'Deportes', icon: '⚽' },
-      { id: 'books', name: 'Libros', icon: '📚' }
+      { id: 'books', name: 'Libros', icon: '📚' },
     ];
   }
 
@@ -254,7 +288,7 @@ export class StorefrontComponent implements OnInit {
         image: '/assets/images/product-placeholder.jpg',
         category: 'electronics',
         stock: 10,
-        onSale: true
+        onSale: true,
       },
       {
         id: 2,
@@ -264,7 +298,7 @@ export class StorefrontComponent implements OnInit {
         image: '/assets/images/product-placeholder.jpg',
         category: 'clothing',
         stock: 50,
-        onSale: false
+        onSale: false,
       },
       {
         id: 3,
@@ -274,7 +308,7 @@ export class StorefrontComponent implements OnInit {
         image: '/assets/images/product-placeholder.jpg',
         category: 'books',
         stock: 25,
-        onSale: false
+        onSale: false,
       },
       {
         id: 4,
@@ -285,8 +319,8 @@ export class StorefrontComponent implements OnInit {
         image: '/assets/images/product-placeholder.jpg',
         category: 'electronics',
         stock: 15,
-        onSale: true
-      }
+        onSale: true,
+      },
     ];
   }
 
@@ -295,26 +329,32 @@ export class StorefrontComponent implements OnInit {
   }
 
   filterByCategory(categoryId: string) {
-    this.selectedCategory = this.selectedCategory === categoryId ? null : categoryId;
+    this.selectedCategory =
+      this.selectedCategory === categoryId ? null : categoryId;
     this.filterProducts();
   }
 
   filterProducts() {
     let filtered = [...this.products];
-    
+
     // Filtrar por búsqueda
     if (this.searchTerm) {
-      filtered = filtered.filter(product =>
-        product.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
-        product.description.toLowerCase().includes(this.searchTerm.toLowerCase())
+      filtered = filtered.filter(
+        (product) =>
+          product.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
+          product.description
+            .toLowerCase()
+            .includes(this.searchTerm.toLowerCase()),
       );
     }
-    
+
     // Filtrar por categoría
     if (this.selectedCategory) {
-      filtered = filtered.filter(product => product.category === this.selectedCategory);
+      filtered = filtered.filter(
+        (product) => product.category === this.selectedCategory,
+      );
     }
-    
+
     this.filteredProducts = filtered;
     this.sortProducts();
   }
@@ -338,28 +378,30 @@ export class StorefrontComponent implements OnInit {
   }
 
   addToCart(product: any) {
-    const existingItem = this.cartItems.find(item => item.id === product.id);
-    
+    const existingItem = this.cartItems.find((item) => item.id === product.id);
+
     if (existingItem) {
       existingItem.quantity++;
     } else {
       this.cartItems.push({
         ...product,
-        quantity: 1
+        quantity: 1,
       });
     }
-    
+
     // Mostrar notificación (en producción usaría toast service)
     console.log('Producto agregado al carrito:', product.name);
   }
 
   removeFromCart(item: any) {
-    this.cartItems = this.cartItems.filter(cartItem => cartItem.id !== item.id);
+    this.cartItems = this.cartItems.filter(
+      (cartItem) => cartItem.id !== item.id,
+    );
   }
 
   updateQuantity(item: any, change: number) {
     const newQuantity = item.quantity + change;
-    
+
     if (newQuantity <= 0) {
       this.removeFromCart(item);
     } else if (newQuantity <= item.stock) {
@@ -368,8 +410,8 @@ export class StorefrontComponent implements OnInit {
   }
 
   toggleWishlist(product: any) {
-    const index = this.wishlist.findIndex(item => item.id === product.id);
-    
+    const index = this.wishlist.findIndex((item) => item.id === product.id);
+
     if (index > -1) {
       this.wishlist.splice(index, 1);
     } else {

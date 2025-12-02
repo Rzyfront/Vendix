@@ -22,7 +22,13 @@ import {
 @Component({
   selector: 'app-store-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent, InputComponent], // ✅ Agregar InputComponent
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    IconComponent,
+    InputComponent,
+  ], // ✅ Agregar InputComponent
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -344,10 +350,7 @@ import {
                   Zona horaria
                   <span class="field-optional">(opcional)</span>
                 </label>
-                <select
-                  class="field-input"
-                  formControlName="timezone"
-                >
+                <select class="field-input" formControlName="timezone">
                   <option value="">Selecciona una zona horaria</option>
                   <option
                     *ngFor="let timezone of timezones"
@@ -497,10 +500,7 @@ import {
 
               <div class="form-field">
                 <label class="field-label">País</label>
-                <select
-                  class="field-input"
-                  formControlName="country_code"
-                >
+                <select class="field-input" formControlName="country_code">
                   <option value="">Selecciona un país</option>
                   <option
                     *ngFor="let country of countries"
@@ -513,10 +513,7 @@ import {
 
               <div class="form-field">
                 <label class="field-label">Departamento</label>
-                <select
-                  class="field-input"
-                  formControlName="state_province"
-                >
+                <select class="field-input" formControlName="state_province">
                   <option value="">Selecciona un departamento</option>
                   <option *ngFor="let dep of departments" [value]="dep.id">
                     {{ dep.name }}
@@ -527,10 +524,7 @@ import {
               <!-- Ciudad -->
               <div class="form-field">
                 <label class="field-label">Ciudad</label>
-                <select
-                  class="field-input"
-                  formControlName="city"
-                >
+                <select class="field-input" formControlName="city">
                   <option value="">Selecciona una ciudad</option>
                   <option *ngFor="let city of cities" [value]="city.id">
                     {{ city.name }}
@@ -569,7 +563,7 @@ export class StoreSetupStepComponent implements OnInit {
 
   constructor(
     private countryService: CountryService,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -614,7 +608,7 @@ export class StoreSetupStepComponent implements OnInit {
   private async initializeFormData(
     countryControl: any,
     depControl: any,
-    cityControl: any
+    cityControl: any,
   ): Promise<void> {
     const countryValue = countryControl.value;
     const depValue = depControl.value ? Number(depControl.value) : null;
@@ -649,4 +643,3 @@ export class StoreSetupStepComponent implements OnInit {
     this.cdr.markForCheck();
   }
 }
-

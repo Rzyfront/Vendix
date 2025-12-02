@@ -9,7 +9,9 @@ import { IconComponent } from '../../../../../shared/components/index';
   template: `
     <div class="flex flex-col items-center justify-center py-16 px-4">
       <!-- Icon -->
-      <div class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4">
+      <div
+        class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4"
+      >
         <app-icon name="users" class="w-10 h-10 text-gray-400"></app-icon>
       </div>
 
@@ -34,11 +36,13 @@ import { IconComponent } from '../../../../../shared/components/index';
       </button>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class UserEmptyStateComponent {
   @Input() title: string = 'No users found';

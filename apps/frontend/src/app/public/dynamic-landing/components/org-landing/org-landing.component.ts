@@ -9,20 +9,27 @@ import { CardComponent } from '../../../../shared/components/card/card.component
   standalone: true,
   imports: [CommonModule, ButtonComponent, CardComponent],
   template: `
-    <div class="org-landing-container" [style.background]="branding?.background">
+    <div
+      class="org-landing-container"
+      [style.background]="branding?.background"
+    >
       <header class="org-header">
         <div class="org-logo">
-          <img 
-            *ngIf="branding?.logo" 
-            [src]="branding.logo" 
+          <img
+            *ngIf="branding?.logo"
+            [src]="branding.logo"
             [alt]="organizationName + ' Logo'"
             class="logo-image"
-          >
+          />
           <h1 *ngIf="!branding?.logo">{{ organizationName }}</h1>
         </div>
         <nav class="org-nav">
-          <button class="nav-button" (click)="navigateToLogin()">Iniciar Sesión</button>
-          <button class="nav-button primary" (click)="navigateToShop()">Ir a Tienda</button>
+          <button class="nav-button" (click)="navigateToLogin()">
+            Iniciar Sesión
+          </button>
+          <button class="nav-button primary" (click)="navigateToShop()">
+            Ir a Tienda
+          </button>
         </nav>
       </header>
 
@@ -54,7 +61,7 @@ import { CardComponent } from '../../../../shared/components/card/card.component
       </main>
     </div>
   `,
-  styleUrls: ['./org-landing.component.scss']
+  styleUrls: ['./org-landing.component.scss'],
 })
 export class OrgLandingComponent implements OnInit {
   organizationName = 'Organización';
@@ -67,7 +74,9 @@ export class OrgLandingComponent implements OnInit {
   ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn('[ORG-LANDING] App config not available, using default values');
+      console.warn(
+        '[ORG-LANDING] App config not available, using default values',
+      );
       this.loadDefaultData();
       return;
     }
@@ -75,8 +84,11 @@ export class OrgLandingComponent implements OnInit {
     const domainConfig = appConfig.domainConfig;
     this.organizationName = domainConfig.organization_slug || 'Organización';
     this.branding = appConfig.branding || {};
-    this.organizationDescription = appConfig.domainConfig.customConfig?.description || '';
-    this.features = this.mapFeatures(appConfig.domainConfig.customConfig?.features || {});
+    this.organizationDescription =
+      appConfig.domainConfig.customConfig?.description || '';
+    this.features = this.mapFeatures(
+      appConfig.domainConfig.customConfig?.features || {},
+    );
   }
 
   private loadDefaultData() {
@@ -84,16 +96,36 @@ export class OrgLandingComponent implements OnInit {
   }
 
   private mapFeatures(features: any): any[] {
-    const featureMap: { [key: string]: { title: string; description: string } } = {
-      onboarding: { title: 'Onboarding', description: 'Configuración rápida y guiada' },
-      multiStore: { title: 'Multi-Tienda', description: 'Gestiona múltiples tiendas' },
-      userManagement: { title: 'Gestión de Usuarios', description: 'Control de accesos y roles' },
-      analytics: { title: 'Analytics', description: 'Métricas y reportes detallados' },
-      inventory: { title: 'Inventario', description: 'Control de stock en tiempo real' },
+    const featureMap: {
+      [key: string]: { title: string; description: string };
+    } = {
+      onboarding: {
+        title: 'Onboarding',
+        description: 'Configuración rápida y guiada',
+      },
+      multiStore: {
+        title: 'Multi-Tienda',
+        description: 'Gestiona múltiples tiendas',
+      },
+      userManagement: {
+        title: 'Gestión de Usuarios',
+        description: 'Control de accesos y roles',
+      },
+      analytics: {
+        title: 'Analytics',
+        description: 'Métricas y reportes detallados',
+      },
+      inventory: {
+        title: 'Inventario',
+        description: 'Control de stock en tiempo real',
+      },
       pos: { title: 'Punto de Venta', description: 'Sistema POS integrado' },
       orders: { title: 'Pedidos', description: 'Gestión completa de órdenes' },
-      customers: { title: 'Clientes', description: 'Base de datos de clientes' },
-      reports: { title: 'Reportes', description: 'Reportes personalizables' }
+      customers: {
+        title: 'Clientes',
+        description: 'Base de datos de clientes',
+      },
+      reports: { title: 'Reportes', description: 'Reportes personalizables' },
     };
 
     return Object.entries(features)

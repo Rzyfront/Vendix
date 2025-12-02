@@ -8,26 +8,29 @@
 >
   <!-- Resumen del Pedido -->
   <div class="mb-6 animate-slide-in">
-    <app-card
-      [shadow]="'md'"
-      [customClasses]="'payment-summary-enhanced'"
-    >
+    <app-card [shadow]="'md'" [customClasses]="'payment-summary-enhanced'">
       <div class="p-6">
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-3">
             <div class="flex justify-between items-center">
-              <span class="text-sm font-medium text-[var(--color-text-secondary)]"
+              <span
+                class="text-sm font-medium text-[var(--color-text-secondary)]"
                 >Subtotal</span
               >
-              <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+              <span
+                class="text-sm font-semibold text-[var(--color-text-primary)]"
+              >
                 ${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}
               </span>
             </div>
             <div class="flex justify-between items-center">
-              <span class="text-sm font-medium text-[var(--color-text-secondary)]"
+              <span
+                class="text-sm font-medium text-[var(--color-text-secondary)]"
                 >Impuestos</span
               >
-              <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+              <span
+                class="text-sm font-semibold text-[var(--color-text-primary)]"
+              >
                 ${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}
               </span>
             </div>
@@ -37,14 +40,17 @@
               *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0"
               class="flex justify-between items-center"
             >
-              <span class="text-sm font-medium text-[var(--color-text-secondary)]"
+              <span
+                class="text-sm font-medium text-[var(--color-text-secondary)]"
                 >Descuento</span
               >
               <span class="text-sm font-semibold text-[var(--color-error)]">
                 -${{ cartState?.summary?.discountAmount | number: "1.2-2" }}
               </span>
             </div>
-            <div class="flex justify-between items-center pt-3 border-t border-[var(--color-border)]">
+            <div
+              class="flex justify-between items-center pt-3 border-t border-[var(--color-border)]"
+            >
               <span class="text-base font-bold text-[var(--color-text-primary)]"
                 >Total</span
               >
@@ -59,7 +65,7 @@
   </div>
 
   <!-- Opciones de Pago -->
-  <div class="mb-6 animate-slide-in" style="animation-delay: 0.1s;">
+  <div class="mb-6 animate-slide-in" style="animation-delay: 0.1s">
     <h3 class="section-header-enhanced text-xl mb-6 flex items-center gap-3">
       <app-icon
         name="credit-card"
@@ -99,9 +105,7 @@
 
     <!-- Métodos de Pago -->
     <div>
-      <h4 class="section-header-enhanced text-lg mb-4">
-        Pagos Inmediatos
-      </h4>
+      <h4 class="section-header-enhanced text-lg mb-4">Pagos Inmediatos</h4>
       <div class="grid grid-cols-2 gap-4">
         <div
           *ngFor="let method of paymentMethods; let i = index"
@@ -114,7 +118,7 @@
           (keydown.space)="selectPaymentMethod(method)"
           [attr.aria-label]="'Seleccionar método de pago ' + method.name"
           [attr.aria-pressed]="paymentState.selectedMethod?.id === method.id"
-          style="animation-delay: {{0.2 + i * 0.05}}s"
+          style="animation-delay: {{ 0.2 + i * 0.05 }}s"
         >
           <div class="flex flex-col items-center">
             <app-icon
@@ -127,7 +131,9 @@
               "
               class="mb-3"
             ></app-icon>
-            <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+            <span
+              class="text-sm font-semibold text-[var(--color-text-primary)]"
+            >
               {{ method.name }}
             </span>
           </div>
@@ -137,8 +143,12 @@
   </div>
 
   <!-- Formulario de Detalles de Pago -->
-  <div *ngIf="paymentState.selectedMethod" class="mb-6 animate-slide-in" style="animation-delay: 0.3s;">
-    <app-card [shadow]="'md'"] [customClasses]="'payment-details-enhanced'">
+  <div
+    *ngIf="paymentState.selectedMethod"
+    class="mb-6 animate-slide-in"
+    style="animation-delay: 0.3s"
+  >
+    <app-card [shadow]="'md'" ] [customClasses]="'payment-details-enhanced'">
       <div class="p-6">
         <h4 class="section-header-enhanced text-lg mb-6">
           Detalles de Pago - {{ paymentState.selectedMethod.name }}
@@ -177,7 +187,9 @@
 
           <!-- Botones de Montos Rápidos -->
           <div>
-            <label class="block text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+            <label
+              class="block text-sm font-medium text-[var(--color-text-secondary)] mb-3"
+            >
               Montos Rápidos
             </label>
             <div class="grid grid-cols-4 gap-3">
@@ -207,11 +219,14 @@
                   [size]="20"
                   color="var(--color-success)"
                 ></app-icon>
-                <span class="text-base font-semibold text-[var(--color-success)]"
+                <span
+                  class="text-base font-semibold text-[var(--color-success)]"
                   >Cambio</span
                 >
               </div>
-              <span class="text-xl font-bold text-[var(--color-success)] pulse-success">
+              <span
+                class="text-xl font-bold text-[var(--color-success)] pulse-success"
+              >
                 ${{ paymentState.change | number: "1.2-2" }}
               </span>
             </div>
@@ -241,12 +256,14 @@
   </div>
 
   <!-- Teclado Numérico -->
-  <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="mb-6 animate-slide-in" style="animation-delay: 0.4s;">
+  <div
+    *ngIf="paymentState.selectedMethod?.type === 'cash'"
+    class="mb-6 animate-slide-in"
+    style="animation-delay: 0.4s"
+  >
     <app-card [shadow]="'md'" [customClasses]="'payment-details-enhanced'">
       <div class="p-6">
-        <h4 class="section-header-enhanced text-lg mb-4">
-          Teclado Numérico
-        </h4>
+        <h4 class="section-header-enhanced text-lg mb-4">Teclado Numérico</h4>
         <div class="grid grid-cols-3 gap-3">
           <button
             *ngFor="let num of [7, 8, 9, 4, 5, 6, 1, 2, 3]"

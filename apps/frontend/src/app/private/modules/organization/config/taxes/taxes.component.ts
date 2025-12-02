@@ -11,7 +11,8 @@ import { CommonModule } from '@angular/common';
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Aquí se mostrarán las configuraciones de impuestos y la gestión de tasas.
+          Aquí se mostrarán las configuraciones de impuestos y la gestión de
+          tasas.
         </p>
       </div>
     </div>
