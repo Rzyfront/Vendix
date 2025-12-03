@@ -1,17 +1,12 @@
-<div
-  class="vendix-landing min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]"
->
+<div class="vendix-landing min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
   <!-- Navigation Header (Modern Clean Design) -->
   <header
-    class="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[var(--color-border)] shadow-sm"
-  >
+    class="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[var(--color-border)] shadow-sm">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Logo Section -->
         <div class="flex items-center space-x-3">
-          <div
-            class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
-          >
+          <div class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center">
             <app-icon name="cart" [size]="24" color="white"></app-icon>
           </div>
           <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
@@ -21,48 +16,32 @@
 
         <!-- Desktop Navigation -->
         <nav class="hidden md:flex items-center space-x-8">
-          <a
-            href="#features"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-200 font-medium"
-          >
+          <a href="#features"
+            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Características
           </a>
-          <a
-            href="#solutions"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-200 font-medium"
-          >
+          <a href="#solutions"
+            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Soluciones
           </a>
-          <a
-            href="#pricing"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-200 font-medium"
-          >
+          <a href="#pricing"
+            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Precios
           </a>
-          <a
-            routerLink="/auth/login"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium"
-          >
+          <a routerLink="/auth/login"
+            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Iniciar Sesión
           </a>
-          <a
-            routerLink="/auth/register"
-            class="bg-[var(--color-primary)] text-white px-6 py-2.5 rounded-xl hover:bg-[var(--color-secondary)] transition-all duration-200 shadow-md hover:shadow-lg font-medium"
-          >
+          <a routerLink="/auth/register"
+            class="bg-[var(--color-primary)] text-white px-6 py-2.5 rounded-xl hover:bg-[var(--color-secondary)] transition-all duration-200 shadow-md hover:shadow-lg font-medium">
             Comenzar Gratis
           </a>
         </nav>
 
         <!-- Mobile Menu Button -->
-        <button
-          class="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-          (click)="toggleMobileMenu()"
-        >
-          <app-icon
-            [name]="mobileMenuOpen ? 'x' : 'menu'"
-            [size]="24"
-            color="var(--color-text-primary)"
-          ></app-icon>
+        <button class="md:hidden p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+          (click)="toggleMobileMenu()">
+          <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
         </button>
       </div>
     </div>
@@ -70,154 +49,91 @@
 
   <!-- Mobile Menu Overlay -->
   @if (mobileMenuOpen) {
-    <div class="fixed inset-0 z-[60] md:hidden">
-      <!-- Backdrop -->
-      <div
-        class="fixed inset-0 bg-black/50 backdrop-blur-sm"
-        (click)="closeMobileMenu()"
-      ></div>
+  <div class="fixed inset-0 z-[60] md:hidden">
+    <!-- Backdrop -->
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
 
-      <!-- Mobile Menu Panel -->
-      <div
-        class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-white shadow-xl transform transition-transform duration-300 ease-in-out"
-      >
-        <div class="flex flex-col h-full">
-          <!-- Mobile Menu Header -->
-          <div
-            class="flex items-center justify-between p-4 border-b border-gray-200"
-          >
-            <div class="flex items-center space-x-3">
-              <div
-                class="w-8 h-8 bg-[var(--color-primary)] rounded-lg flex items-center justify-center"
-              >
-                <app-icon name="cart" [size]="20" color="white"></app-icon>
-              </div>
-              <h2
-                class="text-lg font-semibold text-[var(--color-text-primary)]"
-              >
-                {{ tenantConfig?.branding?.name || "Vendix" }}
-              </h2>
+    <!-- Mobile Menu Panel -->
+    <div
+      class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-white shadow-xl transform transition-transform duration-300 ease-in-out">
+      <div class="flex flex-col h-full">
+        <!-- Mobile Menu Header -->
+        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+          <div class="flex items-center space-x-3">
+            <div class="w-8 h-8 bg-[var(--color-primary)] rounded-lg flex items-center justify-center">
+              <app-icon name="cart" [size]="20" color="white"></app-icon>
             </div>
-            <button
-              class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-              (click)="closeMobileMenu()"
-            >
-              <app-icon
-                name="menu"
-                [size]="20"
-                color="var(--color-text-primary)"
-              ></app-icon>
-            </button>
+            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
+              {{ tenantConfig?.branding?.name || "Vendix" }}
+            </h2>
+          </div>
+          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
+            <app-icon name="menu" [size]="20" color="var(--color-text-primary)"></app-icon>
+          </button>
+        </div>
+
+        <!-- Mobile Menu Content -->
+        <div class="flex-1 overflow-y-auto p-4">
+          <div class="space-y-2">
+            <a href="#features"
+              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+              (click)="closeMobileMenu()">
+              <app-icon name="check-circle" [size]="20" color="var(--color-text-secondary)"
+                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+              <span class="text-[var(--color-text-primary)] font-medium">Características</span>
+            </a>
+
+            <a href="#solutions"
+              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+              (click)="closeMobileMenu()">
+              <app-icon name="settings" [size]="20" color="var(--color-text-secondary)"
+                class="mr-3 group-hover:text-[var(--color-accent)]"></app-icon>
+              <span class="text-[var(--color-text-primary)] font-medium">Soluciones</span>
+            </a>
+
+            <a href="#pricing"
+              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+              (click)="closeMobileMenu()">
+              <app-icon name="credit-card" [size]="20" color="var(--color-text-secondary)"
+                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+              <span class="text-[var(--color-text-primary)] font-medium">Precios</span>
+            </a>
+
+            <div class="border-t border-gray-200 my-4"></div>
+
+            <a routerLink="/auth/login"
+              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+              (click)="closeMobileMenu()">
+              <app-icon name="user" [size]="20" color="var(--color-text-secondary)"
+                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+              <span class="text-[var(--color-text-primary)] font-medium">Iniciar Sesión</span>
+            </a>
+
+            <a routerLink="/auth/register"
+              class="flex items-center p-3 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] transition-colors duration-200 group mt-4"
+              (click)="closeMobileMenu()">
+              <app-icon name="plus" [size]="20" color="white" class="mr-3"></app-icon>
+              <span class="font-medium">Comenzar Gratis</span>
+            </a>
           </div>
 
-          <!-- Mobile Menu Content -->
-          <div class="flex-1 overflow-y-auto p-4">
-            <div class="space-y-2">
-              <a
-                href="#features"
-                class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-                (click)="closeMobileMenu()"
-              >
-                <app-icon
-                  name="check-circle"
-                  [size]="20"
-                  color="var(--color-text-secondary)"
-                  class="mr-3 group-hover:text-[var(--color-primary)]"
-                ></app-icon>
-                <span class="text-[var(--color-text-primary)] font-medium"
-                  >Características</span
-                >
+          <!-- Mobile Menu Footer -->
+          <div class="border-t border-gray-200 mt-6 pt-4">
+            <div class="text-center">
+              <p class="text-sm text-[var(--color-text-secondary)] mb-4">
+                ¿Necesitas ayuda?
+              </p>
+              <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
+                class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-medium">
+                <app-icon name="mail-check" [size]="16" color="currentColor" class="mr-2"></app-icon>
+                Contactar Soporte
               </a>
-
-              <a
-                href="#solutions"
-                class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-                (click)="closeMobileMenu()"
-              >
-                <app-icon
-                  name="settings"
-                  [size]="20"
-                  color="var(--color-text-secondary)"
-                  class="mr-3 group-hover:text-[var(--color-accent)]"
-                ></app-icon>
-                <span class="text-[var(--color-text-primary)] font-medium"
-                  >Soluciones</span
-                >
-              </a>
-
-              <a
-                href="#pricing"
-                class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-                (click)="closeMobileMenu()"
-              >
-                <app-icon
-                  name="credit-card"
-                  [size]="20"
-                  color="var(--color-text-secondary)"
-                  class="mr-3 group-hover:text-[var(--color-primary)]"
-                ></app-icon>
-                <span class="text-[var(--color-text-primary)] font-medium"
-                  >Precios</span
-                >
-              </a>
-
-              <div class="border-t border-gray-200 my-4"></div>
-
-              <a
-                routerLink="/auth/login"
-                class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-                (click)="closeMobileMenu()"
-              >
-                <app-icon
-                  name="user"
-                  [size]="20"
-                  color="var(--color-text-secondary)"
-                  class="mr-3 group-hover:text-[var(--color-primary)]"
-                ></app-icon>
-                <span class="text-[var(--color-text-primary)] font-medium"
-                  >Iniciar Sesión</span
-                >
-              </a>
-
-              <a
-                routerLink="/auth/register"
-                class="flex items-center p-3 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] transition-colors duration-200 group mt-4"
-                (click)="closeMobileMenu()"
-              >
-                <app-icon
-                  name="plus"
-                  [size]="20"
-                  color="white"
-                  class="mr-3"
-                ></app-icon>
-                <span class="font-medium">Comenzar Gratis</span>
-              </a>
-            </div>
-
-            <!-- Mobile Menu Footer -->
-            <div class="border-t border-gray-200 mt-6 pt-4">
-              <div class="text-center">
-                <p class="text-sm text-[var(--color-text-secondary)] mb-4">
-                  ¿Necesitas ayuda?
-                </p>
-                <a
-                  href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-                  class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-medium"
-                >
-                  <app-icon
-                    name="mail-check"
-                    [size]="16"
-                    color="currentColor"
-                    class="mr-2"
-                  ></app-icon>
-                  Contactar Soporte
-                </a>
-              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
+  </div>
   }
 
   <!-- Hero Section with Carousel -->
@@ -227,31 +143,18 @@
 
   <main>
     <!-- AI Features Section -->
-    <section
-      id="features"
-      class="min-h-screen bg-[var(--color-surface)] flex items-center py-20"
-    >
+    <section id="features" class="min-h-screen bg-[var(--color-surface)] flex items-center py-20">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-16">
-          <div
-            class="inline-flex items-center gap-2 bg-[var(--color-primary-light)] px-4 py-2 rounded-full mb-6"
-          >
-            <span class="w-2 h-2 bg-[var(--color-primary)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-primary)]"
-              >Características IA</span
-            >
+          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
+            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
+            <span class="text-sm font-medium text-[var(--color-accent)]">Características IA</span>
           </div>
-          <h2
-            class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight"
-          >
+          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
             Potencia tu Negocio con<br />
-            <span class="text-[var(--color-primary)]"
-              >Inteligencia Artificial</span
-            >
+            <span class="text-[var(--color-primary)]">Inteligencia Artificial</span>
           </h2>
-          <p
-            class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed"
-          >
+          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
             Implementación avanzada de IA para transformar cada aspecto de tu
             operación empresarial.
           </p>
@@ -260,20 +163,12 @@
         <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
           <!-- Predicción de Ventas -->
           <div
-            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
+            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300"
-            >
-              <app-icon
-                name="chart-line"
-                [size]="24"
-                color="var(--color-primary)"
-              ></app-icon>
+              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-3"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
               Predicción de Ventas
             </h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -284,20 +179,12 @@
 
           <!-- Recomendaciones Inteligentes -->
           <div
-            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
+            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300"
-            >
-              <app-icon
-                name="users"
-                [size]="24"
-                color="var(--color-accent)"
-              ></app-icon>
+              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-3"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
               Recomendaciones IA
             </h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -308,20 +195,12 @@
 
           <!-- Optimización de Inventario -->
           <div
-            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
+            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300"
-            >
-              <app-icon
-                name="package"
-                [size]="24"
-                color="var(--color-success)"
-              ></app-icon>
+              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-3"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
               Inventario Inteligente
             </h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -332,20 +211,12 @@
 
           <!-- Análisis de Comportamiento -->
           <div
-            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
+            class="group bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
             <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300"
-            >
-              <app-icon
-                name="bar-chart"
-                [size]="24"
-                color="var(--color-primary)"
-              ></app-icon>
+              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
+              <app-icon name="bar-chart" [size]="24" color="var(--color-primary)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-3"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
               Análisis Cliente
             </h3>
             <p class="text-[var(--color-text-secondary)] leading-relaxed">
@@ -358,29 +229,18 @@
     </section>
 
     <!-- Solutions Section -->
-    <section
-      id="solutions"
-      class="min-h-screen bg-[var(--color-background)] flex items-center py-20"
-    >
+    <section id="solutions" class="min-h-screen bg-[var(--color-background)] flex items-center py-20">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-20">
-          <div
-            class="inline-flex items-center gap-2 bg-[var(--color-accent-light)] px-4 py-2 rounded-full mb-6"
-          >
+          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
             <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]"
-              >Tipos de Venta</span
-            >
+            <span class="text-sm font-medium text-[var(--color-accent)]">Tipos de Venta</span>
           </div>
-          <h2
-            class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight"
-          >
+          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
             Soluciones para<br />
-            <span class="text-[var(--color-accent)]">Todos los Canales</span>
+            <span class="text-[var(--color-primary)]">Todos los Canales</span>
           </h2>
-          <p
-            class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed"
-          >
+          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
             Gestiona todos tus puntos de venta con una plataforma unificada y
             moderna.
           </p>
@@ -389,57 +249,32 @@
         <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-7xl mx-auto">
           <!-- Punto de Venta POS -->
           <div
-            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 hover:shadow-lg transition-all duration-300"
-          >
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6"
-            >
-              <app-icon
-                name="credit-card"
-                [size]="24"
-                color="var(--color-accent)"
-              ></app-icon>
+            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 hover:shadow-lg transition-all duration-300">
+            <div class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6">
+              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-4"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
               Punto de Venta POS
             </h3>
             <ul class="space-y-3 text-[var(--color-text-secondary)]">
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Escáner de códigos de barra</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Gestión de efectivo y tarjeta</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Impresión de tickets y facturas</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Inventario en tiempo real</span>
               </li>
             </ul>
@@ -447,57 +282,32 @@
 
           <!-- Facturación -->
           <div
-            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6"
-            >
-              <app-icon
-                name="file-text"
-                [size]="24"
-                color="var(--color-primary)"
-              ></app-icon>
+            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6">
+              <app-icon name="file-text" [size]="24" color="var(--color-primary)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-4"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
               Facturación
             </h3>
             <ul class="space-y-3 text-[var(--color-text-secondary)]">
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Facturas electrónicas válidas</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Generación automática DIAN</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Reportes contables</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Retenciones automáticas</span>
               </li>
             </ul>
@@ -505,57 +315,32 @@
 
           <!-- Pagos -->
           <div
-            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
-            <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6"
-            >
-              <app-icon
-                name="credit-card"
-                [size]="24"
-                color="var(--color-success)"
-              ></app-icon>
+            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6">
+              <app-icon name="credit-card" [size]="24" color="var(--color-success)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-4"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
               Pagos
             </h3>
             <ul class="space-y-3 text-[var(--color-text-secondary)]">
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Tarjeta crédito y débito</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Pagos móviles QR</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Transferencias bancarias</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Criptomonedas</span>
               </li>
             </ul>
@@ -563,57 +348,32 @@
 
           <!-- Gestión de Envíos -->
           <div
-            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300"
-          >
-            <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6"
-            >
-              <app-icon
-                name="truck"
-                [size]="24"
-                color="var(--color-primary)"
-              ></app-icon>
+            class="bg-white p-8 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
+            <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6">
+              <app-icon name="truck" [size]="24" color="var(--color-primary)"></app-icon>
             </div>
-            <h3
-              class="text-xl font-semibold text-[var(--color-text-primary)] mb-4"
-            >
+            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
               Gestión de Envíos
             </h3>
             <ul class="space-y-3 text-[var(--color-text-secondary)]">
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Integración transportadoras</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Seguimiento en tiempo real</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Cálculo automático fletes</span>
               </li>
               <li class="flex items-start">
-                <app-icon
-                  name="check"
-                  [size]="16"
-                  color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"
-                ></app-icon>
+                <app-icon name="check" [size]="16" color="var(--color-success)"
+                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
                 <span>Notificaciones SMS/email</span>
               </li>
             </ul>
@@ -623,166 +383,113 @@
     </section>
 
     <!-- Pricing Section -->
-    <section
-      id="pricing"
-      class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32"
-    >
+    <section id="pricing" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
       <div class="container mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-12 md:mb-16">
-          <div
-            class="inline-flex items-center gap-2 bg-[var(--color-primary-light)] px-4 py-2 rounded-full mb-6"
-          >
-            <span class="w-2 h-2 bg-[var(--color-primary)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-primary)]"
-              >Planes y Precios</span
-            >
+          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
+            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
+            <span class="text-sm font-medium text-[var(--color-accent)]">Planes y Precios</span>
           </div>
-          <h2
-            class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight"
-          >
+          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
             Planes para
             <span class="text-[var(--color-primary)]">Tu Negocio</span>
           </h2>
-          <p
-            class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed"
-          >
+          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
             Elige el plan perfecto según tus necesidades. Cancela cuando
             quieras.
           </p>
         </div>
 
         <!-- Mobile-First Pricing Cards -->
-        <div
-          class="space-y-6 md:space-y-0 md:grid md:grid-cols-3 lg:grid-cols-3 gap-6 md:gap-8 max-w-7xl mx-auto"
-        >
+        <div class="space-y-6 md:space-y-0 md:grid md:grid-cols-3 lg:grid-cols-3 gap-6 md:gap-8 max-w-7xl mx-auto">
           @for (plan of plans; track plan.name) {
-            <div
-              class="relative bg-white rounded-2xl border border-[var(--color-border)] {{
+          <div class="relative bg-white rounded-2xl border border-[var(--color-border)] {{
                 plan.highlighted
                   ? 'ring-2 ring-[var(--color-primary)]/50 shadow-xl'
                   : 'shadow-lg'
-              }} transition-all duration-300 hover:shadow-xl hover:scale-[1.02] overflow-hidden"
-            >
-              @if (plan.highlighted) {
-                <div
-                  class="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10"
-                >
-                  <span
-                    class="bg-[var(--color-primary)] text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg"
-                  >
-                    Más Popular
-                  </span>
-                </div>
-              }
+              }} transition-all duration-300 hover:shadow-xl hover:scale-[1.02] overflow-hidden">
+            @if (plan.highlighted) {
+            <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
+              <span class="bg-[var(--color-primary)] text-white px-4 py-2 rounded-full text-sm font-semibold shadow-lg">
+                Más Popular
+              </span>
+            </div>
+            }
 
-              <!-- Mobile Header -->
-              <div class="p-6 md:p-8">
-                <!-- Plan Name and Price Header -->
-                <div class="text-center mb-6 md:mb-8">
-                  <h3
-                    class="text-xl md:text-2xl font-bold text-[var(--color-text-primary)] mb-3"
-                  >
-                    {{ plan.name }}
-                  </h3>
-                  <p
-                    class="text-sm md:text-base text-[var(--color-text-secondary)] mb-6 leading-relaxed"
-                  >
-                    {{ plan.description }}
-                  </p>
-                  <div class="flex items-baseline justify-center mb-2">
-                    <span
-                      class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)]"
-                      >{{ plan.price }}</span
-                    >
-                    <span
-                      class="text-[var(--color-text-secondary)] ml-2 text-base md:text-lg"
-                      >{{ plan.period }}</span
-                    >
-                  </div>
-                </div>
-
-                <!-- Features List -->
-                <div class="mb-8">
-                  <ul class="space-y-3 md:space-y-4">
-                    @for (feature of plan.features; track feature) {
-                      <li class="flex items-start group">
-                        <app-icon
-                          name="check"
-                          [size]="18"
-                          color="var(--color-success)"
-                          class="mr-3 mt-1 flex-shrink-0 group-hover:scale-110 transition-transform duration-200"
-                        ></app-icon>
-                        <span
-                          class="text-sm md:text-base text-[var(--color-text-secondary)] leading-relaxed group-hover:text-[var(--color-text-primary)] transition-colors duration-200"
-                          >{{ feature }}</span
-                        >
-                      </li>
-                    }
-                  </ul>
-                </div>
-
-                <!-- CTA Button and Terms -->
-                <div class="space-y-4">
-                  <a
-                    routerLink="/auth/register"
-                    class="block w-full py-3 md:py-4 px-6 rounded-xl text-base md:text-lg font-semibold text-center transition-all duration-300 min-h-[52px] flex items-center justify-center {{
-                      plan.highlighted
-                        ? 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl'
-                        : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border-2 border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white'
-                    }}"
-                  >
-                    {{ plan.cta_text }}
-                  </a>
-
-                  <!-- Términos y condiciones -->
-                  <p
-                    class="text-center text-sm text-[var(--color-text-secondary)]"
-                  >
-                    <a
-                      href="#"
-                      (click)="showTermsAndConditions()"
-                      class="hover:text-[var(--color-primary)] underline transition-colors duration-200"
-                    >
-                      Términos y condiciones
-                    </a>
-                  </p>
+            <!-- Mobile Header -->
+            <div class="p-6 md:p-8">
+              <!-- Plan Name and Price Header -->
+              <div class="text-center mb-6 md:mb-8">
+                <h3 class="text-xl md:text-2xl font-bold text-[var(--color-text-primary)] mb-3">
+                  {{ plan.name }}
+                </h3>
+                <p class="text-sm md:text-base text-[var(--color-text-secondary)] mb-6 leading-relaxed">
+                  {{ plan.description }}
+                </p>
+                <div class="flex items-baseline justify-center mb-2">
+                  <span class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)]">{{ plan.price }}</span>
+                  <span class="text-[var(--color-text-secondary)] ml-2 text-base md:text-lg">{{ plan.period }}</span>
                 </div>
               </div>
 
-              <!-- Mobile Highlight Border -->
-              @if (plan.highlighted) {
-                <div
-                  class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]"
-                ></div>
-              }
+              <!-- Features List -->
+              <div class="mb-8">
+                <ul class="space-y-3 md:space-y-4">
+                  @for (feature of plan.features; track feature) {
+                  <li class="flex items-start group">
+                    <app-icon name="check" [size]="18" color="var(--color-success)"
+                      class="mr-3 mt-1 flex-shrink-0 group-hover:scale-110 transition-transform duration-200"></app-icon>
+                    <span
+                      class="text-sm md:text-base text-[var(--color-text-secondary)] leading-relaxed group-hover:text-[var(--color-text-primary)] transition-colors duration-200">{{
+                      feature }}</span>
+                  </li>
+                  }
+                </ul>
+              </div>
+
+              <!-- CTA Button and Terms -->
+              <div class="space-y-4">
+                <a routerLink="/auth/register" class="block w-full py-3 md:py-4 px-6 rounded-xl text-base md:text-lg font-semibold text-center transition-all duration-300 min-h-[52px] flex items-center justify-center {{
+                      plan.highlighted
+                        ? 'bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl'
+                        : 'bg-[var(--color-background)] text-[var(--color-text-primary)] border-2 border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-white'
+                    }}">
+                  {{ plan.cta_text }}
+                </a>
+
+                <!-- Términos y condiciones -->
+                <p class="text-center text-sm text-[var(--color-text-secondary)]">
+                  <a href="#" (click)="showTermsAndConditions()"
+                    class="hover:text-[var(--color-primary)] underline transition-colors duration-200">
+                    Términos y condiciones
+                  </a>
+                </p>
+              </div>
             </div>
+
+            <!-- Mobile Highlight Border -->
+            @if (plan.highlighted) {
+            <div
+              class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]">
+            </div>
+            }
+          </div>
           }
         </div>
 
         <!-- Mobile Additional Info -->
         <div class="mt-12 md:mt-16 text-center">
-          <div
-            class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20"
-          >
-            <h3
-              class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3"
-            >
+          <div class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20">
+            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">
               ¿No estás seguro qué plan elegir?
             </h3>
             <p class="text-[var(--color-text-secondary)] mb-4 leading-relaxed">
               Contáctanos para una asesoría personalizada y encuentra el plan
               perfecto para tu negocio.
             </p>
-            <a
-              href="mailto:quicks.dev@gmail.com?subject=Consulta%20de%20Planes%20Vendix"
-              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200"
-            >
-              <app-icon
-                name="mail-check"
-                [size]="18"
-                color="currentColor"
-                class="mr-2"
-              ></app-icon>
+            <a href="mailto:quicks.dev@gmail.com?subject=Consulta%20de%20Planes%20Vendix"
+              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
+              <app-icon name="mail-check" [size]="18" color="currentColor" class="mr-2"></app-icon>
               Hablar con un experto
             </a>
           </div>
@@ -791,50 +498,32 @@
     </section>
 
     <!-- CTA Section -->
-    <section
-      class="min-h-screen bg-[var(--color-primary)] relative overflow-hidden flex items-center"
-    >
-      <div
-        class="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10"
-      >
-        <h2
-          class="text-4xl md:text-5xl font-bold text-white mb-6 tracking-tight"
-        >
+    <section class="min-h-screen bg-[var(--color-primary)] relative overflow-hidden flex items-center">
+      <div class="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+        <h2 class="text-4xl md:text-5xl font-bold text-white mb-6 tracking-tight">
           ¿Listo para Transformar<br />
           tu Negocio con IA?
         </h2>
-        <p
-          class="text-xl text-white/90 mb-10 max-w-3xl mx-auto leading-relaxed"
-        >
+        <p class="text-xl text-white/90 mb-10 max-w-3xl mx-auto leading-relaxed">
           Únete a miles de empresas que ya están usando inteligencia artificial
           para revolucionar sus ventas y operaciones.
         </p>
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
-          <a
-            routerLink="/auth/register"
-            class="bg-white text-[var(--color-primary)] px-8 py-4 rounded-xl font-semibold hover:bg-gray-50 hover:shadow-xl transition-all duration-300"
-          >
+          <a routerLink="/auth/register"
+            class="bg-white text-[var(--color-primary)] px-8 py-4 rounded-xl font-semibold hover:bg-gray-50 hover:shadow-xl transition-all duration-300">
             Comenzar Gratis Ahora
           </a>
-          <a
-            href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-            class="border-2 border-white text-white px-8 py-4 rounded-xl font-semibold hover:bg-white hover:text-[var(--color-primary)] transition-all duration-300"
-          >
+          <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
+            class="border-2 border-white text-white px-8 py-4 rounded-xl font-semibold hover:bg-white hover:text-[var(--color-primary)] transition-all duration-300">
             Agendar Demo Personalizada
           </a>
         </div>
       </div>
       <!-- Decorative elements -->
       <div class="absolute top-0 left-0 w-full h-full opacity-10">
-        <div
-          class="absolute top-10 left-10 w-20 h-20 bg-white rounded-full"
-        ></div>
-        <div
-          class="absolute bottom-10 right-10 w-32 h-32 bg-white rounded-full"
-        ></div>
-        <div
-          class="absolute top-1/2 right-1/4 w-16 h-16 bg-white rounded-full"
-        ></div>
+        <div class="absolute top-10 left-10 w-20 h-20 bg-white rounded-full"></div>
+        <div class="absolute bottom-10 right-10 w-32 h-32 bg-white rounded-full"></div>
+        <div class="absolute top-1/2 right-1/4 w-16 h-16 bg-white rounded-full"></div>
       </div>
     </section>
   </main>
@@ -845,21 +534,9 @@
       <div class="grid md:grid-cols-4 gap-8 mb-12">
         <div class="md:col-span-1">
           <div class="flex items-center space-x-3 mb-4">
-            <div
-              class="w-10 h-10 bg-white rounded-xl flex items-center justify-center"
-            >
-              <svg
-                class="w-6 h-6 text-[var(--color-primary)]"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
+            <div class="w-10 h-10 bg-white rounded-xl flex items-center justify-center">
+              <svg class="w-6 h-6 text-[var(--color-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
             </div>
             <h3 class="text-xl font-semibold">Vendix</h3>
@@ -873,63 +550,30 @@
         <div>
           <h4 class="text-lg font-semibold mb-4">Producto</h4>
           <div class="space-y-3">
-            <a
-              href="#features"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Características</a
-            >
-            <a
-              href="#solutions"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Soluciones</a
-            >
-            <a
-              href="#pricing"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Precios</a
-            >
+            <a href="#features" class="block text-white/70 hover:text-white transition-colors">Características</a>
+            <a href="#solutions" class="block text-white/70 hover:text-white transition-colors">Soluciones</a>
+            <a href="#pricing" class="block text-white/70 hover:text-white transition-colors">Precios</a>
           </div>
         </div>
 
         <div>
           <h4 class="text-lg font-semibold mb-4">Empresa</h4>
           <div class="space-y-3">
-            <a
-              routerLink="/auth/login"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Iniciar Sesión</a
-            >
-            <a
-              routerLink="/auth/register"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Registrarse</a
-            >
-            <a
-              href="mailto:quicks.dev@gmail.com"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Contacto</a
-            >
+            <a routerLink="/auth/login" class="block text-white/70 hover:text-white transition-colors">Iniciar
+              Sesión</a>
+            <a routerLink="/auth/register"
+              class="block text-white/70 hover:text-white transition-colors">Registrarse</a>
+            <a href="mailto:quicks.dev@gmail.com"
+              class="block text-white/70 hover:text-white transition-colors">Contacto</a>
           </div>
         </div>
 
         <div>
           <h4 class="text-lg font-semibold mb-4">Legal</h4>
           <div class="space-y-3">
-            <a
-              href="#"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Política de Privacidad</a
-            >
-            <a
-              href="#"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Términos de Servicio</a
-            >
-            <a
-              href="#"
-              class="block text-white/70 hover:text-white transition-colors"
-              >Cookies</a
-            >
+            <a href="#" class="block text-white/70 hover:text-white transition-colors">Política de Privacidad</a>
+            <a href="#" class="block text-white/70 hover:text-white transition-colors">Términos de Servicio</a>
+            <a href="#" class="block text-white/70 hover:text-white transition-colors">Cookies</a>
           </div>
         </div>
       </div>
@@ -940,34 +584,22 @@
             &copy; 2024 Vendix Platform. Todos los derechos reservados.
           </p>
           <div class="flex space-x-6">
-            <a
-              href="#"
-              class="text-white/70 hover:text-white transition-colors"
-            >
+            <a href="#" class="text-white/70 hover:text-white transition-colors">
               <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                 <path
-                  d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
-                />
+                  d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
               </svg>
             </a>
-            <a
-              href="#"
-              class="text-white/70 hover:text-white transition-colors"
-            >
+            <a href="#" class="text-white/70 hover:text-white transition-colors">
               <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                 <path
-                  d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"
-                />
+                  d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z" />
               </svg>
             </a>
-            <a
-              href="#"
-              class="text-white/70 hover:text-white transition-colors"
-            >
+            <a href="#" class="text-white/70 hover:text-white transition-colors">
               <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                 <path
-                  d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"
-                />
+                  d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
               </svg>
             </a>
           </div>
@@ -979,47 +611,34 @@
 
 <!-- Modal de Términos y Condiciones -->
 @if (showTermsModal) {
-  <div
-    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-  >
-    <div
-      class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl"
-    >
-      <!-- Header -->
-      <div
-        class="bg-[var(--color-primary)] text-white p-6 flex justify-between items-center"
-      >
-        <h2 class="text-xl font-bold">Términos y Condiciones</h2>
-        <button
-          (click)="closeTermsModal()"
-          class="text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
-        >
-          <app-icon name="x" [size]="20" color="white"></app-icon>
+<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
+    <!-- Header -->
+    <div class="bg-[var(--color-primary)] text-white p-6 flex justify-between items-center">
+      <h2 class="text-xl font-bold">Términos y Condiciones</h2>
+      <button (click)="closeTermsModal()" class="text-white hover:bg-white/20 rounded-lg p-2 transition-colors">
+        <app-icon name="x" [size]="20" color="white"></app-icon>
+      </button>
+    </div>
+
+    <!-- Content -->
+    <div class="p-6 overflow-y-auto max-h-[60vh]">
+      <div [innerHTML]="termsContent"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="bg-gray-50 p-6 border-t border-gray-200">
+      <div class="flex justify-end gap-3">
+        <button (click)="closeTermsModal()"
+          class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
+          Cerrar
         </button>
-      </div>
-
-      <!-- Content -->
-      <div class="p-6 overflow-y-auto max-h-[60vh]">
-        <div [innerHTML]="termsContent"></div>
-      </div>
-
-      <!-- Footer -->
-      <div class="bg-gray-50 p-6 border-t border-gray-200">
-        <div class="flex justify-end gap-3">
-          <button
-            (click)="closeTermsModal()"
-            class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-          >
-            Cerrar
-          </button>
-          <button
-            (click)="closeTermsModal()"
-            class="px-6 py-2 bg-[var(--color-primary)] text-white rounded-lg hover:bg-[var(--color-secondary)] transition-colors"
-          >
-            Acepto los términos
-          </button>
-        </div>
+        <button (click)="closeTermsModal()"
+          class="px-6 py-2 bg-[var(--color-primary)] text-white rounded-lg hover:bg-[var(--color-secondary)] transition-colors">
+          Acepto los términos
+        </button>
       </div>
     </div>
   </div>
+</div>
 }
