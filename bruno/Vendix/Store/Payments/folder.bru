@@ -1,0 +1,39 @@
+meta {
+  name: Store/Payments
+}
+
+post {
+  url: "http://localhost:3000/api/payments"
+}
+
+post {
+  url: "http://localhost:3000/api/payments/with-order"
+}
+
+get {
+  url: "http://localhost:3000/api/payments"
+}
+
+get {
+  url: "http://localhost:3000/api/payments/{{paymentId}}"
+}
+
+post {
+  url: "http://localhost:3000/api/payments/{{paymentId}}/refund"
+}
+
+get {
+  url: "http://localhost:3000/api/payments/{{paymentId}}/status"
+}
+
+post {
+  url: "http://localhost:3000/api/webhooks/stripe"
+}
+
+post {
+  url: "http://localhost:3000/api/webhooks/paypal"
+}
+
+post {
+  url: "http://localhost:3000/api/webhooks/bank-transfer"
+}

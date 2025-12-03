@@ -1,0 +1,22 @@
+meta {
+  name: Get Domain Settings
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{url}}/organization/domains?limit=10&offset=0
+}
+
+tests {
+  test("Domain settings retrieved successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+  });
+
+  test("Response contains domain settings array", function() {
+    expect(res.body.data).to.be.an('array');
+  });
+}

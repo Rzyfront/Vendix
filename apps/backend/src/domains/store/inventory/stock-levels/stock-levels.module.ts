@@ -10,4 +10,4 @@ import { PrismaModule } from '../../../../prisma/prisma.module';
   providers: [StockLevelsService],
   exports: [StockLevelsService],
 })
-export class StockLevelsModule { }
+export class StockLevelsModule {}

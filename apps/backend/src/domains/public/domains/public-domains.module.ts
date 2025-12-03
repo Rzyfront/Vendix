@@ -6,17 +6,17 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 
 /**
  * 🌐 Public Domains Module
- * 
+ *
  * Provides public endpoints for domain resolution.
  * Uses PublicDomainsService with GlobalPrismaService to avoid
  * organization context requirements.
  */
 @Module({
-    imports: [
-        PrismaModule, // For GlobalPrismaService
-        ResponseModule,
-    ],
-    controllers: [PublicDomainsController],
-    providers: [PublicDomainsService],
+  imports: [
+    PrismaModule, // For GlobalPrismaService
+    ResponseModule,
+  ],
+  controllers: [PublicDomainsController],
+  providers: [PublicDomainsService],
 })
-export class PublicDomainsModule { }
+export class PublicDomainsModule {}

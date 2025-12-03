@@ -11,4 +11,4 @@ import { PrismaModule } from '../../../prisma/prisma.module';
   providers: [BrandsService, PermissionsGuard],
   exports: [BrandsService],
 })
-export class BrandsModule { }
+export class BrandsModule {}

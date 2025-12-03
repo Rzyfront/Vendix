@@ -1,0 +1,21 @@
+meta {
+  name: Get Login Attempts
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{url}}/organization/login-attempts?page=1&limit=10
+}
+
+tests {
+  test("Login attempts retrieved successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Response contains login attempts array", function() {
+    expect(res.body.data).to.be.an('array');
+  });
+}

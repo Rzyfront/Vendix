@@ -113,30 +113,30 @@ export class RolesService {
     return this.transformRoleWithPermissionDescriptions(role);
   }
 
-  async findAll(userId: number) {
-    // Verificar si el usuario es super_admin
-    const userRoles = await this.prismaService.user_roles.findMany({
-      where: { userId: userId },
+  async findAll(user_id: number) {
+    // OrganizationPrismaService filtra automáticamente por organization_id
+    const user_roles = await this.prismaService.user_roles.findMany({
+      where: { user_id: user_id },
       include: {
         roles: true,
       },
     });
 
-    const isSuperAdmin = userRoles.some(
-      (ur) => ur.roles?.name === 'super_admin',
+    const is_owner_or_admin = user_roles.some(
+      (ur) => ur.roles?.name === 'owner' || ur.roles?.name === 'admin',
     );
 
-    // Si no es super_admin, filtrar el rol super_admin de los resultados
-    const whereClause = isSuperAdmin
+    // Si no es owner/admin, filtrar roles de sistema organizacional
+    const where_clause = is_owner_or_admin
       ? {}
       : {
           name: {
-            not: 'super_admin',
+            notIn: ['owner', 'admin'],
           },
         };
 
     const roles = await this.prismaService.roles.findMany({
-      where: whereClause,
+      where: where_clause,
       include: {
         role_permissions: {
           include: {
@@ -197,7 +197,7 @@ export class RolesService {
     // Si se proporciona userId, verificar permisos de acceso
     if (userId) {
       const userRoles = await this.prismaService.user_roles.findMany({
-        where: { userId: userId },
+        where: { user_id: userId },
         include: {
           roles: true,
         },
@@ -434,7 +434,7 @@ export class RolesService {
     // Si se proporciona userId, verificar permisos de acceso
     if (userId) {
       const userRoles = await this.prismaService.user_roles.findMany({
-        where: { userId: userId },
+        where: { user_id: userId },
         include: {
           roles: true,
         },
@@ -498,7 +498,7 @@ export class RolesService {
     // Verificar permisos para asignar el rol super_admin
     if (role.name === 'super_admin') {
       const adminUserRoles = await this.prismaService.user_roles.findMany({
-        where: { userId: adminUserId },
+        where: { user_id: adminUserId },
         include: {
           roles: true,
         },
@@ -662,7 +662,7 @@ export class RolesService {
 
   async getUserPermissions(userId: number) {
     const userRoles = await this.prismaService.user_roles.findMany({
-      where: { userId: userId },
+      where: { user_id: userId },
       include: {
         roles: {
           include: {
@@ -692,7 +692,7 @@ export class RolesService {
 
   async getUserRoles(userId: number) {
     return await this.prismaService.user_roles.findMany({
-      where: { userId: userId },
+      where: { user_id: userId },
       include: {
         roles: {
           include: {
@@ -712,7 +712,7 @@ export class RolesService {
   async getDashboardStats(userId: number): Promise<RoleDashboardStatsDto> {
     // Verificar si el usuario es super_admin
     const userRoles = await this.prismaService.user_roles.findMany({
-      where: { userId: userId },
+      where: { user_id: userId },
       include: {
         roles: true,
       },

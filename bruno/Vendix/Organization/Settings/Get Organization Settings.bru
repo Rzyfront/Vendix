@@ -1,0 +1,23 @@
+meta {
+  name: Get Organization Settings
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/organization/settings
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get organization settings successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Response contains settings data", function() {
+    expect(res.body).to.have.property('data');
+  });
+}

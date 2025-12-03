@@ -1,0 +1,35 @@
+meta {
+  name: Update Permission
+  type: http
+  seq: 5
+}
+
+patch {
+  url: http://{{url}}/organization/permissions/{{created_permission_id}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "description": "Permite crear y gestionar usuarios en el sistema administrativo",
+    "status": "active"
+  }
+}
+
+tests {
+  test("Update permission successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Permiso actualizado exitosamente');
+  });
+
+  test("Permission data is updated", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id', bru.getEnvVar('created_permission_id'));
+    expect(res.body.data).to.have.property('description', 'Permite crear y gestionar usuarios en el sistema administrativo');
+    expect(res.body.data).to.have.property('status', 'active');
+  });
+}

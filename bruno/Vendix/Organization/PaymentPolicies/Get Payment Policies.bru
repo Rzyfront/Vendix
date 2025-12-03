@@ -1,0 +1,21 @@
+meta {
+  name: Get Payment Policies
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{url}}/organization/payment-policies
+}
+
+tests {
+  test("Payment policies retrieved successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Response contains payment policies object", function() {
+    expect(res.body.data).to.be.an('object');
+  });
+}

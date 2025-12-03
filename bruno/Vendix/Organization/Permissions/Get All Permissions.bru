@@ -1,0 +1,49 @@
+meta {
+  name: Get All Permissions
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/organization/permissions?page=1&limit=10
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get all permissions successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Lista de permisos obtenida exitosamente');
+  });
+
+  test("Response has correct structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('pagination');
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.pagination).to.have.property('total');
+    expect(res.body.pagination).to.have.property('page');
+    expect(res.body.pagination).to.have.property('limit');
+    expect(res.body.pagination).to.have.property('totalPages');
+  });
+
+  test("Permissions have required fields", function() {
+    if (res.body.data.length > 0) {
+      const permission = res.body.data[0];
+      expect(permission).to.have.property('id');
+      expect(permission).to.have.property('name');
+      expect(permission).to.have.property('path');
+      expect(permission).to.have.property('method');
+      expect(permission).to.have.property('status');
+    }
+  });
+
+  test("Pagination values are correct", function() {
+    expect(res.body.pagination.page).to.equal(1);
+    expect(res.body.pagination.limit).to.equal(10);
+    expect(res.body.pagination.total).to.be.a('number');
+    expect(res.body.pagination.totalPages).to.be.a('number');
+  });
+}

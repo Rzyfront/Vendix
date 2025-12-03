@@ -1,0 +1,51 @@
+meta {
+  name: Create Permission
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/organization/permissions
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "users.create",
+    "description": "Permite crear nuevos usuarios en el sistema",
+    "path": "/api/users",
+    "method": "POST",
+    "status": "active"
+  }
+}
+
+vars:post-response {
+  created_permission_id: res.body.data.id
+  created_permission_name: res.body.data.name
+}
+
+tests {
+  test("Create permission successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Permiso creado exitosamente');
+  });
+
+  test("Permission data is complete", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name', 'users.create');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('path', '/api/users');
+    expect(res.body.data).to.have.property('method', 'POST');
+    expect(res.body.data).to.have.property('status', 'active');
+  });
+
+  test("Permission ID extracted correctly", function() {
+    expect(bru.getEnvVar('created_permission_id')).to.be.a('number');
+    expect(bru.getEnvVar('created_permission_name')).to.equal('users.create');
+  });
+}

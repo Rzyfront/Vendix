@@ -1,0 +1,47 @@
+meta {
+  name: Create Role
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/organization/roles
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "manager",
+    "description": "Gestor de tienda con permisos administrativos",
+    "system_role": false
+  }
+}
+
+vars:post-response {
+  created_role_id: res.body.data.id
+  created_role_name: res.body.data.name
+}
+
+tests {
+  test("Create role successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Rol creado exitosamente');
+  });
+
+  test("Role data is complete", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('name', 'manager');
+    expect(res.body.data).to.have.property('description');
+    expect(res.body.data).to.have.property('system_role', false);
+  });
+
+  test("Role ID extracted correctly", function() {
+    expect(bru.getEnvVar('created_role_id')).to.be.a('number');
+    expect(bru.getEnvVar('created_role_name')).to.equal('manager');
+  });
+}

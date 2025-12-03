@@ -1,0 +1,38 @@
+meta {
+  name: Update Address
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{url}}/organization/addresses/{{addressId}}
+  body: json
+}
+
+body:json {
+  {
+    "address_line_1": "Calle 456",
+    "city": "Guadalajara",
+    "state": "Jalisco"
+  }
+}
+
+tests {
+  test("Address updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+
+  test("Address data is updated", function() {
+    expect(res.body.data.address_line_1).to.equal('Calle 456');
+    expect(res.body.data.city).to.equal('Guadalajara');
+    expect(res.body.data.state).to.equal('Jalisco');
+  });
+
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
+    expect(res.body.data).to.not.have.property('token');
+  });
+}

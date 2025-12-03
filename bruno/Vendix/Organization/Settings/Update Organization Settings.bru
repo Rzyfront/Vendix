@@ -1,0 +1,33 @@
+meta {
+  name: Update Organization Settings
+  type: http
+  seq: 2
+}
+
+put {
+  url: http://{{url}}/organization/settings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "settings": {
+      "theme": "dark",
+      "language": "es",
+      "notifications": true
+    }
+  }
+}
+
+tests {
+  test("Update organization settings successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Response contains updated settings", function() {
+    expect(res.body).to.have.property('data');
+  });
+}

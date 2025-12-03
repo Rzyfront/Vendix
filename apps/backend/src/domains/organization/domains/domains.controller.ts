@@ -49,7 +49,7 @@ export class DomainsController {
   constructor(
     private readonly domainsService: DomainsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   // ========== ENDPOINTS PRIVADOS (requieren autenticación) ==========
 

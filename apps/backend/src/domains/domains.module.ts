@@ -14,4 +14,4 @@ import { PublicDomainModule } from './public/public.module';
     PublicDomainModule,
   ],
 })
-export class DomainsModule { }
+export class DomainsModule {}

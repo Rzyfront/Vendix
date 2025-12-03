@@ -1,0 +1,16 @@
+meta {
+  name: Delete Address
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{url}}/organization/addresses/{{addressId}}
+  body: none
+}
+
+tests {
+  test("Address deleted successfully", function() {
+    expect(res.status).to.equal(204);
+  });
+}
