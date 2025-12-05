@@ -11,7 +11,7 @@ import {
   AdminOrganizationQueryDto,
   OrganizationState,
   OrganizationDashboardDto,
-} from '../../organization/organizations/dto';
+} from './dto';
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 

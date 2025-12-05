@@ -17,7 +17,7 @@ import {
   UpdateOrganizationDto,
   AdminOrganizationQueryDto,
   OrganizationDashboardDto,
-} from '../../organization/organizations/dto';
+} from './dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';

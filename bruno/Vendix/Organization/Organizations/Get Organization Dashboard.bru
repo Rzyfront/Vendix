@@ -1,0 +1,32 @@
+meta {
+  name: Get Organization Dashboard
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{base_url}}/organization/organizations/dashboard?period=6m
+  headers: [
+    {
+      key: "Authorization",
+      value: "Bearer {{token}}"
+    }
+  ]
+}
+
+tests {
+  test("Get dashboard successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('obtenido exitosamente');
+  });
+
+  test("Dashboard data is present", function() {
+    expect(res.body).to.have.property('data');
+    const dashboard = res.body.data;
+    // Add specific assertions based on dashboard structure
+    expect(dashboard).to.be.an('object');
+  });
+}

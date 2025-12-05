@@ -1,0 +1,32 @@
+meta {
+  name: Update Organization Profile - Invalid Data
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{base_url}}/organization/organizations/profile
+  body: json
+  headers: [
+    {
+      key: "Authorization",
+      value: "Bearer {{token}}"
+    }
+  ]
+}
+
+body:json {
+  {
+    "name": "A",
+    "email": "invalid-email"
+  }
+}
+
+tests {
+  test("Update profile fails with invalid data", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.false;
+    expect(res.body).to.have.property('message');
+  });
+}
