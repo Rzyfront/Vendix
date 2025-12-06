@@ -5,7 +5,7 @@ meta {
 }
 
 patch {
-  url: http://{{url}}/stores/{{created_store_id}}
+  url: http://{{url}}/organization/stores/5
   body: json
   auth: none
 }
@@ -33,7 +33,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('actualizada exitosamente');
   });
-
+  
   test("Store data was updated correctly", function() {
     expect(res.body).to.have.property('data');
     const store = res.body.data;
@@ -47,11 +47,11 @@ tests {
     expect(store.store_type).to.equal('online');
     expect(store.is_active).to.equal(true);
   });
-
+  
   test("Updated store ID matches", function() {
     expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_store_id')));
   });
-
+  
   test("Updated timestamp is present", function() {
     expect(res.body.data).to.have.property('updated_at');
     const updatedAt = new Date(res.body.data.updated_at);

@@ -1,0 +1,41 @@
+meta {
+  name: Get Role Permissions
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/organization/roles/{{created_role_id}}/permissions
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get role permissions successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('IDs de permisos obtenidos exitosamente');
+  });
+
+  test("Response has correct structure", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('role_id', bru.getEnvVar('created_role_id'));
+    expect(res.body.data).to.have.property('permission_ids');
+    expect(res.body.data.permission_ids).to.be.an('array');
+    expect(res.body.data).to.have.property('total_permissions');
+    expect(res.body.data.total_permissions).to.be.a('number');
+  });
+
+  test("Permission IDs are numbers", function() {
+    if (res.body.data.permission_ids.length > 0) {
+      res.body.data.permission_ids.forEach(function(permissionId) {
+        expect(permissionId).to.be.a('number');
+      });
+    }
+  });
+
+  test("Total permissions matches array length", function() {
+    expect(res.body.data.total_permissions).to.equal(res.body.data.permission_ids.length);
+  });
+}

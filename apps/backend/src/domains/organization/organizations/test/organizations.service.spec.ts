@@ -111,7 +111,9 @@ describe('OrganizationsService', () => {
   describe('getProfile', () => {
     it('should return organization profile when context exists', async () => {
       // Arrange
-      mock_prisma.organizations.findUnique.mockResolvedValue(mock_organization_data);
+      mock_prisma.organizations.findUnique.mockResolvedValue(
+        mock_organization_data,
+      );
 
       // Act
       const result = await service.getProfile();
@@ -243,19 +245,27 @@ describe('OrganizationsService', () => {
 
       mock_prisma.orders.count
         .mockResolvedValueOnce(100) // monthly_orders
-        .mockResolvedValueOnce(10);  // orders_today
+        .mockResolvedValueOnce(10); // orders_today
 
       mock_prisma.orders.aggregate
-        .mockResolvedValueOnce({ _sum: { grand_total: 6000, shipping_cost: 500 } })
-        .mockResolvedValueOnce({ _sum: { grand_total: 5500, shipping_cost: 450 } });
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 6000, shipping_cost: 500 },
+        })
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 5500, shipping_cost: 450 },
+        });
 
       mock_prisma.order_items.aggregate
         .mockResolvedValueOnce({ _sum: { total_price: 1000 } })
         .mockResolvedValueOnce({ _sum: { total_price: 950 } });
 
       mock_prisma.orders.aggregate
-        .mockResolvedValueOnce({ _sum: { grand_total: 5000, shipping_cost: 400 } })
-        .mockResolvedValueOnce({ _sum: { grand_total: 4800, shipping_cost: 350 } });
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 5000, shipping_cost: 400 },
+        })
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 4800, shipping_cost: 350 },
+        });
 
       mock_prisma.order_items.aggregate
         .mockResolvedValueOnce({ _sum: { total_price: 800 } })
@@ -294,16 +304,24 @@ describe('OrganizationsService', () => {
         .mockResolvedValueOnce(10);
 
       mock_prisma.orders.aggregate
-        .mockResolvedValueOnce({ _sum: { grand_total: 6000, shipping_cost: 500 } })
-        .mockResolvedValueOnce({ _sum: { grand_total: 5500, shipping_cost: 450 } });
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 6000, shipping_cost: 500 },
+        })
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 5500, shipping_cost: 450 },
+        });
 
       mock_prisma.order_items.aggregate
         .mockResolvedValueOnce({ _sum: { total_price: 1000 } })
         .mockResolvedValueOnce({ _sum: { total_price: 950 } });
 
       mock_prisma.orders.aggregate
-        .mockResolvedValueOnce({ _sum: { grand_total: 5000, shipping_cost: 400 } })
-        .mockResolvedValueOnce({ _sum: { grand_total: 4800, shipping_cost: 350 } });
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 5000, shipping_cost: 400 },
+        })
+        .mockResolvedValueOnce({
+          _sum: { grand_total: 4800, shipping_cost: 350 },
+        });
 
       mock_prisma.order_items.aggregate
         .mockResolvedValueOnce({ _sum: { total_price: 800 } })

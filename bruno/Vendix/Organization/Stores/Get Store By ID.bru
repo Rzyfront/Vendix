@@ -5,9 +5,9 @@ meta {
 }
 
 get {
-  url: http://{{url}}/stores/{{created_store_id}}
+  url: http://{{url}}/organization/stores/5
   body: none
-  auth: none
+  auth: inherit
 }
 
 tests {
@@ -18,7 +18,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('obtenida exitosamente');
   });
-
+  
   test("Store data is complete", function() {
     expect(res.body).to.have.property('data');
     const store = res.body.data;
@@ -34,16 +34,16 @@ tests {
     expect(store).to.have.property('created_at');
     expect(store).to.have.property('updated_at');
   });
-
+  
   test("Store ID matches requested ID", function() {
     expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_store_id')));
   });
-
+  
   test("Store has proper relationship data", function() {
     expect(res.body.data).to.have.property('organization_id');
     expect(res.body.data.organization_id).to.be.a('number');
   });
-
+  
   test("Operating hours is properly formatted", function() {
     if (res.body.data.operating_hours) {
       expect(typeof res.body.data.operating_hours).to.be.oneOf(['string', 'object']);

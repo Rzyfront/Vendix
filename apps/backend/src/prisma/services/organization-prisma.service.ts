@@ -16,7 +16,6 @@ export class OrganizationPrismaService extends BasePrismaService {
     'addresses',
     'audit_logs',
     'roles',
-    'permissions',
     'user_roles',
     'role_permissions',
     'user_settings',
@@ -74,7 +73,6 @@ export class OrganizationPrismaService extends BasePrismaService {
     }
 
     const scoped_args = { ...args };
-    const security_filter: Record<string, any> = {};
 
     if (this.org_scoped_models.includes(model)) {
       if (!context.organization_id) {
@@ -82,14 +80,25 @@ export class OrganizationPrismaService extends BasePrismaService {
           'Access denied - organization context required',
         );
       }
-      security_filter.organization_id = context.organization_id;
-    }
 
-    if (Object.keys(security_filter).length > 0) {
-      scoped_args.where = {
-        ...scoped_args.where,
-        ...security_filter,
-      };
+      // Filtro especial para roles: incluir roles de la organización actual Y roles del sistema (organization_id = null)
+      if (model === 'roles') {
+        const existingWhere = scoped_args.where || {};
+        scoped_args.where = {
+          ...existingWhere,
+          OR: [
+            { organization_id: context.organization_id },
+            { organization_id: null },
+          ],
+        };
+      } else {
+        // Para otros modelos: solo filtrar por organization_id
+        const existingWhere = scoped_args.where || {};
+        scoped_args.where = {
+          ...existingWhere,
+          organization_id: context.organization_id,
+        };
+      }
     }
 
     return query(scoped_args);

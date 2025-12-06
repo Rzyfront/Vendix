@@ -5,9 +5,9 @@ meta {
 }
 
 post {
-  url: http://{{url}}/stores
+  url: http://{{url}}/organization/stores
   body: json
-  auth: none
+  auth: inherit
 }
 
 body:json {
@@ -42,7 +42,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('creada exitosamente');
   });
-
+  
   test("Store data is complete", function() {
     expect(res.body).to.have.property('data');
     const store = res.body.data;
@@ -61,12 +61,12 @@ tests {
     expect(store).to.have.property('organization_id', 16);
     expect(store).to.have.property('manager_user_id', 57);
   });
-
+  
   test("Store ID and slug extracted correctly", function() {
     expect(bru.getEnvVar('created_store_id')).to.be.a('number');
     expect(bru.getEnvVar('created_store_slug')).to.equal('test-store-api');
   });
-
+  
   test("Store has metadata", function() {
     expect(res.body.data).to.have.property('created_at');
     expect(res.body.data).to.have.property('updated_at');

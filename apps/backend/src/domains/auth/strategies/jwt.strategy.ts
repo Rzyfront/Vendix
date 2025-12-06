@@ -68,6 +68,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         throw new UnauthorizedException('Cuenta bloqueada temporalmente');
       }
 
+      // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el organization_id del token
+      // corresponde al usuario (incluso para super_admin para consistencia)
+      if (Number(payload.organization_id) !== user.organization_id) {
+        console.error('JWT Strategy - Organization mismatch:', {
+          token_org_id: payload.organization_id,
+          user_org_id: user.organization_id,
+          user_id: user.id,
+          email: user.email,
+        });
+        throw new UnauthorizedException(
+          'Token scope inválido: organización no corresponde al usuario',
+        );
+      }
+
       // ✅ Retornamos el usuario con scope del TOKEN (no de la BD)
       // Esto permite tener diferentes scopes por sesión/token
       return {

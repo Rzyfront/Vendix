@@ -5,13 +5,9 @@ meta {
 }
 
 get {
-  url: {{base_url}}/organization/organizations/profile
-  headers: [
-    {
-      key: "Authorization",
-      value: "Bearer {{token}}"
-    }
-  ]
+  url: http://{{url}}/organization/organizations/profile
+  body: none
+  auth: inherit
 }
 
 tests {
@@ -23,12 +19,19 @@ tests {
     expect(res.body.message).to.include('obtenido exitosamente');
   });
 
-  test("Profile data is present", function() {
+  test("Profile data is complete", function() {
     expect(res.body).to.have.property('data');
     const profile = res.body.data;
     expect(profile).to.have.property('id');
     expect(profile).to.have.property('name');
     expect(profile).to.have.property('slug');
     expect(profile).to.have.property('email');
+    expect(profile).to.have.property('state');
+    expect(profile).to.have.property('created_at');
+    expect(profile).to.have.property('updated_at');
+  });
+
+  test("No sensitive data exposed", function() {
+    expect(res.body.data).to.not.have.property('password');
   });
 }

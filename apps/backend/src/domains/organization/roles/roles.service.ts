@@ -11,6 +11,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../audit/audit.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateRoleDto,
   UpdateRoleDto,
@@ -59,6 +60,14 @@ export class RolesService {
 
   async create(createRoleDto: CreateRoleDto, userId: number) {
     const { name, description, system_role } = createRoleDto;
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+
+    if (!organization_id && !system_role) {
+      throw new ForbiddenException(
+        'Organization context required to create non-system roles',
+      );
+    }
 
     // Verificar que el nombre no exista
     const existingRole = await this.prismaService.roles.findUnique({
@@ -75,6 +84,7 @@ export class RolesService {
         name,
         description,
         is_system_role: system_role || false,
+        organization_id: system_role ? null : organization_id,
       },
       include: {
         role_permissions: {
@@ -103,7 +113,12 @@ export class RolesService {
       action: AuditAction.CREATE,
       resource: AuditResource.ROLES,
       resourceId: role.id,
-      newValues: { name, description, is_system_role: system_role },
+      newValues: {
+        name,
+        description,
+        is_system_role: system_role,
+        organization_id: role.organization_id,
+      },
       metadata: {
         action: 'create_role',
         role_name: name,
@@ -320,11 +335,22 @@ export class RolesService {
     const role = await this.findOne(role_id);
     const { permission_ids } = assignPermissionsDto;
 
+    // No permitir modificar permisos de roles del sistema
+    if (role.system_role) {
+      throw new BadRequestException(
+        'No se pueden modificar permisos de roles del sistema',
+      );
+    }
+
     // Verificar que los permisos existan
     const permissions = await this.prismaService.permissions.findMany({
       where: {
         id: { in: permission_ids },
         status: 'active',
+      },
+      select: {
+        id: true,
+        is_system_permission: true,
       },
     });
 
@@ -332,6 +358,12 @@ export class RolesService {
       throw new BadRequestException(
         'Uno o más permisos no existen o están inactivos',
       );
+    }
+
+    // Verificar que no se asignen permisos del sistema
+    const systemPermission = permissions.find((p) => p.is_system_permission);
+    if (systemPermission) {
+      throw new ForbiddenException('No se pueden asignar permisos del sistema');
     }
 
     // Crear las relaciones role_permissions
@@ -382,6 +414,47 @@ export class RolesService {
   ) {
     const role = await this.findOne(role_id);
     const { permission_ids } = removePermissionsDto;
+
+    // No permitir modificar permisos de roles del sistema
+    if (role.system_role) {
+      throw new BadRequestException(
+        'No se pueden modificar permisos de roles del sistema',
+      );
+    }
+
+    // Verificar que no se remuevan permisos del sistema
+    const permissions = await this.prismaService.permissions.findMany({
+      where: {
+        id: { in: permission_ids },
+        status: 'active',
+      },
+      select: {
+        id: true,
+        is_system_permission: true,
+      },
+    });
+
+    const systemPermission = permissions.find((p) => p.is_system_permission);
+    if (systemPermission) {
+      throw new ForbiddenException('No se pueden remover permisos del sistema');
+    }
+
+    // Verificar que no se remuevan permisos del sistema
+    const permissionsToRemove = await this.prismaService.permissions.findMany({
+      where: {
+        id: { in: permission_ids },
+        status: 'active',
+      },
+      select: {
+        id: true,
+        is_system_permission: true,
+      },
+    });
+
+    const systemPerm = permissionsToRemove.find((p) => p.is_system_permission);
+    if (systemPerm) {
+      throw new ForbiddenException('No se pueden remover permisos del sistema');
+    }
 
     // Eliminar las relaciones role_permissions
     const result = await this.prismaService.role_permissions.deleteMany({
@@ -478,7 +551,13 @@ export class RolesService {
     // Verificar que el usuario existe
     const user = await this.prismaService.users.findUnique({
       where: { id: user_id },
-      select: { id: true, email: true, first_name: true, last_name: true },
+      select: {
+        id: true,
+        email: true,
+        first_name: true,
+        last_name: true,
+        organization_id: true,
+      },
     });
 
     if (!user) {
@@ -488,11 +567,23 @@ export class RolesService {
     // Verificar que el rol existe
     const role = await this.prismaService.roles.findUnique({
       where: { id: role_id },
-      select: { id: true, name: true },
+      select: { id: true, name: true, organization_id: true },
     });
 
     if (!role) {
       throw new NotFoundException('Rol no encontrado');
+    }
+
+    // Validar pertenencia organizacional
+    // Los roles del sistema (organization_id = null) pueden asignarse a cualquier usuario
+    // Los roles específicos de organización solo pueden asignarse a usuarios de la misma organización
+    if (
+      role.organization_id !== null &&
+      role.organization_id !== user.organization_id
+    ) {
+      throw new ForbiddenException(
+        'El rol no pertenece a la organización del usuario',
+      );
     }
 
     // Verificar permisos para asignar el rol super_admin
@@ -606,16 +697,39 @@ export class RolesService {
       },
       include: {
         users: {
-          select: { id: true, email: true, first_name: true, last_name: true },
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            organization_id: true,
+          },
         },
         roles: {
-          select: { id: true, name: true, is_system_role: true },
+          select: {
+            id: true,
+            name: true,
+            is_system_role: true,
+            organization_id: true,
+          },
         },
       },
     });
 
     if (!userRole) {
       throw new NotFoundException('El usuario no tiene este rol asignado');
+    }
+
+    // Validar pertenencia organizacional (seguridad adicional)
+    // Los roles del sistema (organization_id = null) pueden removerse de cualquier usuario
+    // Los roles específicos de organización solo pueden removerse de usuarios de la misma organización
+    if (
+      userRole.roles?.organization_id !== null &&
+      userRole.roles?.organization_id !== userRole.users?.organization_id
+    ) {
+      throw new ForbiddenException(
+        'El rol no pertenece a la organización del usuario',
+      );
     }
 
     // No permitir remover roles del sistema si es el último rol del usuario

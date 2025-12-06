@@ -1,0 +1,28 @@
+meta {
+  name: Create Role - Name Conflict
+  type: http
+  seq: 14
+}
+
+post {
+  url: http://{{url}}/organization/roles
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "senior_manager",
+    "description": "Rol con nombre duplicado",
+    "system_role": false
+  }
+}
+
+tests {
+  test("Create role with duplicate name fails", function() {
+    expect(res.status).to.equal(409);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Ya existe un rol con este nombre');
+  });
+}

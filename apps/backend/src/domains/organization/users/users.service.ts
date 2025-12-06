@@ -16,12 +16,14 @@ import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AuditService, AuditResource } from '../audit/audit.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: OrganizationPrismaService,
     private emailService: EmailService,
+    private auditService: AuditService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -391,5 +393,101 @@ export class UsersService {
         archivados: usuariosArchivados,
       },
     };
+  }
+
+  async verifyEmail(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const old_state = user.state;
+
+    // Update user state to active (or keep current state if suspended/archived)
+    const new_state =
+      user.state === 'pending_verification' ? 'active' : user.state;
+
+    const updated_user = await this.prisma.users.update({
+      where: { id },
+      data: {
+        state: new_state,
+        email_verified: true,
+        updated_at: new Date(),
+      },
+    });
+
+    // Delete any existing email verification tokens
+    await this.prisma.email_verification_tokens.deleteMany({
+      where: { user_id: id },
+    });
+
+    // Log the action
+    await this.auditService.logUpdate(
+      id,
+      AuditResource.USERS,
+      id,
+      { state: old_state },
+      { state: new_state, email_verified: true },
+      {
+        action: 'verify_email',
+        verified_by: 'admin',
+      },
+    );
+
+    return updated_user;
+  }
+
+  async resetPassword(id: number, resetPasswordDto: any) {
+    const { new_password, confirm_password } = resetPasswordDto;
+
+    // Validate passwords match
+    if (new_password !== confirm_password) {
+      throw new BadRequestException('Passwords do not match');
+    }
+
+    // Validate password length
+    if (new_password.length < 8) {
+      throw new BadRequestException(
+        'Password must be at least 8 characters long',
+      );
+    }
+
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Hash the new password
+    const hashed_password = await bcrypt.hash(new_password, 10);
+
+    // Update user password
+    const updated_user = await this.prisma.users.update({
+      where: { id },
+      data: {
+        password_hash: hashed_password,
+        updated_at: new Date(),
+      },
+    });
+
+    // Log the action
+    await this.auditService.logUpdate(
+      id,
+      AuditResource.USERS,
+      id,
+      { password_hash: '[REDACTED]' },
+      { password_hash: '[REDACTED]' },
+      {
+        action: 'reset_password',
+        reset_by_admin: true,
+      },
+    );
+
+    return updated_user;
   }
 }

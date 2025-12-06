@@ -5,9 +5,9 @@ meta {
 }
 
 get {
-  url: http://{{url}}/stores/stats
+  url: http://{{url}}/organization/stores/stats
   body: none
-  auth: none
+  auth: inherit
 }
 
 tests {
@@ -18,16 +18,16 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('Estadísticas de tiendas obtenidas exitosamente');
   });
-
+  
   test("Global stats structure is correct", function() {
     expect(res.body).to.have.property('data');
     const stats = res.body.data;
     expect(stats).to.be.an('object');
   });
-
+  
   test("Global stats contain store metrics", function() {
     const stats = res.body.data;
-
+  
     // Contadores de tiendas
     if (stats.stores) {
       expect(stats.stores).to.have.property('total_stores');
@@ -38,7 +38,7 @@ tests {
       expect(stats.stores.total_stores).to.be.a('number');
       expect(stats.stores.active_stores).to.be.a('number');
     }
-
+  
     // Métricas de rendimiento
     if (stats.performance) {
       expect(stats.performance).to.have.property('total_revenue');
@@ -47,7 +47,7 @@ tests {
       expect(stats.performance.total_revenue).to.be.a('number');
       expect(stats.performance.total_orders).to.be.a('number');
     }
-
+  
     // Distribución por tipo
     if (stats.by_type) {
       expect(stats.by_type).to.be.an('object');
@@ -55,7 +55,7 @@ tests {
       expect(stats.by_type.online).to.be.a('number');
       expect(stats.by_type.hybrid).to.be.a('number');
     }
-
+  
     // Distribución por estado
     if (stats.by_status) {
       expect(stats.by_status).to.be.an('object');
@@ -64,22 +64,22 @@ tests {
       expect(stats.by_status.archived).to.be.a('number');
     }
   });
-
+  
   test("Stats values are non-negative numbers", function() {
     const stats = res.body.data;
-
+  
     if (stats.stores) {
       expect(stats.stores.total_stores).to.be.at.least(0);
       expect(stats.stores.active_stores).to.be.at.least(0);
       expect(stats.stores.inactive_stores).to.be.at.least(0);
     }
-
+  
     if (stats.performance) {
       expect(stats.performance.total_revenue).to.be.at.least(0);
       expect(stats.performance.total_orders).to.be.at.least(0);
     }
   });
-
+  
   test("Stats include date information", function() {
     const stats = res.body.data;
     if (stats.generated_at || stats.last_updated) {

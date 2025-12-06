@@ -1,0 +1,33 @@
+meta {
+  name: Remove Role from User
+  type: http
+  seq: 11
+}
+
+post {
+  url: http://{{url}}/organization/roles/remove-from-user
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "user_id": {{admin_user_id}},
+    "role_id": {{created_role_id}}
+  }
+}
+
+tests {
+  test("Remove role from user successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Rol removido exitosamente');
+  });
+
+  test("Response contains success message", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('message');
+    expect(res.body.data.message).to.include('Rol removido del usuario exitosamente');
+  });
+}

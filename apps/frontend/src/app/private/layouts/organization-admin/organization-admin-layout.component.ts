@@ -190,12 +190,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Asignaciones de Tienda',
           icon: 'building',
           route: '/admin/users/store-assignments',
-        },
-        {
-          label: 'Auditoría de Acceso',
-          icon: 'eye',
-          route: '/admin/users/access-audit',
-        },
+        }
       ],
     },
     {

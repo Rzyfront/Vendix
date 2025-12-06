@@ -5,14 +5,9 @@ meta {
 }
 
 patch {
-  url: {{base_url}}/organization/organizations/profile
+  url: http://{{url}}/organization/organizations/profile
   body: json
-  headers: [
-    {
-      key: "Authorization",
-      value: "Bearer {{token}}"
-    }
-  ]
+  auth: inherit
 }
 
 body:json {
@@ -22,6 +17,11 @@ body:json {
     "phone": "+1234567890",
     "website": "https://updated.example.com"
   }
+}
+
+vars:post-response {
+  updated_org_name: res.body.data.name
+  updated_org_email: res.body.data.email
 }
 
 tests {
@@ -40,5 +40,14 @@ tests {
     expect(profile).to.have.property('email', 'updated@example.com');
     expect(profile).to.have.property('phone', '+1234567890');
     expect(profile).to.have.property('website', 'https://updated.example.com');
+  });
+
+  test("Variables extracted correctly", function() {
+    expect(bru.getEnvVar('updated_org_name')).to.equal('Updated Organization Name');
+    expect(bru.getEnvVar('updated_org_email')).to.equal('updated@example.com');
+  });
+
+  test("Profile has metadata", function() {
+    expect(res.body.data).to.have.property('updated_at');
   });
 }

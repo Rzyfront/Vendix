@@ -5,7 +5,7 @@ meta {
 }
 
 patch {
-  url: http://{{url}}/stores/{{created_store_id}}/settings
+  url: http://{{url}}/stores/5/settings
   body: json
   auth: none
 }
@@ -50,11 +50,11 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('Configuración de tienda actualizada exitosamente');
   });
-
+  
   test("Settings structure is correct", function() {
     expect(res.body).to.have.property('data');
     const settings = res.body.data;
-
+  
     expect(settings).to.have.property('settings');
     expect(settings.settings).to.have.property('inventory');
     expect(settings.settings).to.have.property('shipping');
@@ -62,21 +62,21 @@ tests {
     expect(settings.settings).to.have.property('notifications');
     expect(settings.settings).to.have.property('display');
   });
-
+  
   test("Inventory settings are correct", function() {
     const inventory = res.body.data.settings.inventory;
     expect(inventory.track_inventory).to.be.a('boolean');
     expect(inventory.low_stock_threshold).to.be.a('number');
     expect(inventory.allow_backorders).to.be.a('boolean');
   });
-
+  
   test("Shipping settings are correct", function() {
     const shipping = res.body.data.settings.shipping;
     expect(shipping.enable_shipping).to.be.a('boolean');
     expect(shipping.free_shipping_threshold).to.be.a('number');
     expect(shipping.shipping_zones).to.be.an('array');
   });
-
+  
   test("Payment settings are correct", function() {
     const payments = res.body.data.settings.payments;
     expect(payments.enable_online_payments).to.be.a('boolean');

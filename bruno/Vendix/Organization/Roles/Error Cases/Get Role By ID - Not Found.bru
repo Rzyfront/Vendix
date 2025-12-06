@@ -1,0 +1,20 @@
+meta {
+  name: Get Role By ID - Not Found
+  type: http
+  seq: 16
+}
+
+get {
+  url: http://{{url}}/organization/roles/999999
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get non-existent role fails", function() {
+    expect(res.status).to.equal(404);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Rol no encontrado');
+  });
+}

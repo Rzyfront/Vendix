@@ -5,13 +5,13 @@ meta {
 }
 
 get {
-  url: {{base_url}}/organization/organizations/dashboard?period=6m
-  headers: [
-    {
-      key: "Authorization",
-      value: "Bearer {{token}}"
-    }
-  ]
+  url: http://{{url}}/organization/organizations/dashboard
+  body: none
+  auth: inherit
+}
+
+params:query {
+  period: 6m
 }
 
 tests {
@@ -26,7 +26,12 @@ tests {
   test("Dashboard data is present", function() {
     expect(res.body).to.have.property('data');
     const dashboard = res.body.data;
-    // Add specific assertions based on dashboard structure
     expect(dashboard).to.be.an('object');
+    expect(dashboard).to.have.property('period');
+    expect(dashboard).to.have.property('data');
+  });
+
+  test("Dashboard period matches query", function() {
+    expect(res.body.data.period).to.equal('6m');
   });
 }

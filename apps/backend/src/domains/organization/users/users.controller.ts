@@ -20,6 +20,7 @@ import {
   UpdateUserDto,
   UserQueryDto,
   UsersDashboardDto,
+  ResetPasswordDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -201,6 +202,48 @@ export class UsersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al reactivar el usuario',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post(':id/verify-email')
+  @Permissions('users:verify-email')
+  async verifyEmail(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.usersService.verifyEmail(id);
+      return this.responseService.success(
+        result,
+        'Email verificado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al verificar el email',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post(':id/reset-password')
+  @Permissions('users:reset-password')
+  async resetPassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() resetPasswordDto: ResetPasswordDto,
+  ) {
+    try {
+      const result = await this.usersService.resetPassword(
+        id,
+        resetPasswordDto,
+      );
+      return this.responseService.success(
+        result,
+        'Contraseña restablecida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al restablecer la contraseña',
         error.response?.message || error.message,
         error.status || 400,
       );

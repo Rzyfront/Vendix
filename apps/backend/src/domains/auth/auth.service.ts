@@ -1249,14 +1249,38 @@ export class AuthService {
       // 🔒 VALIDACIONES DE SEGURIDAD ADICIONALES
       await this.validateRefreshTokenSecurity(tokenRecord, client_info);
 
+      // 🔒 VERIFICAR QUE EL TOKEN TIENE USUARIO ASOCIADO
+      const user = tokenRecord.users;
+      if (!user) {
+        console.error('Refresh token - No user associated:', {
+          token_id: tokenRecord.id,
+          user_id: tokenRecord.user_id,
+        });
+        throw new UnauthorizedException(
+          'Refresh token inválido: usuario no encontrado',
+        );
+      }
+
+      // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el token scope corresponde al usuario
+      if (Number(payload.organization_id) !== user.organization_id) {
+        console.error('Refresh token - Organization mismatch:', {
+          user_id: user.id,
+          token_organization_id: payload.organization_id,
+          user_organization_id: user.organization_id,
+        });
+        throw new UnauthorizedException(
+          'Token scope inválido: organización no corresponde al usuario',
+        );
+      }
+
       // Generar nuevos tokens
-      const tokens = await this.generateTokens(tokenRecord.users, {
+      const tokens = await this.generateTokens(user, {
         organization_id: payload.organization_id,
         store_id: payload.store_id,
       });
 
       // El password no está incluido en esta consulta por seguridad
-      const userWithoutPassword = tokenRecord.users;
+      const userWithoutPassword = user;
 
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =

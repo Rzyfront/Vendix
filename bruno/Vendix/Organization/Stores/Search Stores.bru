@@ -5,9 +5,17 @@ meta {
 }
 
 get {
-  url: http://{{url}}/stores?search=test&page=1&limit=5&store_type=online&is_active=true
+  url: http://{{url}}/organization/stores?search=test&page=1&limit=5&store_type=online&is_active=true
   body: none
-  auth: none
+  auth: inherit
+}
+
+params:query {
+  search: test
+  page: 1
+  limit: 5
+  store_type: online
+  is_active: true
 }
 
 tests {
@@ -18,7 +26,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('obtenidas exitosamente');
   });
-
+  
   test("Search results structure is correct", function() {
     expect(res.body).to.have.property('data');
     expect(res.body).to.have.property('pagination');
@@ -27,7 +35,7 @@ tests {
     expect(res.body.pagination).to.have.property('page', 1);
     expect(res.body.pagination).to.have.property('limit', 5);
   });
-
+  
   test("Search results contain relevant stores", function() {
     if (res.body.data.length > 0) {
       res.body.data.forEach(store => {
@@ -36,14 +44,14 @@ tests {
         expect(store).to.have.property('slug');
         expect(store).to.have.property('store_type', 'online');
         expect(store).to.have.property('is_active', true);
-
+  
         // Verificar que los resultados contienen el término de búsqueda
         const searchText = store.name.toLowerCase() + store.slug.toLowerCase();
         expect(searchText).to.include('test');
       });
     }
   });
-
+  
   test("Search respects filters", function() {
     if (res.body.data.length > 0) {
       res.body.data.forEach(store => {
@@ -52,13 +60,13 @@ tests {
       });
     }
   });
-
+  
   test("Search respects pagination", function() {
     expect(res.body.pagination.page).to.equal(1);
     expect(res.body.pagination.limit).to.equal(5);
     expect(res.body.data.length).to.be.at.most(5);
   });
-
+  
   test("Search pagination info is correct", function() {
     expect(res.body.pagination.total).to.be.a('number');
     expect(res.body.pagination.totalPages).to.be.a('number');

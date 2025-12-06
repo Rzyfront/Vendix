@@ -90,8 +90,8 @@ describe('OrganizationsController', () => {
       .compile();
 
     controller = module.get<OrganizationsController>(OrganizationsController);
-    mock_service = module.get(OrganizationsService) as MockOrganizationsService;
-    mock_response_service = module.get(ResponseService) as MockResponseService;
+    mock_service = module.get(OrganizationsService);
+    mock_response_service = module.get(ResponseService);
   });
 
   describe('getProfile', () => {
@@ -284,7 +284,9 @@ describe('OrganizationsController', () => {
       const result = await controller.getDashboard(query_without_store);
 
       // Assert
-      expect(mock_service.getDashboard).toHaveBeenCalledWith(query_without_store);
+      expect(mock_service.getDashboard).toHaveBeenCalledWith(
+        query_without_store,
+      );
       expect(mock_response_service.success).toHaveBeenCalledWith(
         mock_dashboard_data,
         'Dashboard de organización obtenido exitosamente',

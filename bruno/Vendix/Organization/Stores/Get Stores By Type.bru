@@ -5,9 +5,15 @@ meta {
 }
 
 get {
-  url: http://{{url}}/stores?store_type=physical&page=1&limit=10
+  url: http://{{url}}/organization/stores?store_type=physical&page=1&limit=10
   body: none
-  auth: none
+  auth: inherit
+}
+
+params:query {
+  store_type: physical
+  page: 1
+  limit: 10
 }
 
 tests {
@@ -18,7 +24,7 @@ tests {
     expect(res.body).to.have.property('message');
     expect(res.body.message).to.include('obtenidas exitosamente');
   });
-
+  
   test("All stores have correct type", function() {
     if (res.body.data.length > 0) {
       res.body.data.forEach(store => {
@@ -26,7 +32,7 @@ tests {
       });
     }
   });
-
+  
   test("Response has pagination", function() {
     expect(res.body).to.have.property('pagination');
     expect(res.body.pagination).to.have.property('total');
@@ -34,7 +40,7 @@ tests {
     expect(res.body.pagination).to.have.property('limit', 10);
     expect(res.body.data.length).to.be.at.most(10);
   });
-
+  
   test("Stores have required fields", function() {
     if (res.body.data.length > 0) {
       const store = res.body.data[0];
@@ -46,7 +52,7 @@ tests {
       expect(store).to.have.property('organization_id');
     }
   });
-
+  
   test("Filter is working correctly", function() {
     if (res.body.data.length > 0) {
       const hasWrongType = res.body.data.some(store => store.store_type !== 'physical');

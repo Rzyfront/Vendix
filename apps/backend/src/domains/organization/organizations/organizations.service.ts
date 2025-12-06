@@ -1,13 +1,7 @@
-import {
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import {
-  UpdateOrganizationDto,
-  OrganizationDashboardDto,
-} from './dto';
+import { UpdateOrganizationDto, OrganizationDashboardDto } from './dto';
 import { Prisma } from '@prisma/client';
 
 @Injectable()

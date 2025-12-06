@@ -5,14 +5,9 @@ meta {
 }
 
 patch {
-  url: {{base_url}}/organization/organizations/profile
+  url: http://{{url}}/organization/organizations/profile
   body: json
-  headers: [
-    {
-      key: "Authorization",
-      value: "Bearer {{token}}"
-    }
-  ]
+  auth: inherit
 }
 
 body:json {
@@ -28,5 +23,10 @@ tests {
     expect(res.body).to.have.property('success');
     expect(res.body.success).to.be.false;
     expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Error');
+  });
+
+  test("No data returned on error", function() {
+    expect(res.body).to.not.have.property('data');
   });
 }

@@ -4,7 +4,9 @@ import * as pg from 'pg';
 import * as bcrypt from 'bcryptjs';
 
 // Create PostgreSQL connection pool
-const connectionString = process.env.DATABASE_URL || 'postgresql://username:password@localhost:5432/vendix_db?schema=public';
+const connectionString =
+  process.env.DATABASE_URL ||
+  'postgresql://username:password@localhost:5432/vendix_db?schema=public';
 const pool = new pg.Pool({ connectionString });
 
 // Create adapter
@@ -204,6 +206,18 @@ async function main() {
       name: 'users.reactivate',
       description: 'Reactivar usuario',
       path: '/api/users/:id/reactivate',
+      method: 'POST',
+    },
+    {
+      name: 'users.verify-email',
+      description: 'Verificar email de usuario',
+      path: '/api/users/:id/verify-email',
+      method: 'POST',
+    },
+    {
+      name: 'users.reset-password',
+      description: 'Restablecer contraseña de usuario',
+      path: '/api/users/:id/reset-password',
       method: 'POST',
     },
 
@@ -901,6 +915,20 @@ async function main() {
     });
   }
 
+  // Marcar permisos críticos como permisos del sistema
+  await prisma.permissions.updateMany({
+    where: {
+      OR: [
+        { name: { contains: 'super_admin' } },
+        { name: { startsWith: 'system.' } },
+        { name: { startsWith: 'security.' } },
+        { name: { startsWith: 'rate.limiting.' } },
+      ],
+    },
+    // @ts-ignore is_system_permission exists in model
+    data: { is_system_permission: true },
+  });
+
   // 2. Crear roles
   console.log('👥 Creando roles...');
   const superAdminRole = await prisma.roles.upsert({
@@ -910,6 +938,8 @@ async function main() {
       name: 'super_admin',
       description: 'Super Administrador del sistema',
       is_system_role: true,
+      // @ts-ignore
+      organization_id: null,
     },
   });
   const ownerRole = await prisma.roles.upsert({
@@ -965,6 +995,13 @@ async function main() {
       description: 'Cliente de la tienda',
       is_system_role: true,
     },
+  });
+
+  // Asignar organization_id = null a roles del sistema (por si acaso)
+  await prisma.roles.updateMany({
+    where: { is_system_role: true },
+    // @ts-ignore organization_id exists in model
+    data: { organization_id: null },
   });
 
   // 3. Asignar permisos a roles
