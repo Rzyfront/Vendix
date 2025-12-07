@@ -1,0 +1,22 @@
+meta {
+  name: Register Customer
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/auth/register-customer
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "customer@example.com",
+    "password": "Password123!",
+    "first_name": "Customer",
+    "last_name": "User",
+    "phone": "+1987654321",
+    "store_id": 1
+  }
+}

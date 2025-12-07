@@ -1,0 +1,18 @@
+meta {
+  name: Update Config
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{url}}/rate-limiting/config
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "limit": 100,
+    "window": "15 minutes"
+  }
+}

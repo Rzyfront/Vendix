@@ -1,0 +1,17 @@
+meta {
+  name: Clean DB
+  type: http
+  seq: 8
+}
+
+post {
+  url: http://{{url}}/clean
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "secretKey": "vendix-dangerous-clean"
+  }
+}

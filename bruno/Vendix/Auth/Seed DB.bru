@@ -1,0 +1,17 @@
+meta {
+  name: Seed DB
+  type: http
+  seq: 7
+}
+
+post {
+  url: http://{{url}}/seed
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "secretKey": "vendix-initial-seeds"
+  }
+}

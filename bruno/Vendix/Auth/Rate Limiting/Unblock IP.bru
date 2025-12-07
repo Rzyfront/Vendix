@@ -1,0 +1,15 @@
+meta {
+  name: Unblock IP
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{url}}/rate-limiting/blocked
+  body: none
+  auth: inherit
+}
+
+params:query {
+  ip: 127.0.0.1
+}

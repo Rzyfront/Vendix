@@ -1,0 +1,21 @@
+meta {
+  name: Register Owner
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/auth/register-owner
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "owner@example.com",
+    "password": "Password123!",
+    "first_name": "Owner",
+    "last_name": "User",
+    "phone": "+1234567890"
+  }
+}

@@ -1,0 +1,15 @@
+meta {
+  name: Reset Attempts
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/rate-limiting/reset
+  body: none
+  auth: inherit
+}
+
+params:query {
+  ip: 127.0.0.1
+}
