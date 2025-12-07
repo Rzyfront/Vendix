@@ -1,0 +1,21 @@
+meta {
+  name: "Get All Products"
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/store/stores?page=1&limit=10
+  body: none
+  auth: inherit
+}
+
+params:query {
+  page: 1
+  limit: 10
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -32,16 +32,17 @@ export class ProductsService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
-  ) {}
+  ) { }
 
   async create(createProductDto: CreateProductDto) {
     try {
       // Obtener store_id del DTO o del contexto del token
+      // Obtener store_id del contexto
       const context = RequestContextService.getContext();
-      const store_id = createProductDto.store_id || context?.store_id;
+      const store_id = context?.store_id;
 
       if (!store_id) {
-        throw new BadRequestException('No se pudo determinar la tienda actual');
+        throw new ForbiddenException('Store context required for this operation');
       }
 
       // Generar slug si no se proporciona
@@ -97,7 +98,7 @@ export class ProductsService {
 
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-              `Please check available brands in the system.`,
+            `Please check available brands in the system.`,
           );
         }
       } else {
@@ -171,11 +172,11 @@ export class ProductsService {
               ...(current_context?.is_super_admin
                 ? {}
                 : {
-                    OR: [
-                      { store_id: store_id }, // Categorías específicas de la tienda
-                      { store_id: null }, // Categorías globales
-                    ],
-                  }),
+                  OR: [
+                    { store_id: store_id }, // Categorías específicas de la tienda
+                    { store_id: null }, // Categorías globales
+                  ],
+                }),
             },
           });
 
@@ -388,16 +389,10 @@ export class ProductsService {
 
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
-    const scoped_store_id = store_id || context?.store_id;
-
-    if (!scoped_store_id && !context?.is_super_admin) {
-      throw new BadRequestException('Store context is required');
-    }
+    // store_id check is handled by StorePrismaService
 
     const where: Prisma.productsWhereInput = {
-      // Aplicar siempre scope de store_id (a menos que sea super admin)
-      ...(!context?.is_super_admin && { store_id: scoped_store_id }),
-      // Para POS optimizado, siempre incluir activos
+      // Auto-scoped by StorePrismaService
       state: pos_optimized
         ? ProductState.ACTIVE
         : include_inactive
@@ -409,12 +404,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -676,9 +671,10 @@ export class ProductsService {
   }
 
   async findBySlug(storeId: number, slug: string) {
+    // storeId param is redundant if forced by context, but we can keep it if needed. 
+    // However, StorePrismaService filters by context.store_id.
     const product = await this.prisma.products.findFirst({
       where: {
-        store_id: storeId,
         slug,
         state: ProductState.ACTIVE, // Solo productos activos
       },

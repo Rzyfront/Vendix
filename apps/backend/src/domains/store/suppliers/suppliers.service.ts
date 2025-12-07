@@ -7,7 +7,7 @@ import { SupplierQueryDto } from './dto/supplier-query.dto';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   create(createSupplierDto: CreateSupplierDto) {
     const { organization_id, ...data } = createSupplierDto;
@@ -25,7 +25,7 @@ export class SuppliersService {
     });
   }
 
-  async findAll(query: SupplierQueryDto) {
+  asyundefinedAll(query: SupplierQueryDto) {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
     const where: any = {

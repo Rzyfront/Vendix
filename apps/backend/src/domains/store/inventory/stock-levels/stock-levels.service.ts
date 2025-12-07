@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 
 @Injectable()
 export class StockLevelsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   findAll(query: StockLevelQueryDto) {
     return this.prisma.stock_levels.findMany({
@@ -35,6 +35,8 @@ export class StockLevelsService {
   }
 
   findByLocation(locationId: number, query: StockLevelQueryDto) {
+    // Validate location access implicitly by the query scope? 
+    // If locationId is not in store, findMany returns empty. Correct.
     return this.prisma.stock_levels.findMany({
       where: {
         location_id: locationId,
@@ -66,7 +68,8 @@ export class StockLevelsService {
   }
 
   findOne(id: number) {
-    return this.prisma.stock_levels.findUnique({
+    // Changed to findFirst to allow scoping injections
+    return this.prisma.stock_levels.findFirst({
       where: { id },
       include: {
         products: true,
@@ -82,24 +85,30 @@ export class StockLevelsService {
     quantityChange: number,
     productVariantId?: number,
   ) {
-    const existingStock = await this.prisma.stock_levels.findUnique({
+    // Validate validation of location membership in store
+    const location = await this.prisma.inventory_locations.findFirst({
+      where: { id: locationId }
+    });
+    if (!location) {
+      throw new ForbiddenException('Location not found in this store context');
+    }
+
+    // Use findFirst for scoped query compatibility
+    const existingStock = await this.prisma.stock_levels.findFirst({
       where: {
-        product_id_product_variant_id_location_id: {
-          product_id: productId,
-          product_variant_id: productVariantId || null,
-          location_id: locationId,
-        },
+        product_id: productId,
+        product_variant_id: productVariantId || null,
+        location_id: locationId,
       },
     });
 
     if (existingStock) {
-      return this.prisma.stock_levels.update({
+      // Use updateMany for scoped query compatibility
+      return this.prisma.stock_levels.updateMany({
         where: {
-          product_id_product_variant_id_location_id: {
-            product_id: productId,
-            product_variant_id: productVariantId || null,
-            location_id: locationId,
-          },
+          // Using ID is safer if we found it, but updateMany via composite key + scope is also fine.
+          // Using ID from existingStock makes it specific.
+          id: existingStock.id
         },
         data: {
           quantity_on_hand: existingStock.quantity_on_hand + quantityChange,

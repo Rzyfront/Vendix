@@ -4,33 +4,33 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { AccessValidationService } from '@common/services/access-validation.service';
+
 import {
   CreateTaxCategoryDto,
   UpdateTaxCategoryDto,
   TaxCategoryQueryDto,
 } from './dto';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class TaxesService {
   constructor(
     private prisma: StorePrismaService,
-    private accessValidation: AccessValidationService,
-  ) {}
+  ) { }
 
   async create(createTaxCategoryDto: CreateTaxCategoryDto, user: any) {
-    if (createTaxCategoryDto.store_id) {
-      await this.accessValidation.validateStoreAccess(
-        createTaxCategoryDto.store_id,
-        user,
-      );
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
     }
 
     return this.prisma.tax_categories.create({
       data: {
         name: createTaxCategoryDto.name,
         description: createTaxCategoryDto.description,
-        store_id: createTaxCategoryDto.store_id,
+        store_id: store_id,
       },
     });
   }
@@ -59,15 +59,12 @@ export class TaxesService {
   }
 
   async findOne(id: number, user: any) {
-    const taxCategory = await this.prisma.tax_categories.findUnique({
+    // Auto-scoped by StorePrismaService
+    const taxCategory = await this.prisma.tax_categories.findFirst({
       where: { id },
     });
     if (!taxCategory) throw new NotFoundException('Tax category not found');
-    if (taxCategory.store_id)
-      await this.accessValidation.validateStoreAccess(
-        taxCategory.store_id,
-        user,
-      );
+
     return taxCategory;
   }
 

@@ -3,7 +3,9 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import {
@@ -19,45 +21,27 @@ export class AddressesService {
   constructor(
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
-  ) {}
+  ) { }
 
   async create(createAddressDto: CreateAddressDto, user: any) {
-    // Validar que solo se proporcione un tipo de entidad
-    const entity_types = [
-      createAddressDto.store_id ? 'store' : null,
-      createAddressDto.organization_id ? 'organization' : null,
-      createAddressDto.user_id ? 'user' : null,
-    ].filter(Boolean);
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
 
-    if (entity_types.length !== 1) {
-      throw new BadRequestException(
-        'Debe proporcionar exactamente uno de: store_id, organization_id, o user_id',
-      );
+    if (!store_id) {
+      throw new ForbiddenException('Store context required for this operation');
     }
 
-    // Validar permisos según el tipo de entidad
-    if (createAddressDto.store_id) {
-      await this.accessValidation.validateStoreAccess(
-        createAddressDto.store_id,
-        user,
-      );
-    } else if (createAddressDto.organization_id) {
-      await this.accessValidation.validateOrganizationAccess(
-        createAddressDto.organization_id,
-        user,
-      );
-    } else if (createAddressDto.user_id) {
-      await this.accessValidation.validateUserAccess(
-        createAddressDto.user_id,
-        user,
-      );
+    // Force store_id from context
+    createAddressDto.store_id = store_id;
+
+    // Enforce that we are only creating store addresses in this domain
+    if (createAddressDto.organization_id || createAddressDto.user_id) {
+      throw new BadRequestException('Cannot create organization or user addresses in Store domain');
     }
 
     if (createAddressDto.is_primary) {
       await this.unsetOtherDefaults({
-        store_id: createAddressDto.store_id,
-        organization_id: createAddressDto.organization_id,
-        user_id: createAddressDto.user_id,
+        store_id: store_id,
       });
     }
 
@@ -76,9 +60,10 @@ export class AddressesService {
       longitude: createAddressDto.longitude
         ? parseFloat(createAddressDto.longitude)
         : null,
-      store_id: createAddressDto.store_id,
-      organization_id: createAddressDto.organization_id,
-      user_id: createAddressDto.user_id,
+      store_id: store_id,
+      // Ensure other foreign keys are null
+      organization_id: null,
+      user_id: null,
     };
 
     try {
@@ -86,23 +71,9 @@ export class AddressesService {
         data: address_data,
         include: {
           stores: { select: { id: true, name: true } },
-          organizations: { select: { id: true, name: true } },
-          users: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2003') {
-          const field = error.meta?.field_name as string;
-          if (field?.includes('store_id')) {
-            throw new BadRequestException('Invalid store reference');
-          } else if (field?.includes('organization_id')) {
-            throw new BadRequestException('Invalid organization reference');
-          } else if (field?.includes('user_id')) {
-            throw new BadRequestException('Invalid user reference');
-          }
-        }
-      }
       throw error;
     }
   }
@@ -112,7 +83,6 @@ export class AddressesService {
       page = 1,
       limit = 10,
       search,
-      store_id,
       type,
       is_primary,
       city,
@@ -135,10 +105,7 @@ export class AddressesService {
       ];
     }
 
-    if (store_id) {
-      where.store_id = store_id;
-      await this.accessValidation.validateStoreAccess(store_id, user);
-    }
+    // Auto-scoped by StorePrismaService via store_id in context
     if (type) where.type = type as any;
     if (is_primary !== undefined) where.is_primary = is_primary;
     if (city) where.city = { contains: city, mode: 'insensitive' };
@@ -166,12 +133,11 @@ export class AddressesService {
   }
 
   async findOne(id: number, user: any) {
+    // Auto-scoped by StorePrismaService
     const address = await this.prisma.addresses.findFirst({
       where: { id },
       include: {
         stores: { select: { id: true, name: true } },
-        organizations: { select: { id: true, name: true } },
-        users: { select: { id: true, first_name: true, last_name: true } },
       },
     });
 
@@ -179,42 +145,30 @@ export class AddressesService {
       throw new NotFoundException('Address not found');
     }
 
-    // Validar permisos según el tipo de entidad
-    if (address.store_id) {
-      await this.accessValidation.validateStoreAccess(address.store_id, user);
-    } else if (address.organization_id) {
-      await this.accessValidation.validateOrganizationAccess(
-        address.organization_id,
-        user,
-      );
-    } else if (address.user_id) {
-      await this.accessValidation.validateUserAccess(address.user_id, user);
-    }
-
     return address;
   }
 
   async findByStore(storeId: number, user: any) {
-    await this.accessValidation.validateStoreAccess(storeId, user);
-
-    return await this.prisma.addresses.findMany({
-      where: { store_id: storeId },
+    // Check context matches storeId derived from param? 
+    // Or just ignore param and use context? 
+    // To be safe and compliant with "always use prisma store service", 
+    // we lean on the service's automatic filtering. 
+    return this.prisma.addresses.findMany({
+      orderBy: { is_primary: 'desc' },
       include: {
         stores: { select: { id: true, name: true } },
       },
-      orderBy: { is_primary: 'desc' },
     });
   }
 
   async update(id: number, updateAddressDto: UpdateAddressDto, user: any) {
+    // Ensure existence and access via scoped findOne
     const address = await this.findOne(id, user);
 
     if (updateAddressDto.is_primary) {
       await this.unsetOtherDefaults(
         {
-          store_id: address.store_id || undefined,
-          organization_id: address.organization_id || undefined,
-          user_id: address.user_id || undefined,
+          store_id: address.store_id!,
         },
         id,
       );
@@ -242,23 +196,9 @@ export class AddressesService {
         data: update_data,
         include: {
           stores: { select: { id: true, name: true } },
-          organizations: { select: { id: true, name: true } },
-          users: { select: { id: true, first_name: true, last_name: true } },
         },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2003') {
-          const field = error.meta?.field_name as string;
-          if (field?.includes('store_id')) {
-            throw new BadRequestException('Invalid store reference');
-          } else if (field?.includes('organization_id')) {
-            throw new BadRequestException('Invalid organization reference');
-          } else if (field?.includes('user_id')) {
-            throw new BadRequestException('Invalid user reference');
-          }
-        }
-      }
       throw error;
     }
   }

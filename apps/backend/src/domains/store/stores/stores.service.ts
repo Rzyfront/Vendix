@@ -91,7 +91,11 @@ export class StoresService {
     const { page = 1, limit = 10, search, store_type, is_active } = query;
     const skip = (page - 1) * limit;
 
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+
     const where: Prisma.storesWhereInput = {
+      ...(organization_id && !context?.is_super_admin && { organization_id }),
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },

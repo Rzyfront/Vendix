@@ -25,7 +25,7 @@ export class PaymentsService {
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
     private stockLevelManager: StockLevelManager,
-  ) {}
+  ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -218,16 +218,24 @@ export class PaymentsService {
       where.customer_id = customerId;
     }
 
+    if (customerId) {
+      where.customer_id = customerId;
+    }
+
+    // Manual store filtering removed - handled by StorePrismaService
+    // StorePrismaService automatically injects: where orders: { store_id: context.store_id }
+
+    // However, if we want to filter by specific storeId WITHIN the allowed context (implicit)
+    // we can keep it, but getting User Store Ids is redundant if strictly scoped.
     if (storeId) {
+      // Redundant if store_id == context.store_id, but harmless.
+      // If storeId != context.store_id, query returns empty (correct).
       where.orders = {
-        store_id: storeId,
+        store_id: storeId
       };
     } else {
-      where.orders = {
-        store_id: {
-          in: await this.getUserStoreIds(user),
-        },
-      };
+      // Ensure we are filtering by orders relevant to this context
+      // StorePrismaService does this automatically via relational scope.
     }
 
     if (paymentMethodType) {
@@ -372,8 +380,7 @@ export class PaymentsService {
     console.error(
       `Access denied: User ${user.id} (Roles: ${JSON.stringify(
         user.roles,
-      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${
-        store?.organization_id
+      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${store?.organization_id
       }). Allowed stores: ${JSON.stringify(userStoreIds)}`,
     );
     throw new ForbiddenException('Access denied to this store');
@@ -439,17 +446,17 @@ export class PaymentsService {
           },
           payment: payment
             ? {
-                id: payment.id,
-                amount: payment.amount,
-                payment_method:
-                  payment.store_payment_method?.display_name ||
-                  payment.store_payment_method?.system_payment_method
-                    ?.display_name ||
-                  'Unknown',
-                status: payment.status,
-                transaction_id: payment.transaction_id,
-                change: payment.change,
-              }
+              id: payment.id,
+              amount: payment.amount,
+              payment_method:
+                payment.store_payment_method?.display_name ||
+                payment.store_payment_method?.system_payment_method
+                  ?.display_name ||
+                'Unknown',
+              status: payment.status,
+              transaction_id: payment.transaction_id,
+              change: payment.change,
+            }
             : undefined,
         };
       });

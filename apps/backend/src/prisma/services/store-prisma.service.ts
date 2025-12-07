@@ -12,36 +12,13 @@ export class StorePrismaService extends BasePrismaService {
     'store_users',
     'store_settings',
     'inventory_locations',
-    'inventory_batches',
-    'inventory_serial_numbers',
-    'stock_reservations',
-    'purchase_orders',
-    'purchase_order_items',
-    'sales_orders',
-    'sales_order_items',
-    'stock_transfers',
-    'stock_transfer_items',
-    'return_orders',
-    'return_order_items',
     'categories',
     'tax_categories',
     'products',
     'tax_rates',
     'orders',
-    'payments',
     'store_payment_methods',
-    'product_categories',
-    'product_images',
-    'product_tax_assignments',
-    'product_variants',
-    'refund_items',
-    'refunds',
-    'reviews',
-    'stock_levels',
-    'inventory_adjustments',
-    'inventory_transactions',
-    'order_items',
-    'inventory_movements',
+    'addresses',
   ];
 
   constructor() {
@@ -67,7 +44,18 @@ export class StorePrismaService extends BasePrismaService {
       'deleteMany',
     ];
 
-    for (const model of this.store_scoped_models) {
+    const all_scoped_models = [
+      ...this.store_scoped_models,
+      'stock_levels', // Relational
+      'inventory_batches', // Relational
+      'inventory_serial_numbers', // Relational
+      'order_items', // Relational
+      'product_variants', // Relational
+      'suppliers', // Org scoped
+      'payments', // Relational
+    ];
+
+    for (const model of all_scoped_models) {
       extensions[model] = {};
       for (const operation of operations) {
         extensions[model][operation] = ({ args, query }: any) => {
@@ -89,13 +77,38 @@ export class StorePrismaService extends BasePrismaService {
     }
 
     const scoped_args = { ...args };
+    const relational_scopes: Record<string, any> = {
+      'stock_levels': { inventory_locations: { store_id: context.store_id } },
+      'inventory_batches': { inventory_locations: { store_id: context.store_id } },
+      'inventory_serial_numbers': { inventory_locations: { store_id: context.store_id } },
+      'order_items': { orders: { store_id: context.store_id } },
+      'product_variants': { products: { store_id: context.store_id } },
+      'payments': { orders: { store_id: context.store_id } },
+      // Add others as identified
+    };
+
     const security_filter: Record<string, any> = {};
+
+    // Models requiring Organization scope (no store_id, but owned by Org)
+    const org_scoped_models = ['suppliers'];
 
     if (this.store_scoped_models.includes(model)) {
       if (!context.store_id) {
         throw new ForbiddenException('Access denied - store context required');
       }
       security_filter.store_id = context.store_id;
+    } else if (relational_scopes[model]) {
+      if (!context.store_id) {
+        throw new ForbiddenException('Access denied - store context required');
+      }
+      // Merge deep merge? Simple spread won't work for nested where.
+      // Assign validation filter
+      Object.assign(security_filter, relational_scopes[model]);
+    } else if (org_scoped_models.includes(model)) {
+      if (!context.organization_id) {
+        throw new ForbiddenException('Access denied - organization context required');
+      }
+      security_filter.organization_id = context.organization_id;
     }
 
     if (Object.keys(security_filter).length > 0) {
@@ -123,49 +136,7 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.inventory_locations;
   }
 
-  get inventory_batches() {
-    return this.scoped_client.inventory_batches;
-  }
 
-  get inventory_serial_numbers() {
-    return this.scoped_client.inventory_serial_numbers;
-  }
-
-  get stock_reservations() {
-    return this.scoped_client.stock_reservations;
-  }
-
-  get purchase_orders() {
-    return this.scoped_client.purchase_orders;
-  }
-
-  get purchase_order_items() {
-    return this.scoped_client.purchase_order_items;
-  }
-
-  get sales_orders() {
-    return this.scoped_client.sales_orders;
-  }
-
-  get sales_order_items() {
-    return this.scoped_client.sales_order_items;
-  }
-
-  get stock_transfers() {
-    return this.scoped_client.stock_transfers;
-  }
-
-  get stock_transfer_items() {
-    return this.scoped_client.stock_transfer_items;
-  }
-
-  get return_orders() {
-    return this.scoped_client.return_orders;
-  }
-
-  get return_order_items() {
-    return this.scoped_client.return_order_items;
-  }
 
   get categories() {
     return this.scoped_client.categories;
@@ -187,60 +158,34 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.orders;
   }
 
-  get payments() {
-    return this.scoped_client.payments;
-  }
-
   get store_payment_methods() {
     return this.scoped_client.store_payment_methods;
   }
 
-  get product_categories() {
-    return this.scoped_client.product_categories;
-  }
-
-  get product_images() {
-    return this.scoped_client.product_images;
-  }
-
-  get product_tax_assignments() {
-    return this.scoped_client.product_tax_assignments;
+  get order_items() {
+    return this.scoped_client.order_items;
   }
 
   get product_variants() {
     return this.scoped_client.product_variants;
   }
 
-  get refund_items() {
-    return this.scoped_client.refund_items;
-  }
-
-  get refunds() {
-    return this.scoped_client.refunds;
-  }
-
-  get reviews() {
-    return this.scoped_client.reviews;
-  }
-
   get stock_levels() {
     return this.scoped_client.stock_levels;
   }
 
-  get inventory_adjustments() {
-    return this.scoped_client.inventory_adjustments;
+  get inventory_batches() {
+    return this.scoped_client.inventory_batches;
   }
 
-  get inventory_movements() {
-    return this.scoped_client.inventory_movements;
+  get inventory_serial_numbers() {
+    return this.scoped_client.inventory_serial_numbers;
   }
 
-  get inventory_transactions() {
-    return this.scoped_client.inventory_transactions;
-  }
 
-  get order_items() {
-    return this.scoped_client.order_items;
+
+  get payments() {
+    return this.scoped_client.payments;
   }
 
   // Global models (no scoping applied)
@@ -250,6 +195,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get brands() {
     return this.baseClient.brands;
+  }
+
+  get product_categories() {
+    return this.baseClient.product_categories;
   }
 
   get system_payment_methods() {
@@ -270,15 +219,16 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get suppliers() {
-    return this.baseClient.suppliers;
+    return this.scoped_client.suppliers;
   }
 
   get supplier_products() {
-    return this.baseClient.supplier_products;
+    return this.scoped_client.supplier_products;
   }
 
+  // Addresses is now scoped
   get addresses() {
-    return this.baseClient.addresses;
+    return this.scoped_client.addresses;
   }
 
   get audit_logs() {

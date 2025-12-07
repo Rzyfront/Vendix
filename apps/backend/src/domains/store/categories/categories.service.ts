@@ -3,7 +3,10 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  InternalServerErrorException,
+  ForbiddenException,
 } from '@nestjs/common';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import {
@@ -19,31 +22,28 @@ export class CategoriesService {
   constructor(
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
-  ) {}
+  ) { }
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
-    // store_id se infiere automáticamente del contexto del token
-    // if (!createCategoryDto.store_id) {
-    //   throw new BadRequestException('store_id is required');
-    // }
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
 
-    // await this.accessValidation.validateStoreAccess(
-    //   createCategoryDto.store_id,
-    //   user,
-    // );
+    if (!store_id) {
+      throw new ForbiddenException('Store context required for this operation');
+    }
+
     const slug = slugify(createCategoryDto.name, { lower: true, strict: true });
-    // El store_id se infiere automáticamente del contexto, no necesitamos validar slug único manualmente
-    // await this.validateUniqueSlug(slug, createCategoryDto.store_id);
 
-    // Solo usar los campos que existen en el schema de Prisma
-    // store_id se inyecta automáticamente por el contexto de Prisma
+    // Ensure slug is unique in this store context
+    await this.validateUniqueSlug(slug, store_id);
+
     const categoryData: any = {
       name: createCategoryDto.name,
       slug: slug,
       description: createCategoryDto.description,
-      // store_id: createCategoryDto.store_id, // Se inyecta automáticamente
+      store_id: store_id, // Manual injection required for create
       image_url: createCategoryDto.image_url,
-      state: 'active', // Usar 'state' en lugar de 'status'
+      state: 'active',
     };
 
     return this.prisma.categories.create({
@@ -144,8 +144,6 @@ export class CategoriesService {
 
   async remove(id: number, user: any) {
     const category = await this.findOne(id, { includeInactive: true });
-    if (category.store_id)
-      await this.accessValidation.validateStoreAccess(category.store_id, user);
 
     const productCount = await this.prisma.product_categories.count({
       where: { category_id: id },

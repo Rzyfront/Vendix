@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
@@ -12,16 +13,16 @@ import { OrderStatsDto } from './dto/order-stats.dto';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     try {
-      // Validar contexto y aplicar scope automático
+      // Enforce store context
       const context = RequestContextService.getContext();
-      const target_store_id = createOrderDto.store_id || context?.store_id;
+      const store_id = context?.store_id;
 
-      if (!target_store_id && !context?.is_super_admin) {
-        throw new BadRequestException('Store context is required');
+      if (!store_id) {
+        throw new ForbiddenException('Store context required for this operation');
       }
 
       if (!createOrderDto.order_number) {
@@ -29,34 +30,22 @@ export class OrdersService {
       }
 
       const user = await this.prisma.users.findUnique({
-        where: { id: createOrderDto.customer_id }, // customer_id is now user_id
+        where: { id: createOrderDto.customer_id },
       });
       if (!user) {
         throw new NotFoundException('User (customer) not found');
       }
 
-      // Validar que la tienda exista y esté dentro del scope
-      const store = await this.prisma.stores.findFirst({
-        where: {
-          id: target_store_id,
-          ...(context?.is_super_admin
-            ? {}
-            : {
-                organization_id: context?.organization_id,
-              }),
-        },
-      });
-      if (!store) {
-        throw new NotFoundException('Store not found');
-      }
+      // Store existence check is redundant if we trust context/token, 
+      // but if we want to be sure it's active:
+      // this.prisma.stores is global. 
+      // We can skip checking store if context implies it exists.
 
-      // 🔧 FIX: Usar cliente sin scope para creación cuando no hay contexto
-      const client = this.prisma.withoutScope();
-
-      return await client.orders.create({
+      // Use scoped client (creates are not scoped by extension but using correct service is good style)
+      return await this.prisma.orders.create({
         data: {
-          customer_id: createOrderDto.customer_id, // This should be user_id
-          store_id: target_store_id!, // Usar store_id del contexto (validado arriba)
+          customer_id: createOrderDto.customer_id,
+          store_id: store_id, // Force strict store_id
           order_number: createOrderDto.order_number,
           state: createOrderDto.state || order_state_enum.created,
           subtotal_amount: createOrderDto.subtotal,
@@ -114,27 +103,22 @@ export class OrdersService {
     } = query;
     const skip = (page - 1) * limit;
 
-    // Validar contexto y aplicar scope automático
-    const context = RequestContextService.getContext();
-    const target_store_id = store_id || context?.store_id;
+    // Context validation handled by StorePrismaService auto-scoping
 
+    // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
-      // Aplicar siempre scope de store_id (a menos que sea super admin)
-      ...(!context?.is_super_admin && { store_id: target_store_id }),
       ...(search && {
         OR: [{ order_number: { contains: search, mode: 'insensitive' } }],
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
-      // 🔧 FIX: Agregar store_id del query si se proporciona explícitamente
-      ...(store_id && { store_id }),
       ...(date_from &&
         date_to && {
-          created_at: {
-            gte: new Date(date_from),
-            lte: new Date(date_to),
-          },
-        }),
+        created_at: {
+          gte: new Date(date_from),
+          lte: new Date(date_to),
+        },
+      }),
     };
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
@@ -168,16 +152,10 @@ export class OrdersService {
   }
 
   async findOne(id: number) {
-    // Validar contexto para aplicar scope
-    const context = RequestContextService.getContext();
-
+    // Auto-scoped by StorePrismaService
     const order = await this.prisma.orders.findFirst({
       where: {
         id,
-        // Aplicar scope de store_id a menos que sea super admin
-        ...(!context?.is_super_admin && {
-          store_id: context?.store_id,
-        }),
       },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
@@ -205,12 +183,8 @@ export class OrdersService {
 
   async remove(id: number) {
     await this.findOne(id);
-
-    // 🔧 FIX: Determinar si usar cliente con scope o sin scope
-    const context = RequestContextService.getContext();
-    const client = context ? this.prisma : this.prisma.withoutScope();
-
-    return client.orders.delete({ where: { id } });
+    // Use scoped client (implicit via this.prisma)
+    return this.prisma.orders.delete({ where: { id } });
   }
 
   private async generateOrderNumber(): Promise<string> {
@@ -235,12 +209,8 @@ export class OrdersService {
   }
 
   async getStats(): Promise<OrderStatsDto> {
-    const context = RequestContextService.getContext();
-    const target_store_id = context?.store_id;
-
-    const where: Prisma.ordersWhereInput = {
-      ...(!context?.is_super_admin && { store_id: target_store_id }),
-    };
+    // Auto-scoped
+    const where: Prisma.ordersWhereInput = {};
 
     const [totalOrders, totalRevenue, pendingOrders, completedOrders] =
       await Promise.all([
