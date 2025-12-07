@@ -1,0 +1,24 @@
+meta {
+  name: Store Filter
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/store/products?store_id=1
+  body: none
+  auth: inherit
+}
+
+params:query {
+  store_id: 1
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg2ODc5OCwiZXhwIjoxNzY0ODcyMzk4fQ.0FN_BlLTbizsm3kpaaXzj07mKXOIp-Fm6I8XklgMFsQ
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

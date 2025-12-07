@@ -1,0 +1,24 @@
+meta {
+  name: Brand Filter
+  type: http
+  seq: 6
+}
+
+get {
+  url: http://{{url}}/store/products?brand_id=1
+  body: none
+  auth: inherit
+}
+
+params:query {
+  brand_id: 1
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg3MjQwOCwiZXhwIjoxNzY0ODc2MDA4fQ.3-DxgqyxBrN7npCRzZ7fsCV9Znapo5-3m0TfP_Zhrqc
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

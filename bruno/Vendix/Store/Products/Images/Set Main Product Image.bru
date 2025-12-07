@@ -5,9 +5,13 @@ meta {
 }
 
 post {
-  url: http://{{url}}/products/{{productId}}/images
+  url: http://{{url}}/store/products/{{productId}}/images
   body: json
-  auth: inherit
+  auth: bearer
+}
+
+auth:bearer {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NTA0MDYwOCwiZXhwIjoxNzY1MDQ0MjA4fQ.5rLgbPoavmhOA74DV9JDE-NLN0tHpUn4iXqcx1F2eLE
 }
 
 body:json {
@@ -17,23 +21,28 @@ body:json {
   }
 }
 
+vars:pre-request {
+  productId: 7
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOm51bGwsImlhdCI6MTc2NTA0MjIxNSwiZXhwIjoxNzY1MDQ1ODE1fQ.Qp5ajP3GbOguNVfEIJLQSIikALUf2UKIa1HhUQ3VMzQ
+}
+
 tests {
   test("Main product image added successfully", function() {
     expect(res.status).to.equal(201);
     expect(res.body).to.have.property('success', true);
     expect(res.body).to.have.property('data');
-
+  
     const image = res.body.data;
     expect(image).to.have.property('id');
     expect(image).to.have.property('image_url', 'https://example.com/iphone15pro-main-hero.jpg');
     expect(image).to.have.property('is_main', true);
   });
-
+  
   test("Image is marked as main", function() {
     const image = res.body.data;
     expect(image.is_main).to.be.true;
   });
-
+  
   test("Image is associated with correct product", function() {
     const image = res.body.data;
     expect(image).to.have.property('product_id');
