@@ -377,7 +377,6 @@ export class ProductsService {
       limit = 10,
       search,
       state,
-      store_id,
       category_id,
       brand_id,
       include_inactive,
@@ -471,10 +470,7 @@ export class ProductsService {
           ...(include_variants && {
             product_variants: {
               include: {
-                product_images: {
-                  where: { is_main: true },
-                  take: 1,
-                },
+                product_images: true,
                 stock_levels: {
                   select: {
                     quantity_available: true,
