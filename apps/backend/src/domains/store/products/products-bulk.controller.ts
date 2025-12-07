@@ -31,13 +31,13 @@ export class ProductsBulkController {
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   /**
    * Carga masiva de productos desde JSON
    */
   @Post('upload')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async uploadProducts(
     @Body() bulkUploadDto: BulkProductUploadDto,
     @Req() req: AuthenticatedRequest,
@@ -72,7 +72,7 @@ export class ProductsBulkController {
    * Valida productos antes de la carga masiva
    */
   @Post('validate')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async validateProducts(
     @Body() bulkUploadDto: BulkProductUploadDto,
     @Req() req: AuthenticatedRequest,
@@ -108,7 +108,7 @@ export class ProductsBulkController {
    * Obtiene la plantilla para carga masiva
    */
   @Get('template')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async getTemplate() {
     try {
       const template: BulkUploadTemplateDto =
@@ -130,7 +130,7 @@ export class ProductsBulkController {
    * Descarga la plantilla en formato CSV
    */
   @Get('template/download')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async downloadTemplate() {
     try {
       const template: BulkUploadTemplateDto =
@@ -156,7 +156,7 @@ export class ProductsBulkController {
    * Carga masiva desde archivo CSV
    */
   @Post('upload/csv')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))
   async uploadProductsFromFile(
     @UploadedFile(

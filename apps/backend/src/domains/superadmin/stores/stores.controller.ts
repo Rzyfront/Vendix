@@ -18,19 +18,18 @@ import {
 } from '../../store/stores/dto';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Admin Stores')
 @Controller('superadmin/stores')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class StoresController {
   constructor(
     private readonly adminStoresService: StoresService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a new store' })

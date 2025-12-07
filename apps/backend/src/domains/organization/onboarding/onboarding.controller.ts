@@ -9,9 +9,14 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { Roles } from '../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../auth/guards/roles.guard';
+import { UserRole } from '../../auth/enums/user-role.enum';
+import { UnauthorizedException } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
 import {
   OrganizationOnboardingStatusDto,
@@ -21,13 +26,14 @@ import {
 } from './dto/onboarding-status.dto';
 
 @Controller('organization/onboarding')
-@UseGuards(JwtAuthGuard)
+@UseGuards(RolesGuard, PermissionsGuard)
 export class OnboardingController {
-  constructor(private readonly onboardingService: OnboardingService) {}
+  constructor(private readonly onboardingService: OnboardingService) { }
 
   // ===== USER ONBOARDING ENDPOINTS =====
 
   @Get('status')
+  @Permissions('organization:onboarding:read')
   async getUserOnboardingStatus(@Request() req) {
     return this.onboardingService.getUserOnboardingStatus(req.user.id);
   }
@@ -35,22 +41,31 @@ export class OnboardingController {
   // ===== ORGANIZATION ONBOARDING ENDPOINTS =====
 
   @Get('organization/:organizationId/status')
+  @Permissions('organization:onboarding:read')
   async getOrganizationOnboardingStatus(
     @Param('organizationId') organizationId: number,
+    @Req() req: AuthenticatedRequest,
   ): Promise<OrganizationOnboardingStatusDto> {
-    return this.onboardingService.getOrganizationOnboardingStatus(
-      Number(organizationId),
-    );
+    const orgId = Number(organizationId);
+    if (req.user.organization_id !== orgId && !req.user.user_roles?.some(r => r.roles?.name === UserRole.SUPER_ADMIN)) {
+      throw new UnauthorizedException('You can only access your own organization onboarding status');
+    }
+    return this.onboardingService.getOrganizationOnboardingStatus(orgId);
   }
 
   @Post('organization/:organizationId/complete')
+  @Permissions('organization:onboarding:update')
   async completeOrganizationOnboarding(
     @Param('organizationId') organizationId: number,
     @Body() completeDto: CompleteOrganizationOnboardingDto,
-    @Request() req,
+    @Req() req: AuthenticatedRequest,
   ): Promise<OrganizationOnboardingStatusDto> {
+    const orgId = Number(organizationId);
+    if (req.user.organization_id !== orgId && !req.user.user_roles?.some(r => r.roles?.name === UserRole.SUPER_ADMIN)) {
+      throw new UnauthorizedException('You can only complete your own organization onboarding');
+    }
     return this.onboardingService.completeOrganizationOnboarding(
-      Number(organizationId),
+      orgId,
       completeDto,
     );
   }

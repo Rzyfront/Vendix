@@ -33,10 +33,10 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
-  @Permissions('users:create')
+  @Permissions('organization:users:create')
   async create(
     @Body() createUserDto: CreateUserDto,
     @Req() req: AuthenticatedRequest,
@@ -54,7 +54,7 @@ export class UsersController {
   }
 
   @Get()
-  @Permissions('users:read')
+  @Permissions('organization:users:read')
   async findAll(
     @Query() query: UserQueryDto,
     @Req() req: AuthenticatedRequest,
@@ -84,7 +84,7 @@ export class UsersController {
   }
 
   @Get('stats')
-  @Permissions('users:read')
+  @Permissions('organization:users:read')
   async getStats(@Query() query: UsersDashboardDto) {
     try {
       const result = await this.usersService.getDashboard(query);
@@ -101,7 +101,7 @@ export class UsersController {
   }
 
   @Get(':id')
-  @Permissions('users:read')
+  @Permissions('organization:users:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const user = await this.usersService.findOne(id);
@@ -119,7 +119,7 @@ export class UsersController {
   }
 
   @Get(':id/settings')
-  @Permissions('users:read')
+  @Permissions('organization:users:read')
   async findUserSettings(@Param('id', ParseIntPipe) id: number) {
     try {
       const user = await this.usersService.findUserSettings(id);
@@ -137,7 +137,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Permissions('users:update')
+  @Permissions('organization:users:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateUserDto: UpdateUserDto,
@@ -158,7 +158,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Permissions('users:delete')
+  @Permissions('organization:users:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       await this.usersService.remove(id);
@@ -173,7 +173,7 @@ export class UsersController {
   }
 
   @Post(':id/archive')
-  @Permissions('users:delete')
+  @Permissions('organization:users:delete')
   async archive(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.usersService.archive(id);
@@ -191,7 +191,7 @@ export class UsersController {
   }
 
   @Post(':id/reactivate')
-  @Permissions('users:update')
+  @Permissions('organization:users:update')
   async reactivate(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.usersService.reactivate(id);
@@ -209,7 +209,7 @@ export class UsersController {
   }
 
   @Post(':id/verify-email')
-  @Permissions('users:verify-email')
+  @Permissions('organization:users:verify-email')
   async verifyEmail(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.usersService.verifyEmail(id);
@@ -227,7 +227,7 @@ export class UsersController {
   }
 
   @Post(':id/reset-password')
-  @Permissions('users:reset-password')
+  @Permissions('organization:users:reset-password')
   async resetPassword(
     @Param('id', ParseIntPipe) id: number,
     @Body() resetPasswordDto: ResetPasswordDto,

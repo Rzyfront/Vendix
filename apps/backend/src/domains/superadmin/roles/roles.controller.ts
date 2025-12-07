@@ -18,20 +18,19 @@ import {
 } from '../../organization/roles/dto/role.dto';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ResponseService } from 'src/common/responses';
 
 @ApiTags('Admin Roles')
 @Controller('superadmin/roles')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class RolesController {
   constructor(
     private readonly rolesService: RolesService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a new role' })

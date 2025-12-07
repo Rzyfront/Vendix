@@ -17,7 +17,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
 import {
   EnablePaymentMethodDto,
@@ -27,12 +27,11 @@ import {
 
 @ApiTags('Store Payment Methods')
 @Controller('store/stores/:storeId/payment-methods')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class StorePaymentMethodsController {
   constructor(
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
-  ) {}
+  ) { }
 
   @Get('available')
   @ApiOperation({ summary: 'Get available payment methods to enable' })

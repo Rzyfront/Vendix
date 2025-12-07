@@ -47,7 +47,7 @@ export class RolesController {
   constructor(
     private readonly rolesService: RolesService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
@@ -120,7 +120,7 @@ export class RolesController {
 
   @Get(':id/permissions')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.MANAGER)
-  @Permissions('roles.permissions.read')
+  @Permissions('organization:roles:permissions:read')
   @ApiOperation({ summary: 'Obtener IDs de permisos de un rol' })
   @ApiResponse({
     status: 200,

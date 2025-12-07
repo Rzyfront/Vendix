@@ -27,10 +27,10 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get()
-  @Permissions('orders:read')
+  @Permissions('store:orders:read')
   async findAll(@Query() query: OrderQueryDto) {
     try {
       const result = await this.ordersService.findAll(query);
@@ -48,7 +48,7 @@ export class OrdersController {
   }
 
   @Post()
-  @Permissions('orders:create')
+  @Permissions('store:orders:create')
   async create(
     @Body() createOrderDto: CreateOrderDto,
     @Req() req: AuthenticatedRequest,
@@ -66,7 +66,7 @@ export class OrdersController {
   }
 
   @Get(':id')
-  @Permissions('orders:read')
+  @Permissions('store:orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.ordersService.findOne(id);
@@ -84,7 +84,7 @@ export class OrdersController {
   }
 
   @Patch(':id')
-  @Permissions('orders:update')
+  @Permissions('store:orders:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateOrderDto: UpdateOrderDto,
@@ -105,7 +105,7 @@ export class OrdersController {
   }
 
   @Delete(':id')
-  @Permissions('orders:delete')
+  @Permissions('store:orders:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       await this.ordersService.remove(id);
@@ -120,7 +120,7 @@ export class OrdersController {
   }
 
   @Get('stats')
-  @Permissions('orders:read')
+  @Permissions('store:orders:read')
   async getStats() {
     try {
       const result = await this.ordersService.getStats();

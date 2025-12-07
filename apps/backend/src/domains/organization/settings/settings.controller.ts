@@ -2,18 +2,17 @@ import { Controller, Get, Put, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { UpdateSettingsDto } from './dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @ApiTags('Organization Settings')
 @Controller('organization/settings')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) {}
+  constructor(private readonly settingsService: SettingsService) { }
 
   @Get()
-  @Permissions('organization_settings:read')
+  @Permissions('organization:settings:read')
   @ApiOperation({ summary: 'Get organization settings' })
   @ApiResponse({
     status: 200,
@@ -24,7 +23,7 @@ export class SettingsController {
   }
 
   @Put()
-  @Permissions('organization_settings:update')
+  @Permissions('organization:settings:update')
   @ApiOperation({ summary: 'Update organization settings' })
   @ApiResponse({
     status: 200,

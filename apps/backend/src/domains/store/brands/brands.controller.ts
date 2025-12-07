@@ -29,7 +29,7 @@ export class BrandsController {
   ) {}
 
   @Post()
-  @Permissions('brands:create')
+  @Permissions('store:brands:create')
   async create(
     @Body() createBrandDto: CreateBrandDto,
     @Req() req: AuthenticatedRequest,
@@ -43,7 +43,7 @@ export class BrandsController {
   }
 
   @Get()
-  @Permissions('brands:read')
+  @Permissions('store:brands:read')
   async findAll(@Query() query: BrandQueryDto) {
     try {
       const result = await this.brandsService.findAll(query);
@@ -71,7 +71,7 @@ export class BrandsController {
   }
 
   @Get('store/:storeId')
-  @Permissions('brands:read')
+  @Permissions('store:brands:read')
   async findByStore(
     @Param('storeId', ParseIntPipe) storeId: number,
     @Query() query: BrandQueryDto,
@@ -102,7 +102,7 @@ export class BrandsController {
   }
 
   @Get(':id')
-  @Permissions('brands:read')
+  @Permissions('store:brands:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
@@ -121,7 +121,7 @@ export class BrandsController {
   }
 
   @Patch(':id')
-  @Permissions('brands:update')
+  @Permissions('store:brands:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateBrandDto: UpdateBrandDto,
@@ -146,7 +146,7 @@ export class BrandsController {
   }
 
   @Delete(':id')
-  @Permissions('brands:admin_delete')
+  @Permissions('store:brands:admin_delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,

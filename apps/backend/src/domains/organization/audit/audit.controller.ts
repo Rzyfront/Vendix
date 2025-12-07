@@ -11,13 +11,14 @@ import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @ApiTags('Admin Audit')
 @Controller('organization/admin/audit')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.SUPER_ADMIN)
+@UseGuards(RolesGuard, PermissionsGuard)
+@Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
 @ApiBearerAuth()
 export class AuditController {
   constructor(
@@ -34,6 +35,7 @@ export class AuditController {
     status: HttpStatus.OK,
     description: 'Audit logs retrieved successfully',
   })
+  @Permissions('organization:audit:read')
   async getAuditLogs(
     @Query('user_id') user_id?: string,
     @Query('store_id') store_id?: string,
@@ -73,6 +75,7 @@ export class AuditController {
     status: HttpStatus.OK,
     description: 'Audit statistics retrieved successfully',
   })
+  @Permissions('organization:audit:read')
   async getAuditStats(
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,

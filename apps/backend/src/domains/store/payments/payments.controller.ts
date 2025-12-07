@@ -18,7 +18,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+
 import { PaymentsService } from './payments.service';
 import {
   CreatePaymentDto,
@@ -30,10 +30,9 @@ import {
 
 @ApiTags('Payments')
 @Controller('store/payments')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(private readonly paymentsService: PaymentsService) { }
 
   @Post()
   @ApiOperation({ summary: 'Process payment for existing order' })

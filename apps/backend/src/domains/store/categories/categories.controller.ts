@@ -30,7 +30,7 @@ export class CategoriesController {
   ) {}
 
   @Post()
-  @Permissions('categories:create')
+  @Permissions('store:categories:create')
   async create(
     @Body() createCategoryDto: CreateCategoryDto,
     @Req() req: AuthenticatedRequest,
@@ -54,7 +54,7 @@ export class CategoriesController {
   }
 
   @Get()
-  @Permissions('categories:read')
+  @Permissions('store:categories:read')
   async findAll(@Query() query: CategoryQueryDto) {
     try {
       const result = await this.categoriesService.findAll(query);
@@ -81,7 +81,7 @@ export class CategoriesController {
   }
 
   @Get('search')
-  @Permissions('categories:read')
+  @Permissions('store:categories:read')
   async search(@Query() query: CategoryQueryDto) {
     try {
       const result = await this.categoriesService.findAll({
@@ -102,7 +102,7 @@ export class CategoriesController {
   }
 
   @Get(':id')
-  @Permissions('categories:read')
+  @Permissions('store:categories:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
@@ -125,7 +125,7 @@ export class CategoriesController {
   }
 
   @Patch(':id')
-  @Permissions('categories:update')
+  @Permissions('store:categories:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
@@ -151,7 +151,7 @@ export class CategoriesController {
   }
 
   @Put(':id')
-  @Permissions('categories:update')
+  @Permissions('store:categories:update')
   async replace(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateCategoryDto: UpdateCategoryDto,
@@ -177,7 +177,7 @@ export class CategoriesController {
   }
 
   @Delete(':id')
-  @Permissions('categories:delete')
+  @Permissions('store:categories:delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,

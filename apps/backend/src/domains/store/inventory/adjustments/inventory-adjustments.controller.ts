@@ -22,24 +22,23 @@ import {
   CreateAdjustmentDto,
   AdjustmentQueryDto,
 } from './interfaces/inventory-adjustment.interface';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
 
 @ApiTags('Inventory Adjustments')
 @Controller('store/inventory/adjustments')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 @ApiBearerAuth()
 export class InventoryAdjustmentsController {
   constructor(
     private readonly adjustmentsService: InventoryAdjustmentsService,
-  ) {}
+  ) { }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create inventory adjustment' })
   @ApiResponse({ status: 201, description: 'Adjustment created successfully' })
-  @RequirePermissions('create:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:create')
   async createAdjustment(@Body() createAdjustmentDto: CreateAdjustmentDto) {
     return await this.adjustmentsService.createAdjustment(createAdjustmentDto);
   }
@@ -47,7 +46,7 @@ export class InventoryAdjustmentsController {
   @Patch(':id/approve')
   @ApiOperation({ summary: 'Approve inventory adjustment' })
   @ApiResponse({ status: 200, description: 'Adjustment approved successfully' })
-  @RequirePermissions('approve:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:approve')
   async approveAdjustment(
     @Param('id') id: number,
     @Body('approvedByUserId') approvedByUserId: number,
@@ -64,7 +63,7 @@ export class InventoryAdjustmentsController {
     status: 200,
     description: 'Adjustments retrieved successfully',
   })
-  @RequirePermissions('read:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:read')
   async getAdjustments(@Query() query: AdjustmentQueryDto) {
     return await this.adjustmentsService.getAdjustments(query);
   }
@@ -75,7 +74,7 @@ export class InventoryAdjustmentsController {
     status: 200,
     description: 'Adjustment retrieved successfully',
   })
-  @RequirePermissions('read:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:read')
   async getAdjustmentById(@Param('id') id: number) {
     return await this.adjustmentsService.getAdjustmentById(
       parseInt(id.toString()),
@@ -88,7 +87,7 @@ export class InventoryAdjustmentsController {
     status: 200,
     description: 'Adjustment summary retrieved successfully',
   })
-  @RequirePermissions('read:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:read')
   async getAdjustmentSummary(
     @Param('organizationId') organizationId: number,
     @Query('startDate') startDate?: string,
@@ -104,7 +103,7 @@ export class InventoryAdjustmentsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete pending adjustment' })
   @ApiResponse({ status: 200, description: 'Adjustment deleted successfully' })
-  @RequirePermissions('delete:inventory-adjustment')
+  @RequirePermissions('store:inventory:adjustments:delete')
   async deleteAdjustment(@Param('id') id: number) {
     await this.adjustmentsService.deleteAdjustment(parseInt(id.toString()));
   }

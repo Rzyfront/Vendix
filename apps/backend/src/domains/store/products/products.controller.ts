@@ -33,9 +33,9 @@ export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
   @Post()
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async create(
     @Body() createProductDto: CreateProductDto,
     @Req() req: AuthenticatedRequest,
@@ -56,7 +56,7 @@ export class ProductsController {
   }
 
   @Get()
-  @Permissions('products:read')
+  @Permissions('store:products:read')
   async findAll(
     @Query() query: ProductQueryDto,
     @Req() req: AuthenticatedRequest,
@@ -86,7 +86,7 @@ export class ProductsController {
   }
 
   @Get(':id')
-  @Permissions('products:read')
+  @Permissions('store:products:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.productsService.findOne(id);
@@ -104,7 +104,7 @@ export class ProductsController {
   }
 
   @Get('store/:storeId')
-  @Permissions('products:read')
+  @Permissions('store:products:read')
   async findByStore(@Param('storeId', ParseIntPipe) storeId: number) {
     try {
       const result = await this.productsService.getProductsByStore(storeId);
@@ -122,7 +122,7 @@ export class ProductsController {
   }
 
   @Get('slug/:slug/store/:storeId')
-  @Permissions('products:read')
+  @Permissions('store:products:read')
   async findBySlug(
     @Param('slug') slug: string,
     @Param('storeId', ParseIntPipe) storeId: number,
@@ -143,7 +143,7 @@ export class ProductsController {
   }
 
   @Patch(':id')
-  @Permissions('products:update')
+  @Permissions('store:products:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateProductDto: UpdateProductDto,
@@ -164,7 +164,7 @@ export class ProductsController {
   }
 
   @Patch(':id/deactivate')
-  @Permissions('products:delete')
+  @Permissions('store:products:delete')
   async deactivate(@Param('id', ParseIntPipe) id: number) {
     try {
       await this.productsService.deactivate(id);
@@ -182,7 +182,7 @@ export class ProductsController {
   }
 
   @Delete(':id')
-  @Permissions('products:admin_delete')
+  @Permissions('store:products:admin_delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       await this.productsService.remove(id);
@@ -197,7 +197,7 @@ export class ProductsController {
   }
   // Product Variants endpoints
   @Post(':id/variants')
-  @Permissions('products:create')
+  @Permissions('store:products:create')
   async createVariant(
     @Param('id', ParseIntPipe) productId: number,
     @Body() createVariantDto: CreateProductVariantDto,
@@ -222,7 +222,7 @@ export class ProductsController {
   }
 
   @Patch('variants/:variantId')
-  @Permissions('products:update')
+  @Permissions('store:products:update')
   async updateVariant(
     @Param('variantId', ParseIntPipe) variantId: number,
     @Body() updateVariantDto: UpdateProductVariantDto,
@@ -246,7 +246,7 @@ export class ProductsController {
   }
 
   @Delete('variants/:variantId')
-  @Permissions('products:delete')
+  @Permissions('store:products:delete')
   async removeVariant(@Param('variantId', ParseIntPipe) variantId: number) {
     try {
       await this.productsService.removeVariant(variantId);
@@ -264,7 +264,7 @@ export class ProductsController {
 
   // Product Images endpoints
   @Post(':id/images')
-  @Permissions('products:update')
+  @Permissions('store:products:update')
   async addImage(
     @Param('id', ParseIntPipe) productId: number,
     @Body() imageDto: ProductImageDto,
@@ -285,7 +285,7 @@ export class ProductsController {
   }
 
   @Delete('images/:imageId')
-  @Permissions('products:update')
+  @Permissions('store:products:update')
   async removeImage(@Param('imageId', ParseIntPipe) imageId: number) {
     try {
       await this.productsService.removeImage(imageId);
@@ -302,7 +302,7 @@ export class ProductsController {
   }
 
   @Get('stats/store/:storeId')
-  @Permissions('products:read')
+  @Permissions('store:products:read')
   async getProductStats(@Param('storeId', ParseIntPipe) storeId: number) {
     try {
       const result = await this.productsService.getProductStats(storeId);

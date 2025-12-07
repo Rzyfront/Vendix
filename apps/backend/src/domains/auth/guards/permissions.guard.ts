@@ -10,7 +10,7 @@ import { UserRole } from '../enums/user-role.enum';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(private reflector: Reflector) { }
 
   canActivate(context: ExecutionContext): boolean {
     const requiredPermissions = this.reflector.getAllAndOverride<string[]>(
@@ -59,7 +59,7 @@ export class PermissionsGuard implements CanActivate {
     const hasNamedPermission = requiredPermissions.some((permissionName) =>
       user.permissions.some(
         (userPerm) =>
-          userPerm.path.includes(permissionName) &&
+          userPerm.name === permissionName &&
           userPerm.status === 'active',
       ),
     );

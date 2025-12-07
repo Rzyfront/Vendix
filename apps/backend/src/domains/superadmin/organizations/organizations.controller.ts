@@ -19,20 +19,19 @@ import {
   OrganizationDashboardDto,
 } from './dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Admin Organizations')
 @Controller('superadmin/organizations')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class OrganizationsController {
   constructor(
     private readonly adminOrganizationsService: OrganizationsService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a new organization' })

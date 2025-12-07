@@ -30,10 +30,10 @@ export class TaxesController {
   constructor(
     private readonly taxesService: TaxesService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
-  @Permissions('taxes:create')
+  @Permissions('store:taxes:create')
   async create(
     @Body() createTaxCategoryDto: CreateTaxCategoryDto,
     @Req() req: AuthenticatedRequest,
@@ -56,7 +56,7 @@ export class TaxesController {
   }
 
   @Get()
-  @Permissions('taxes:read')
+  @Permissions('store:taxes:read')
   async findAll(@Query() query: TaxCategoryQueryDto) {
     try {
       const result = await this.taxesService.findAll(query);
@@ -84,7 +84,7 @@ export class TaxesController {
   }
 
   @Get(':id')
-  @Permissions('taxes:read')
+  @Permissions('store:taxes:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
@@ -104,7 +104,7 @@ export class TaxesController {
   }
 
   @Patch(':id')
-  @Permissions('taxes:update')
+  @Permissions('store:taxes:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateTaxCategoryDto: UpdateTaxCategoryDto,
@@ -129,7 +129,7 @@ export class TaxesController {
   }
 
   @Delete(':id')
-  @Permissions('taxes:delete')
+  @Permissions('store:taxes:delete')
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,

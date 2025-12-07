@@ -17,7 +17,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+
 import { SystemPaymentMethodsService } from '../services/system-payment-methods.service';
 import {
   CreateSystemPaymentMethodDto,
@@ -26,12 +26,11 @@ import {
 
 @ApiTags('System Payment Methods')
 @Controller('system-payment-methods')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class SystemPaymentMethodsController {
   constructor(
     private readonly systemPaymentMethodsService: SystemPaymentMethodsService,
-  ) {}
+  ) { }
 
   @Get()
   @ApiOperation({ summary: 'Get all system payment methods' })

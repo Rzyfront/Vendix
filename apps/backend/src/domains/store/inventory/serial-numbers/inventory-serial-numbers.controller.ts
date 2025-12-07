@@ -26,9 +26,8 @@ import {
   ApiOperation,
   ApiResponse,
   ApiParam,
-  ApiQuery,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+
 // Using local enum definition until Prisma client is regenerated
 enum SerialNumberStatus {
   IN_STOCK = 'in_stock',
@@ -42,11 +41,10 @@ enum SerialNumberStatus {
 
 @ApiTags('inventory-serial-numbers')
 @Controller('store/inventory/serial-numbers')
-@UseGuards(JwtAuthGuard)
 export class InventorySerialNumbersController {
   constructor(
     private readonly serialNumbersService: InventorySerialNumbersService,
-  ) {}
+  ) { }
 
   @Post('batch')
   @ApiOperation({ summary: 'Create serial numbers for a batch' })

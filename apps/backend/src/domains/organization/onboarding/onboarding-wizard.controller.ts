@@ -22,17 +22,15 @@ import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
 import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @ApiTags('Onboarding Wizard')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('organization/onboarding-wizard')
 export class OnboardingWizardController {
   constructor(
     private readonly wizardService: OnboardingWizardService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get('status')
   @HttpCode(HttpStatus.OK)

@@ -16,7 +16,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions as Permissions } from '../../../auth/decorators/permissions.decorator';
 import { OrganizationPaymentPoliciesService } from '../services/organization-payment-policies.service';
@@ -27,12 +27,12 @@ import {
 
 @ApiTags('Organization Payment Policies')
 @Controller('organizations/:organizationId/payment-policies')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 @ApiBearerAuth()
 export class OrganizationPaymentPoliciesController {
   constructor(
     private readonly organizationPaymentPoliciesService: OrganizationPaymentPoliciesService,
-  ) {}
+  ) { }
 
   @Post()
   @Permissions('organizations:update')

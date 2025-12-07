@@ -11,10 +11,10 @@ export class OrganizationsController {
   constructor(
     private readonly organizationsService: OrganizationsService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get('profile')
-  @Permissions('organizations:read')
+  @Permissions('organization:organizations:read')
   async getProfile() {
     try {
       const result = await this.organizationsService.getProfile();
@@ -31,7 +31,7 @@ export class OrganizationsController {
   }
 
   @Patch('profile')
-  @Permissions('organizations:update')
+  @Permissions('organization:organizations:update')
   async updateProfile(@Body() update_organization_dto: UpdateOrganizationDto) {
     try {
       const result = await this.organizationsService.updateProfile(
@@ -50,7 +50,7 @@ export class OrganizationsController {
   }
 
   @Get('dashboard')
-  @Permissions('organizations:read')
+  @Permissions('organization:organizations:read')
   async getDashboard(@Query() dashboard_query: OrganizationDashboardDto) {
     try {
       const result =

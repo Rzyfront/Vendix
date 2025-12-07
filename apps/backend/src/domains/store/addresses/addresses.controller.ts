@@ -30,7 +30,7 @@ export class AddressesController {
   ) {}
 
   @Post()
-  @Permissions('addresses:create')
+  @Permissions('store:addresses:create')
   async create(
     @Body() createAddressDto: CreateAddressDto,
     @Req() req: AuthenticatedRequest,
@@ -53,7 +53,7 @@ export class AddressesController {
   }
 
   @Get()
-  @Permissions('addresses:read')
+  @Permissions('store:addresses:read')
   async findAll(
     @Query() query: AddressQueryDto,
     @Req() req: AuthenticatedRequest,
@@ -84,7 +84,7 @@ export class AddressesController {
   }
 
   @Get('store/:storeId')
-  @Permissions('addresses:read')
+  @Permissions('store:addresses:read')
   async findByStore(
     @Param('storeId', ParseIntPipe) storeId: number,
     @Req() req: AuthenticatedRequest,
@@ -105,7 +105,7 @@ export class AddressesController {
   }
 
   @Get(':id')
-  @Permissions('addresses:read')
+  @Permissions('store:addresses:read')
   async findOne(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
@@ -125,7 +125,7 @@ export class AddressesController {
   }
 
   @Patch(':id')
-  @Permissions('addresses:update')
+  @Permissions('store:addresses:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateAddressDto: UpdateAddressDto,
@@ -150,7 +150,7 @@ export class AddressesController {
   }
 
   @Delete(':id')
-  @Permissions('addresses:delete')
+  @Permissions('store:addresses:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('id', ParseIntPipe) id: number,

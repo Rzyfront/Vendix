@@ -17,6 +17,9 @@ import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { UserRole } from '../../auth/enums/user-role.enum';
 import {
   ResponseService,
   SuccessResponse,
@@ -42,14 +45,14 @@ import {
  * Maneja las peticiones HTTP relacionadas con dominios
  */
 @Controller('organization/domains')
-@UseGuards(RolesGuard)
+@UseGuards(RolesGuard, PermissionsGuard)
 export class DomainsController {
   private readonly logger = new Logger(DomainsController.name);
 
   constructor(
     private readonly domainsService: DomainsService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   // ========== ENDPOINTS PRIVADOS (requieren autenticación) ==========
 
@@ -57,7 +60,8 @@ export class DomainsController {
    * Crear configuración de dominio
    */
   @Post()
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:create')
   @HttpCode(HttpStatus.CREATED)
   async createDomainSetting(
     @Body() createDomainSettingDto: CreateDomainSettingDto,
@@ -76,22 +80,29 @@ export class DomainsController {
    * Obtener todas las configuraciones con filtros
    */
   @Get()
-  @Roles('super_admin', 'admin', 'owner')
+  @Get()
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getAllDomainSettings(
-    @Query('organizationId') organizationId?: string,
-    @Query('storeId') storeId?: string,
+    @Query('organizationId') organizationId: string,
+    @Query('storeId') storeId: string,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Req() req?: AuthenticatedRequest,
   ): Promise<PaginatedResponse<DomainSettingResponse>> {
     const filters: any = {};
+    const userRole = req?.user?.user_roles?.[0]?.roles?.name; // Simple check, ideally use helper
+    const isSuperAdmin = userRole === UserRole.SUPER_ADMIN;
 
-    if (organizationId) {
-      const orgId = parseInt(organizationId, 10);
-      if (isNaN(orgId)) {
-        throw new BadRequestException('Invalid organizationId parameter');
+    if (isSuperAdmin) {
+      if (organizationId) {
+        const orgId = parseInt(organizationId, 10);
+        if (!isNaN(orgId)) filters.organization_id = orgId;
       }
-      filters.organization_id = orgId;
+    } else {
+      // Auto-scope for non-super-admins
+      filters.organization_id = req?.user?.organization_id;
     }
 
     if (storeId) {
@@ -135,7 +146,8 @@ export class DomainsController {
    * 📊 Obtener estadísticas de dominios
    */
   @Get('stats')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getDomainStats(): Promise<SuccessResponse<any>> {
     const stats = await this.domainsService.getDomainStats();
     return this.responseService.success(
@@ -148,7 +160,8 @@ export class DomainsController {
    * Obtener configuración por hostname
    */
   @Get('hostname/:hostname')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getDomainSettingByHostname(
     @Param('hostname') hostname: string,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
@@ -164,7 +177,8 @@ export class DomainsController {
    * Obtener configuración por ID
    */
   @Get(':id')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getDomainSettingById(
     @Param('id') id: string,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
@@ -183,7 +197,8 @@ export class DomainsController {
    * Actualizar configuración de dominio
    */
   @Put('hostname/:hostname')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
   async updateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() updateDomainSettingDto: UpdateDomainSettingDto,
@@ -202,7 +217,8 @@ export class DomainsController {
    * Eliminar configuración de dominio
    */
   @Delete('hostname/:hostname')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:delete')
   @HttpCode(HttpStatus.OK)
   async deleteDomainSetting(
     @Param('hostname') hostname: string,
@@ -215,7 +231,8 @@ export class DomainsController {
    * Duplicar configuración de dominio
    */
   @Post('hostname/:hostname/duplicate')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:create')
   async duplicateDomainSetting(
     @Param('hostname') hostname: string,
     @Body() duplicateData: DuplicateDomainDto,
@@ -234,7 +251,8 @@ export class DomainsController {
    * Obtener configuraciones por organización
    */
   @Get('organization/:organizationId')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getDomainSettingsByOrganization(
     @Param('organizationId') organizationId: string,
   ): Promise<SuccessResponse<DomainSettingResponse[]>> {
@@ -255,7 +273,8 @@ export class DomainsController {
    * Obtener configuraciones por tienda
    */
   @Get('store/:storeId')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async getDomainSettingsByStore(
     @Param('storeId') storeId: string,
   ): Promise<SuccessResponse<DomainSettingResponse[]>> {
@@ -276,7 +295,8 @@ export class DomainsController {
    * Validar hostname
    */
   @Post('validate-hostname')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
   async validateHostname(
     @Body() data: ValidateHostnameDto,
   ): Promise<SuccessResponse<DomainValidationResponse>> {
@@ -291,7 +311,8 @@ export class DomainsController {
    * Verificar configuración DNS
    */
   @Post('hostname/:hostname/verify')
-  @Roles('super_admin', 'admin', 'owner')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:verify')
   async verifyDomain(
     @Param('hostname') hostname: string,
     @Body() body: VerifyDomainDto,

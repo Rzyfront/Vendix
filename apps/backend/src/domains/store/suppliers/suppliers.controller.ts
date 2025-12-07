@@ -13,8 +13,12 @@ import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
 import { ResponseService } from '@common/responses/response.service';
+import { UseGuards } from '@nestjs/common';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @Controller('store/inventory/suppliers')
+@UseGuards(PermissionsGuard)
 export class SuppliersController {
   constructor(
     private readonly suppliersService: SuppliersService,
@@ -22,6 +26,7 @@ export class SuppliersController {
   ) {}
 
   @Post()
+  @Permissions('store:suppliers:create')
   async create(@Body() createSupplierDto: CreateSupplierDto) {
     try {
       const result = await this.suppliersService.create(createSupplierDto);
@@ -39,6 +44,7 @@ export class SuppliersController {
   }
 
   @Get()
+  @Permissions('store:suppliers:read')
   async findAll(@Query() query: SupplierQueryDto) {
     try {
       const result = await this.suppliersService.findAll(query);
@@ -65,6 +71,7 @@ export class SuppliersController {
   }
 
   @Get('active')
+  @Permissions('store:suppliers:read')
   async findActive(@Query() query: SupplierQueryDto) {
     try {
       const result = await this.suppliersService.findActive(query);
@@ -82,6 +89,7 @@ export class SuppliersController {
   }
 
   @Get(':id')
+  @Permissions('store:suppliers:read')
   async findOne(@Param('id') id: string) {
     try {
       const result = await this.suppliersService.findOne(+id);
@@ -99,6 +107,7 @@ export class SuppliersController {
   }
 
   @Get(':id/products')
+  @Permissions('store:suppliers:read')
   async findSupplierProducts(@Param('id') id: string) {
     try {
       const result = await this.suppliersService.findSupplierProducts(+id);
@@ -116,6 +125,7 @@ export class SuppliersController {
   }
 
   @Patch(':id')
+  @Permissions('store:suppliers:update')
   async update(
     @Param('id') id: string,
     @Body() updateSupplierDto: UpdateSupplierDto,
@@ -136,6 +146,7 @@ export class SuppliersController {
   }
 
   @Delete(':id')
+  @Permissions('store:suppliers:delete')
   async remove(@Param('id') id: string) {
     try {
       await this.suppliersService.remove(+id);

@@ -11,18 +11,17 @@ import {
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SessionsService } from './sessions.service';
 import { UserSessionsQueryDto } from './dto';
-import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @ApiTags('User Sessions')
 @Controller('organization/sessions')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 export class SessionsController {
-  constructor(private readonly userSessionsService: SessionsService) {}
+  constructor(private readonly userSessionsService: SessionsService) { }
 
   @Get()
-  @Permissions('user_sessions:read')
+  @Permissions('organization:user_sessions:read')
   @ApiOperation({ summary: 'Get all user sessions' })
   @ApiResponse({
     status: 200,
@@ -33,7 +32,7 @@ export class SessionsController {
   }
 
   @Get(':id')
-  @Permissions('user_sessions:read')
+  @Permissions('organization:user_sessions:read')
   @ApiOperation({ summary: 'Get user session by ID' })
   @ApiResponse({
     status: 200,
@@ -44,7 +43,7 @@ export class SessionsController {
   }
 
   @Delete(':id')
-  @Permissions('user_sessions:delete')
+  @Permissions('organization:user_sessions:delete')
   @ApiOperation({ summary: 'Terminate user session' })
   @ApiResponse({
     status: 200,
@@ -55,7 +54,7 @@ export class SessionsController {
   }
 
   @Delete('user/:userId')
-  @Permissions('user_sessions:delete')
+  @Permissions('organization:user_sessions:delete')
   @ApiOperation({ summary: 'Terminate all sessions for a user' })
   @ApiResponse({
     status: 200,

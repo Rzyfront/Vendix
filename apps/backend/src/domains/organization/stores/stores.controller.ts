@@ -30,10 +30,10 @@ export class StoresController {
   constructor(
     private readonly storesService: StoresService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
-  @Permissions('stores:create')
+  @Permissions('organization:stores:create')
   async create(
     @Body() createStoreDto: CreateStoreDto,
     @Req() req: AuthenticatedRequest,
@@ -62,7 +62,7 @@ export class StoresController {
   }
 
   @Get()
-  @Permissions('stores:read')
+  @Permissions('organization:stores:read')
   async findAll(
     @Query() query: StoreQueryDto,
     @Req() req: AuthenticatedRequest,
@@ -85,7 +85,7 @@ export class StoresController {
   }
 
   @Get('stats')
-  @Permissions('stores:read')
+  @Permissions('organization:stores:read')
   async getStats() {
     try {
       const result = await this.storesService.getGlobalDashboard();
@@ -102,7 +102,7 @@ export class StoresController {
   }
 
   @Get(':id')
-  @Permissions('stores:read')
+  @Permissions('organization:stores:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const store = await this.storesService.findOne(id);
@@ -122,7 +122,7 @@ export class StoresController {
   }
 
   @Patch(':id')
-  @Permissions('stores:update')
+  @Permissions('organization:stores:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateStoreDto: UpdateStoreDto,
@@ -145,7 +145,7 @@ export class StoresController {
   }
 
   @Delete(':id')
-  @Permissions('stores:delete')
+  @Permissions('organization:stores:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     try {
       await this.storesService.remove(id);
@@ -168,7 +168,7 @@ export class StoresController {
   }
 
   @Patch(':id/settings')
-  @Permissions('stores:update')
+  @Permissions('organization:stores:update')
   async updateSettings(
     @Param('id', ParseIntPipe) storeId: number,
     @Body() settingsDto: UpdateStoreSettingsDto,
@@ -194,7 +194,7 @@ export class StoresController {
   }
 
   @Get(':id/stats')
-  @Permissions('stores:read')
+  @Permissions('organization:stores:read')
   async getStoreStats(
     @Param('id', ParseIntPipe) id: number,
     @Query() query: StoreDashboardDto,

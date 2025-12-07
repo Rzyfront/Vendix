@@ -20,24 +20,23 @@ import {
   CreateTransactionDto,
   TransactionQueryDto,
 } from './interfaces/inventory-transaction.interface';
-import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
 
 @ApiTags('Inventory Transactions')
 @Controller('store/inventory/transactions')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(PermissionsGuard)
 @ApiBearerAuth()
 export class InventoryTransactionsController {
   constructor(
     private readonly transactionsService: InventoryTransactionsService,
-  ) {}
+  ) { }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create inventory transaction' })
   @ApiResponse({ status: 201, description: 'Transaction created successfully' })
-  @RequirePermissions('create:inventory-transaction')
+  @RequirePermissions('store:inventory:transactions:create')
   async createTransaction(@Body() createTransactionDto: CreateTransactionDto) {
     return await this.transactionsService.createTransaction(
       createTransactionDto,
@@ -50,7 +49,7 @@ export class InventoryTransactionsController {
     status: 200,
     description: 'Transaction history retrieved successfully',
   })
-  @RequirePermissions('read:inventory-transaction')
+  @RequirePermissions('store:inventory:transactions:read')
   async getProductTransactions(
     @Param('productId') productId: number,
     @Query() query: TransactionQueryDto,
@@ -67,7 +66,7 @@ export class InventoryTransactionsController {
     status: 200,
     description: 'Transaction retrieved successfully',
   })
-  @RequirePermissions('read:inventory-transaction')
+  @RequirePermissions('store:inventory:transactions:read')
   async getTransactionById(@Param('id') id: number) {
     return await this.transactionsService.getTransactionById(id);
   }
@@ -78,7 +77,7 @@ export class InventoryTransactionsController {
     status: 200,
     description: 'Transaction summary retrieved successfully',
   })
-  @RequirePermissions('read:inventory-transaction')
+  @RequirePermissions('store:inventory:transactions:read')
   async getTransactionSummary(
     @Param('productId') productId: number,
     @Query('variantId') variantId?: number,
@@ -99,7 +98,7 @@ export class InventoryTransactionsController {
     status: 200,
     description: 'Recent transactions retrieved successfully',
   })
-  @RequirePermissions('read:inventory-transaction')
+  @RequirePermissions('store:inventory:transactions:read')
   async getRecentTransactions(
     @Param('organizationId') organizationId: string,
     @Query('limit') limit?: number,
