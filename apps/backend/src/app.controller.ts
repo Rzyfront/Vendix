@@ -68,7 +68,7 @@ export class AppController {
   @Post('clean')
   @HttpCode(HttpStatus.OK)
   async runClean(@Body() body: { secretKey: string }) {
-    if (body.secretKey !== 'vendix-dangerous-c') {
+    if (body.secretKey !== 'vendix-dangerous-clean') {
       throw new ForbiddenException('Invalid secret key');
     }
 
