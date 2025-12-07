@@ -15,6 +15,12 @@ tests {
     expect(res.body).to.have.property('success', true);
     expect(res.body).to.have.property('data');
     expect(res.body.data).to.have.property('id');
+    // Verify inclusions from service
+    // Service includes: stores, organizations, users
+    // OrganizationPrismaService ensures this address belongs to the current org context.
+    if (res.body.data.organizations) {
+       expect(res.body.data.organizations).to.be.an('object');
+    }
   });
 
   test("Address data matches created", function() {

@@ -19,5 +19,8 @@ tests {
 
   test("Response contains settings data", function() {
     expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('settings');
+    expect(res.body.data.settings).to.be.an('object');
   });
 }

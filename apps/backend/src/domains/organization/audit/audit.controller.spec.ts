@@ -54,7 +54,6 @@ describe('AuditController', () => {
         to_date: '2025-12-31',
         limit: '10',
         offset: '0',
-        organization_id: '1',
       };
 
       const expectedFilters = {
@@ -67,7 +66,6 @@ describe('AuditController', () => {
         to_date: new Date('2025-12-31'),
         limit: 10,
         offset: 0,
-        organization_id: 1,
       };
 
       const mockLogs = [
@@ -96,7 +94,6 @@ describe('AuditController', () => {
         query.to_date,
         query.limit,
         query.offset,
-        query.organization_id,
       );
 
       expect(mockAuditService.getAuditLogs).toHaveBeenCalledWith(
@@ -204,7 +201,7 @@ describe('AuditController', () => {
         expect.objectContaining({
           from_date: expect.any(Date),
           to_date: expect.any(Date),
-        }),
+        }) as any,
       );
     });
 
@@ -215,7 +212,6 @@ describe('AuditController', () => {
         resource_id: '999',
         limit: '25',
         offset: '5',
-        organization_id: '7',
       };
 
       const expectedFilters = {
@@ -224,7 +220,6 @@ describe('AuditController', () => {
         resource_id: 999,
         limit: 25,
         offset: 5,
-        organization_id: 7,
       };
 
       mockAuditService.getAuditLogs.mockResolvedValue([]);
@@ -244,7 +239,6 @@ describe('AuditController', () => {
         undefined,
         query.limit,
         query.offset,
-        query.organization_id,
       );
 
       expect(mockAuditService.getAuditLogs).toHaveBeenCalledWith(
@@ -363,7 +357,7 @@ describe('AuditController', () => {
       await controller.getAuditStats(query.fromDate);
 
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
-        expect.any(Date),
+        expect.any(Date) as any,
         undefined,
       );
     });
@@ -392,7 +386,7 @@ describe('AuditController', () => {
 
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
         undefined,
-        expect.any(Date),
+        expect.any(Date) as any,
       );
     });
 
@@ -417,11 +411,9 @@ describe('AuditController', () => {
 
       await controller.getAuditStats(query.fromDate, query.toDate);
 
-      await controller.getAuditStats(query.fromDate, query.toDate);
-
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
-        expect.any(Date),
-        expect.any(Date),
+        expect.any(Date) as any,
+        expect.any(Date) as any,
       );
     });
   });

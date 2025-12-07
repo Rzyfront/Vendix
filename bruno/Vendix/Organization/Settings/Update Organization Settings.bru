@@ -29,5 +29,7 @@ tests {
 
   test("Response contains updated settings", function() {
     expect(res.body).to.have.property('data');
+    expect(res.body.data.settings).to.have.property('theme', 'dark');
+    expect(res.body.data.settings).to.have.property('language', 'es');
   });
 }

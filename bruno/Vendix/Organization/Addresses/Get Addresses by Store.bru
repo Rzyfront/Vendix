@@ -15,6 +15,9 @@ tests {
     expect(res.body).to.have.property('success', true);
     expect(res.body).to.have.property('data');
     expect(res.body.data).to.be.an('array');
+    if (res.body.data.length > 0) {
+       expect(res.body.data[0]).to.have.property('store_id', 1); // Assuming param is 1
+    }
   });
 
   test("Response includes pagination meta", function() {

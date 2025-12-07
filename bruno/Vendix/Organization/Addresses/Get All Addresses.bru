@@ -22,6 +22,14 @@ tests {
     expect(res.body.meta).to.have.property('total');
     expect(res.body.meta).to.have.property('page');
     expect(res.body.meta).to.have.property('limit');
+    // Ensure addresses have implicit organization scope, so we shouldn't see cross-org data.
+    // We can't easily assert that here without knowing the specific DB state, 
+    // but the structure check confirms the API contract.
+  });
+
+  test("Ensure data and meta properties exist", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
   });
 
   test("No sensitive data exposed", function() {

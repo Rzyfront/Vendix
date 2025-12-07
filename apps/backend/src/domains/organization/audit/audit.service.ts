@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 export enum AuditAction {
   CREATE = 'CREATE',
@@ -47,7 +48,7 @@ export interface AuditLogData {
 
 @Injectable()
 export class AuditService {
-  constructor(private readonly prismaService: OrganizationPrismaService) {}
+  constructor(private readonly prismaService: OrganizationPrismaService) { }
 
   /**
    * Registra un evento de auditoría
@@ -58,7 +59,9 @@ export class AuditService {
         data: {
           user_id: auditData.userId,
           store_id: auditData.storeId,
-          organization_id: auditData.organizationId, // ✅ Nuevo campo organization_id
+          organization_id:
+            auditData.organizationId ||
+            RequestContextService.getContext()?.organization_id, // ✅ Nuevo campo organization_id con fallback a contexto
           action: auditData.action,
           resource: auditData.resource,
           resource_id: auditData.resourceId,
@@ -186,7 +189,7 @@ export class AuditService {
   async getAuditLogs(filters?: {
     user_id?: number;
     store_id?: number;
-    organization_id?: number; // ✅ Ahora usa campo directo
+    // organization_id?: number; // Eliminado: se usa el contexto
     action?: AuditAction;
     resource?: AuditResource;
     resource_id?: number;
@@ -199,8 +202,7 @@ export class AuditService {
 
     if (filters?.user_id) where.user_id = filters.user_id;
     if (filters?.store_id) where.store_id = filters.store_id;
-    if (filters?.organization_id)
-      where.organization_id = filters.organization_id;
+    // Organization filtering handled automatically by OrganizationPrismaService
     if (filters?.action) where.action = filters.action;
     if (filters?.resource) where.resource = filters.resource;
     if (filters?.resource_id) where.resource_id = filters.resource_id;
@@ -255,6 +257,11 @@ export class AuditService {
       where.created_at = {};
       if (fromDate) where.created_at.gte = fromDate;
       if (toDate) where.created_at.lte = toDate;
+    }
+
+    const context = RequestContextService.getContext();
+    if (context?.organization_id) {
+      where.organization_id = context.organization_id;
     }
 
     const [totalLogs, logsByAction, logsByResource] = await Promise.all([

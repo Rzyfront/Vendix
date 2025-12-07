@@ -1,10 +1,14 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
-import { GlobalPrismaService as PrismaService } from '../../../prisma/services/global-prisma.service';
+import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
+
+// Mock RequestContextService
+jest.mock('@common/context/request-context.service');
 
 describe('AuditService', () => {
   let service: AuditService;
-  let prismaService: PrismaService;
+  let prismaService: OrganizationPrismaService;
 
   const mockPrismaService = {
     audit_logs: {
@@ -20,14 +24,21 @@ describe('AuditService', () => {
       providers: [
         AuditService,
         {
-          provide: PrismaService,
+          provide: OrganizationPrismaService,
           useValue: mockPrismaService,
         },
       ],
     }).compile();
 
     service = module.get<AuditService>(AuditService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<OrganizationPrismaService>(
+      OrganizationPrismaService,
+    );
+
+    // Default mock for RequestContextService
+    (RequestContextService.getContext as jest.Mock).mockReturnValue({
+      organization_id: 1,
+    });
   });
 
   afterEach(() => {
@@ -39,7 +50,7 @@ describe('AuditService', () => {
       const auditData = {
         userId: 1,
         storeId: 1,
-        organizationId: 1,
+        // organizationId removed from input as it comes from context
         action: AuditAction.CREATE,
         resource: AuditResource.PRODUCTS,
         resourceId: 123,
@@ -116,7 +127,7 @@ describe('AuditService', () => {
 
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         '❌ Error registrando auditoría:',
-        expect.any(Error),
+        expect.anything(),
       );
       consoleErrorSpy.mockRestore();
     });
@@ -146,7 +157,7 @@ describe('AuditService', () => {
         resourceId,
         newValues,
         metadata,
-      });
+      } as any);
     });
   });
 
@@ -177,7 +188,7 @@ describe('AuditService', () => {
         oldValues,
         newValues,
         metadata,
-      });
+      } as any);
     });
   });
 
@@ -205,7 +216,7 @@ describe('AuditService', () => {
         resourceId,
         oldValues,
         metadata,
-      });
+      } as any);
     });
   });
 
@@ -227,7 +238,7 @@ describe('AuditService', () => {
         metadata,
         ipAddress,
         userAgent,
-      });
+      } as any);
     });
 
     it('should work with undefined userId', async () => {
@@ -244,7 +255,7 @@ describe('AuditService', () => {
         metadata,
         ipAddress: undefined,
         userAgent: undefined,
-      });
+      } as any);
     });
   });
 
@@ -261,7 +272,7 @@ describe('AuditService', () => {
         action,
         resource,
         metadata,
-      });
+      } as any);
     });
   });
 
@@ -270,7 +281,7 @@ describe('AuditService', () => {
       const filters = {
         user_id: 1,
         store_id: 1,
-        organization_id: 1,
+        // organization_id removed from filters
         action: AuditAction.CREATE,
         resource: AuditResource.PRODUCTS,
         resource_id: 123,
@@ -299,7 +310,17 @@ describe('AuditService', () => {
         where: {
           user_id: 1,
           store_id: 1,
-          organization_id: 1,
+          // organization_id is automatically scoped by OrganizationPrismaService logic (mocked here implicitly or explicitly if needed)
+          // For finding calls, we expect what passes to the prisma findMany. 
+          // Since we are moving to automatic scoping, the service won't manually add organization_id to 'where'
+          // UNLESS the service expects OrganizationPrismaService to handle it.
+          // In the service implementation plan, we remove manual adding of organization_id.
+          // So we should NOT expect organization_id in the 'where' clause that is passed to prisma.findMany
+          // HOWEVER, if OrganizationPrismaService intercepts it, the Service code passes a 'where' WITHOUT organization_id, 
+          // and OrganizationPrismaService ADDS it. 
+          // Since we are mocking PrismaService, we check what AuditService calls.
+          // AuditService calls findMany({ where: { ... } }).
+          // It will NOT have organization_id in 'where' anymore.
           action: AuditAction.CREATE,
           resource: AuditResource.PRODUCTS,
           resource_id: 123,

@@ -23,7 +23,7 @@ export class AuditController {
   constructor(
     private readonly auditService: AuditService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get('logs')
   @ApiOperation({
@@ -44,7 +44,6 @@ export class AuditController {
     @Query('to_date') to_date?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-    @Query('organization_id') organization_id?: string,
   ) {
     const filters: any = {};
 
@@ -57,7 +56,6 @@ export class AuditController {
     if (to_date) filters.to_date = new Date(to_date);
     if (limit) filters.limit = parseInt(limit);
     if (offset) filters.offset = parseInt(offset);
-    if (organization_id) filters.organization_id = parseInt(organization_id);
 
     const logs = await this.auditService.getAuditLogs(filters);
     return this.responseService.success(

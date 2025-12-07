@@ -300,17 +300,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Reportes de Cumplimiento',
           icon: 'file-check',
           route: '/admin/audit/compliance',
-        },
-        {
-          label: 'Documentos Legales',
-          icon: 'file-text',
-          route: '/admin/audit/legal-docs',
-        },
-        {
-          label: 'Copia de Seguridad y Recuperación',
-          icon: 'backup',
-          route: '/admin/audit/backup',
-        },
+        }
       ],
     },
     {

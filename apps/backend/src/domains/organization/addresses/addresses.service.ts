@@ -11,17 +11,26 @@ import {
   UpdateAddressDto,
   AddressQueryDto,
   UpdateGPSCoordinatesDto,
+  UpdateGPSCoordinatesDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class AddressesService {
   constructor(
     private prisma: OrganizationPrismaService,
     private accessValidation: AccessValidationService,
-  ) {}
+  ) { }
 
   async create(createAddressDto: CreateAddressDto, user: any) {
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+
+    if (!organization_id) {
+      throw new ForbiddenException('Organization context required');
+    }
+
     // Validar que solo se proporcione un tipo de entidad
     const entity_types = [
       createAddressDto.store_id ? 'store' : null,
@@ -42,10 +51,10 @@ export class AddressesService {
         user,
       );
     } else if (createAddressDto.organization_id) {
-      await this.accessValidation.validateOrganizationAccess(
-        createAddressDto.organization_id,
-        user,
-      );
+      // Validate that DTO org id matches context
+      if (createAddressDto.organization_id !== organization_id) {
+        throw new ForbiddenException('Cannot create address for another organization');
+      }
     } else if (createAddressDto.user_id) {
       await this.accessValidation.validateUserAccess(
         createAddressDto.user_id,
@@ -56,7 +65,7 @@ export class AddressesService {
     if (createAddressDto.is_primary) {
       await this.unsetOtherDefaults({
         store_id: createAddressDto.store_id,
-        organization_id: createAddressDto.organization_id,
+        organization_id: createAddressDto.organization_id, // If null, it's fine
         user_id: createAddressDto.user_id,
       });
     }
@@ -77,7 +86,7 @@ export class AddressesService {
         ? parseFloat(createAddressDto.longitude)
         : null,
       store_id: createAddressDto.store_id,
-      organization_id: createAddressDto.organization_id,
+      organization_id: organization_id, // Always enforce context org id
       user_id: createAddressDto.user_id,
     };
 
@@ -179,15 +188,13 @@ export class AddressesService {
       throw new NotFoundException('Address not found');
     }
 
-    // Validar permisos según el tipo de entidad
+    // Validar permisos adicionales (store/user) si es necesario, 
+    // pero organization access ya está garantizado por el prisma service.
     if (address.store_id) {
       await this.accessValidation.validateStoreAccess(address.store_id, user);
-    } else if (address.organization_id) {
-      await this.accessValidation.validateOrganizationAccess(
-        address.organization_id,
-        user,
-      );
-    } else if (address.user_id) {
+    }
+    // Organization access is implicit.
+    if (address.user_id) {
       await this.accessValidation.validateUserAccess(address.user_id, user);
     }
 

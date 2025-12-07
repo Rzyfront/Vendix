@@ -17,5 +17,8 @@ tests {
 
   test("Response contains stats object", function() {
     expect(res.body.data).to.be.an('object');
+    expect(res.body.data).to.have.property('total_logs');
+    expect(res.body.data).to.have.property('logs_by_action');
+    expect(res.body.data).to.have.property('logs_by_resource');
   });
 }
