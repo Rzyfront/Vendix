@@ -11,7 +11,6 @@ import {
   UpdateAddressDto,
   AddressQueryDto,
   UpdateGPSCoordinatesDto,
-  UpdateGPSCoordinatesDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';

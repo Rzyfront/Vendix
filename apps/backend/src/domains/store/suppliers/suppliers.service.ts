@@ -25,7 +25,7 @@ export class SuppliersService {
     });
   }
 
-  asyundefinedAll(query: SupplierQueryDto) {
+  async findAll(query: SupplierQueryDto) {
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
     const where: any = {
