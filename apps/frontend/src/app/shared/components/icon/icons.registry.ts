@@ -67,6 +67,16 @@ import {
   Sparkles,
   Mail,
   Palette,
+  CheckSquare,
+  Lightbulb,
+  LayoutDashboard,
+  ShoppingBag,
+  Layout,
+  MapPin,
+  Building2,
+  AlignLeft,
+  Droplet,
+  UserCircle,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -170,6 +180,20 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   mail: Mail,
   palette: Palette,
   x: X,
+  'check-square': CheckSquare,
+  globe: Globe,
+  lightbulb: Lightbulb,
+  'chart-bar': BarChart3,
+  'layout-dashboard': LayoutDashboard,
+  'shopping-bag': ShoppingBag,
+  layout: Layout,
+  'refresh-cw': RefreshCw,
+  'map-pin': MapPin,
+  'building-2': Building2,
+  'align-left': AlignLeft,
+  droplet: Droplet,
+  'help-circle': HelpCircle,
+  'user-circle': UserCircle,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;
