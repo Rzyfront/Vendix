@@ -60,6 +60,13 @@ import {
   Save,
   Maximize,
   Minimize,
+  ArrowLeft,
+  ArrowRight,
+  SkipForward,
+  Loader2,
+  Sparkles,
+  Mail,
+  Palette,
   LucideIconData,
 } from 'lucide-angular';
 
@@ -153,6 +160,16 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Default fallback icon
   default: HelpCircle,
+
+  // Onboarding icons
+  'arrow-left': ArrowLeft,
+  'arrow-right': ArrowRight,
+  'skip-forward': SkipForward,
+  'loader-2': Loader2,
+  sparkles: Sparkles,
+  mail: Mail,
+  palette: Palette,
+  x: X,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

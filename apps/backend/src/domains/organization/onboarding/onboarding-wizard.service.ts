@@ -27,7 +27,7 @@ interface WizardValidation {
 
 @Injectable()
 export class OnboardingWizardService {
-  constructor(private readonly prismaService: OrganizationPrismaService) {}
+  constructor(private readonly prismaService: OrganizationPrismaService) { }
 
   /**
    * Get wizard status for a user
@@ -103,6 +103,7 @@ export class OnboardingWizardService {
    * Select application type for the user
    */
   async selectAppType(userId: number, selectAppTypeDto: SelectAppTypeDto) {
+    console.log('select_app_type', { user_id: userId, select_app_type_dto: selectAppTypeDto });
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: { user_settings: true },
@@ -153,6 +154,7 @@ export class OnboardingWizardService {
    * Setup user with address
    */
   async setupUser(userId: number, setupUserDto: SetupUserWizardDto) {
+    console.log('setup_user', { user_id: userId, setup_user_dto: setupUserDto });
     // Update user data
     const updatedUser = await this.prismaService.users.update({
       where: { id: userId },
@@ -204,7 +206,8 @@ export class OnboardingWizardService {
       }
     }
 
-    return updatedUser;
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 
   /**
@@ -214,6 +217,7 @@ export class OnboardingWizardService {
     userId: number,
     setupOrgDto: SetupOrganizationWizardDto,
   ) {
+    console.log('setup_organization', { user_id: userId, setup_org_dto: setupOrgDto });
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -284,6 +288,7 @@ export class OnboardingWizardService {
    * Setup store with address
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
+    console.log('setup_store', { user_id: userId, setup_store_dto: setupStoreDto });
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -341,6 +346,7 @@ export class OnboardingWizardService {
     userId: number,
     setupAppConfigDto: SetupAppConfigWizardDto,
   ) {
+    console.log('setup_app_config', { user_id: userId, setup_app_config_dto: setupAppConfigDto });
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: {

@@ -18,7 +18,6 @@ export class OrganizationPrismaService extends BasePrismaService {
     'roles',
     'user_roles',
     'role_permissions',
-    'user_settings',
     'refresh_tokens',
     'password_reset_tokens',
     'email_verification_tokens',

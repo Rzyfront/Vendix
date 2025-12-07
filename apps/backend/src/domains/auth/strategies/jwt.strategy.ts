@@ -48,12 +48,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           },
         },
       });
-      console.log(
-        'JWT Strategy - User found:',
-        user ? 'YES' : 'NO',
-        user?.id,
-        user?.email,
-      );
+
       if (!user) {
         throw new UnauthorizedException(
           'Usuario no encontrado en base de datos',

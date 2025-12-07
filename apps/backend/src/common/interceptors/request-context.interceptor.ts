@@ -19,8 +19,6 @@ export class RequestContextInterceptor implements NestInterceptor {
     const user = req.user;
     if (!user) return next.handle();
 
-    console.log('[CTX-INT] User object:', JSON.stringify(user, null, 2));
-
     const roles =
       user.user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
     const is_super_admin = roles.includes('super_admin');
@@ -38,11 +36,6 @@ export class RequestContextInterceptor implements NestInterceptor {
       is_owner,
       email: user.email,
     };
-
-    // Forzar log a stderr para Docker
-    console.error(
-      `[${requestId}] [CTX-INT] Context set: User ${user.id} | Org ${contextObj.organization_id || 'N/A'} | Store ${contextObj.store_id || 'N/A'} | Roles: ${roles.join(', ')} | is_super_admin: ${is_super_admin} | is_owner: ${is_owner}`,
-    );
 
     return RequestContextService.asyncLocalStorage.run(contextObj, () => {
       return next.handle();

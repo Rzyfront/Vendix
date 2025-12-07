@@ -16,7 +16,8 @@
   --font-headings:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial;
-  --font-base: var(--font-primary); /* Default base font */
+  --font-base: var(--font-primary);
+  /* Default base font */
 
   /* Font Weights */
   --fw-regular: 400;
@@ -25,30 +26,45 @@
   --fw-bold: 700;
 
   /* Font Sizes */
-  --fs-xs: 0.75rem; /* 12px */
-  --fs-sm: 0.875rem; /* 14px */
-  --fs-base: 1rem; /* 16px */
-  --fs-lg: 1.125rem; /* 18px */
-  --fs-xl: 1.25rem; /* 20px */
-  --fs-2xl: 1.5rem; /* 24px */
-  --fs-3xl: 1.875rem; /* 30px */
+  --fs-xs: 0.75rem;
+  /* 12px */
+  --fs-sm: 0.875rem;
+  /* 14px */
+  --fs-base: 1rem;
+  /* 16px */
+  --fs-lg: 1.125rem;
+  /* 18px */
+  --fs-xl: 1.25rem;
+  /* 20px */
+  --fs-2xl: 1.5rem;
+  /* 24px */
+  --fs-3xl: 1.875rem;
+  /* 30px */
 
   /* Responsive Font Sizes - Mobile Optimized */
-  --fs-xs-mobile: 0.6875rem; /* 11px - ~8% smaller */
-  --fs-sm-mobile: 0.75rem; /* 12px - ~14% smaller */
-  --fs-base-mobile: 0.875rem; /* 14px - ~12% smaller */
-  --fs-lg-mobile: 0.9375rem; /* 15px - ~17% smaller */
-  --fs-xl-mobile: 1.0625rem; /* 17px - ~15% smaller */
-  --fs-2xl-mobile: 1.25rem; /* 20px - ~17% smaller */
-  --fs-3xl-mobile: 1.5rem; /* 24px - ~20% smaller */
+  --fs-xs-mobile: 0.6875rem;
+  /* 11px - ~8% smaller */
+  --fs-sm-mobile: 0.75rem;
+  /* 12px - ~14% smaller */
+  --fs-base-mobile: 0.875rem;
+  /* 14px - ~12% smaller */
+  --fs-lg-mobile: 0.9375rem;
+  /* 15px - ~17% smaller */
+  --fs-xl-mobile: 1.0625rem;
+  /* 17px - ~15% smaller */
+  --fs-2xl-mobile: 1.25rem;
+  /* 20px - ~17% smaller */
+  --fs-3xl-mobile: 1.5rem;
+  /* 24px - ~20% smaller */
 
   /* Default Theme Colors (Light) */
   --color-background: #f8fafc;
   --color-surface: #ffffff;
-  --color-primary: #7ed7a5; /* Vendix green */
+  --color-primary: #7ed7a5;
+  /* Vendix green */
   --color-secondary: #2f6f4e;
   --color-accent: #06b6d4;
-  --color-destructive: #ef4444;
+  --color-destructive: #c46363;
   --color-border: #e6edf3;
   --color-ring: rgba(126, 215, 165, 0.5);
 
@@ -77,19 +93,24 @@
   --color-text-primary: #0f172a;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #94a3b8;
-  --color-text-on-primary: #ffffff; /* Example for text on primary buttons */
+  --color-text-on-primary: #ffffff;
+  /* Example for text on primary buttons */
 
   /* Radii */
-  --border-radius: 0.375rem; /* Default radius, ~6px */
+  --border-radius: 0.375rem;
+  /* Default radius, ~6px */
   --radius-sm: 0.25rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-pill: 9999px;
 
   /* Logo Sizes */
-  --logo-sm: 2.25rem; /* 36px */
-  --logo-md: 2.5rem; /* 40px */
-  --logo-lg: 3rem; /* 48px */
+  --logo-sm: 2.25rem;
+  /* 36px */
+  --logo-md: 2.5rem;
+  /* 40px */
+  --logo-lg: 3rem;
+  /* 48px */
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.04);
@@ -111,25 +132,37 @@
   --z-maximum: 100;
 
   /* Sidebar Variables */
-  --sidebar-width: 15rem; /* 240px */
-  --sidebar-width-collapsed: 4rem; /* 64px */
-  --sidebar-width-mobile: 80vw; /* Maximum width for mobile overlay */
+  --sidebar-width: 15rem;
+  /* 240px */
+  --sidebar-width-collapsed: 4rem;
+  /* 64px */
+  --sidebar-width-mobile: 80vw;
+  /* Maximum width for mobile overlay */
   --sidebar-backdrop-opacity: 0.5;
-  --sidebar-mobile-z-index: 55; /* Above header (50), below notifications (60) */
+  --sidebar-mobile-z-index: 55;
+  /* Above header (50), below notifications (60) */
 
   /* Misc */
   --border-width: 1px;
-  --control-padding: 0.625rem 0.75rem; /* 10px 12px */
-  --control-padding-mobile: 0.5rem 0.625rem; /* 8px 10px - ~20% smaller */
+  --control-padding: 0.625rem 0.75rem;
+  /* 10px 12px */
+  --control-padding-mobile: 0.5rem 0.625rem;
+  /* 8px 10px - ~20% smaller */
   --transition-fast: 160ms;
 
   /* Responsive Spacing - Mobile Optimized */
-  --spacing-xs-mobile: 0.25rem; /* 4px */
-  --spacing-sm-mobile: 0.5rem; /* 8px */
-  --spacing-md-mobile: 0.625rem; /* 10px */
-  --spacing-lg-mobile: 0.875rem; /* 14px */
-  --spacing-xl-mobile: 1.125rem; /* 18px */
-  --spacing-2xl-mobile: 1.375rem; /* 22px */
+  --spacing-xs-mobile: 0.25rem;
+  /* 4px */
+  --spacing-sm-mobile: 0.5rem;
+  /* 8px */
+  --spacing-md-mobile: 0.625rem;
+  /* 10px */
+  --spacing-lg-mobile: 0.875rem;
+  /* 14px */
+  --spacing-xl-mobile: 1.125rem;
+  /* 18px */
+  --spacing-2xl-mobile: 1.375rem;
+  /* 22px */
 }
 
 /* Dark Theme */
@@ -203,26 +236,33 @@ body {
   h1 {
     font-size: var(--fs-3xl-mobile);
   }
+
   h2 {
     font-size: var(--fs-2xl-mobile);
   }
+
   h3 {
     font-size: var(--fs-xl-mobile);
   }
+
   h4 {
     font-size: var(--fs-lg-mobile);
   }
+
   h5 {
     font-size: var(--fs-base-mobile);
   }
+
   h6 {
     font-size: var(--fs-sm-mobile);
   }
+
   p,
   span,
   div {
     font-size: inherit;
   }
+
   small {
     font-size: var(--fs-xs-mobile);
   }
@@ -232,26 +272,33 @@ body {
 h1 {
   font-size: var(--fs-3xl-mobile);
 }
+
 h2 {
   font-size: var(--fs-2xl-mobile);
 }
+
 h3 {
   font-size: var(--fs-xl-mobile);
 }
+
 h4 {
   font-size: var(--fs-lg-mobile);
 }
+
 h5 {
   font-size: var(--fs-base-mobile);
 }
+
 h6 {
   font-size: var(--fs-sm-mobile);
 }
+
 p,
 span,
 div {
   font-size: inherit;
 }
+
 small {
   font-size: var(--fs-xs-mobile);
 }
@@ -303,6 +350,7 @@ footer {
 }
 
 @media (max-width: 480px) {
+
   /* Extra compact spacing for very small screens */
   .container,
   .section {
@@ -344,9 +392,11 @@ footer {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   border: 1px solid var(--color-border);
-  max-width: 42rem; /* ~lg */
+  max-width: 42rem;
+  /* ~lg */
   width: calc(100vw - 2rem);
-  padding: 1rem; /* let inner components decide spacing */
+  padding: 1rem;
+  /* let inner components decide spacing */
   animation: dialog-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   z-index: var(--z-modal);
 }
@@ -355,6 +405,7 @@ footer {
 .app-dialog-backdrop.closing {
   animation: backdrop-out 150ms ease-in forwards;
 }
+
 .app-dialog-panel.closing {
   animation: dialog-out 140ms ease-in forwards;
 }
@@ -363,33 +414,40 @@ footer {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
 }
+
 @keyframes backdrop-out {
   from {
     opacity: 1;
   }
+
   to {
     opacity: 0;
   }
 }
+
 @keyframes dialog-in {
   from {
     opacity: 0;
     transform: translateY(4px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
+
 @keyframes dialog-out {
   from {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+
   to {
     opacity: 0;
     transform: translateY(-4px) scale(0.98);
@@ -400,27 +458,33 @@ footer {
 .toast-item {
   will-change: transform, opacity;
 }
+
 .toast-enter {
   animation: toast-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
 .toast-leave {
   animation: toast-out 140ms ease-in forwards;
 }
+
 @keyframes toast-in {
   from {
     opacity: 0;
     transform: translateY(-6px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
 }
+
 @keyframes toast-out {
   from {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+
   to {
     opacity: 0;
     transform: translateY(-6px) scale(0.98);
@@ -432,10 +496,12 @@ footer {
   animation: toast-progress var(--toast-duration, 3500ms) linear forwards;
   transform-origin: left center;
 }
+
 @keyframes toast-progress {
   from {
     transform: scaleX(1);
   }
+
   to {
     transform: scaleX(0);
   }

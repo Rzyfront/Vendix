@@ -222,12 +222,12 @@ interface WizardStep {
         <div class="flex space-x-3">
           <app-button
             *ngIf="!isCompletionStep"
-            variant="secondary"
+            variant="outline-danger"
             size="sm"
             (clicked)="close()"
           >
             <app-icon name="x" size="16" slot="icon"></app-icon>
-            Guardar y continuar después
+            Omitir
           </app-button>
 
           <app-button
