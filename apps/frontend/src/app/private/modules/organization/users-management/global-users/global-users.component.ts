@@ -8,7 +8,7 @@ import {
   UserState,
   PaginatedUsersResponse,
 } from '../../users/interfaces/user.interface';
-import { GlobalUsersService } from '../../../super-admin/users/services/global-users.service';
+import { OrganizationUsersService } from './services/organization-users.service';
 import { UserStatsService } from './services/user-stats.service';
 import {
   UserStatsComponent,
@@ -311,7 +311,7 @@ export class GlobalUsersComponent implements OnInit, OnDestroy {
   ];
 
   constructor(
-    private globalUsersService: GlobalUsersService,
+    private organizationUsersService: OrganizationUsersService,
     private userStatsService: UserStatsService,
     private fb: FormBuilder,
     private dialogService: DialogService,
@@ -359,7 +359,7 @@ export class GlobalUsersComponent implements OnInit, OnDestroy {
       state: filters.state || undefined,
     };
 
-    this.globalUsersService
+    this.organizationUsersService
       .getUsers(query)
       .subscribe({
         next: (response: PaginatedUsersResponse) => {
@@ -437,7 +437,7 @@ export class GlobalUsersComponent implements OnInit, OnDestroy {
   deleteUser(): void {
     if (!this.userToDelete) return;
 
-    this.globalUsersService.deleteUser(this.userToDelete.id).subscribe({
+    this.organizationUsersService.deleteUser(this.userToDelete.id).subscribe({
       next: () => {
         this.userToDelete = null;
         this.loadUsers();

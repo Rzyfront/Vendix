@@ -84,17 +84,17 @@ export interface PermissionQueryDto {
 }
 
 export interface AssignPermissionsDto {
-  permissionIds: number[];
+  permission_ids: number[];
 }
 
 export interface AssignRoleToUserDto {
-  userId: number;
-  roleId: number;
+  user_id: number;
+  role_id: number;
 }
 
 export interface RemoveRoleFromUserDto {
-  userId: number;
-  roleId: number;
+  user_id: number;
+  role_id: number;
 }
 
 export interface RoleStats {

@@ -35,7 +35,7 @@ export class DomainsService implements OnModuleInit {
   constructor(
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
-  ) {}
+  ) { }
 
   async onModuleInit() {
     this.logger.log('🚀 DomainsService initialized');
@@ -102,7 +102,7 @@ export class DomainsService implements OnModuleInit {
   ) {
     await this.prisma.domain_settings.updateMany({
       where: {
-        ...(orgId && { organization_id: orgId }),
+
         store_id: storeId || null,
         domain_type: domainType as any,
         is_primary: true,

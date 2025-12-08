@@ -6,11 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import {
-  AuditService,
-  AuditAction,
-  AuditResource,
-} from '../audit/audit.service';
+import { AuditService, AuditAction, AuditResource } from '../../superadmin/audit/audit.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateRoleDto,
@@ -30,7 +26,7 @@ export class RolesService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly auditService: AuditService,
-  ) {}
+  ) { }
 
   // ===== UTILIDADES PRIVADAS =====
 
@@ -145,10 +141,10 @@ export class RolesService {
     const where_clause = is_owner_or_admin
       ? {}
       : {
-          name: {
-            notIn: ['owner', 'admin'],
-          },
-        };
+        name: {
+          notIn: ['owner', 'admin'],
+        },
+      };
 
     const roles = await this.prismaService.roles.findMany({
       where: where_clause,

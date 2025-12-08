@@ -22,10 +22,11 @@ import {
 import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
 
 // Import existing components
+import { ProductCreateModalComponent } from '../product-create-modal.component';
+import { BulkUploadModalComponent } from '../bulk-upload-modal/bulk-upload-modal.component';
 import {
   ProductEmptyStateComponent,
   ProductFilterDropdownComponent,
-  ProductCreateModalComponent,
 } from '../index';
 
 // Import shared components
@@ -55,6 +56,7 @@ import './product-list.component.css';
     StatsComponent,
     ProductEmptyStateComponent,
     ProductCreateModalComponent,
+    BulkUploadModalComponent,
     ProductFilterDropdownComponent,
     InputsearchComponent,
     IconComponent,
@@ -71,6 +73,9 @@ export class ProductListComponent implements OnInit, OnDestroy {
   selectedState = '';
   selectedCategory = '';
   selectedBrand = '';
+
+  // Bulk Upload Modal state
+  isBulkUploadModalOpen = false;
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -223,6 +228,20 @@ export class ProductListComponent implements OnInit, OnDestroy {
       brand_id: [null],
       state: [ProductState.ACTIVE],
     });
+  }
+
+
+
+  // Bulk Upload Methods
+  openBulkUploadModal(): void {
+    this.isBulkUploadModalOpen = true;
+  }
+
+  onBulkUploadComplete(): void {
+    this.isBulkUploadModalOpen = false;
+    this.loadProducts();
+    this.loadStats();
+    this.toastService.success('Carga masiva completada');
   }
 
   get hasFilters(): boolean {
@@ -536,6 +555,7 @@ export class ProductListComponent implements OnInit, OnDestroy {
       state: productData.state,
       category_id: productData.category_id,
       brand_id: productData.brand_id,
+      images: productData.images, // Include images in update payload
     };
 
     const sub = this.productsService

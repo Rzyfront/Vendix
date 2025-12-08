@@ -30,7 +30,7 @@ export class PosCustomerService {
     null,
   );
   private readonly apiUrl = `${environment.apiUrl}/store/users`;
-  private readonly registerUrl = `${environment.apiUrl}/store/auth/register-customer`;
+  private readonly registerUrl = `${environment.apiUrl}/auth/register-customer`;
 
   constructor(private http: HttpClient) {
     // Initialize with mock data for development if needed

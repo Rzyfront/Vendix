@@ -1,1 +1,1 @@
-// TODO: Add DTOs for store-users
+export * from './query-store-users.dto';

@@ -16,7 +16,7 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @ApiTags('Admin Audit')
-@Controller('organization/admin/audit')
+@Controller('superadmin/admin/audit')
 @UseGuards(RolesGuard, PermissionsGuard)
 @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
 @ApiBearerAuth()

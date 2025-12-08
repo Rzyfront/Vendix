@@ -19,7 +19,7 @@ import {
   AuditService,
   AuditAction,
   AuditResource,
-} from '../organization/audit/audit.service';
+} from '../superadmin/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 
 @Injectable()
@@ -967,39 +967,61 @@ export class AuthService {
     if (organization_slug && user_app_type === 'STORE_ADMIN') {
       // hasHighPrivilege ya calculado arriba
 
-      if (hasHighPrivilege && user.main_store_id) {
-        const mainStore = await this.prismaService.stores.findUnique({
-          where: { id: user.main_store_id },
-        });
-        if (mainStore) {
-          console.log(
-            '🔄 LOGIN - Auto-switching STORE_ADMIN to main_store context',
-          );
-          effective_organization_slug = undefined;
-          effective_store_slug = mainStore.slug;
-          (user as any).main_store = mainStore;
+      // Intentar encontrar una tienda para este usuario si no ha especificado una
+      // Esto es crítico para que generateTokens reciba un store_id válido
+      if (!effective_store_slug) {
+        console.log(
+          '🔄 LOGIN - STORE_ADMIN user logged in via Org Slug - Attempting to auto-select store context',
+        );
 
-          // Verificar y crear relación store_users si es necesario
-          const existingStoreUser =
-            await this.prismaService.store_users.findUnique({
+        // Estrategia 1: Main Store (si existe y tiene acceso)
+        if (user.main_store_id) {
+          const mainStore = await this.prismaService.stores.findUnique({
+            where: { id: user.main_store_id },
+          });
+          if (mainStore) {
+            // Verificar acceso
+            const hasAccess = await this.prismaService.store_users.findUnique({
               where: {
                 store_id_user_id: {
                   store_id: mainStore.id,
-                  user_id: user.id,
-                },
-              },
+                  user_id: user.id
+                }
+              }
             });
+            // Tambien permitir si es Owner/Admin
+            if (hasAccess || hasHighPrivilege) {
+              effective_organization_slug = undefined;
+              effective_store_slug = mainStore.slug;
+              (user as any).main_store = mainStore;
+              console.log('✅ LOGIN - Auto-selected Main Store:', mainStore.slug);
+            }
+          }
+        }
 
-          if (!existingStoreUser) {
-            await this.prismaService.store_users.create({
-              data: {
-                store_id: mainStore.id,
-                user_id: user.id,
-              },
-            });
-            console.log(
-              '✅ LOGIN - Auto-created store_users relation for high-privilege user',
-            );
+        // Estrategia 2: Si no hay Main Store o no tiene acceso, buscar la primera tienda disponible
+        if (!effective_store_slug) {
+          const firstStoreUser = await this.prismaService.store_users.findFirst({
+            where: { user_id: user.id },
+            include: { store: true }
+          });
+
+          if (firstStoreUser && firstStoreUser.store) {
+            effective_organization_slug = undefined;
+            effective_store_slug = firstStoreUser.store.slug;
+            console.log('✅ LOGIN - Auto-selected First Available Store:', firstStoreUser.store.slug);
+          }
+        }
+
+        // Si aun no tenemos tienda y es owner/admin, intentar buscar cualquier tienda de la org
+        if (!effective_store_slug && hasHighPrivilege) {
+          const firstOrgStore = await this.prismaService.stores.findFirst({
+            where: { organization_id: user.organization_id }
+          });
+          if (firstOrgStore) {
+            effective_organization_slug = undefined;
+            effective_store_slug = firstOrgStore.slug;
+            console.log('✅ LOGIN - Auto-selected First Organization Store (High Privilege):', firstOrgStore.slug);
           }
         }
       }

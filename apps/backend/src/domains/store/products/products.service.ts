@@ -136,6 +136,8 @@ export class ProductsService {
         image_urls,
         stock_quantity,
         stock_by_location,
+        cost_price, // Exclude from productData as it's not in products table
+        weight,     // Exclude from productData as it's not in products table
         ...productData
       } = createProductDto;
 
@@ -221,7 +223,7 @@ export class ProductsService {
                 quantity_change: stockLocation.quantity,
                 movement_type: 'initial',
                 reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
-                user_id: 1, // Use default user ID as fallback
+                user_id: context?.user_id || 1, // Use context user_id or fallback to 1 (system user)
                 create_movement: true,
                 validate_availability: false,
               },
@@ -242,7 +244,7 @@ export class ProductsService {
               quantity_change: stock_quantity,
               movement_type: 'initial',
               reason: 'Initial stock on product creation (legacy)',
-              user_id: 1, // Use default user ID as fallback
+              user_id: context?.user_id || 1, // Use context user_id or fallback to 1 (system user)
               create_movement: true,
               validate_availability: false,
             },
@@ -252,11 +254,11 @@ export class ProductsService {
 
         // Inicializar stock levels para todas las ubicaciones de la organización
         // Obtenemos el organization_id del contexto
-        const context = RequestContextService.getContext();
-        if (context?.organization_id) {
+        const orgContext = RequestContextService.getContext();
+        if (orgContext?.organization_id) {
           await this.stockLevelManager.initializeStockLevelsForProduct(
             product.id,
-            context.organization_id,
+            orgContext.organization_id,
             prisma,
           );
         }

@@ -308,8 +308,7 @@ export class AddressesService {
     };
 
     if (criteria.store_id) where.store_id = criteria.store_id;
-    if (criteria.organization_id)
-      where.organization_id = criteria.organization_id;
+
     if (criteria.user_id) where.user_id = criteria.user_id;
     if (excludeId) where.id = { not: excludeId };
 

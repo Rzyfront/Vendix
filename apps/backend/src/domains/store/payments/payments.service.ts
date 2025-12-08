@@ -548,6 +548,10 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
   ) {
     // Get payment method details
+    if (!dto.store_payment_method_id) {
+      throw new Error('Payment method is required when payment is enabled');
+    }
+
     const paymentMethod = await tx.store_payment_methods.findFirst({
       where: { id: dto.store_payment_method_id },
       include: {

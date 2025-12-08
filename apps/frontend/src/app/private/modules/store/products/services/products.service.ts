@@ -21,7 +21,7 @@ import {
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   // CRUD Básico
   getProducts(
@@ -210,6 +210,24 @@ export class ProductsService {
       .get<
         PaginatedResponse<Product>
       >(`${this.apiUrl}/store/products/low-stock/${threshold}`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
+  // Carga Masiva
+  getBulkUploadTemplate(): Observable<any> {
+    return this.http
+      .get(`${this.apiUrl}/store/products/bulk/template/download`, {
+        responseType: 'text',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  uploadBulkProducts(file: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.http
+      .post(`${this.apiUrl}/store/products/bulk/upload/csv`, formData)
       .pipe(catchError(this.handleError));
   }
 

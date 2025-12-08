@@ -1,4 +1,4 @@
-import { Component, Input, EventEmitter, Output } from '@angular/core';
+import { Component, Input, EventEmitter, Output, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -46,7 +46,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
 })
-export class ProductCreateModalComponent {
+export class ProductCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() product: Product | null = null; // Product data for edit mode
@@ -78,6 +78,23 @@ export class ProductCreateModalComponent {
     this.loadCategoriesAndBrands();
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['product']) {
+      if (this.product) {
+        this.populateForm();
+      } else {
+        this.resetForm();
+      }
+    }
+
+    if (changes['isOpen'] && this.isOpen) {
+      // Setup logic when opened (e.g. reload options)
+      if (!this.product) {
+        this.resetForm();
+      }
+    }
+  }
+
   private createForm(): FormGroup {
     return this.fb.group({
       name: [
@@ -98,6 +115,15 @@ export class ProductCreateModalComponent {
       state: [ProductState.ACTIVE],
       newImageUrl: [''],
     });
+  }
+
+  resetForm() {
+    this.productForm.reset({
+      base_price: 0,
+      stock_quantity: 0,
+      state: ProductState.ACTIVE
+    });
+    this.imageUrls = [];
   }
 
   private loadCategoriesAndBrands(): void {
@@ -131,8 +157,12 @@ export class ProductCreateModalComponent {
       });
 
       this.imageUrls = sortedImages.map((img) => img.image_url);
+    } else {
+      this.imageUrls = [];
     }
   }
+
+  // ... (Loader methods unchanged) ...
 
   private loadCategories(): void {
     this.categoriesService.getCategories().subscribe({
@@ -245,8 +275,6 @@ export class ProductCreateModalComponent {
       return;
     }
 
-    this.isSubmitting = true;
-
     const formValue = this.productForm.value;
     const images: CreateProductImageDto[] = this.imageUrls.map(
       (url, index) => ({
@@ -255,7 +283,9 @@ export class ProductCreateModalComponent {
       }),
     );
 
-    const createProductDto: CreateProductDto = {
+    // Prepare DTO using Partial<CreateProductDto> or just an object we emit
+    // Note: Parent needs to handle casting to Create or Update DTO
+    const productData = {
       name: formValue.name,
       slug: formValue.slug || undefined,
       description: formValue.description || undefined,
@@ -271,18 +301,7 @@ export class ProductCreateModalComponent {
       images: images.length > 0 ? images : undefined,
     };
 
-    this.productsService.createProduct(createProductDto).subscribe({
-      next: () => {
-        this.toastService.success('Product created successfully!');
-        this.submit.emit(createProductDto);
-        this.openChange.emit(false);
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error creating product');
-        console.error('Error creating product:', error);
-        this.isSubmitting = false;
-      },
-    });
+    this.submit.emit(productData);
   }
 
   private markFormGroupTouched(formGroup: FormGroup): void {

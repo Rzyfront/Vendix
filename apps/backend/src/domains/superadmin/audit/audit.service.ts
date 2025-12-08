@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 export enum AuditAction {
@@ -48,7 +48,7 @@ export interface AuditLogData {
 
 @Injectable()
 export class AuditService {
-  constructor(private readonly prismaService: OrganizationPrismaService) { }
+  constructor(private readonly prismaService: GlobalPrismaService) { }
 
   /**
    * Registra un evento de auditoría

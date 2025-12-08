@@ -16,7 +16,7 @@ import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AuditService, AuditResource } from '../audit/audit.service';
+import { AuditService, AuditAction, AuditResource } from '../../superadmin/audit/audit.service';
 
 @Injectable()
 export class UsersService {
@@ -24,7 +24,7 @@ export class UsersService {
     private prisma: OrganizationPrismaService,
     private emailService: EmailService,
     private auditService: AuditService,
-  ) {}
+  ) { }
 
   async create(createUserDto: CreateUserDto) {
     const {
@@ -46,9 +46,7 @@ export class UsersService {
     const existing_user = await this.prisma.users.findFirst({
       where: {
         email,
-        ...(target_organization_id && {
-          organization_id: target_organization_id,
-        }),
+
       },
     });
     if (existing_user) {
@@ -210,12 +208,7 @@ export class UsersService {
           state: true,
           last_login: true,
           created_at: true,
-          organizations: { select: { id: true, name: true } },
-          user_roles: {
-            include: {
-              roles: true,
-            },
-          },
+
         },
       }),
       this.prisma.users.count({ where }),

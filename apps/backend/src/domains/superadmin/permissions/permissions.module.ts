@@ -11,4 +11,4 @@ import { ResponseModule } from '@common/responses/response.module';
   providers: [PermissionsService],
   exports: [PermissionsService],
 })
-export class PermissionsModule {}
+export class PermissionsModule { }

@@ -99,7 +99,7 @@ export class RolesController {
     return this.responseService.deleted('Role deleted successfully');
   }
 
-  @Post(':id/permissions/assign')
+  @Post(':id/permissions')
   @ApiOperation({ summary: 'Assign permissions to a role' })
   @ApiResponse({
     status: 200,
@@ -124,7 +124,7 @@ export class RolesController {
     );
   }
 
-  @Post(':id/permissions/remove')
+  @Delete(':id/permissions')
   @ApiOperation({ summary: 'Remove permissions from a role' })
   @ApiResponse({ status: 200, description: 'Permissions removed successfully' })
   @ApiResponse({ status: 404, description: 'Role not found' })
@@ -139,6 +139,21 @@ export class RolesController {
     return this.responseService.success(
       result,
       'Permissions removed successfully',
+    );
+  }
+
+  @Get(':id/permissions')
+  @ApiOperation({ summary: 'Get permissions for a role' })
+  @ApiResponse({
+    status: 200,
+    description: 'Role permissions retrieved successfully',
+  })
+  @ApiResponse({ status: 404, description: 'Role not found' })
+  async getPermissions(@Param('id') id: string) {
+    const result = await this.rolesService.getPermissions(+id);
+    return this.responseService.success(
+      result,
+      'Role permissions retrieved successfully',
     );
   }
 }

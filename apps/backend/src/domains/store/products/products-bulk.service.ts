@@ -177,6 +177,14 @@ export class ProductsBulkService {
     // Validar cada producto individualmente
     for (const [index, product] of products.entries()) {
       try {
+        // Skip if this SKU is a duplicate in the batch
+        if (duplicateSkus.has(product.sku)) {
+             // We don't add to validProducts, and we don't need to add another error message 
+             // because we already added "Duplicate SKU found in batch" globally.
+             // OR we can add a specific error for this row if desired, but user just wants it excluded from valid.
+             continue;
+        }
+
         await this.validateProductData(product, storeId);
 
         // Verificar si el SKU ya existe en la base de datos

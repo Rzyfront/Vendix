@@ -760,7 +760,6 @@ export class OnboardingWizardService {
       // Check if slug is available within this organization
       const existing = await this.prismaService.stores.findFirst({
         where: {
-          organization_id: organizationId,
           slug: slug,
         },
       });

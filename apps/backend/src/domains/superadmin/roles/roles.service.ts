@@ -14,7 +14,7 @@ import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class RolesService {
-  constructor(private prisma: GlobalPrismaService) {}
+  constructor(private prisma: GlobalPrismaService) { }
 
   async create(createRoleDto: CreateRoleDto) {
     const existingRole = await (this.prisma as any).roles.findUnique({
@@ -25,7 +25,7 @@ export class RolesService {
       throw new ConflictException('Role with this name already exists');
     }
 
-    return this.prisma.roles.create({
+    const role = await this.prisma.roles.create({
       data: {
         name: createRoleDto.name,
         description: createRoleDto.description,
@@ -59,6 +59,8 @@ export class RolesService {
         },
       },
     });
+
+    return this.mapToResponse(role);
   }
 
   async findAll(query: {
@@ -128,7 +130,7 @@ export class RolesService {
     ]);
 
     return {
-      data,
+      data: data.map((role) => this.mapToResponse(role)),
       meta: {
         total,
         page,
@@ -174,7 +176,7 @@ export class RolesService {
       throw new NotFoundException('Role not found');
     }
 
-    return role;
+    return this.mapToResponse(role);
   }
 
   async update(id: number, updateRoleDto: UpdateRoleDto) {
@@ -199,7 +201,7 @@ export class RolesService {
       }
     }
 
-    return this.prisma.roles.update({
+    const role = await this.prisma.roles.update({
       where: { id },
       data: {
         ...updateRoleDto,
@@ -233,6 +235,8 @@ export class RolesService {
         },
       },
     });
+
+    return this.mapToResponse(role);
   }
 
   async remove(id: number) {
@@ -333,6 +337,17 @@ export class RolesService {
     return this.findOne(roleId);
   }
 
+  async getPermissions(roleId: number) {
+    const rolePermissions = await this.prisma.role_permissions.findMany({
+      where: { role_id: roleId },
+      select: { permission_id: true },
+    });
+
+    return {
+      permission_ids: rolePermissions.map((rp) => rp.permission_id),
+    };
+  }
+
   async getDashboardStats() {
     const [
       totalRoles,
@@ -393,6 +408,22 @@ export class RolesService {
       totalPermissions,
       rolesByUserCountRanges,
       recentRoles,
+    };
+  }
+
+
+  private mapToResponse(role: any) {
+    if (!role) return role;
+
+    const permissions =
+      role.role_permissions?.map((rp) => rp.permissions) || [];
+
+    // Eliminamos role_permissions para limpiar la respuesta y evitar duplicidad
+    const { role_permissions, ...roleData } = role;
+
+    return {
+      ...roleData,
+      permissions,
     };
   }
 }

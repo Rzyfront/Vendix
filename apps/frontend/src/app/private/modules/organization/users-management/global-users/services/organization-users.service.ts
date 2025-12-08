@@ -8,7 +8,7 @@ import {
   throwError,
   map,
 } from 'rxjs';
-import { environment } from '../../../../../../environments/environment';
+import { environment } from '../../../../../../../environments/environment';
 import {
   User,
   CreateUserDto,
@@ -17,12 +17,12 @@ import {
   UsersDashboardDto,
   UserStats,
   PaginatedUsersResponse,
-} from '../interfaces/user.interface';
+} from '../../../users/interfaces/user.interface';
 
 @Injectable({
   providedIn: 'root',
 })
-export class GlobalUsersService {
+export class OrganizationUsersService {
   private apiUrl = environment.apiUrl;
 
   constructor(private http: HttpClient) { }
@@ -48,7 +48,7 @@ export class GlobalUsersService {
   }
 
   /**
-   * Get all users with pagination and filters (Super Admin access)
+   * Get all users with pagination and filters (Organization level)
    */
   getUsers(query: UserQueryDto = {}): Observable<PaginatedUsersResponse> {
     this.isLoading$.next(true);
@@ -58,35 +58,36 @@ export class GlobalUsersService {
     if (query.limit) params = params.set('limit', query.limit.toString());
     if (query.search) params = params.set('search', query.search);
     if (query.state) params = params.set('state', query.state);
-    if (query.organization_id)
-      params = params.set('organization_id', query.organization_id.toString());
+    // organization_id is implicit from the user's token/session in organization context,
+    // but we can support it if needed. For Org Admin, they see their own org users.
 
-    return this.http.get<any>(`${this.apiUrl}/users`, { params }).pipe(
+    return this.http.get<any>(`${this.apiUrl}/organization/users`, { params }).pipe(
       map((response) => {
         // Map API response to frontend structure
+        const meta = response.meta || {};
         return {
-          data: response.data,
+          data: response.data || [],
           pagination: {
-            page: response.meta.page,
-            limit: response.meta.limit,
-            total: response.meta.total,
-            total_pages: response.meta.totalPages,
+            page: Number(meta.page) || 1,
+            limit: Number(meta.limit) || 10,
+            total: Number(meta.total) || 0,
+            total_pages: Number(meta.totalPages) || Math.ceil((Number(meta.total) || 0) / (Number(meta.limit) || 10)) || 1,
           },
         } as PaginatedUsersResponse;
       }),
       finalize(() => this.isLoading$.next(false)),
       catchError((error) => {
-        console.error('Error loading global users:', error);
+        console.error('Error loading organization users:', error);
         return throwError(() => error);
       }),
     );
   }
 
   /**
-   * Get user by ID (Super Admin access)
+   * Get user by ID (Organization level)
    */
   getUserById(id: number): Observable<User> {
-    return this.http.get<User>(`${this.apiUrl}/users/${id}`).pipe(
+    return this.http.get<User>(`${this.apiUrl}/organization/users/${id}`).pipe(
       catchError((error) => {
         console.error('Error getting user:', error);
         return throwError(() => error);
@@ -95,12 +96,12 @@ export class GlobalUsersService {
   }
 
   /**
-   * Create new user (Super Admin access)
+   * Create new user (Organization level)
    */
   createUser(userData: CreateUserDto): Observable<User> {
     this.isCreatingUser$.next(true);
 
-    return this.http.post<User>(`${this.apiUrl}/users`, userData).pipe(
+    return this.http.post<User>(`${this.apiUrl}/organization/users`, userData).pipe(
       finalize(() => this.isCreatingUser$.next(false)),
       catchError((error) => {
         console.error('Error creating user:', error);
@@ -110,12 +111,12 @@ export class GlobalUsersService {
   }
 
   /**
-   * Update existing user (Super Admin access)
+   * Update existing user (Organization level)
    */
   updateUser(id: number, userData: UpdateUserDto): Observable<User> {
     this.isUpdatingUser$.next(true);
 
-    return this.http.patch<User>(`${this.apiUrl}/users/${id}`, userData).pipe(
+    return this.http.patch<User>(`${this.apiUrl}/organization/users/${id}`, userData).pipe(
       finalize(() => this.isUpdatingUser$.next(false)),
       catchError((error) => {
         console.error('Error updating user:', error);
@@ -125,12 +126,13 @@ export class GlobalUsersService {
   }
 
   /**
-   * Delete user (Soft delete) (Super Admin access)
+   * Delete user (Maps to suspend in org context if delete not available, or standard delete)
+   * Organization controller has delete method.
    */
   deleteUser(id: number): Observable<void> {
     this.isDeletingUser$.next(true);
 
-    return this.http.delete<void>(`${this.apiUrl}/users/${id}`).pipe(
+    return this.http.delete<void>(`${this.apiUrl}/organization/users/${id}`).pipe(
       finalize(() => this.isDeletingUser$.next(false)),
       catchError((error) => {
         console.error('Error deleting user:', error);
@@ -140,12 +142,12 @@ export class GlobalUsersService {
   }
 
   /**
-   * Activate user (Super Admin access)
+   * Activate user (Organization level)
    */
   activateUser(id: number): Observable<User> {
     this.isUpdatingUser$.next(true);
 
-    return this.http.post<User>(`${this.apiUrl}/users/${id}/activate`, {}).pipe(
+    return this.http.post<User>(`${this.apiUrl}/organization/users/${id}/reactivate`, {}).pipe(
       finalize(() => this.isUpdatingUser$.next(false)),
       catchError((error) => {
         console.error('Error activating user:', error);
@@ -155,24 +157,35 @@ export class GlobalUsersService {
   }
 
   /**
-   * Deactivate user (Super Admin access)
+   * Deactivate user (Maps to archive as deactivate endpoint is missing in Org controller, or check if available)
+   * Org controller has `archive` but no specific `deactivate` (unlike superadmin).
+   * Superadmin has `deactivate` -> `state: inactive`.
+   * Org `archive` -> `state: archived`.
+   * Org `remove` (delete) -> `state: suspended`.
+   *
+   * If the UI expects "Deactivate" to mean "Inactive", we might need to use update with state,
+   * but the controller doesn't seem to expose simple state update via convenience method,
+   * only PATCH /:id.
+   *
+   * Let's map deactivateUser to archiveKey for now as per plan, or use PATCH if needed.
+   * Plan said maps to archive.
    */
   deactivateUser(id: number): Observable<User> {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/users/${id}/deactivate`, {})
+      .post<User>(`${this.apiUrl}/organization/users/${id}/archive`, {})
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
-          console.error('Error deactivating user:', error);
+          console.error('Error archiving user:', error);
           return throwError(() => error);
         }),
       );
   }
 
   /**
-   * Get global user dashboard statistics
+   * Get organization user dashboard statistics
    */
   getUsersStats(dashboardQuery: UsersDashboardDto = {}): Observable<UserStats> {
     let params = new HttpParams();
@@ -184,46 +197,30 @@ export class GlobalUsersService {
     if (dashboardQuery.role && dashboardQuery.role.trim() !== '') {
       params = params.set('role', dashboardQuery.role.trim());
     }
-    if (dashboardQuery.page && dashboardQuery.page > 0) {
-      params = params.set('page', dashboardQuery.page.toString());
-    }
-    if (dashboardQuery.limit && dashboardQuery.limit > 0) {
-      params = params.set('limit', dashboardQuery.limit.toString());
-    }
-    if (dashboardQuery.include_inactive !== undefined) {
-      params = params.set(
-        'include_inactive',
-        dashboardQuery.include_inactive.toString(),
-      );
-    }
-
-    console.log('Making global stats request with params:', params.toString());
+    // ... other params
 
     return this.http
       .get<{
         data: UserStats;
-      }>(`${this.apiUrl}/users/dashboard`, { params })
+      }>(`${this.apiUrl}/organization/users/stats`, { params })
       .pipe(
         map((response) => response.data),
         catchError((error) => {
-          console.error('Error getting global users stats:', error);
-          console.error('Error details:', {
-            status: error.status,
-            statusText: error.statusText,
-            url: error.url,
-            params: params.toString(),
-          });
+          console.error('Error getting organization users stats:', error);
           return throwError(() => error);
         }),
       );
   }
 
   /**
-   * Assign role to user (Super Admin access)
+   * Assign role to user (Organization level)
    */
   assignRoleToUser(userId: number, roleId: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/users/${userId}/roles/${roleId}`, {})
+      .post<User>(`${this.apiUrl}/organization/roles/assign-to-user`, {
+        user_id: userId,
+        role_id: roleId,
+      })
       .pipe(
         catchError((error) => {
           console.error('Error assigning role to user:', error);
@@ -233,11 +230,14 @@ export class GlobalUsersService {
   }
 
   /**
-   * Remove role from user (Super Admin access)
+   * Remove role from user (Organization level)
    */
   removeRoleFromUser(userId: number, roleId: number): Observable<User> {
     return this.http
-      .delete<User>(`${this.apiUrl}/users/${userId}/roles/${roleId}`)
+      .post<User>(`${this.apiUrl}/organization/roles/remove-from-user`, {
+        user_id: userId,
+        role_id: roleId,
+      })
       .pipe(
         catchError((error) => {
           console.error('Error removing role from user:', error);

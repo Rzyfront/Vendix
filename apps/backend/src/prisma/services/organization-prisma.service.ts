@@ -16,13 +16,6 @@ export class OrganizationPrismaService extends BasePrismaService {
     'addresses',
     'audit_logs',
     'roles',
-    'user_roles',
-    'role_permissions',
-    'refresh_tokens',
-    'password_reset_tokens',
-    'email_verification_tokens',
-    'user_sessions',
-    'login_attempts',
     'organization_settings',
     'domain_settings',
   ];

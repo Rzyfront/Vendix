@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import {
   Controller,
   Post,
@@ -130,7 +131,7 @@ export class ProductsBulkController {
    * Descarga la plantilla en formato CSV
    */
   @Get('template/download')
-  @Permissions('store:products:create')
+  @Permissions('store:products:bulk:template')
   async downloadTemplate() {
     try {
       const template: BulkUploadTemplateDto =
@@ -155,15 +156,18 @@ export class ProductsBulkController {
   /**
    * Carga masiva desde archivo CSV
    */
+
+  /**
+   * Carga masiva desde archivo CSV o Excel
+   */
   @Post('upload/csv')
-  @Permissions('store:products:create')
+  @Permissions('store:products:bulk:upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadProductsFromFile(
     @UploadedFile(
       new ParseFilePipe({
         validators: [
           new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // 5MB
-          new FileTypeValidator({ fileType: 'text/csv' }),
         ],
       }),
     )
@@ -172,8 +176,16 @@ export class ProductsBulkController {
   ) {
     try {
       // Validar tipo de archivo
-      if (!file.mimetype.includes('csv')) {
-        throw new BadRequestException('Solo se permiten archivos CSV');
+      const allowedMimeTypes = [
+        'text/csv',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+        'application/vnd.ms-excel', // .xls
+      ];
+
+      if (!allowedMimeTypes.includes(file.mimetype)) {
+        throw new BadRequestException(
+          'Solo se permiten archivos CSV o Excel (.xlsx, .xls)',
+        );
       }
 
       // Validar que el archivo no esté vacío
@@ -181,8 +193,38 @@ export class ProductsBulkController {
         throw new BadRequestException('El archivo está vacío');
       }
 
-      // Parsear CSV
-      const products = await this.parseCsvFile(file.buffer);
+      let products: any[] = [];
+
+
+      const isExcel =
+        file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+        file.mimetype === 'application/vnd.ms-excel' ||
+        file.originalname.toLowerCase().endsWith('.xlsx') ||
+        file.originalname.toLowerCase().endsWith('.xls');
+
+      const isCsv =
+        file.mimetype === 'text/csv' ||
+        file.mimetype === 'application/csv' ||
+        file.originalname.toLowerCase().endsWith('.csv');
+
+      // Procesar según tipo de archivo
+      if (isExcel) {
+        products = this.parseExcelFile(file.buffer);
+      } else if (isCsv) {
+        products = await this.parseCsvFile(file.buffer);
+      } else {
+        // Fallback based on content analysis or just error?
+        // Given previous permissive logic, let's try to detect by signature or just default to CSV if text-like?
+        // Safest is to error if we can't identify, but let's default to parsing logic based on looser mime check as fallback
+        if (file.mimetype.includes('csv')) {
+          products = await this.parseCsvFile(file.buffer);
+        } else {
+          // Default to Excel try if unknown? Or Error?
+          // Let's assume Excel for binary-ish mimes that we missed? 
+          // Better to just throw invalid format if didn't match strict rules above to avoid the "CSV error on Excel file" confusion
+          throw new BadRequestException('Formato de archivo no reconocido. Use .csv, .xlsx o .xls');
+        }
+      }
 
       // Validar productos
       const validationResult =
@@ -191,7 +233,7 @@ export class ProductsBulkController {
       if (!validationResult.isValid) {
         return this.responseService.success(
           validationResult,
-          'Se encontraron errores en el archivo CSV',
+          'Se encontraron errores en el archivo',
         );
       }
 
@@ -221,6 +263,77 @@ export class ProductsBulkController {
       );
     }
   }
+
+  /**
+   * Parsea archivo Excel a array de productos
+   */
+  private parseExcelFile(buffer: Buffer): any[] {
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+
+      // Convertir a JSON
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      if (jsonData.length < 2) {
+        throw new BadRequestException(
+          'El archivo Excel debe contener al menos una fila de encabezados y una fila de datos',
+        );
+      }
+
+      const headers = (jsonData[0] as string[]).map(h => h.trim());
+      const products: Record<string, any>[] = [];
+
+      for (let i = 1; i < jsonData.length; i++) {
+        const row = jsonData[i] as any[];
+        if (!row || row.length === 0) continue;
+
+        const product: Record<string, any> = {};
+
+        headers.forEach((header, index) => {
+          let value = row[index];
+
+          // Normalizar valores
+          if (value !== undefined && value !== null) {
+            value = String(value).trim();
+          }
+
+          // Convertir tipos de datos según el campo
+          switch (header) {
+            case 'base_price':
+            case 'stock_quantity':
+            case 'cost_price':
+            case 'weight':
+              product[header] = value ? parseFloat(value) : undefined;
+              break;
+            case 'brand_id':
+              product[header] = value ? parseInt(value, 10) : undefined;
+              break;
+            case 'category_ids':
+              product[header] = value
+                ? String(value).split(',').map((id) => parseInt(id.trim(), 10))
+                : [];
+              break;
+            default:
+              product[header] = value || undefined;
+          }
+        });
+
+        // Solo agregar si tiene nombre o SKU (ignorar filas vacías)
+        if (product['name'] || product['sku']) {
+          products.push(product);
+        }
+      }
+
+      return products;
+    } catch (error) {
+      throw new BadRequestException(
+        'Error al procesar el archivo Excel: ' + error.message,
+      );
+    }
+  }
+
 
   /**
    * Genera contenido CSV a partir de la plantilla

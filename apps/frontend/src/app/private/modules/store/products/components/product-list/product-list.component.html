@@ -103,6 +103,15 @@
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
             <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="openBulkUploadModal()"
+              [disabled]="isLoading"
+              title="Carga Masiva"
+            >
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
               variant="primary"
               size="sm"
               (clicked)="openCreateProductModal()"
@@ -163,6 +172,20 @@
     (cancel)="onCreateModalCancel()"
   ></app-product-create-modal>
 
+  <!-- Modal Carga Masiva -->
+  <app-bulk-upload-modal
+    [isOpen]="isBulkUploadModalOpen"
+    (openChange)="isBulkUploadModalOpen = $event"
+    (uploadComplete)="onBulkUploadComplete()"
+  ></app-bulk-upload-modal>
+
   <!-- Modal Editar Producto -->
-  <!-- TODO: Create edit modal component when needed -->
+  <app-product-create-modal
+    [isOpen]="isEditModalOpen"
+    [isSubmitting]="isUpdatingProduct"
+    [product]="selectedProduct"
+    (openChange)="onEditModalChange($event)"
+    (submit)="updateProduct($event)"
+    (cancel)="onEditModalCancel()"
+  ></app-product-create-modal>
 </div>

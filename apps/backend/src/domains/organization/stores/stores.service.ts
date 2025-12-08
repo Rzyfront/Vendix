@@ -18,7 +18,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class StoresService {
-  constructor(private prisma: OrganizationPrismaService) {}
+  constructor(private prisma: OrganizationPrismaService) { }
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -32,7 +32,6 @@ export class StoresService {
     const existingStore = await this.prisma.stores.findFirst({
       where: {
         slug,
-        organization_id: organization_id,
       },
     });
     if (existingStore) {

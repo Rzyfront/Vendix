@@ -35,13 +35,13 @@ import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Permissions')
 @ApiBearerAuth()
-@Controller('organization/permissions')
+@Controller('superadmin/admin/permissions')
 @UseGuards(RolesGuard)
 export class PermissionsController {
   constructor(
     private readonly permissionsService: PermissionsService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)

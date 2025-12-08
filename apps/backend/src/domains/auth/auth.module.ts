@@ -10,7 +10,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { EmailModule } from '../../email/email.module';
 import { OrganizationsModule } from '../organization/organizations/organizations.module';
-import { AuditModule } from '../organization/audit/audit.module';
+import { AuditModule } from '../superadmin/audit/audit.module';
 import { OnboardingModule } from '../organization/onboarding/onboarding.module';
 import { ResponseModule } from '@common/responses/response.module';
 import {

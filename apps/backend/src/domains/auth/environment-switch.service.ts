@@ -11,7 +11,7 @@ import {
   AuditService,
   AuditAction,
   AuditResource,
-} from '../organization/audit/audit.service';
+} from '../superadmin/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -21,7 +21,7 @@ export class EnvironmentSwitchService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
-  ) {}
+  ) { }
 
   async switchEnvironment(
     userId: number,

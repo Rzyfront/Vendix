@@ -5,7 +5,7 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { AuditService, AuditAction } from '../organization/audit/audit.service';
+import { AuditService, AuditAction } from '../superadmin/audit/audit.service';
 import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Security Logs')
@@ -15,7 +15,7 @@ export class SecurityLogsController {
   constructor(
     private readonly auditService: AuditService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get('failed-logins')
   @ApiOperation({

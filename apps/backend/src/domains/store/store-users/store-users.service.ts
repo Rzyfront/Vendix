@@ -23,14 +23,100 @@ export class StoreUsersService {
     });
   }
 
-  async findAll() {
-    // Auto-scoped
-    return this.prisma.store_users.findMany({
-      include: {
-        users: true,
-        roles: true
+  async findAll(query: any) {
+    // Store context is handled automatically by StorePrismaService
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      role,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
+
+    const skip = (page - 1) * limit;
+
+    const where: any = {
+      user: {
+        state: 'active', // Only show active users by default
       }
-    });
+    };
+
+    if (search) {
+      where.user = {
+        ...where.user,
+        OR: [
+          { first_name: { contains: search, mode: 'insensitive' } },
+          { last_name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      };
+    }
+
+    if (role) {
+      where.user = {
+        ...where.user,
+        user_roles: {
+          some: {
+            roles: {
+              name: role
+            }
+          }
+        }
+      };
+    }
+
+    // Map Sort Field
+    const orderByField = sort_by === 'created_at' ? 'createdAt' : sort_by;
+
+    const [total, data] = await Promise.all([
+      this.prisma.store_users.count({ where }),
+      this.prisma.store_users.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+              phone: true,
+              state: true,
+              last_login: true,
+            }
+          },
+        },
+        skip,
+        take: limit,
+        orderBy: {
+          [orderByField]: sort_order,
+        },
+      }),
+    ]);
+
+
+    // Transform result to match expected frontend format if needed
+    // The frontend expects a flat structure compatible with PosCustomer interface
+    return {
+      data: data.map(item => ({
+        id: item.user.id, // Use user ID as the main ID for the customer
+        email: item.user.email,
+        first_name: item.user.first_name,
+        last_name: item.user.last_name,
+        phone: item.user.phone,
+        state: item.user.state, // Mapped from user state
+        last_login: item.user.last_login,
+        created_at: item.createdAt,
+        store_user_id: item.id, // Keep reference to store_user ID if needed
+        // Add other fields if available/needed
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async findOne(id: number) {

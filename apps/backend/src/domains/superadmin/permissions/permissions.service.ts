@@ -4,12 +4,12 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   AuditService,
   AuditAction,
   AuditResource,
-} from '../audit/audit.service';
+} from '../../superadmin/audit/audit.service';
 import {
   CreatePermissionDto,
   UpdatePermissionDto,
@@ -20,9 +20,9 @@ import { http_method_enum } from '@prisma/client';
 @Injectable()
 export class PermissionsService {
   constructor(
-    private readonly prismaService: OrganizationPrismaService,
+    private readonly prismaService: GlobalPrismaService,
     private readonly auditService: AuditService,
-  ) {}
+  ) { }
 
   // ===== CRUD PERMISSIONS =====
 

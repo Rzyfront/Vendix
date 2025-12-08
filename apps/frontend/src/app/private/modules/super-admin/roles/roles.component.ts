@@ -409,7 +409,7 @@ export class RolesComponent implements OnInit, OnDestroy {
     // Get current role permissions to calculate differences
     this.rolesService.getRolePermissions(this.currentRole.id).subscribe({
       next: (currentPermissionIds) => {
-        const newPermissionIds = permissionData.permissionIds || [];
+        const newPermissionIds = permissionData.permission_ids || [];
 
         // Calculate permissions to add and remove
         const toAdd = newPermissionIds.filter(
@@ -425,7 +425,7 @@ export class RolesComponent implements OnInit, OnDestroy {
         if (toAdd.length > 0) {
           operations.push(
             this.rolesService.assignPermissionsToRole(this.currentRole!.id, {
-              permissionIds: toAdd,
+              permission_ids: toAdd,
             }),
           );
         }
@@ -433,7 +433,7 @@ export class RolesComponent implements OnInit, OnDestroy {
         if (toRemove.length > 0) {
           operations.push(
             this.rolesService.removePermissionsFromRole(this.currentRole!.id, {
-              permissionIds: toRemove,
+              permission_ids: toRemove,
             }),
           );
         }
@@ -450,20 +450,20 @@ export class RolesComponent implements OnInit, OnDestroy {
         // Execute all operations
         operations.length === 1
           ? operations[0].subscribe({
-              next: () => this.handlePermissionsUpdateSuccess(),
-              error: (error) => this.handlePermissionsUpdateError(error),
-            })
+            next: () => this.handlePermissionsUpdateSuccess(),
+            error: (error) => this.handlePermissionsUpdateError(error),
+          })
           : operations.length === 2
             ? // Execute both operations in parallel
-              operations.forEach((op) =>
-                op.subscribe({
-                  next: () => {
-                    // Wait for both operations to complete
-                    // This is a simplified approach, in production you might want more sophisticated handling
-                  },
-                  error: (error) => this.handlePermissionsUpdateError(error),
-                }),
-              )
+            operations.forEach((op) =>
+              op.subscribe({
+                next: () => {
+                  // Wait for both operations to complete
+                  // This is a simplified approach, in production you might want more sophisticated handling
+                },
+                error: (error) => this.handlePermissionsUpdateError(error),
+              }),
+            )
             : null;
 
         // For simplicity, we'll wait a bit and then complete

@@ -3,11 +3,11 @@ import { OrganizationPrismaService } from '../../prisma/services/organization-pr
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
-import { PermissionsModule } from './permissions/permissions.module';
+
 import { DomainsModule } from './domains/domains.module';
 import { StoresModule } from './stores/stores.module';
 import { AddressesModule } from './addresses/addresses.module';
-import { AuditModule } from './audit/audit.module';
+
 import { SettingsModule } from './settings/settings.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { LoginAttemptsModule } from './login-attempts/login-attempts.module';
@@ -18,11 +18,10 @@ import { PaymentPoliciesModule } from './payment-policies/payment-policies.modul
     OrganizationsModule,
     UsersModule,
     RolesModule,
-    PermissionsModule,
+
     DomainsModule,
     StoresModule,
     AddressesModule,
-    AuditModule,
     SettingsModule,
     SessionsModule,
     LoginAttemptsModule,
@@ -31,4 +30,4 @@ import { PaymentPoliciesModule } from './payment-policies/payment-policies.modul
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],
 })
-export class OrganizationDomainModule {}
+export class OrganizationDomainModule { }
