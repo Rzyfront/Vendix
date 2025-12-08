@@ -120,6 +120,7 @@ export interface UpdateProductDto {
   brand_id?: number;
   category_ids?: number[];
   tax_category_ids?: number[];
+  images?: CreateProductImageDto[];
 }
 
 export interface CreateProductVariantDto {
