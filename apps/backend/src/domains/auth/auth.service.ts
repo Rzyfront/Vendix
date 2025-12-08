@@ -974,54 +974,86 @@ export class AuthService {
           '🔄 LOGIN - STORE_ADMIN user logged in via Org Slug - Attempting to auto-select store context',
         );
 
-        // Estrategia 1: Main Store (si existe y tiene acceso)
+        // Estrategia 1: Main Store (si existe)
         if (user.main_store_id) {
-          const mainStore = await this.prismaService.stores.findUnique({
+          const main_store = await this.prismaService.stores.findUnique({
             where: { id: user.main_store_id },
           });
-          if (mainStore) {
-            // Verificar acceso
-            const hasAccess = await this.prismaService.store_users.findUnique({
-              where: {
-                store_id_user_id: {
-                  store_id: mainStore.id,
-                  user_id: user.id
+
+          if (main_store) {
+            // Verificar si pertenece a la misma organización
+            if (main_store.organization_id === user.organization_id) {
+              // Verificar acceso o si es High Privilege
+              const has_access = await this.prismaService.store_users.findUnique({
+                where: {
+                  store_id_user_id: {
+                    store_id: main_store.id,
+                    user_id: user.id
+                  }
                 }
+              });
+
+              if (has_access || hasHighPrivilege) {
+                effective_organization_slug = undefined;
+                effective_store_slug = main_store.slug;
+                (user as any).main_store = main_store;
+
+                // AUTO-RELATION: Si es High Privilege y no tiene acceso, crear la relación
+                if (hasHighPrivilege && !has_access) {
+                  console.log(`✨ LOGIN - Creating automatic store_users relation for High Privilege user in Main Store: ${main_store.slug}`);
+                  await this.prismaService.store_users.create({
+                    data: {
+                      store_id: main_store.id,
+                      user_id: user.id
+                    }
+                  });
+                }
+
+                console.log('✅ LOGIN - Auto-selected Main Store:', main_store.slug);
               }
-            });
-            // Tambien permitir si es Owner/Admin
-            if (hasAccess || hasHighPrivilege) {
-              effective_organization_slug = undefined;
-              effective_store_slug = mainStore.slug;
-              (user as any).main_store = mainStore;
-              console.log('✅ LOGIN - Auto-selected Main Store:', mainStore.slug);
             }
           }
         }
 
-        // Estrategia 2: Si no hay Main Store o no tiene acceso, buscar la primera tienda disponible
+        // Estrategia 2: Si no hay Main Store o no se pudo seleccionar, buscar la primera tienda disponible donde YA tiene acceso
         if (!effective_store_slug) {
-          const firstStoreUser = await this.prismaService.store_users.findFirst({
-            where: { user_id: user.id },
+          const first_store_user = await this.prismaService.store_users.findFirst({
+            where: {
+              user_id: user.id,
+              store: {
+                organization_id: user.organization_id // Asegurar que sea de la misma org
+              }
+            },
             include: { store: true }
           });
 
-          if (firstStoreUser && firstStoreUser.store) {
+          if (first_store_user && first_store_user.store) {
             effective_organization_slug = undefined;
-            effective_store_slug = firstStoreUser.store.slug;
-            console.log('✅ LOGIN - Auto-selected First Available Store:', firstStoreUser.store.slug);
+            effective_store_slug = first_store_user.store.slug;
+            console.log('✅ LOGIN - Auto-selected First Available Store:', first_store_user.store.slug);
           }
         }
 
-        // Si aun no tenemos tienda y es owner/admin, intentar buscar cualquier tienda de la org
+        // Estrategia 3: High Privilege Fallback - Buscar CUALQUIER tienda de la org
         if (!effective_store_slug && hasHighPrivilege) {
-          const firstOrgStore = await this.prismaService.stores.findFirst({
+          const first_org_store = await this.prismaService.stores.findFirst({
             where: { organization_id: user.organization_id }
           });
-          if (firstOrgStore) {
+
+          if (first_org_store) {
             effective_organization_slug = undefined;
-            effective_store_slug = firstOrgStore.slug;
-            console.log('✅ LOGIN - Auto-selected First Organization Store (High Privilege):', firstOrgStore.slug);
+            effective_store_slug = first_org_store.slug;
+
+            // AUTO-RELATION: Crear relación explícita
+            console.log(`✨ LOGIN - Creating automatic store_users relation for High Privilege user in Fallback Store: ${first_org_store.slug}`);
+            await this.prismaService.store_users.create({
+              data: {
+                store_id: first_org_store.id,
+                user_id: user.id
+              }
+            });
+
+            console.log('✅ LOGIN - Auto-selected First Organization Store (High Privilege):', first_org_store.slug);
           }
         }
       }

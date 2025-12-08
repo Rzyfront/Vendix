@@ -1,7 +1,7 @@
 meta {
   name: "Verify Consolidated Product Stock Including Variants"
   type: http
-  seq: 5
+  seq: 8
 }
 
 get {
@@ -15,67 +15,67 @@ tests {
     expect(res.status).to.equal(200);
     expect(res.body).to.have.property('success', true);
     expect(res.body).to.have.property('data');
-
+  
     const product = res.body.data;
     expect(product).to.have.property('id', parseInt({{productId}}));
     expect(product).to.have.property('name', 'Laptop Gaming Pro Max');
   });
-
+  
   test("Product stock correctly aggregates base product + variants", function() {
     const product = res.body.data;
-
+  
     // Stock base: 18 (10+5+3)
     // Stock variante: 13 (8+3+2)
     // Total consolidado: 31
     expect(product).to.have.property('stock_quantity'); // Compatibilidad
     expect(product).to.have.property('total_stock_available'); // Nuevo campo
     expect(product).to.have.property('total_stock_reserved'); // Reservas
-
+  
     expect(product.total_stock_available).to.equal(31); // 18 + 13
     expect(product.stock_quantity).to.equal(31); // Compatibilidad
     expect(product.total_stock_reserved).to.equal(0); // Sin reservas
   });
-
+  
   test("Product variants are included with individual stock", function() {
     const product = res.body.data;
     expect(product).to.have.property('product_variants');
     expect(product.product_variants).to.be.an('array');
     expect(product.product_variants.length).to.be.at.least(1);
-
+  
     const variant = product.product_variants.find(v => v.id === parseInt({{variantId}}));
     expect(variant).to.exist;
     expect(variant).to.have.property('total_stock_available', 13);
     expect(variant).to.have.property('stock_quantity', 13);
   });
-
+  
   test("Product stock_by_location shows consolidated quantities", function() {
     const product = res.body.data;
-
+  
     if (product.stock_by_location) {
       expect(product.stock_by_location).to.be.an('array');
-
+  
       // Debe mostrar el stock consolidado por ubicación
       const location1 = product.stock_by_location.find(l => l.location_id === 1);
       const location2 = product.stock_by_location.find(l => l.location_id === 2);
       const location3 = product.stock_by_location.find(l => l.location_id === 3);
-
+  
       if (location1) {
         // Base: 10 + Variante: 8 = 18 total en ubicación 1
         expect(location1.available).to.equal(18);
       }
-
+  
       if (location2) {
         // Base: 5 + Variante: 3 = 8 total en ubicación 2
         expect(location2.available).to.equal(8);
       }
-
+  
       if (location3) {
         // Base: 3 + Variante: 2 = 5 total en ubicación 3
         expect(location3.available).to.equal(5);
       }
     }
   });
-
+  
   test("Product includes all necessary relationships", function() {
     const product = res.body.data;
     expect(product).to.have.property('stores');
@@ -84,18 +84,18 @@ tests {
     expect(product).to.have.property('product_images');
     expect(product).to.have.property('product_variants');
   });
-
+  
   test("Stock calculations are consistent across different fields", function() {
     const product = res.body.data;
-
+  
     // Verificar que los diferentes campos de stock sean consistentes
     const baseStock = 18;
     const variantStock = 13;
     const totalExpected = baseStock + variantStock;
-
+  
     expect(product.total_stock_available).to.equal(totalExpected);
     expect(product.stock_quantity).to.equal(totalExpected);
-
+  
     // Si hay stock_by_location, la suma debe coincidir
     if (product.stock_by_location && product.stock_by_location.length > 0) {
       const totalByLocation = product.stock_by_location

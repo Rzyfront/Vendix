@@ -68,11 +68,14 @@ export class EnvironmentSwitchService {
     let store_id: number | null = null;
     let active_store: any = null;
 
+    // 1. Lógica para STORE_ADMIN
     if (targetEnvironment === 'STORE_ADMIN') {
       const has_store_role =
         user_role_names.includes('store_admin') ||
         user_role_names.includes('owner') ||
-        user_role_names.includes('manager');
+        user_role_names.includes('manager') ||
+        user_role_names.includes('admin') ||
+        user_role_names.includes('super_admin');
 
       if (!has_store_role) {
         throw new UnauthorizedException(
@@ -80,10 +83,86 @@ export class EnvironmentSwitchService {
         );
       }
 
-      // Verificar que la tienda exista y el usuario tenga acceso
+      // Auto-selección de tienda si no se proporciona slug
+      let effective_store_slug = storeSlug;
+      const has_high_privilege =
+        user_role_names.includes('owner') ||
+        user_role_names.includes('admin') ||
+        user_role_names.includes('super_admin');
+
+      if (!effective_store_slug) {
+        console.log('🔄 SWITCH - STORE_ADMIN switch without slug - Attempting to auto-select store context');
+
+        // Estrategia 1: Main Store
+        if (user.main_store_id) {
+          const main_store = await this.prismaService.stores.findUnique({
+            where: { id: user.main_store_id },
+          });
+
+          if (main_store && main_store.organization_id === user.organization_id) {
+            const has_access = await this.prismaService.store_users.findUnique({
+              where: {
+                store_id_user_id: {
+                  store_id: main_store.id,
+                  user_id: user.id
+                }
+              }
+            });
+
+            if (has_access || has_high_privilege) {
+              effective_store_slug = main_store.slug;
+
+              // AUTO-RELATION
+              if (has_high_privilege && !has_access) {
+                console.log(`✨ SWITCH - Creating automatic store_users relation in Main Store: ${main_store.slug}`);
+                await this.prismaService.store_users.create({
+                  data: { store_id: main_store.id, user_id: user.id }
+                });
+              }
+            }
+          }
+        }
+
+        // Estrategia 2: Primera tienda disponible (donde YA tiene acceso)
+        if (!effective_store_slug) {
+          const first_store_user = await this.prismaService.store_users.findFirst({
+            where: {
+              user_id: user.id,
+              store: { organization_id: user.organization_id }
+            },
+            include: { store: true }
+          });
+          if (first_store_user?.store) {
+            effective_store_slug = first_store_user.store.slug;
+          }
+        }
+
+        // Estrategia 3: High Privilege Fallback
+        if (!effective_store_slug && has_high_privilege) {
+          const first_org_store = await this.prismaService.stores.findFirst({
+            where: { organization_id: user.organization_id }
+          });
+          if (first_org_store) {
+            effective_store_slug = first_org_store.slug;
+            // AUTO-RELATION
+            console.log(`✨ SWITCH - Creating automatic store_users relation in Fallback Store: ${first_org_store.slug}`);
+            await this.prismaService.store_users.create({
+              data: { store_id: first_org_store.id, user_id: user.id }
+            });
+          }
+        }
+      }
+
+      if (!effective_store_slug) {
+        throw new BadRequestException(
+          'No se pudo determinar el contexto de tienda. Proporcione store_slug explícitamente.',
+        );
+      }
+
+      // Verificar la tienda final
       const store = await this.prismaService.stores.findFirst({
         where: {
-          slug: storeSlug,
+          slug: effective_store_slug,
           organization_id: user.organization_id,
         },
         include: {
@@ -100,15 +179,20 @@ export class EnvironmentSwitchService {
         throw new NotFoundException('Tienda no encontrada');
       }
 
-      // Verificar que el usuario pertenezca a la organización de la tienda o esté asignado a la tienda
+      // Verificar acceso final (redundante pero seguro)
       const has_access =
-        user_role_names.includes('super_admin') ||
-        user_role_names.includes('owner') ||
-        user.organization_id === store.organization_id ||
+        has_high_privilege ||
         store.store_users.length > 0;
 
       if (!has_access) {
-        throw new UnauthorizedException('No tienes acceso a esta tienda');
+        // Doble check por si se acaba de crear la relación y prisma no la trajo en el include anterior (aunque unlikely en misma transacción, pero aquí son commmits distintos)
+        const specific_access = await this.prismaService.store_users.findFirst({
+          where: { store_id: store.id, user_id: userId }
+        });
+
+        if (!specific_access) {
+          throw new UnauthorizedException('No tienes acceso a esta tienda');
+        }
       }
 
       store_id = store.id;

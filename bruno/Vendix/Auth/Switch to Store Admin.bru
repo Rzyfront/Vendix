@@ -13,8 +13,12 @@ post {
 body:json {
   {
     "target_environment": "STORE_ADMIN",
-    "store_slug": "tech-bogota"
+    "store_slug": "tech-medellin"
   }
+}
+
+vars:post-response {
+  token: res.body.data.access_token
 }
 
 tests {
