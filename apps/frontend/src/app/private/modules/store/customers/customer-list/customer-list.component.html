@@ -1,0 +1,162 @@
+<div class="space-y-6">
+  <!-- Tarjetas de Estadísticas -->
+  <div class="stats-grid">
+    <!-- Total de Clientes -->
+    <app-stats
+      title="Total de Clientes"
+      [value]="formatNumber(stats.total_customers)"
+      iconName="users"
+      iconBgColor="bg-primary/10"
+      iconColor="text-primary"
+    ></app-stats>
+
+    <!-- Clientes Activos -->
+    <app-stats
+      title="Clientes Activos"
+      [value]="formatNumber(stats.active_customers)"
+      iconName="user-check"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    ></app-stats>
+
+    <!-- Nuevos este mes -->
+    <app-stats
+      title="Nuevos este mes"
+      [value]="formatNumber(stats.new_customers_this_month)"
+      iconName="user-plus"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+
+    <!-- Clientes Inactivos -->
+    <app-stats
+      title="Clientes Inactivos"
+      [value]="
+        formatNumber(
+          (stats.total_customers || 0) - (stats.active_customers || 0)
+        )
+      "
+      iconName="user-x"
+      iconBgColor="bg-gray-100"
+      iconColor="text-gray-600"
+    ></app-stats>
+  </div>
+
+  <!-- Lista de Clientes -->
+  <div class="customer-list-content">
+    <div class="px-6 py-4 border-b border-border">
+      <div
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+      >
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            Todos los Clientes ({{ customers.length }})
+          </h2>
+        </div>
+
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
+          <!-- Quick search input -->
+          <app-inputsearch
+            class="w-full sm:w-64 flex-shrink-0"
+            size="sm"
+            placeholder="Buscar clientes..."
+            [debounceTime]="1000"
+            [(ngModel)]="searchTerm"
+            (ngModelChange)="onSearch()"
+          ></app-inputsearch>
+
+          <!-- Action buttons -->
+          <div class="flex gap-2 items-center ml-auto">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshCustomers()"
+              [disabled]="loading"
+              title="Actualizar"
+            >
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="onCreateCustomer()"
+              title="Nuevo Cliente"
+            >
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <span class="hidden sm:inline">Nuevo Cliente</span>
+            </app-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estado de Carga -->
+    <div *ngIf="loading" class="p-8 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Cargando clientes...</p>
+    </div>
+
+    <!-- Estado Vacío -->
+    <div *ngIf="!loading && customers.length === 0" class="p-8 text-center">
+      <div
+        class="inline-flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mb-4"
+      >
+        <app-icon name="users" [size]="32" class="text-gray-400"></app-icon>
+      </div>
+      <h3 class="text-lg font-medium text-text-primary mb-2">
+        {{ getEmptyStateTitle() }}
+      </h3>
+      <p class="text-text-secondary mb-6 max-w-md mx-auto">
+        {{ getEmptyStateDescription() }}
+      </p>
+      <div class="flex gap-3 justify-center">
+        <app-button variant="primary" size="sm" (clicked)="onCreateCustomer()">
+          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+          Nuevo Cliente
+        </app-button>
+        <app-button variant="outline" size="sm" (clicked)="refreshCustomers()">
+          <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+          Actualizar
+        </app-button>
+      </div>
+    </div>
+
+    <!-- Tabla de Clientes -->
+    <div *ngIf="!loading && customers.length > 0" class="p-6">
+      <app-table
+        [data]="customers"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [loading]="loading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onTableSort($event)"
+        (rowClick)="onCustomerClick($event)"
+      >
+      </app-table>
+    </div>
+  </div>
+
+  <!-- Modal Crear Cliente -->
+  <app-customer-create-modal
+    *ngIf="showCreateModal"
+    (customerCreated)="onCustomerCreated()"
+    (close)="closeCreateModal()"
+  >
+  </app-customer-create-modal>
+
+  <!-- Modal Editar Cliente -->
+  <app-customer-details-modal
+    *ngIf="showDetailsModal"
+    [customerId]="selectedCustomerId"
+    (customerUpdated)="onCustomerUpdated()"
+    (close)="closeDetailsModal()"
+  >
+  </app-customer-details-modal>
+</div>

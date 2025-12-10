@@ -90,28 +90,25 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'all',
-          },
-          {
-            path: 'all',
             loadComponent: () =>
               import(
-                '../../private/modules/store/customers/all/all-customers.component'
-              ).then((c) => c.AllCustomersComponent),
+                '../../private/modules/store/customers/customer-list/customer-list.component'
+              ).then((c) => c.CustomerListComponent),
           },
           {
-            path: ':id',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/details/customer-details.component'
-              ).then((c) => c.CustomerDetailsComponent),
+            path: 'all',  // ← NUEVO: Para el menú "Todos los Clientes"
+            loadComponent: () => import('../../private/modules/store/customers/customer-list/customer-list.component')
+              .then((c) => c.CustomerListComponent),
           },
           {
-            path: 'reviews',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/reviews/reviews.component'
-              ).then((c) => c.ReviewsComponent),
+            path: ':id',  // ← NUEVO: Para detalles de cliente
+            loadComponent: () => import('../../private/modules/store/customers/components/customer-details/customer-details.component')
+              .then((c) => c.CustomerDetailsComponent),
+          },
+          {
+            path: 'reviews',  // ← NUEVO: Para el menú "Reseñas"
+            loadComponent: () => import('../../private/modules/store/customers/components/customer-reviews/customer-reviews.component')
+              .then((c) => c.CustomerReviewsComponent),
           },
         ],
       },
@@ -144,11 +141,6 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'analytics',
         children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            redirectTo: 'sales',
-          },
           {
             path: 'sales',
             loadComponent: () =>
