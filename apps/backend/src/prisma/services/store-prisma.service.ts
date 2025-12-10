@@ -89,26 +89,41 @@ export class StorePrismaService extends BasePrismaService {
 
     const scoped_args = { ...args };
     const relational_scopes: Record<string, any> = {
-      'stock_levels': { inventory_locations: { store_id: context.store_id } },
-      'inventory_batches': { inventory_locations: { store_id: context.store_id } },
-      'inventory_serial_numbers': { inventory_locations: { store_id: context.store_id } },
-      'order_items': { orders: { store_id: context.store_id } },
-      'product_variants': { products: { store_id: context.store_id } },
-      'payments': { orders: { store_id: context.store_id } },
-      'product_images': { products: { store_id: context.store_id } },
-      'sales_order_items': { sales_orders: { organization_id: context.organization_id } }, // Changed to Org Scope
-      'refunds': { orders: { store_id: context.store_id } },
-      'inventory_adjustments': { inventory_locations: { store_id: context.store_id } },
-      'stock_reservations': { inventory_locations: { store_id: context.store_id } },
-      'purchase_orders': { location: { store_id: context.store_id } },
-      'inventory_movements': { products: { store_id: context.store_id } },
-      'inventory_transactions': { products: { store_id: context.store_id } },
+      stock_levels: { inventory_locations: { store_id: context.store_id } },
+      inventory_batches: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      inventory_serial_numbers: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      order_items: { orders: { store_id: context.store_id } },
+      product_variants: { products: { store_id: context.store_id } },
+      payments: { orders: { store_id: context.store_id } },
+      product_images: { products: { store_id: context.store_id } },
+      sales_order_items: {
+        sales_orders: { organization_id: context.organization_id },
+      }, // Changed to Org Scope
+      refunds: { orders: { store_id: context.store_id } },
+      inventory_adjustments: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      stock_reservations: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      purchase_orders: { location: { store_id: context.store_id } },
+      inventory_movements: { products: { store_id: context.store_id } },
+      inventory_transactions: { products: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
 
     // Models requiring Organization scope (no store_id, but owned by Org)
-    const org_scoped_models = ['suppliers', 'stock_transfers', 'sales_orders', 'return_orders'];
+    const org_scoped_models = [
+      'suppliers',
+      'stock_transfers',
+      'sales_orders',
+      'return_orders',
+    ];
 
     if (this.store_scoped_models.includes(model)) {
       if (!context.store_id) {
@@ -116,13 +131,14 @@ export class StorePrismaService extends BasePrismaService {
       }
       security_filter.store_id = context.store_id;
     } else if (relational_scopes[model]) {
-      if (!context.store_id && !relational_scopes[model].sales_orders) { // Exception for sales_order_items
-        // Wait, if sales_orders is org scoped, sales_order_items (relational to sales_orders) 
+      if (!context.store_id && !relational_scopes[model].sales_orders) {
+        // Exception for sales_order_items
+        // Wait, if sales_orders is org scoped, sales_order_items (relational to sales_orders)
         // should be scoped by organization_id via sales_orders?
         // sales_order_items -> sales_orders (Org Scoped).
         // So if I am in a store context (store_id only), I might NOT have access to sales_orders?
         // RequestContext typically has both store_id and organization_id if logged in as store user.
-        // If sales_sales orders are Org level, maybe store users shouldn't see them? 
+        // If sales_sales orders are Org level, maybe store users shouldn't see them?
         // But let's assume valid access for now and use organization_id for filtering.
       }
 
@@ -131,7 +147,9 @@ export class StorePrismaService extends BasePrismaService {
       Object.assign(security_filter, relational_scopes[model]);
     } else if (org_scoped_models.includes(model)) {
       if (!context.organization_id) {
-        throw new ForbiddenException('Access denied - organization context required');
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
       }
       security_filter.organization_id = context.organization_id;
     }
@@ -160,7 +178,6 @@ export class StorePrismaService extends BasePrismaService {
   get inventory_locations() {
     return this.scoped_client.inventory_locations;
   }
-
 
   get categories() {
     return this.scoped_client.categories;
@@ -205,7 +222,6 @@ export class StorePrismaService extends BasePrismaService {
   get inventory_serial_numbers() {
     return this.scoped_client.inventory_serial_numbers;
   }
-
 
   get payments() {
     return this.scoped_client.payments;

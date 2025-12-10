@@ -19,6 +19,21 @@ export class RegisterCustomerDto {
   email: string;
 
   @ApiProperty({
+    example: 'cliente123',
+    description: 'Nombre de usuario del cliente',
+  })
+  @IsString({ message: 'El nombre de usuario debe ser un string' })
+  @IsNotEmpty({ message: 'El nombre de usuario es requerido' })
+  @MinLength(3, {
+    message: 'El nombre de usuario debe tener al menos 3 caracteres',
+  })
+  @Matches(/^[a-zA-Z0-9_]+$/, {
+    message:
+      'El nombre de usuario solo puede contener letras, números y guiones bajos',
+  })
+  username: string;
+
+  @ApiProperty({
     example: 'Password@123',
     description:
       'Contraseña del cliente (opcional, se genera temporal si no se proporciona)',
@@ -49,6 +64,10 @@ export class RegisterCustomerDto {
   })
   @IsString({ message: 'El teléfono debe ser un string' })
   @IsOptional()
+  @Matches(/^\+?[1-9]\d{6,14}$/, {
+    message:
+      'Formato de teléfono inválido. Use formato internacional (+1234567890) o local (9 dígitos mínimo)',
+  })
   phone?: string;
 
   @ApiProperty({

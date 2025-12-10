@@ -1,10 +1,14 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class StoreUsersService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
 
   async create(data: any) {
     const context = RequestContextService.getContext();
@@ -18,19 +22,34 @@ export class StoreUsersService {
     return this.prisma.store_users.create({
       data: {
         ...data,
-        store_id: store_id
-      }
+        store_id: store_id,
+      },
     });
   }
 
   async findAll() {
     // Auto-scoped
-    return this.prisma.store_users.findMany({
+    const storeUsers = await this.prisma.store_users.findMany({
       include: {
-        users: true,
-        roles: true
-      }
+        user: true,
+        store: true,
+      },
     });
+
+    // Transform to match frontend expectations
+    return storeUsers.map((storeUser) => ({
+      id: storeUser.user.id,
+      username: storeUser.user.username,
+      email: storeUser.user.email,
+      first_name: storeUser.user.first_name,
+      last_name: storeUser.user.last_name,
+      phone: storeUser.user.phone,
+      state: storeUser.user.state,
+      created_at: storeUser.user.created_at,
+      updated_at: storeUser.user.updated_at,
+      // TODO: Add roles when relationship is properly set up
+      roles: [],
+    }));
   }
 
   async findOne(id: number) {
@@ -38,9 +57,9 @@ export class StoreUsersService {
     const user = await this.prisma.store_users.findFirst({
       where: { id },
       include: {
-        users: true,
-        roles: true
-      }
+        user: true,
+        store: true,
+      },
     });
 
     if (!user) throw new NotFoundException('Store user not found');
@@ -51,14 +70,14 @@ export class StoreUsersService {
     await this.findOne(id);
     return this.prisma.store_users.update({
       where: { id },
-      data
+      data,
     });
   }
 
   async remove(id: number) {
     await this.findOne(id);
     return this.prisma.store_users.delete({
-      where: { id }
+      where: { id },
     });
   }
 }

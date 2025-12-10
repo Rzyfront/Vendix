@@ -1,0 +1,167 @@
+<app-modal
+  [isOpen]="isOpen"
+  [size]="'md'"
+  [title]="'Crear Nuevo Cliente'"
+  [subtitle]="'Ingresa los datos del nuevo cliente'"
+  (close)="onClose()"
+  (isOpenChange)="isOpenChange.emit($event)"
+>
+  <!-- Contenedor con scroll unificado -->
+  <div class="modal-content-wrapper">
+    <form
+      [formGroup]="customerForm"
+      (ngSubmit)="onSubmit()"
+      class="customer-form"
+    >
+      <!-- Sección 1: Información Personal -->
+      <div class="form-section">
+        <div class="section-header">
+          <app-icon name="user" [size]="18" class="section-icon"></app-icon>
+          <h3 class="section-title">Información Personal</h3>
+        </div>
+
+        <div class="form-fields">
+          <div class="form-row">
+            <app-input
+              label="Nombre de Usuario"
+              type="text"
+              placeholder="juanperez"
+              formControlName="username"
+              [error]="getError('username')"
+              [control]="customerForm.get('username')"
+              [required]="true"
+              [helperText]="'Solo letras, números y guiones bajos'"
+              size="sm"
+              class="flex-1"
+            ></app-input>
+
+            <app-input
+              label="Email"
+              type="email"
+              placeholder="juan@ejemplo.com"
+              formControlName="email"
+              [error]="getError('email')"
+              [control]="customerForm.get('email')"
+              [required]="true"
+              size="sm"
+              class="flex-1"
+            ></app-input>
+          </div>
+
+          <div class="form-row">
+            <app-input
+              label="Nombre"
+              type="text"
+              placeholder="Juan"
+              formControlName="first_name"
+              [error]="getError('first_name')"
+              [control]="customerForm.get('first_name')"
+              [required]="true"
+              size="sm"
+              class="flex-1"
+            ></app-input>
+
+            <app-input
+              label="Apellido"
+              type="text"
+              placeholder="Pérez"
+              formControlName="last_name"
+              [error]="getError('last_name')"
+              [control]="customerForm.get('last_name')"
+              [required]="true"
+              size="sm"
+              class="flex-1"
+            ></app-input>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sección 2: Información de Contacto -->
+      <div class="form-section">
+        <div class="section-header">
+          <app-icon name="phone" [size]="18" class="section-icon"></app-icon>
+          <h3 class="section-title">Información de Contacto</h3>
+        </div>
+
+        <div class="form-fields">
+          <div class="form-row">
+            <app-input
+              label="Teléfono"
+              type="tel"
+              placeholder="+54 11 1234-5678"
+              formControlName="phone"
+              [error]="getError('phone')"
+              [control]="customerForm.get('phone')"
+              [helperText]="'Formato: +código área número (solo números)'"
+              size="sm"
+              class="flex-1"
+            ></app-input>
+
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Tipo de Documento
+              </label>
+              <select
+                formControlName="document_type"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Seleccionar...</option>
+                <option *ngFor="let type of documentTypes" [value]="type.value">
+                  {{ type.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <app-input
+            label="Número de Documento"
+            type="text"
+            placeholder="12345678"
+            formControlName="document_number"
+            [error]="getError('document_number')"
+            [control]="customerForm.get('document_number')"
+            [helperText]="'Formato según tipo de documento seleccionado'"
+            size="sm"
+          ></app-input>
+        </div>
+      </div>
+
+      <!-- Sección 3: Seguridad -->
+      <div class="form-section">
+        <div class="section-header">
+          <app-icon name="lock" [size]="18" class="section-icon"></app-icon>
+          <h3 class="section-title">Seguridad</h3>
+        </div>
+
+        <div class="form-fields">
+          <app-input
+            label="Contraseña Temporal"
+            type="password"
+            placeholder="Dejar en blanco para generar automáticamente"
+            formControlName="password"
+            [error]="getError('password')"
+            [control]="customerForm.get('password')"
+            [helperText]="'Opcional: 8+ caracteres con un carácter especial'"
+            size="sm"
+          ></app-input>
+        </div>
+      </div>
+
+      <!-- Form Actions -->
+      <div class="flex justify-end gap-3 pt-6 border-t border-gray-200">
+        <button
+          type="button"
+          (click)="onClose()"
+          [disabled]="loading"
+          class="btn-cancel"
+        >
+          Cancelar
+        </button>
+        <button type="submit" [disabled]="loading" class="btn-submit">
+          <div *ngIf="loading" class="loading-spinner"></div>
+          {{ loading ? "Creando..." : "Crear Cliente" }}
+        </button>
+      </div>
+    </form>
+  </div>
+</app-modal>
