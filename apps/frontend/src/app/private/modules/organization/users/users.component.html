@@ -5,9 +5,7 @@
   <!-- Users Table Container -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <div class="px-6 py-4 border-b border-border">
-      <div
-        class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4"
-      >
+      <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <!-- Título y contador -->
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
@@ -16,22 +14,15 @@
         </div>
 
         <!-- Controles compactos -->
-        <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+        <div class="flex flex-wrap items-center gap-3 w-full lg:w-auto" [formGroup]="filterForm">
           <!-- Búsqueda -->
-          <app-inputsearch
-            class="min-w-[200px] flex-1 lg:flex-none"
-            size="sm"
-            placeholder="Buscar usuarios..."
-            [debounceTime]="500"
-            (searchChange)="onSearchChange($event)"
-          ></app-inputsearch>
+          <app-inputsearch class="min-w-[200px] flex-1 lg:flex-none" size="sm" placeholder="Buscar usuarios..."
+            [debounceTime]="500" (searchChange)="onSearchChange($event)"></app-inputsearch>
 
           <!-- Filtro por estado -->
-          <select
-            formControlName="state"
+          <select formControlName="state"
             class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
-            [disabled]="isLoading"
-          >
+            [disabled]="isLoading">
             <option *ngFor="let state of userStates" [value]="state.value">
               {{ state.label }}
             </option>
@@ -39,21 +30,11 @@
 
           <!-- Botones de acción -->
           <div class="flex gap-2 items-center">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="refreshUsers()"
-              [disabled]="isLoading"
-              title="Actualizar"
-            >
+            <app-button variant="outline" size="sm" (clicked)="refreshUsers()" [disabled]="isLoading"
+              title="Actualizar">
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="createUser()"
-              title="Nuevo Usuario"
-            >
+            <app-button variant="primary" size="sm" (clicked)="createUser()" title="Nuevo Usuario">
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline ml-2">Nuevo</span>
             </app-button>
@@ -63,36 +44,22 @@
     </div>
     <!-- Loading State -->
     <div *ngIf="isLoading" class="p-8 text-center">
-      <div
-        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-      ></div>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       <p class="mt-2 text-text-secondary">Loading users...</p>
     </div>
 
     <!-- Empty State -->
-    <app-user-empty-state
-      *ngIf="!isLoading && users.length === 0"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      (actionClick)="createUser()"
-    >
+    <app-user-empty-state *ngIf="!isLoading && users.length === 0" [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()" (actionClick)="createUser()">
     </app-user-empty-state>
 
     <!-- Table View -->
     <div *ngIf="users.length > 0 && viewMode === 'table'" class="p-6">
-      <app-table
-        [data]="users"
-        [columns]="tableColumns"
-        [actions]="tableActions"
-        [loading]="isLoading"
-        (sort)="onSortChange($event.column, $event.direction)"
-      >
+      <app-table [data]="users" [columns]="tableColumns" [actions]="tableActions" [loading]="isLoading"
+        (sort)="onSortChange($event.column, $event.direction)">
         <!-- Custom cell for status -->
         <ng-template #statusCell let-item>
-          <span
-            class="px-2 py-1 text-xs font-medium rounded-full"
-            [class]="getStateDisplay(item.state).class"
-          >
+          <span class="px-2 py-1 text-xs font-medium rounded-full" [class]="getStateDisplay(item.state).class">
             {{ getStateDisplay(item.state).text }}
           </span>
         </ng-template>
@@ -100,13 +67,9 @@
         <!-- Custom cell for 2FA -->
         <ng-template #twoFactorCell let-item>
           <div class="flex items-center gap-2">
-            <app-icon
-              name="shield"
-              class="w-4 h-4"
-              [ngClass]="
+            <app-icon name="shield" class="w-4 h-4" [ngClass]="
                 item.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
-              "
-            ></app-icon>
+              "></app-icon>
             <span class="text-sm text-text">
               {{ item.two_factor_enabled ? "Sí" : "No" }}
             </span>
@@ -116,13 +79,9 @@
         <!-- Custom cell for email verification -->
         <ng-template #emailVerifiedCell let-item>
           <div class="flex items-center gap-2">
-            <app-icon
-              name="check"
-              class="w-4 h-4"
-              [ngClass]="
+            <app-icon name="check" class="w-4 h-4" [ngClass]="
                 item.email_verified ? 'text-green-500' : 'text-yellow-500'
-              "
-            ></app-icon>
+              "></app-icon>
             <span class="text-sm text-text">
               {{ item.email_verified ? "Verificado" : "Pendiente" }}
             </span>
@@ -133,38 +92,29 @@
         <ng-template #actionsCell let-item>
           <div class="flex items-center gap-2">
             <!-- Edit Button -->
-            <button
-              (click)="editUser(item)"
+            <button (click)="editUser(item)"
               class="p-1 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
-              title="Editar usuario"
-            >
+              title="Editar usuario">
               <app-icon name="edit" class="w-4 h-4"></app-icon>
             </button>
 
             <!-- Toggle Status Button -->
-            <button
-              (click)="toggleUserStatus(item)"
-              class="p-1 rounded transition-colors"
-              [ngClass]="
+            <button (click)="toggleUserStatus(item)" class="p-1 rounded transition-colors" [ngClass]="
                 item.state === 'active'
                   ? 'text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/20'
                   : 'text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20'
-              "
-              [title]="
+              " [title]="
                 item.state === 'active'
                   ? 'Archivar usuario'
                   : 'Reactivar usuario'
-              "
-            >
+              ">
               <app-icon name="archive" class="w-4 h-4"></app-icon>
             </button>
 
             <!-- Delete Button -->
-            <button
-              (click)="confirmDelete(item)"
+            <button (click)="confirmDelete(item)"
               class="p-1 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-              title="Eliminar usuario"
-            >
+              title="Eliminar usuario">
               <app-icon name="delete" class="w-4 h-4"></app-icon>
             </button>
           </div>
@@ -175,31 +125,17 @@
     <!-- Cards View -->
     <div *ngIf="users.length > 0 && viewMode === 'cards'" class="p-6">
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <app-user-card
-          *ngFor="let user of users"
-          [user]="user"
-          (edit)="editUser($event)"
-          (delete)="confirmDelete($event)"
-          (toggleStatus)="toggleUserStatus($event)"
-        ></app-user-card>
+        <app-user-card *ngFor="let user of users" [user]="user" (edit)="editUser($event)"
+          (delete)="confirmDelete($event)" (toggleStatus)="toggleUserStatus($event)"></app-user-card>
       </div>
     </div>
   </div>
 
   <!-- Create User Modal -->
-  <app-user-create-modal
-    *ngIf="showCreateModal"
-    [isOpen]="showCreateModal"
-    (onClose)="showCreateModal = false"
-    (onUserCreated)="onUserCreated()"
-  ></app-user-create-modal>
+  <app-user-create-modal *ngIf="showCreateModal" [isOpen]="showCreateModal" (onClose)="showCreateModal = false"
+    (onUserCreated)="onUserCreated()"></app-user-create-modal>
 
   <!-- Edit User Modal -->
-  <app-user-edit-modal
-    *ngIf="showEditModal && currentUser"
-    [user]="currentUser"
-    [isOpen]="showEditModal"
-    (onClose)="showEditModal = false"
-    (onUserUpdated)="onUserUpdated()"
-  ></app-user-edit-modal>
+  <app-user-edit-modal *ngIf="showEditModal && currentUser" [user]="currentUser" [isOpen]="showEditModal"
+    (onClose)="showEditModal = false" (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
 </div>

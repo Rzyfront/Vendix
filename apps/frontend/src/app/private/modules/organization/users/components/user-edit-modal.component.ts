@@ -22,7 +22,7 @@ import {
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 import { Subject, takeUntil } from 'rxjs';
-import { OrganizationsService } from '../../../super-admin/organizations/services/organizations.service';
+
 
 @Component({
   selector: 'app-user-edit-modal',
@@ -43,23 +43,7 @@ import { OrganizationsService } from '../../../super-admin/organizations/service
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()" *ngIf="user">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="space-y-2">
-            <label
-              class="block text-sm font-medium text-[var(--color-text-primary)]"
-            >
-              Organización
-            </label>
-            <select
-              formControlName="organization_id"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isUpdating"
-            >
-              <option value="">Seleccionar organización</option>
-              <option *ngFor="let org of organizations" [value]="org.id">
-                {{ org.name }}
-              </option>
-            </select>
-          </div>
+
           <app-input
             formControlName="first_name"
             label="Nombre *"
@@ -108,24 +92,7 @@ import { OrganizationsService } from '../../../super-admin/organizations/service
             helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
 
-          <div class="space-y-2">
-            <label
-              class="block text-sm font-medium text-[var(--color-text-primary)]"
-            >
-              Aplicación
-            </label>
-            <select
-              formControlName="app"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isUpdating"
-            >
-              <option value="">Seleccionar aplicación</option>
-              <option value="ORG_ADMIN">ORG_ADMIN</option>
-              <option value="STORE_ADMIN">STORE_ADMIN</option>
-              <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
-              <option value="VENDIX_LANDING">VENDIX_LANDING</option>
-            </select>
-          </div>
+
 
           <div class="space-y-2">
             <label
@@ -232,16 +199,13 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
   userForm: FormGroup;
   isUpdating: boolean = false;
   UserState = UserState;
-  organizations: any[] = [];
   private destroy$ = new Subject<void>();
-  organizationsService = inject(OrganizationsService);
 
   constructor(
     private fb: FormBuilder,
     private usersService: UsersService,
   ) {
     this.userForm = this.fb.group({
-      organization_id: [null],
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
       username: [
@@ -266,26 +230,11 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
           ),
         ],
       ],
-      app: [''],
       state: [UserState.ACTIVE],
     });
   }
 
-  ngOnInit(): void {
-    this.loadOrganizations();
-  }
-
-  loadOrganizations(): void {
-    this.organizationsService.getOrganizations({}).subscribe({
-      next: (response) => {
-        this.organizations = response.data || [];
-      },
-      error: (error) => {
-        console.error('Error loading organizations:', error);
-        this.organizations = [];
-      },
-    });
-  }
+  ngOnInit(): void { }
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -295,12 +244,10 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
   ngOnChanges(): void {
     if (this.user) {
       this.userForm.patchValue({
-        organization_id: this.user.organization_id,
         first_name: this.user.first_name,
         last_name: this.user.last_name,
         username: this.user.username,
         email: this.user.email,
-        app: this.user.app || '',
         state: this.user.state,
       });
     }

@@ -43,7 +43,7 @@ import {
 import { TableColumn, TableAction } from '../../../../shared/components/index';
 
 @Component({
-  selector: 'app-stores-management',
+  selector: 'app-stores',
   standalone: true,
   imports: [
     CommonModule,
@@ -213,7 +213,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
     `,
   ],
 })
-export class StoresManagementComponent implements OnInit, OnDestroy {
+export class StoresComponent implements OnInit, OnDestroy {
   stores: StoreListItem[] = [];
   isLoading = false;
   searchTerm = '';

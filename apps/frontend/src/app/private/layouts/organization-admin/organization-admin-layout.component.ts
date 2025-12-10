@@ -170,138 +170,17 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Tiendas',
       icon: 'store',
-      route: '/admin/stores-management',
+      route: '/admin/stores',
     },
     {
       label: 'Usuarios',
       icon: 'users',
-      children: [
-        {
-          label: 'Usuarios Globales',
-          icon: 'user',
-          route: '/admin/users/global-users',
-        },
-        {
-          label: 'Roles y Permisos',
-          icon: 'shield',
-          route: '/admin/users/roles-permissions',
-        },
-        {
-          label: 'Asignaciones de Tienda',
-          icon: 'building',
-          route: '/admin/users/store-assignments',
-        }
-      ],
-    },
-    {
-      label: 'Finanzas',
-      icon: 'dollar-sign',
-      children: [
-        {
-          label: 'Reportes',
-          icon: 'file-text',
-          route: '/admin/financial/reports',
-        },
-        {
-          label: 'Facturación y Suscripciones',
-          icon: 'credit-card',
-          route: '/admin/financial/billing',
-        },
-        {
-          label: 'Análisis de Costos',
-          icon: 'bar-chart',
-          route: '/admin/financial/cost-analysis',
-        },
-        {
-          label: 'Flujo de Caja',
-          icon: 'trending-up',
-          route: '/admin/financial/cash-flow',
-        },
-      ],
-    },
-    {
-      label: 'Analíticas e Inteligencia',
-      icon: 'chart-line',
-      children: [
-        {
-          label: 'Análisis Predictivo',
-          icon: 'bar-chart',
-          route: '/admin/analytics/predictive',
-        },
-        {
-          label: 'Análisis Multi-Tienda',
-          icon: 'store',
-          route: '/admin/analytics/cross-store',
-        },
-      ],
-    },
-    {
-      label: 'Inventario',
-      icon: 'warehouse',
-      children: [
-        {
-          label: 'Gestión de Stock',
-          icon: 'package',
-          route: '/admin/inventory/stock',
-        },
-        {
-          label: 'Transferencias de Stock',
-          icon: 'refresh-ccw',
-          route: '/admin/inventory/transfers',
-        },
-        {
-          label: 'Proveedores',
-          icon: 'truck',
-          route: '/admin/inventory/suppliers',
-        },
-        {
-          label: 'Pronóstico de Demanda',
-          icon: 'trending-up',
-          route: '/admin/inventory/demand-forecast',
-        },
-      ],
-    },
-    {
-      label: 'Operaciones',
-      icon: 'truck',
-      children: [
-        {
-          label: 'Gestión de Envíos',
-          icon: 'truck',
-          route: '/admin/operations/shipping',
-        },
-        {
-          label: 'Compras',
-          icon: 'cart',
-          route: '/admin/operations/procurement',
-        },
-        {
-          label: 'Gestión de Devoluciones',
-          icon: 'rotate-ccw',
-          route: '/admin/operations/returns',
-        },
-        {
-          label: 'Optimización de Rutas',
-          icon: 'globe-2',
-          route: '/admin/operations/route-optimization',
-        },
-      ],
+      route: '/admin/users',
     },
     {
       label: 'Auditoría y Cumplimiento',
       icon: 'shield',
-      children: [
-        {
-          label: 'Registros de Auditoría',
-          icon: 'file-text',
-          route: '/admin/audit/logs',
-        },
-        {
-          label: 'Reportes de Cumplimiento',
-          icon: 'file-check',
-          route: '/admin/audit/compliance',
-        }
-      ],
+      route: '/admin/audit/logs'
     },
     {
       label: 'Configuración',
@@ -313,24 +192,9 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/config/application',
         },
         {
-          label: 'Políticas',
-          icon: 'file-text',
-          route: '/admin/config/policies',
-        },
-        {
-          label: 'Integraciones',
-          icon: 'link-2',
-          route: '/admin/config/integrations',
-        },
-        {
-          label: 'Impuestos',
+          label: 'Metodos de pago',
           icon: 'credit-card',
-          route: '/admin/config/taxes',
-        },
-        {
-          label: 'Dominios',
-          icon: 'globe-2',
-          route: '/admin/config/domains',
+          route: '/admin/config/payments-methods',
         },
       ],
     },

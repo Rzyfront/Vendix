@@ -254,13 +254,22 @@ export class EnvironmentSwitchService {
       refresh_token: refresh_token,
     };
 
+    // Obtener configuración actual para no perder preferencias (ej: panel_ui)
+    const currentSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+
+    const currentConfig = (currentSettings?.config as Record<string, any>) || {};
+    const newConfig = {
+      ...currentConfig,
+      app: targetEnvironment,
+    };
+
     // Primero actualizar user settings con el nuevo entorno (antes de consultar)
     await this.prismaService.user_settings.upsert({
       where: { user_id: userId },
       update: {
-        config: {
-          app: targetEnvironment,
-        },
+        config: newConfig,
       },
       create: {
         user_id: userId,

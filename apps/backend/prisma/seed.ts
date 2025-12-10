@@ -395,6 +395,32 @@ async function main() {
       method: 'GET',
     },
 
+    // Clientes (Tienda)
+    {
+      name: 'store:customers:create',
+      description: 'Crear cliente en tienda',
+      path: '/api/store/customers',
+      method: 'POST',
+    },
+    {
+      name: 'store:customers:read',
+      description: 'Leer clientes de tienda',
+      path: '/api/store/customers',
+      method: 'GET',
+    },
+    {
+      name: 'store:customers:update',
+      description: 'Actualizar cliente en tienda',
+      path: '/api/store/customers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:customers:delete',
+      description: 'Eliminar cliente de tienda',
+      path: '/api/store/customers/:id',
+      method: 'DELETE',
+    },
+
     // Productos
     {
       name: 'store:products:create',
@@ -1466,6 +1492,7 @@ async function main() {
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
       p.name.includes('store:brands:read') ||
+      p.name.includes('store:customers:read') ||
       p.name.includes('organization:addresses:read') ||
       p.name.includes('store:addresses:read') ||
       p.name.includes('store:taxes:read'),

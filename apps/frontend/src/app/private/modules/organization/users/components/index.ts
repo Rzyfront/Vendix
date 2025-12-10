@@ -1,5 +1,7 @@
-export { UserStatsComponent } from './user-stats.component';
-export { UserCreateModalComponent } from './user-create-modal.component';
-export { UserEditModalComponent } from './user-edit-modal.component';
-export { UserEmptyStateComponent } from './user-empty-state.component';
-export { UserCardComponent } from './user-card.component';
+export * from './user-create-modal.component';
+export * from './user-edit-modal.component';
+export * from './user-empty-state.component';
+export * from './user-config-modal.component';
+export * from './user-stats.component';
+export * from './user-card.component';
+

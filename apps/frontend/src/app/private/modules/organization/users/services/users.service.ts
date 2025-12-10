@@ -237,4 +237,36 @@ export class UsersService {
       }),
     );
   }
+  /**
+   * Get user configuration (App, Roles, Stores, Panel UI)
+   */
+  getUserConfiguration(id: number): Observable<any> {
+    return this.http
+      .get<any>(`${this.apiUrl}/organization/users/${id}/configuration`)
+      .pipe(
+        map((response) => response.data),
+        catchError((error) => {
+          console.error('Error getting user configuration:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  /**
+   * Update user configuration
+   */
+  updateUserConfiguration(id: number, configData: any): Observable<any> {
+    this.isUpdatingUser$.next(true);
+
+    return this.http
+      .patch<any>(`${this.apiUrl}/organization/users/${id}/configuration`, configData)
+      .pipe(
+        map((response) => response.data),
+        finalize(() => this.isUpdatingUser$.next(false)),
+        catchError((error) => {
+          console.error('Error updating user configuration:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
 }

@@ -21,6 +21,7 @@ import {
   UserQueryDto,
   UsersDashboardDto,
   ResetPasswordDto,
+  UserConfigDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -244,6 +245,45 @@ export class UsersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al restablecer la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get(':id/configuration')
+  @Permissions('organization:users:read')
+  async getConfiguration(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.usersService.findConfiguration(id);
+      return this.responseService.success(
+        result,
+        'Configuración de usuario obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la configuración del usuario',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Patch(':id/configuration')
+  @Permissions('organization:users:update')
+  async updateConfiguration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() configDto: UserConfigDto,
+  ) {
+    try {
+      const result = await this.usersService.updateConfiguration(id, configDto);
+      return this.responseService.updated(
+        result,
+        'Configuración de usuario actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar la configuración del usuario',
         error.response?.message || error.message,
         error.status || 400,
       );

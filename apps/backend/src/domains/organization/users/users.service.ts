@@ -10,6 +10,7 @@ import {
   UpdateUserDto,
   UserQueryDto,
   UsersDashboardDto,
+  UserConfigDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -208,6 +209,9 @@ export class UsersService {
           state: true,
           last_login: true,
           created_at: true,
+          email_verified: true,
+          two_factor_enabled: true,
+          organization_id: true,
 
         },
       }),
@@ -482,5 +486,121 @@ export class UsersService {
     );
 
     return updated_user;
+  }
+
+
+  async findConfiguration(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        store_users: true,
+        user_settings: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const config: UserConfigDto = {
+      app:
+        (user.user_settings[0]?.config as any)?.app || 'VENDIX_LANDING',
+      roles: user.user_roles.map((ur) => ur.role_id),
+      store_ids: user.store_users.map((su) => su.store_id),
+      panel_ui: (user.user_settings[0]?.config as any)?.panel_ui || {},
+    };
+
+    return config;
+  }
+
+  async updateConfiguration(id: number, configDto: UserConfigDto) {
+    const { app, roles, store_ids, panel_ui } = configDto;
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Update User Settings (App & Panel UI)
+      const existingSettings = await tx.user_settings.findFirst({
+        where: { user_id: id },
+      });
+
+      if (existingSettings) {
+        await tx.user_settings.update({
+          where: { id: existingSettings.id },
+          data: {
+            config: {
+              ...((existingSettings.config as object) || {}),
+              app,
+              panel_ui,
+            },
+            updated_at: new Date(),
+          },
+        });
+      } else {
+        await tx.user_settings.create({
+          data: {
+            user_id: id,
+            config: { app, panel_ui },
+          },
+        });
+      }
+
+      // 2. Update Roles
+      if (roles) {
+        // Remove roles not in the new list
+        await tx.user_roles.deleteMany({
+          where: {
+            user_id: id,
+            role_id: { notIn: roles },
+          },
+        });
+
+        // Add new roles
+        for (const roleId of roles) {
+          const exists = await tx.user_roles.findFirst({
+            where: { user_id: id, role_id: roleId },
+          });
+          if (!exists) {
+            await tx.user_roles.create({
+              data: {
+                user_id: id,
+                role_id: roleId,
+              },
+            });
+          }
+        }
+      }
+
+      // 3. Update Stores
+      if (store_ids) {
+        // Remove stores not in the new list
+        await tx.store_users.deleteMany({
+          where: {
+            user_id: id,
+            store_id: { notIn: store_ids },
+          },
+        });
+
+        // Add new stores
+        for (const storeId of store_ids) {
+          const exists = await tx.store_users.findFirst({
+            where: { user_id: id, store_id: storeId },
+          });
+          if (!exists) {
+            await tx.store_users.create({
+              data: {
+                user_id: id,
+                store_id: storeId,
+              },
+            });
+          }
+        }
+      }
+
+      return this.findConfiguration(id);
+    });
   }
 }
