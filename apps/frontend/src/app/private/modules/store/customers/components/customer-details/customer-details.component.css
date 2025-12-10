@@ -1,0 +1,25 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+/* Estilos adicionales para preparación futura */
+.customer-details-container {
+  @apply min-h-screen bg-gray-50;
+}
+
+.customer-details-header {
+  @apply mb-6;
+}
+
+.customer-details-content {
+  @apply bg-white rounded-lg shadow-sm border;
+}
+
+.customer-details-loading {
+  @apply opacity-60 pointer-events-none;
+}
+
+.customer-details-empty {
+  @apply text-center p-8;
+}

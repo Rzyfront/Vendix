@@ -1,0 +1,25 @@
+:host {
+  display: block;
+  width: 100%;
+}
+
+/* Estilos adicionales para preparación futura */
+.customer-reviews-container {
+  @apply min-h-screen bg-gray-50;
+}
+
+.customer-reviews-header {
+  @apply mb-6;
+}
+
+.customer-reviews-content {
+  @apply bg-white rounded-lg shadow-sm border;
+}
+
+.customer-reviews-empty {
+  @apply text-center p-8;
+}
+
+.customer-reviews-loading {
+  @apply opacity-60 pointer-events-none;
+}

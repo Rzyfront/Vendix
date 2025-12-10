@@ -58,20 +58,27 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'list',
+            redirectTo: 'dashboard',
+          },
+          {
+            path: 'dashboard',
+            loadComponent: () =>
+              import('../../private/modules/store/orders/orders').then(
+                (c) => c.OrdersComponent,
+              ),
           },
           {
             path: 'list',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/list/orders-list.component'
+                '../../private/modules/store/orders/components/orders-list'
               ).then((c) => c.OrdersListComponent),
           },
           {
             path: ':id',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/details/order-details.component'
+                '../../private/modules/store/orders/components/order-details'
               ).then((c) => c.OrderDetailsComponent),
           },
         ],
@@ -83,28 +90,25 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'all',
-          },
-          {
-            path: 'all',
             loadComponent: () =>
               import(
-                '../../private/modules/store/customers/all/all-customers.component'
-              ).then((c) => c.AllCustomersComponent),
+                '../../private/modules/store/customers/customer-list/customer-list.component'
+              ).then((c) => c.CustomerListComponent),
           },
           {
-            path: ':id',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/details/customer-details.component'
-              ).then((c) => c.CustomerDetailsComponent),
+            path: 'all',  // ← NUEVO: Para el menú "Todos los Clientes"
+            loadComponent: () => import('../../private/modules/store/customers/customer-list/customer-list.component')
+              .then((c) => c.CustomerListComponent),
           },
           {
-            path: 'reviews',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/customers/reviews/reviews.component'
-              ).then((c) => c.ReviewsComponent),
+            path: ':id',  // ← NUEVO: Para detalles de cliente
+            loadComponent: () => import('../../private/modules/store/customers/components/customer-details/customer-details.component')
+              .then((c) => c.CustomerDetailsComponent),
+          },
+          {
+            path: 'reviews',  // ← NUEVO: Para el menú "Reseñas"
+            loadComponent: () => import('../../private/modules/store/customers/components/customer-reviews/customer-reviews.component')
+              .then((c) => c.CustomerReviewsComponent),
           },
         ],
       },
@@ -137,11 +141,6 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'analytics',
         children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            redirectTo: 'sales',
-          },
           {
             path: 'sales',
             loadComponent: () =>
@@ -180,6 +179,13 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/settings/general/general-settings.component'
               ).then((c) => c.GeneralSettingsComponent),
+          },
+          {
+            path: 'payments',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/payments/payments-settings.component'
+              ).then((c) => c.PaymentsSettingsComponent),
           },
           {
             path: 'appearance',
