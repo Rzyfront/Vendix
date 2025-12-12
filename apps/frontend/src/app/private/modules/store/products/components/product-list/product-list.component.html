@@ -1,28 +1,4 @@
 <div class="space-y-6">
-  <!-- Tarjetas de Estadísticas -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-    <!-- Total de Productos -->
-    <app-stats title="Total de Productos" [value]="formatNumber(stats.total_products)" [smallText]="
-        getGrowthPercentage(stats.productsGrowthRate || 0) + ' vs mes anterior'
-      " iconName="package" iconBgColor="bg-primary/10" iconColor="text-primary"></app-stats>
-
-    <!-- Productos Activos -->
-    <app-stats title="Productos Activos" [value]="formatNumber(stats.active_products)" [smallText]="
-        getGrowthPercentage(stats.activeProductsGrowthRate || 0) +
-        ' vs mes anterior'
-      " iconName="check-circle" iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
-
-    <!-- Productos con Stock Bajo -->
-    <app-stats title="Productos con Stock Bajo" [value]="formatNumber(stats.low_stock_products)" [smallText]="
-        getGrowthPercentage(stats.lowStockGrowthRate || 0) + ' vs mes anterior'
-      " iconName="alert-triangle" iconBgColor="bg-yellow-100" iconColor="text-yellow-600"></app-stats>
-
-    <!-- Productos sin Imágenes -->
-    <app-stats title="Productos sin Imágenes" [value]="formatNumber(stats.products_without_images || 0)" [smallText]="
-        getGrowthPercentage(stats.noImagesGrowthRate || 0) + ' vs mes anterior'
-      " iconName="image-off" iconBgColor="bg-red-100" iconColor="text-red-600"></app-stats>
-  </div>
-
   <!-- Lista de Productos -->
   <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
     <div class="px-6 py-4 border-b border-border">
@@ -36,7 +12,7 @@
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
           <!-- Quick search input -->
           <app-inputsearch class="w-full sm:w-64 flex-shrink-0" size="sm" placeholder="Buscar productos..."
-            [debounceTime]="1000" [(ngModel)]="searchTerm" (ngModelChange)="onSearchChange($event)"></app-inputsearch>
+            [debounceTime]="1000" [ngModel]="searchTerm" (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
           <!-- Filter dropdown -->
           <app-product-filter-dropdown [searchTerm]="searchTerm" [selectedState]="selectedState"
@@ -46,15 +22,15 @@
 
           <!-- Action buttons -->
           <div class="flex gap-2 items-center ml-auto">
-            <app-button variant="outline" size="sm" (clicked)="refreshProducts()" [disabled]="isLoading"
+            <app-button variant="outline" size="sm" (clicked)="refresh.emit()" [disabled]="isLoading"
               title="Actualizar">
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button variant="outline" size="sm" (clicked)="openBulkUploadModal()" [disabled]="isLoading"
+            <app-button variant="outline" size="sm" (clicked)="bulkUpload.emit()" [disabled]="isLoading"
               title="Carga Masiva">
               <app-icon name="upload" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button variant="primary" size="sm" (clicked)="openCreateProductModal()" title="Nuevo Producto">
+            <app-button variant="primary" size="sm" (clicked)="create.emit()" title="Nuevo Producto">
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               <span class="hidden sm:inline">Nuevo Producto</span>
             </app-button>
@@ -71,30 +47,16 @@
 
     <!-- Estado Vacío -->
     <app-product-empty-state *ngIf="!isLoading && products.length === 0" [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()" [showAdditionalActions]="hasFilters"
-      (actionClick)="openCreateProductModal()" (refreshClick)="refreshProducts()" (clearFiltersClick)="clearFilters()">
+      [description]="getEmptyStateDescription()" [showAdditionalActions]="hasFilters" (actionClick)="create.emit()"
+      (refreshClick)="refresh.emit()" (clearFiltersClick)="clearFilters()">
     </app-product-empty-state>
 
     <!-- Tabla de Productos -->
     <div *ngIf="!isLoading && products.length > 0" class="p-6">
       <app-table [data]="products" [columns]="tableColumns" [actions]="tableActions" [loading]="isLoading"
-        [sortable]="true" [hoverable]="true" [striped]="true" size="md" (sort)="onTableSort($event)"
-        (rowClick)="viewProduct($event)">
+        [sortable]="true" [hoverable]="true" [striped]="true" size="md" (sort)="sort.emit($event)"
+        (rowClick)="edit.emit($event)">
       </app-table>
     </div>
   </div>
-
-  <!-- Modal Crear Producto -->
-  <app-product-create-modal [isOpen]="isCreateModalOpen" [isSubmitting]="isCreatingProduct"
-    (openChange)="onCreateModalChange($event)" (submit)="createProduct($event)"
-    (cancel)="onCreateModalCancel()"></app-product-create-modal>
-
-  <!-- Modal Carga Masiva -->
-  <app-bulk-upload-modal [isOpen]="isBulkUploadModalOpen" (openChange)="isBulkUploadModalOpen = $event"
-    (uploadComplete)="onBulkUploadComplete()"></app-bulk-upload-modal>
-
-  <!-- Modal Editar Producto -->
-  <app-product-create-modal [isOpen]="isEditModalOpen" [isSubmitting]="isUpdatingProduct"
-    [product]="selectedProduct || null" (openChange)="onEditModalChange($event)" (submit)="updateProduct($event)"
-    (cancel)="onEditModalCancel()"></app-product-create-modal>
 </div>

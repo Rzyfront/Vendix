@@ -1,58 +1,224 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Subject, takeUntil, finalize } from 'rxjs';
+import {
+  CustomerListComponent,
+  CustomerModalComponent
+} from './components';
+import { StatsComponent } from '../../../../shared/components/stats/stats.component';
+import { CustomersService } from './services/customers.service';
+import { Customer, CustomerStats, CreateCustomerRequest, UpdateCustomerRequest } from './models/customer.model';
+import { ToastService, DialogService } from '../../../../shared/components';
 
 @Component({
   selector: 'app-customers',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    StatsComponent,
+    CustomerListComponent,
+    CustomerModalComponent
+  ],
   template: `
     <div class="p-6">
-      <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">
-          Customer Management
-        </h1>
-        <p class="text-gray-600">
-          Manage customer information, reviews, and relationships
-        </p>
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <app-stats
+          title="Total Customers"
+          [value]="stats?.total_customers || 0"
+          smallText="+12% vs last month"
+          iconName="users"
+          iconBgColor="bg-primary/10"
+          iconColor="text-primary"
+        ></app-stats>
+
+        <app-stats
+          title="Active Customers"
+          [value]="stats?.active_customers || 0"
+          smallText="+5% vs last month"
+          iconName="user-check"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="New This Month"
+          [value]="stats?.new_customers_this_month || 0"
+          smallText="+8% vs last month"
+          iconName="user-plus"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Total Revenue"
+          [value]="((stats?.total_revenue || 0) | currency) || '$0.00'"
+          smallText="+15% vs last month"
+          iconName="dollar-sign"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
       </div>
 
-      <div class="bg-white rounded-lg shadow-sm border p-8">
-        <div class="text-center">
-          <div
-            class="inline-flex items-center justify-center w-16 h-16 bg-purple-100 rounded-full mb-4"
-          >
-            <svg
-              class="w-8 h-8 text-purple-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-              ></path>
-            </svg>
-          </div>
-          <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Customers Module
-          </h2>
-          <p class="text-gray-600 max-w-md mx-auto">
-            This module is under development. You will be able to manage
-            customer information and reviews here.
-          </p>
-        </div>
-      </div>
+      <!-- List -->
+      <app-customer-list
+        [customers]="customers"
+        [loading]="loading"
+        [totalItems]="totalItems"
+        (search)="onSearch($event)"
+        (create)="openCreateModal()"
+        (edit)="openEditModal($event)"
+        (delete)="onDelete($event)"
+        (refresh)="loadCustomers()"
+      ></app-customer-list>
+
+      <!-- Modal -->
+      <app-customer-modal
+        [isOpen]="isModalOpen"
+        [customer]="selectedCustomer"
+        [loading]="actionLoading"
+        (closed)="closeModal()"
+        (save)="onSave($event)"
+      ></app-customer-modal>
     </div>
-  `,
-  styles: [
-    `
-      :host {
-        display: block;
-        width: 100%;
-      }
-    `,
-  ],
+  `
 })
-export class CustomersComponent {}
+export class CustomersComponent implements OnInit, OnDestroy {
+  stats: CustomerStats | null = null;
+  customers: Customer[] = [];
+
+  loading = false;
+  actionLoading = false;
+
+  // Pagination
+  page = 1;
+  limit = 10;
+  totalItems = 0;
+  searchQuery = '';
+
+  // Modal
+  isModalOpen = false;
+  selectedCustomer: Customer | null = null;
+
+  private destroy$ = new Subject<void>();
+
+  constructor(
+    private customersService: CustomersService,
+    private toastService: ToastService,
+    private dialogService: DialogService
+  ) { }
+
+  ngOnInit(): void {
+    this.loadStats();
+    this.loadCustomers();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  loadStats() {
+    this.customersService.getStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(stats => this.stats = stats);
+  }
+
+  loadCustomers() {
+    this.loading = true;
+    this.customersService.getCustomers(this.page, this.limit, { search: this.searchQuery })
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => this.loading = false)
+      )
+      .subscribe({
+        next: (response) => {
+          this.customers = response.data;
+          this.totalItems = response.meta.total;
+        },
+        error: () => {
+          this.toastService.error('Failed to load customers');
+        }
+      });
+  }
+
+  onSearch(query: string) {
+    this.searchQuery = query;
+    this.page = 1;
+    this.loadCustomers();
+  }
+
+  onPageChange(page: number) {
+    this.page = page;
+    this.loadCustomers();
+  }
+
+  openCreateModal() {
+    this.openModal();
+  }
+
+  openEditModal(customer: Customer) {
+    this.openModal(customer);
+  }
+
+  openModal(customer?: Customer) {
+    this.selectedCustomer = customer || null;
+    this.isModalOpen = true;
+  }
+
+  closeModal() {
+    this.isModalOpen = false;
+    this.selectedCustomer = null;
+  }
+
+  onSave(data: CreateCustomerRequest) {
+    this.actionLoading = true;
+
+    const request$ = this.selectedCustomer
+      ? this.customersService.updateCustomer(this.selectedCustomer.id, data)
+      : this.customersService.createCustomer(data);
+
+    request$
+      .pipe(
+        takeUntil(this.destroy$),
+        finalize(() => this.actionLoading = false)
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(`Customer ${this.selectedCustomer ? 'updated' : 'created'} successfully`);
+          this.closeModal();
+          this.loadCustomers();
+          this.loadStats(); // Refresh stats too
+        },
+        error: (err) => {
+          console.error(err);
+          this.toastService.error('Operation failed');
+        }
+      });
+  }
+
+  onDelete(customer: Customer) {
+    this.dialogService.confirm({
+      title: 'Delete Customer',
+      message: `Are you sure you want to delete ${customer.first_name} ${customer.last_name}?`,
+      confirmVariant: 'danger',
+      confirmText: 'Delete'
+    }).then(confirmed => {
+      if (confirmed) {
+        this.customersService.deleteCustomer(customer.id)
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.toastService.success('Customer deleted');
+              this.loadCustomers();
+              this.loadStats();
+            },
+            error: () => {
+              this.toastService.error('Failed to delete customer');
+            }
+          });
+      }
+    });
+  }
+}

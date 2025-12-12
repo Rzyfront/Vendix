@@ -381,62 +381,6 @@ You must implement:
 
 ## YOUR MANDATORY REQUIREMENTS - NON-NEGOTIABLE
 
-### **TEST-FIRST DEVELOPMENT APPROACH - ABSOLUTELY MANDATORY**
-
-### **YOU MUST ALWAYS START WITH SPECS TESTING**
-
-Before beginning any development task, regardless of whether explicitly requested, you **MUST**:
-
-**1. CREATE TESTS FIRST**
-- Always start by creating comprehensive SPECS tests for the new functionality
-- Design tests that cover all expected scenarios, edge cases, and error conditions
-- Include tests for both positive and negative cases
-- Test all CRUD operations, validation rules, and business logic requirements
-- Mock all external dependencies appropriately
-- Follow established testing patterns from existing codebase
-
-**2. EXPLAIN YOUR APPROACH TO THE USER**
-Always communicate to the user:
-```
-● **Learn by Doing - Test-First Development Approach**
-
-**Context:** Based on our experience with the Vendix codebase, I've found that creating comprehensive tests first ensures robust, maintainable code. Starting with tests helps us define clear requirements and catch issues early.
-
-**Your Task:** First, I'll create the complete test suite for [specific functionality], then we'll implement the actual code to make these tests pass. This Test-Driven Development approach ensures:
-
-✅ Clear requirements definition through test specifications
-✅ Better code design and architecture
-✅ Immediate feedback on implementation correctness
-✅ Comprehensive edge case coverage
-✅ Future-proofing against regressions
-
-**Process:** I'll create the tests first, explain what they cover, then implement the functionality step by step to achieve green tests. This ensures we build the right solution with proper error handling and validation from the start.
-```
-
-**3. IMPLEMENT TO SATISFY TESTS**
-- Write the minimum code necessary to make all tests pass
-- Follow existing patterns and conventions in the codebase
-- Ensure all validations, error handling, and business logic are properly implemented
-- Refactor only when all tests are passing
-- Run tests frequently during implementation
-
-**4. VERIFY COMPREHENSIVE COVERAGE**
-- Ensure tests cover all critical paths and edge cases
-- Verify error scenarios are properly handled
-- Confirm integration points work correctly
-- Test performance considerations where relevant
-- Validate against security requirements
-
-**WHY THIS APPROACH IS CRITICAL:**
-- **Prevents Bugs**: Catch issues before they reach production
-- **Better Design**: Forces thoughtful API and architecture decisions
-- **Documentation**: Tests serve as living documentation of expected behavior
-- **Refactoring Safety**: Enables confident code improvements
-- **Team Velocity**: Reduces time spent on debugging and rework
-- **Quality Assurance**: Ensures consistent, reliable functionality
-
-**YOUR MANDATE**: Test-first development is **NOT OPTIONAL** - it is a **CRITICAL REQUIREMENT** for all development work in this codebase. Never skip this step, regardless of task complexity or time constraints.
-
 ### **YOU MUST ALWAYS USE TASK TOOLS**
 
 For all complex, multi-step, or exploration tasks, you are **REQUIRED** to use:

@@ -1,33 +1,15 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { FormsModule } from '@angular/forms';
 
-import { ProductsService } from '../../services/products.service';
-import { CategoriesService } from '../../services/categories.service';
-import { BrandsService } from '../../services/brands.service';
 import {
   Product,
   ProductState,
-  CreateProductDto,
-  UpdateProductDto,
   ProductQueryDto,
-  ProductStats,
   ProductCategory,
   Brand,
 } from '../../interfaces';
-
-import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
-
-// Import existing components
-import { ProductCreateModalComponent } from '../product-create-modal.component';
-import { BulkUploadModalComponent } from '../bulk-upload-modal/bulk-upload-modal.component';
-import {
-  ProductEmptyStateComponent,
-  ProductFilterDropdownComponent,
-} from '../index';
 
 // Import shared components
 import {
@@ -35,14 +17,14 @@ import {
   IconComponent,
   TableComponent,
   ButtonComponent,
-  DialogService,
-  ToastService,
   TableColumn,
   TableAction,
-  StatsComponent,
 } from '../../../../../../shared/components/index';
 
-// Import styles (CSS instead of SCSS to avoid loader issues)
+import { ProductFilterDropdownComponent } from '../product-filter-dropdown/product-filter-dropdown.component';
+import { ProductEmptyStateComponent } from '../product-empty-state.component';
+
+// Import styles
 import './product-list.component.css';
 
 @Component({
@@ -52,30 +34,35 @@ import './product-list.component.css';
     CommonModule,
     RouterModule,
     FormsModule,
-    ReactiveFormsModule,
-    StatsComponent,
-    ProductEmptyStateComponent,
-    ProductCreateModalComponent,
-    BulkUploadModalComponent,
-    ProductFilterDropdownComponent,
     InputsearchComponent,
     IconComponent,
     TableComponent,
     ButtonComponent,
+    ProductFilterDropdownComponent,
+    ProductEmptyStateComponent,
   ],
-  providers: [ProductsService],
   templateUrl: './product-list.component.html',
 })
-export class ProductListComponent implements OnInit, OnDestroy {
-  products: Product[] = [];
-  isLoading = false;
+export class ProductListComponent {
+  @Input() products: Product[] = [];
+  @Input() isLoading = false;
+  @Input() categories: ProductCategory[] = [];
+  @Input() brands: Brand[] = [];
+
+  @Output() refresh = new EventEmitter<void>();
+  @Output() search = new EventEmitter<string>();
+  @Output() filter = new EventEmitter<Partial<ProductQueryDto>>();
+  @Output() create = new EventEmitter<void>();
+  @Output() edit = new EventEmitter<Product>();
+  @Output() delete = new EventEmitter<Product>();
+  @Output() duplicate = new EventEmitter<Product>();
+  @Output() bulkUpload = new EventEmitter<void>();
+  @Output() sort = new EventEmitter<{ column: string; direction: 'asc' | 'desc' | null }>();
+
   searchTerm = '';
   selectedState = '';
   selectedCategory = '';
   selectedBrand = '';
-
-  // Bulk Upload Modal state
-  isBulkUploadModalOpen = false;
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -148,333 +135,34 @@ export class ProductListComponent implements OnInit, OnDestroy {
     {
       label: 'Edit',
       icon: 'edit',
-      action: (product: Product) => this.editProduct(product),
+      action: (product: Product) => this.edit.emit(product),
       variant: 'primary',
     },
     {
       label: 'Duplicate',
       icon: 'copy',
-      action: (product: Product) => this.duplicateProduct(product),
+      action: (product: Product) => this.duplicate.emit(product),
       variant: 'secondary',
     },
     {
       label: 'Eliminar',
       icon: 'trash-2',
-      action: (product: Product) => this.deleteProduct(product),
+      action: (product: Product) => this.delete.emit(product),
       variant: 'danger',
     },
   ];
 
-  stats: ProductStats = {
-    total_products: 0,
-    active_products: 0,
-    inactive_products: 0,
-    archived_products: 0,
-    low_stock_products: 0,
-    out_of_stock_products: 0,
-    total_value: 0,
-    categories_count: 0,
-    brands_count: 0,
-  };
-
-  // Modal state
-  isCreateModalOpen = false;
-  isCreatingProduct = false;
-  createProductForm!: FormGroup;
-
-  // Edit Modal state
-  isEditModalOpen = false;
-  isUpdatingProduct = false;
-  selectedProduct?: Product;
-
-  // Available options for filters
-  categories: ProductCategory[] = [];
-  brands: Brand[] = [];
-
-  private subscriptions: Subscription[] = [];
-
-  constructor(
-    private productsService: ProductsService,
-    private categoriesService: CategoriesService,
-    private brandsService: BrandsService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-    private tenantFacade: TenantFacade,
-  ) {
-    this.initializeCreateForm();
+  // Event Handlers
+  onSearchChange(term: string): void {
+    this.searchTerm = term;
+    this.search.emit(term);
   }
 
-  ngOnInit(): void {
-    this.loadProducts();
-    this.loadStats();
-    this.loadCategories();
-    this.loadBrands();
-  }
-
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
-  private initializeCreateForm(): void {
-    this.createProductForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(2)]],
-      slug: ['', [Validators.minLength(2)]],
-      description: [''],
-      base_price: [0, [Validators.required, Validators.min(0)]],
-      sku: [''],
-      stock_quantity: [0, [Validators.min(0)]],
-      category_id: [null],
-      brand_id: [null],
-      state: [ProductState.ACTIVE],
-    });
-  }
-
-
-
-  // Bulk Upload Methods
-  openBulkUploadModal(): void {
-    this.isBulkUploadModalOpen = true;
-  }
-
-  onBulkUploadComplete(): void {
-    this.isBulkUploadModalOpen = false;
-    this.loadProducts();
-    this.loadStats();
-    this.toastService.success('Carga masiva completada');
-  }
-
-  get hasFilters(): boolean {
-    return !!(
-      this.searchTerm ||
-      this.selectedState ||
-      this.selectedCategory ||
-      this.selectedBrand
-    );
-  }
-
-  openCreateProductModal(): void {
-    this.isCreateModalOpen = true;
-    this.createProductForm.reset({
-      name: '',
-      slug: '',
-      description: '',
-      base_price: 0,
-      sku: '',
-      stock_quantity: 0,
-      category_id: null,
-      brand_id: null,
-      state: ProductState.ACTIVE,
-    });
-  }
-
-  onCreateModalChange(isOpen: boolean): void {
-    this.isCreateModalOpen = isOpen;
-    if (!isOpen) {
-      this.createProductForm.reset();
-    }
-  }
-
-  onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
-    this.createProductForm.reset();
-  }
-
-  createProduct(productData?: CreateProductDto | Event): void {
-    if (!productData || productData instanceof Event) {
-      // Called from "Cadastrar" button - create a default product
-      const defaultProductData: CreateProductDto = {
-        name: 'New Product',
-        slug: this.generateSlug('New Product'),
-        description: 'Default product created from quick action',
-        base_price: 0,
-        sku: undefined,
-        stock_quantity: 0,
-        category_id: undefined,
-        brand_id: undefined,
-      };
-
-      this.isCreatingProduct = true;
-
-      const sub = this.productsService
-        .createProduct(defaultProductData)
-        .subscribe({
-          next: (response: any) => {
-            console.log('Create product response:', response);
-            this.loadProducts();
-            this.loadStats();
-            this.toastService.success('Product created successfully');
-            this.isCreatingProduct = false;
-          },
-          error: (error: any) => {
-            console.error('Error creating product:', error);
-            this.toastService.error('Error creating product');
-            this.isCreatingProduct = false;
-          },
-        });
-
-      this.subscriptions.push(sub);
-      return;
-    }
-
-    // Called with form data from modal - create the product and refresh table
-    this.isCreatingProduct = true;
-
-    const sub = this.productsService
-      .createProduct(productData as CreateProductDto)
-      .subscribe({
-        next: (response: any) => {
-          console.log('Create product response:', response);
-          this.isCreateModalOpen = false;
-          this.loadProducts();
-          this.loadStats();
-          this.toastService.success('Product created successfully');
-          this.isCreatingProduct = false;
-        },
-        error: (error: any) => {
-          console.error('Error creating product:', error);
-          this.toastService.error('Error creating product');
-          this.isCreatingProduct = false;
-        },
-      });
-
-    this.subscriptions.push(sub);
-  }
-
-  loadProducts(): void {
-    this.isLoading = true;
-
-    const query: ProductQueryDto = {
-      ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedState && { state: this.selectedState as ProductState }),
-      ...(this.selectedCategory && {
-        category_id: parseInt(this.selectedCategory),
-      }),
-      ...(this.selectedBrand && { brand_id: parseInt(this.selectedBrand) }),
-    };
-
-    const sub = this.productsService.getProducts(query).subscribe({
-      next: (response: any) => {
-        console.log('Products response:', response);
-        if (response.data) {
-          this.products = response.data.map((product: any) => ({
-            id: product.id,
-            store_id: product.store_id,
-            category_id: product.category_id,
-            brand_id: product.brand_id,
-            name: product.name,
-            slug: product.slug,
-            description: product.description,
-            base_price: product.base_price,
-            sku: product.sku,
-            stock_quantity: product.stock_quantity,
-            state: product.state || ProductState.ACTIVE,
-            created_at: product.created_at || new Date(),
-            updated_at: product.updated_at || new Date(),
-            category: product.category,
-            brand: product.brand,
-            images: product.images || [],
-            variants: product.variants || [],
-          }));
-          console.log('Processed products:', this.products);
-        } else {
-          console.warn('Invalid response structure:', response);
-          this.products = [];
-        }
-        this.isLoading = false;
-      },
-      error: (error: any) => {
-        console.error('Error loading products:', error);
-        this.isLoading = false;
-      },
-    });
-
-    this.subscriptions.push(sub);
-  }
-
-  loadStats(): void {
-    const currentStore = this.tenantFacade.getCurrentStore();
-
-    if (!currentStore || !currentStore.id) {
-      console.error('No current store found, cannot load product stats');
-      this.updateStats();
-      return;
-    }
-
-    const storeId = parseInt(currentStore.id, 10);
-    if (isNaN(storeId)) {
-      console.error('Invalid store ID:', currentStore.id);
-      this.updateStats();
-      return;
-    }
-
-    const sub = this.productsService.getProductStats(storeId).subscribe({
-      next: (response: any) => {
-        console.log('Product stats response:', response);
-        if (response) {
-          this.stats = response;
-        } else {
-          console.warn('Invalid stats response structure:', response);
-          this.updateStats();
-        }
-      },
-      error: (error: any) => {
-        console.error('Error loading product stats:', error);
-        this.updateStats();
-      },
-    });
-
-    this.subscriptions.push(sub);
-  }
-
-  loadCategories(): void {
-    this.categoriesService.getCategories().subscribe({
-      next: (categories: ProductCategory[]) => {
-        this.categories = categories;
-      },
-      error: (error: any) => {
-        console.error('Error loading categories:', error);
-        this.categories = [];
-      },
-    });
-  }
-
-  loadBrands(): void {
-    this.brandsService.getBrands().subscribe({
-      next: (brands: Brand[]) => {
-        this.brands = brands;
-      },
-      error: (error: any) => {
-        console.error('Error loading brands:', error);
-        this.brands = [];
-      },
-    });
-  }
-
-  updateStats(): void {
-    this.stats.total_products = this.products.length;
-    this.stats.active_products = this.products.filter(
-      (product) => product.state === ProductState.ACTIVE,
-    ).length;
-    this.stats.inactive_products = this.products.filter(
-      (product) => product.state === ProductState.INACTIVE,
-    ).length;
-    this.stats.archived_products = this.products.filter(
-      (product) => product.state === ProductState.ARCHIVED,
-    ).length;
-    this.stats.low_stock_products = this.products.filter(
-      (product) =>
-        product.stock_quantity !== undefined &&
-        product.stock_quantity > 0 &&
-        product.stock_quantity <= 10,
-    ).length;
-    this.stats.out_of_stock_products = this.products.filter(
-      (product) => product.stock_quantity === 0,
-    ).length;
-  }
-
-  refreshProducts(): void {
-    this.loadProducts();
+  onFilterDropdownChange(query: ProductQueryDto): void {
+    this.selectedState = query.state || '';
+    this.selectedCategory = query.category_id?.toString() || '';
+    this.selectedBrand = query.brand_id?.toString() || '';
+    this.filter.emit(query);
   }
 
   clearFilters(): void {
@@ -482,149 +170,8 @@ export class ProductListComponent implements OnInit, OnDestroy {
     this.selectedState = '';
     this.selectedCategory = '';
     this.selectedBrand = '';
-    this.loadProducts();
-  }
-
-  onStateChange(event: any): void {
-    this.selectedState = event.target.value;
-    this.loadProducts();
-  }
-
-  onCategoryChange(event: any): void {
-    this.selectedCategory = event.target.value;
-    this.loadProducts();
-  }
-
-  onBrandChange(event: any): void {
-    this.selectedBrand = event.target.value;
-    this.loadProducts();
-  }
-
-  onSearchChange(searchTerm: string): void {
-    this.searchTerm = searchTerm;
-    this.loadProducts();
-  }
-
-  onFilterDropdownChange(query: ProductQueryDto): void {
-    // Update local state from dropdown query (excluding search)
-    this.selectedState = query.state || '';
-    this.selectedCategory = query.category_id?.toString() || '';
-    this.selectedBrand = query.brand_id?.toString() || '';
-
-    // Reload products with new filters
-    this.loadProducts();
-  }
-
-  onTableSort(sortEvent: {
-    column: string;
-    direction: 'asc' | 'desc' | null;
-  }): void {
-    console.log('Sort event:', sortEvent);
-    this.loadProducts();
-  }
-
-  editProduct(product: Product): void {
-    this.selectedProduct = product;
-    this.isEditModalOpen = true;
-  }
-
-  onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
-    if (!isOpen) {
-      this.selectedProduct = undefined;
-    }
-  }
-
-  onEditModalCancel(): void {
-    this.isEditModalOpen = false;
-    this.selectedProduct = undefined;
-  }
-
-  updateProduct(productData: any): void {
-    if (!this.selectedProduct) return;
-
-    this.isUpdatingProduct = true;
-
-    const updateData: UpdateProductDto = {
-      name: productData.name,
-      slug: productData.slug,
-      description: productData.description,
-      base_price: productData.base_price,
-      sku: productData.sku,
-      stock_quantity: productData.stock_quantity,
-      state: productData.state,
-      category_id: productData.category_id,
-      brand_id: productData.brand_id,
-      images: productData.images, // Include images in update payload
-    };
-
-    const sub = this.productsService
-      .updateProduct(this.selectedProduct.id, updateData)
-      .subscribe({
-        next: (response: any) => {
-          console.log('Update product response:', response);
-          this.isEditModalOpen = false;
-          this.selectedProduct = undefined;
-          this.loadProducts();
-          this.loadStats();
-          this.toastService.success('Product updated successfully');
-          this.isUpdatingProduct = false;
-        },
-        error: (error: any) => {
-          console.error('Error updating product:', error);
-          this.toastService.error('Error updating product');
-          this.isUpdatingProduct = false;
-        },
-      });
-
-    this.subscriptions.push(sub);
-  }
-
-  duplicateProduct(product: Product): void {
-    const duplicateData: CreateProductDto = {
-      name: `${product.name} (Copy)`,
-      slug: `${product.slug}-copy`,
-      description: product.description,
-      base_price: product.base_price,
-      sku: product.sku ? `${product.sku}-COPY` : undefined,
-      stock_quantity: product.stock_quantity,
-      category_id: product.category_id,
-      brand_id: product.brand_id,
-    };
-
-    this.createProduct(duplicateData);
-  }
-
-  deleteProduct(product: Product): void {
-    this.dialogService
-      .confirm({
-        title: 'Eliminar Producto',
-        message: `¿Está seguro de que desea eliminar "${product.name}"? Esta acción no se puede deshacer.`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
-      .then((confirmed: boolean) => {
-        if (confirmed) {
-          const sub = this.productsService.deleteProduct(product.id).subscribe({
-            next: () => {
-              this.loadProducts();
-              this.loadStats();
-              this.toastService.success('Product deleted successfully');
-            },
-            error: (error: any) => {
-              console.error('Error deleting product:', error);
-              this.toastService.error('Error deleting product');
-            },
-          });
-
-          this.subscriptions.push(sub);
-        }
-      });
-  }
-
-  viewProduct(product: Product): void {
-    console.log('View product:', product);
+    this.search.emit('');
+    this.filter.emit({});
   }
 
   // Helper methods
@@ -640,47 +187,22 @@ export class ProductListComponent implements OnInit, OnDestroy {
     }).format(value);
   }
 
-  generateSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-  }
-
   getEmptyStateTitle(): string {
-    if (this.hasFilters) {
-      return 'No products match your filters';
-    }
-    return 'No products found';
+    return this.hasFilters ? 'No products match your filters' : 'No products found';
   }
 
   getEmptyStateDescription(): string {
-    if (this.hasFilters) {
-      return 'Try adjusting your search terms or filters';
-    }
-    return 'Get started by creating your first product.';
+    return this.hasFilters
+      ? 'Try adjusting your search terms or filters'
+      : 'Get started by creating your first product.';
   }
 
-  // Formatear número para visualización (movido desde ProductStatsComponent)
-  formatNumber(num: number): string {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  }
-
-  // Calcular porcentaje de crecimiento (movido desde ProductStatsComponent)
-  getGrowthPercentage(growthRate: number): string {
-    const sign = growthRate >= 0 ? '+' : '';
-    return `${sign}${growthRate.toFixed(1)}%`;
-  }
-
-  // Determinar clase CSS según el crecimiento (movido desde ProductStatsComponent)
-  getGrowthClass(growthRate: number): string {
-    if (growthRate > 0) return 'text-green-600';
-    if (growthRate < 0) return 'text-red-600';
-    return 'text-gray-600';
+  get hasFilters(): boolean {
+    return !!(
+      this.searchTerm ||
+      this.selectedState ||
+      this.selectedCategory ||
+      this.selectedBrand
+    );
   }
 }

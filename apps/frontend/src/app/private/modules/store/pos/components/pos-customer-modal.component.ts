@@ -262,16 +262,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               </app-input>
             </div>
 
-            <!-- Address -->
-            <app-input
-              formControlName="address"
-              label="Dirección"
-              placeholder="Calle 123, Ciudad"
-              type="text"
-              [size]="'md'"
-              (blur)="onFieldBlur('address')"
-            >
-            </app-input>
+
           </form>
         </div>
       </div>
@@ -356,7 +347,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
       phone: [''],
       documentType: [''],
       documentNumber: ['', [Validators.required]],
-      address: [''],
+
     });
   }
 
@@ -431,7 +422,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
         phone: this.customer.phone || '',
         documentType: this.customer.document_type || '',
         documentNumber: this.customer.document_number || '',
-        address: this.customer.address || '',
+
       });
     }
   }
@@ -479,8 +470,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-    // Get current store ID
-    const currentStoreId = this.storeContextService.getStoreIdOrThrow();
+
 
     const formData = this.customerForm.value;
     const customerData: CreatePosCustomerRequest = {
@@ -490,8 +480,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
       phone: formData.phone || undefined,
       document_type: formData.documentType,
       document_number: formData.documentNumber,
-      address: formData.address || undefined,
-      store_id: currentStoreId,
+
     };
 
     if (this.customer) {

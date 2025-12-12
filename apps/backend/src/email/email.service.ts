@@ -6,6 +6,7 @@ import {
   EmailConfig,
 } from './interfaces/email.interface';
 import { ResendProvider } from './providers/resend.provider';
+import { SesProvider } from './providers/ses.provider';
 import { SendGridProvider } from './providers/sendgrid.provider';
 import { ConsoleProvider } from './providers/console.provider';
 
@@ -47,7 +48,13 @@ export class EmailService {
 
   private initializeProvider() {
     // En desarrollo, forzar consola si no hay API key válida
-    if (process.env.NODE_ENV === 'development' && !this.config.apiKey) {
+    // Para SES/SMTP usamos config.smtp, no necesariamente apiKey
+    if (
+      process.env.NODE_ENV === 'development' &&
+      !this.config.apiKey &&
+      this.config.provider !== 'ses' &&
+      this.config.provider !== 'smtp'
+    ) {
       this.logger.warn(
         'Development environment: forcing console email provider (no API key)',
       );
@@ -89,6 +96,27 @@ export class EmailService {
               'Failed to initialize SendGrid provider, falling back to console:',
               error,
             );
+            this.provider = new ConsoleProvider(this.config);
+          }
+        }
+        break;
+
+      case 'ses':
+      case 'smtp':
+        if (!this.config.smtp?.host) {
+          this.logger.warn(
+            'SMTP host not found, falling back to console provider',
+          );
+          this.provider = new ConsoleProvider(this.config);
+        } else {
+          try {
+            this.provider = new SesProvider(this.config);
+          } catch (error) {
+            this.logger.error(
+              'Failed to initialize SES/SMTP provider, falling back to console:',
+              error,
+            );
+            console.error(error);
             this.provider = new ConsoleProvider(this.config);
           }
         }
