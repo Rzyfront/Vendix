@@ -152,4 +152,13 @@ export class UsersController {
     const result = await this.usersService.removeRole(+userId, +roleId);
     return this.responseService.success(result, 'Role removed successfully');
   }
+
+  @Post(':id/verify-email')
+  @ApiOperation({ summary: 'Verify user email' })
+  @ApiResponse({ status: 200, description: 'Email verified successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async verifyEmail(@Param('id') id: string) {
+    const result = await this.usersService.verifyEmail(+id);
+    return this.responseService.success(result, 'Email verified successfully');
+  }
 }

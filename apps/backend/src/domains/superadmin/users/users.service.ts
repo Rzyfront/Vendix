@@ -16,7 +16,7 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(private readonly prisma: GlobalPrismaService) { }
 
   async create(createUserDto: CreateUserDto) {
     // Check if email already exists
@@ -410,5 +410,25 @@ export class UsersService {
       usersByRole: usersByRoleWithNames,
       recentUsers: recentUsersWithoutPasswords,
     };
+  }
+
+  async verifyEmail(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.users.update({
+      where: { id },
+      data: {
+        email_verified: true,
+        state: user.state === user_state_enum.pending_verification ? user_state_enum.active : undefined
+      },
+    });
+
+    return { message: 'Email verified successfully' };
   }
 }

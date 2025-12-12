@@ -39,8 +39,8 @@ export const storeAdminRoutes: Routes = [
             pathMatch: 'full',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/components/product-list/product-list.component'
-              ).then((c) => c.ProductListComponent),
+                '../../private/modules/store/products/products.component'
+              ).then((c) => c.ProductsComponent),
           },
           {
             path: ':id',
@@ -96,8 +96,8 @@ export const storeAdminRoutes: Routes = [
             path: 'all',
             loadComponent: () =>
               import(
-                '../../private/modules/store/customers/all/all-customers.component'
-              ).then((c) => c.AllCustomersComponent),
+                '../../private/modules/store/customers/customers.component'
+              ).then((c) => c.CustomersComponent),
           },
           {
             path: ':id',

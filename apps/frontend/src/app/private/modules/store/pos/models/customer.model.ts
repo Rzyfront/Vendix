@@ -19,8 +19,7 @@ export interface CreatePosCustomerRequest {
   phone?: string;
   document_type?: string;
   document_number?: string;
-  address?: string;
-  store_id: number;
+
   password?: string;
 }
 
