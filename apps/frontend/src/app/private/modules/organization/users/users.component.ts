@@ -11,7 +11,6 @@ import {
 import { UsersService } from './services/users.service';
 import { UserStatsService } from './services/user-stats.service';
 import {
-  UserStatsComponent,
   UserCreateModalComponent,
   UserEditModalComponent,
   UserEmptyStateComponent,
@@ -36,6 +35,15 @@ import {
   FormGroup,
 } from '@angular/forms';
 
+interface StatItem {
+  title: string;
+  value: number;
+  smallText: string;
+  iconName: string;
+  iconBgColor: string;
+  iconColor: string;
+}
+
 @Component({
   selector: 'app-users',
   standalone: true,
@@ -43,7 +51,6 @@ import {
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    UserStatsComponent,
     UserCreateModalComponent,
     UserEditModalComponent,
     UserEmptyStateComponent,
@@ -59,6 +66,7 @@ import {
 export class UsersComponent implements OnInit, OnDestroy {
   users: User[] = [];
   userStats: UserStats | null = null;
+  statsItems: StatItem[] = [];
   isLoading = false;
   currentUser: User | null = null;
   showCreateModal = false;
@@ -252,6 +260,93 @@ export class UsersComponent implements OnInit, OnDestroy {
   loadUserStats(): void {
     // Calculate stats from current users list
     this.userStats = this.userStatsService.calculateStats(this.users);
+    this.updateStatsItems();
+  }
+
+  private updateStatsItems(): void {
+    const s = this.userStats || {
+      total_usuarios: 0,
+      activos: 0,
+      pendientes: 0,
+      con_2fa: 0,
+      inactivos: 0,
+      suspendidos: 0,
+      email_verificado: 0,
+      archivados: 0,
+    };
+    const total = s.total_usuarios || 0;
+
+    this.statsItems = [
+      {
+        title: 'Total Usuarios',
+        value: total,
+        smallText: 'en la organización',
+        iconName: 'users',
+        iconBgColor: 'bg-primary/10',
+        iconColor: 'text-primary',
+      },
+      {
+        title: 'Activos',
+        value: s.activos || 0,
+        smallText: `${this.calculatePercentage(s.activos || 0, total)}% del total`,
+        iconName: 'check-circle',
+        iconBgColor: 'bg-green-100',
+        iconColor: 'text-green-600',
+      },
+      {
+        title: 'Pendientes',
+        value: s.pendientes || 0,
+        smallText: `${this.calculatePercentage(s.pendientes || 0, total)}% del total`,
+        iconName: 'clock',
+        iconBgColor: 'bg-yellow-100',
+        iconColor: 'text-yellow-600',
+      },
+      {
+        title: 'Con 2FA',
+        value: s.con_2fa || 0,
+        smallText: `${this.calculatePercentage(s.con_2fa || 0, total)}% del total`,
+        iconName: 'shield',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600',
+      },
+      {
+        title: 'Inactivos',
+        value: s.inactivos || 0,
+        smallText: `${this.calculatePercentage(s.inactivos || 0, total)}% del total`,
+        iconName: 'user-x',
+        iconBgColor: 'bg-gray-100',
+        iconColor: 'text-gray-600',
+      },
+      {
+        title: 'Suspendidos',
+        value: s.suspendidos || 0,
+        smallText: `${this.calculatePercentage(s.suspendidos || 0, total)}% del total`,
+        iconName: 'alert-triangle',
+        iconBgColor: 'bg-red-100',
+        iconColor: 'text-red-600',
+      },
+      {
+        title: 'Email Verificado',
+        value: s.email_verificado || 0,
+        smallText: `${this.calculatePercentage(s.email_verificado || 0, total)}% del total`,
+        iconName: 'mail-check',
+        iconBgColor: 'bg-emerald-100',
+        iconColor: 'text-emerald-600',
+      },
+      {
+        title: 'Archivados',
+        value: s.archivados || 0,
+        smallText: `${this.calculatePercentage(s.archivados || 0, total)}% del total`,
+        iconName: 'archive',
+        iconBgColor: 'bg-red-100',
+        iconColor: 'text-red-600',
+      },
+    ];
+  }
+
+  private calculatePercentage(part: number, total: number): number {
+    if (total === 0) return 0;
+    return Math.round((part / total) * 100);
   }
 
   onSearchChange(searchTerm: string): void {
