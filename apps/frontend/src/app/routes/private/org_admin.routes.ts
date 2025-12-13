@@ -65,11 +65,10 @@ export const orgAdminRoutes: Routes = [
       },
       {
         path: 'audit',
-        pathMatch: 'full',
-        loadComponent: () =>
+        loadChildren: () =>
           import(
-            '../../private/modules/organization/audit/audit.component'
-          ).then((c) => c.AuditComponent),
+            '../../private/modules/organization/audit/audit.routes'
+          ).then((m) => m.AuditRoutingModule),
       },
       {
         path: 'config',
