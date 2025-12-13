@@ -1,6 +1,10 @@
 <div class="space-y-6">
   <!-- Stats Cards -->
-  <app-user-stats [stats]="userStats"></app-user-stats>
+  <!-- Stats Cards -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
+      [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
+  </div>
 
   <!-- Users Table Container -->
   <div class="bg-surface rounded-card shadow-card border border-border">
