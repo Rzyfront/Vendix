@@ -12,6 +12,7 @@ import { SettingsModule } from './settings/settings.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { LoginAttemptsModule } from './login-attempts/login-attempts.module';
 import { PaymentPoliciesModule } from './payment-policies/payment-policies.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { PaymentPoliciesModule } from './payment-policies/payment-policies.modul
     SessionsModule,
     LoginAttemptsModule,
     PaymentPoliciesModule,
+    AuditModule,
   ],
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],

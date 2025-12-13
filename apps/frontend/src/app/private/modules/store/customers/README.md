@@ -10,8 +10,8 @@ This module manages the Customer domain within the Store context. It follows the
   - Manages state (customers list, loading status, modals)
   - Interacts with Services
   - Orchestrates child components
+  - Directly integrates shared system components (e.g., `app-stats`)
 - **Dumb Components (Presentational)**:
-  - `CustomerStatsComponent`: Displays metrics (Inputs: stats)
   - `CustomerListComponent`: Displays data table (Inputs: data; Outputs: events)
   - `CustomerModalComponent`: Handles forms (Inputs: isOpen, customer; Outputs: save, close)
 
@@ -28,8 +28,6 @@ customers/
 │   │   └── customer-list.component.ts
 │   ├── customer-modal/         # Form for Create/Edit
 │   │   └── customer-modal.component.ts
-│   ├── customer-stats/         # Dashboard metrics cards
-│   │   └── customer-stats.component.ts
 │   └── index.ts               # Component exports
 ├── models/                     # Type definitions and interfaces
 │   └── customer.model.ts       # Domain entities and DTOs
