@@ -249,6 +249,7 @@ export class AuthEffects {
             if (parsedState.user && parsedState.tokens?.access_token) {
               return AuthActions.restoreAuthState({
                 user: parsedState.user,
+                user_settings: parsedState.user_settings,
                 tokens: parsedState.tokens,
                 permissions: parsedState.permissions || [],
                 roles: parsedState.roles || [],

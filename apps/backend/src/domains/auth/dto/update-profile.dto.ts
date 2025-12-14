@@ -23,6 +23,16 @@ export class UpdateProfileDto {
     @IsString()
     phone?: string;
 
+    @ApiPropertyOptional({ example: 'CC', description: 'Tipo de documento' })
+    @IsOptional()
+    @IsString()
+    document_type?: string;
+
+    @ApiPropertyOptional({ example: '1234567890', description: 'Número de documento' })
+    @IsOptional()
+    @IsString()
+    document_number?: string;
+
     @ApiPropertyOptional({ description: 'Datos de dirección' })
     @IsOptional()
     @ValidateNested()

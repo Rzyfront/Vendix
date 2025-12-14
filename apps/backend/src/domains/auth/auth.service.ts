@@ -34,13 +34,15 @@ export class AuthService {
   ) { }
 
   async updateProfile(userId: number, updateProfileDto: any) {
-    const { first_name, last_name, phone, address } = updateProfileDto;
+    const { first_name, last_name, phone, address, document_type, document_number } = updateProfileDto;
 
     // 1. Actualizar datos básicos del usuario
     const updateData: any = {};
     if (first_name) updateData.first_name = first_name;
     if (last_name) updateData.last_name = last_name;
     if (phone !== undefined) updateData.phone = phone;
+    if (document_type !== undefined) updateData.document_type = document_type;
+    if (document_number !== undefined) updateData.document_number = document_number;
 
     let user = await this.prismaService.users.update({
       where: { id: userId },
@@ -1472,6 +1474,7 @@ export class AuthService {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: {
+        addresses: true,
         user_roles: {
           include: {
             roles: {

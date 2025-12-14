@@ -239,6 +239,13 @@ export class AuthService {
     return this.http.put(`${this.API_URL}/settings`, data);
   }
 
+  changePassword(current_password: string, new_password: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/change-password`, {
+      current_password,
+      new_password,
+    });
+  }
+
   // === MÉTODOS DE AYUDA ===
   getToken(): string | null {
     return this.authFacade.getTokens()?.access_token || null;
