@@ -12,7 +12,7 @@ import { Router } from '@angular/router';
 import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
-import { ProfileModalComponent } from '../profile-modal/profile-modal.component';
+import { UserUiService } from '../../services/user-ui.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
@@ -30,7 +30,7 @@ export interface UserMenuOption {
 @Component({
   selector: 'app-user-dropdown',
   standalone: true,
-  imports: [CommonModule, IconComponent, ProfileModalComponent],
+  imports: [CommonModule, IconComponent],
   template: `
     <div class="user-dropdown-container" [class.open]="isOpen">
       <button
@@ -84,9 +84,7 @@ export interface UserMenuOption {
       </div>
     </div>
     
-    <app-profile-modal
-      [(isOpen)]="isProfileOpen"
-    ></app-profile-modal>
+
 
   `,
   styleUrls: ['./user-dropdown.component.scss'],
@@ -95,8 +93,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
-  isProfileOpen = false;
-  isSettingsOpen = false;
   isFullscreen = false;
   private destroy$ = new Subject<void>();
 
@@ -105,7 +101,9 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
+
   private fullscreenService = inject(FullscreenService);
+  private userUiService = inject(UserUiService);
 
   userContext$: Observable<{
     user?: any;
@@ -244,13 +242,14 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private goToProfile() {
-    this.isProfileOpen = true;
+    console.log('UserDropdown: goToProfile clicked');
+    this.userUiService.openProfile();
     this.isOpen = false;
     this.closeDropdown.emit();
   }
 
   private goToSettings() {
-    this.isSettingsOpen = true;
+    this.userUiService.openSettings();
     this.isOpen = false;
     this.closeDropdown.emit();
   }
