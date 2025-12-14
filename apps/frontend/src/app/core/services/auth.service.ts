@@ -223,6 +223,22 @@ export class AuthService {
     });
   }
 
+  getProfile(): Observable<any> {
+    return this.http.get(`${this.API_URL}/profile`);
+  }
+
+  updateProfile(data: any): Observable<any> {
+    return this.http.put(`${this.API_URL}/profile`, data);
+  }
+
+  getSettings(): Observable<any> {
+    return this.http.get(`${this.API_URL}/settings`);
+  }
+
+  updateSettings(data: any): Observable<any> {
+    return this.http.put(`${this.API_URL}/settings`, data);
+  }
+
   // === MÉTODOS DE AYUDA ===
   getToken(): string | null {
     return this.authFacade.getTokens()?.access_token || null;

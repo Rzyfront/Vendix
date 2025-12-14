@@ -12,6 +12,7 @@ import { Router } from '@angular/router';
 import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
+import { ProfileModalComponent } from '../profile-modal/profile-modal.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
@@ -29,7 +30,7 @@ export interface UserMenuOption {
 @Component({
   selector: 'app-user-dropdown',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, ProfileModalComponent],
   template: `
     <div class="user-dropdown-container" [class.open]="isOpen">
       <button
@@ -82,6 +83,11 @@ export interface UserMenuOption {
         </div>
       </div>
     </div>
+    
+    <app-profile-modal
+      [(isOpen)]="isProfileOpen"
+    ></app-profile-modal>
+
   `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
@@ -89,6 +95,8 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   @Output() closeDropdown = new EventEmitter<void>();
 
   isOpen = false;
+  isProfileOpen = false;
+  isSettingsOpen = false;
   isFullscreen = false;
   private destroy$ = new Subject<void>();
 
@@ -236,11 +244,15 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private goToProfile() {
-    this.router.navigate(['/profile']);
+    this.isProfileOpen = true;
+    this.isOpen = false;
+    this.closeDropdown.emit();
   }
 
   private goToSettings() {
-    this.router.navigate(['/settings']);
+    this.isSettingsOpen = true;
+    this.isOpen = false;
+    this.closeDropdown.emit();
   }
 
   private logout() {
