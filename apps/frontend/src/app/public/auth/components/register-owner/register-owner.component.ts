@@ -8,6 +8,7 @@ import {
 } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../../core/services/auth.service';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { passwordValidator } from '../../../../core/utils/validators';
@@ -219,6 +220,7 @@ interface RegistrationError {
 export class RegisterOwnerComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
+  private authFacade = inject(AuthFacade);
   private router = inject(Router);
   private toast = inject(ToastService);
 
@@ -262,7 +264,19 @@ export class RegisterOwnerComponent {
 
       this.authService.registerOwner(this.registerForm.value).subscribe({
         next: (result) => {
-          if (result.success) {
+          if (result.success && result.data) {
+            // Restaurar el estado de la aplicación con el nuevo usuario
+            const { user, user_settings, access_token, refresh_token } =
+              result.data;
+
+            this.authFacade.restoreAuthState(
+              user,
+              { access_token, refresh_token },
+              result.data.permissions,
+              user.roles,
+              user_settings,
+            );
+
             // Redirigir al dashboard después del registro exitoso
             this.registrationState = 'success';
             this.toast.success('¡Registro exitoso! Bienvenido a Vendix.');

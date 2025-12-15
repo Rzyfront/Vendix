@@ -168,14 +168,24 @@ export class AuthService {
   // === MÉTODOS RESTAURADOS PARA LOS EFFECTS ===
   registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> {
     // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
-    this.checkAndCleanAuthResidues();
+    this.authFacade.clearAuthState(); // Limpiar estado de NgRx
+    this.clearAllAuthData(); // Limpiar LocalStorage completamente
 
     console.log('🔐 Iniciando registro de owner con estado limpio');
 
-    return this.http.post<AuthResponse>(
-      `${this.API_URL}/register-owner`,
-      registerData,
-    );
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/register-owner`, registerData)
+      .pipe(
+        tap((response) => {
+          if (response.success && response.data) {
+            const { access_token, refresh_token } = response.data;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('access_token', access_token);
+              localStorage.setItem('refresh_token', refresh_token);
+            }
+          }
+        }),
+      );
   }
   logout(): Observable<any> {
     const refreshToken = this.getRefreshToken();

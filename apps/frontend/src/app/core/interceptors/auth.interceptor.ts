@@ -17,7 +17,7 @@ export class AuthInterceptor implements HttpInterceptor {
   private refreshTokenSubject: BehaviorSubject<string | null> =
     new BehaviorSubject<string | null>(null);
 
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService) { }
 
   intercept(
     req: HttpRequest<any>,
@@ -58,7 +58,8 @@ export class AuthInterceptor implements HttpInterceptor {
         if (
           error instanceof HttpErrorResponse &&
           error.status === 401 &&
-          req.url.startsWith(environment.apiUrl)
+          req.url.startsWith(environment.apiUrl) &&
+          !req.url.includes('/auth/login')
         ) {
           console.warn(
             '[AUTH INTERCEPTOR] 401 detected for request:',
