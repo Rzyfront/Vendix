@@ -51,6 +51,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Inventory Routes
+      {
+        path: 'inventory',
+        loadChildren: () =>
+          import('../../private/modules/store/inventory/inventory.routes').then(
+            (m) => m.INVENTORY_ROUTES
+          ),
+      },
       // Orders Routes
       {
         path: 'orders',

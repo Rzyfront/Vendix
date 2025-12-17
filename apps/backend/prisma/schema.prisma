@@ -869,11 +869,15 @@ model suppliers {
   organization_id   Int
   name              String              @db.VarChar(255)
   code              String              @db.VarChar(50)
+  contact_person    String?             @db.VarChar(255)
+  mobile            String?             @db.VarChar(50)
   email             String?             @db.VarChar(255)
   phone             String?             @db.VarChar(50)
   website           String?             @db.VarChar(255)
   tax_id            String?             @db.VarChar(50)
   payment_terms     String?             @db.VarChar(255)
+  currency          String?             @db.VarChar(10)
+  notes             String?
   lead_time_days    Int?
   is_active         Boolean             @default(true)
   address_id        Int?
@@ -972,6 +976,10 @@ model purchase_orders {
   subtotal_amount      Decimal                    @default(0.00) @db.Decimal(12, 2)
   tax_amount           Decimal                    @default(0.00) @db.Decimal(12, 2)
   total_amount         Decimal                    @default(0.00) @db.Decimal(12, 2)
+  discount_amount      Decimal                    @default(0.00) @db.Decimal(12, 2)
+  shipping_cost        Decimal                    @default(0.00) @db.Decimal(12, 2)
+  payment_terms        String?                    @db.VarChar(255)
+  shipping_method      String?                    @db.VarChar(100)
   notes                String?
   created_by_user_id   Int?
   approved_by_user_id  Int?

@@ -19,12 +19,9 @@ export class StorePaymentMethodsService {
    * Get available payment methods for a store to enable
    * Shows only system methods that are active and not yet enabled
    */
-  async getAvailableForStore(storeId: number, user: any) {
-    await this.validateUserAccess(user, storeId);
-
-    // Get already enabled methods
+  async getAvailableForStore() {
+    // Get already enabled methods (StorePrismaService automatically filters by store_id)
     const enabledMethods = await this.prisma.store_payment_methods.findMany({
-      where: { store_id: storeId },
       select: { system_payment_method_id: true },
     });
 
@@ -43,13 +40,8 @@ export class StorePaymentMethodsService {
   /**
    * Get enabled payment methods for a store
    */
-  async getEnabledForStore(storeId: number, user: any) {
-    await this.validateUserAccess(user, storeId);
-
+  async getEnabledForStore() {
     return this.prisma.store_payment_methods.findMany({
-      where: {
-        store_id: storeId,
-      },
       include: {
         system_payment_method: true,
       },
@@ -60,13 +52,10 @@ export class StorePaymentMethodsService {
   /**
    * Get single store payment method
    */
-  async findOne(storeId: number, methodId: number, user: any) {
-    await this.validateUserAccess(user, storeId);
-
+  async findOne(methodId: number) {
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: methodId,
-        store_id: storeId,
       },
       include: {
         system_payment_method: true,
@@ -84,12 +73,9 @@ export class StorePaymentMethodsService {
    * Enable a system payment method for a store
    */
   async enableForStore(
-    storeId: number,
     systemPaymentMethodId: number,
     enableDto: EnablePaymentMethodDto,
-    user: any,
   ) {
-    await this.validateUserAccess(user, storeId);
 
     // Verify system method exists and is active
     const systemMethod = await this.prisma.system_payment_methods.findUnique({
@@ -103,7 +89,6 @@ export class StorePaymentMethodsService {
     // Check if already enabled
     const existing = await this.prisma.store_payment_methods.findFirst({
       where: {
-        store_id: storeId,
         system_payment_method_id: systemPaymentMethodId,
       },
     });
@@ -128,7 +113,6 @@ export class StorePaymentMethodsService {
 
     return this.prisma.store_payment_methods.create({
       data: {
-        store_id: storeId,
         system_payment_method_id: systemPaymentMethodId,
         display_name: enableDto.display_name,
         custom_config: enableDto.custom_config || systemMethod.default_config,
@@ -147,17 +131,12 @@ export class StorePaymentMethodsService {
    * Update store payment method configuration
    */
   async updateStoreMethod(
-    storeId: number,
     storePaymentMethodId: number,
     updateDto: UpdateStorePaymentMethodDto,
-    user: any,
   ) {
-    await this.validateUserAccess(user, storeId);
-
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: storePaymentMethodId,
-        store_id: storeId,
       },
       include: {
         system_payment_method: true,
@@ -186,16 +165,11 @@ export class StorePaymentMethodsService {
    * Disable payment method for a store
    */
   async disableForStore(
-    storeId: number,
     storePaymentMethodId: number,
-    user: any,
   ) {
-    await this.validateUserAccess(user, storeId);
-
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: storePaymentMethodId,
-        store_id: storeId,
       },
     });
 
@@ -213,16 +187,11 @@ export class StorePaymentMethodsService {
    * Delete/remove payment method from store
    */
   async removeFromStore(
-    storeId: number,
     storePaymentMethodId: number,
-    user: any,
   ) {
-    await this.validateUserAccess(user, storeId);
-
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: storePaymentMethodId,
-        store_id: storeId,
       },
       include: {
         _count: {
@@ -252,18 +221,13 @@ export class StorePaymentMethodsService {
    * Reorder payment methods for display
    */
   async reorderMethods(
-    storeId: number,
     orderDto: ReorderPaymentMethodsDto,
-    user: any,
   ) {
-    await this.validateUserAccess(user, storeId);
-
     // Update display_order for each method
     const updates = orderDto.methods.map((item, index) =>
       this.prisma.store_payment_methods.updateMany({
         where: {
           id: item.id,
-          store_id: storeId,
         },
         data: {
           display_order: index,
@@ -277,59 +241,78 @@ export class StorePaymentMethodsService {
   }
 
   /**
-   * Validate user access to store
-   * Reuses logic from PaymentsService
+   * Get payment method statistics for the store
    */
-  private async validateUserAccess(user: any, storeId: number): Promise<void> {
-    // 1. Allow super_admin to access any store
-    if (user.roles && user.roles.includes('super_admin')) {
-      return;
-    }
-
-    // 2. Check if user is explicitly assigned to the store (store_users)
-    const userStoreIds = await this.getUserStoreIds(user);
-    if (userStoreIds.includes(storeId)) {
-      return;
-    }
-
-    // 3. Check if user's main_store_id matches the requested store
-    if (user.main_store_id === storeId) {
-      return;
-    }
-
-    // 4. Check if user's current token store_id matches the requested store
-    if (user.store_id === storeId) {
-      return;
-    }
-
-    // 5. Check if user is Owner or Admin of the Organization that owns the store
-    const store = await this.prisma.stores.findUnique({
-      where: { id: storeId },
-      select: { organization_id: true },
+  async getStats() {
+    // Get all payment methods for this store (filtered by StorePrismaService)
+    const allMethods = await this.prisma.store_payment_methods.findMany({
+      select: {
+        state: true,
+      },
     });
 
-    if (store && user.organization_id === store.organization_id) {
-      if (
-        user.roles &&
-        (user.roles.includes('owner') || user.roles.includes('admin'))
-      ) {
-        return;
+    // Count methods by state
+    const stats = allMethods.reduce(
+      (acc, method) => {
+        switch (method.state) {
+          case 'enabled':
+            acc.enabled_methods++;
+            break;
+          case 'disabled':
+            acc.disabled_methods++;
+            break;
+          case 'requires_configuration':
+            acc.requires_config++;
+            break;
+        }
+        acc.total_methods++;
+        return acc;
+      },
+      {
+        total_methods: 0,
+        enabled_methods: 0,
+        disabled_methods: 0,
+        requires_config: 0,
       }
-    }
+    );
 
-    // 6. Access denied
-    throw new ForbiddenException('Access denied to this store');
-  }
-
-  /**
-   * Get store IDs that user has access to
-   */
-  private async getUserStoreIds(user: any): Promise<number[]> {
-    const storeUsers = await this.prisma.store_users.findMany({
-      where: { user_id: user.id },
-      select: { store_id: true },
+    // Get payment statistics (StorePrismaService automatically filters by store_id)
+    const paymentStats = await this.prisma.payments.aggregate({
+      _count: {
+        id: true,
+      },
+      _sum: {
+        amount: true,
+      },
+      where: {
+        state: {
+          in: ['succeeded', 'captured'],
+        },
+      },
     });
 
-    return storeUsers.map((su: any) => su.store_id);
+    // Get transaction counts by state
+    const transactionCounts = await this.prisma.payments.groupBy({
+      by: ['state'],
+      _count: {
+        state: true,
+      },
+    });
+
+    const successfulTransactions =
+      transactionCounts.find((tc) => tc.state === 'succeeded')?._count.state ||
+      transactionCounts.find((tc) => tc.state === 'captured')?._count.state ||
+      0;
+
+    const failedTransactions =
+      transactionCounts.find((tc) => tc.state === 'failed')?._count.state || 0;
+
+    return {
+      ...stats,
+      total_transactions: paymentStats._count.id || 0,
+      successful_transactions: successfulTransactions,
+      failed_transactions: failedTransactions,
+      total_revenue: parseFloat(paymentStats._sum.amount?.toString() || '0'),
+    };
   }
 }

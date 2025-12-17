@@ -56,8 +56,8 @@ export class PurchaseOrderItemDto {
 export class CreatePurchaseOrderDto {
   @ApiProperty({ description: 'Organization ID' })
   @IsNumber()
-  @IsNotEmpty()
-  organization_id: number;
+  @IsOptional()
+  organization_id?: number;
 
   @ApiProperty({ description: 'Supplier ID' })
   @IsNumber()

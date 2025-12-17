@@ -4,10 +4,12 @@ import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { purchase_order_status_enum } from '@prisma/client';
+import { RequestContextService } from '@common/context/request-context.service';
+import { BadRequestException } from '@nestjs/common';
 
 @Injectable()
 export class PurchaseOrdersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -23,10 +25,28 @@ export class PurchaseOrdersService {
         (createPurchaseOrderDto.tax_amount || 0) +
         (createPurchaseOrderDto.shipping_cost || 0);
 
+      const organization_id = RequestContextService.getOrganizationId();
+
+      if (!organization_id) {
+        throw new BadRequestException('Organization ID not found in context');
+      }
+
+      // Generate order number
+      const date = new Date();
+      const order_number = `PO-${date.getFullYear()}${(date.getMonth() + 1)
+        .toString()
+        .padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}-${Math.floor(
+          Math.random() * 1000,
+        )
+          .toString()
+          .padStart(3, '0')}`;
+
       // Create purchase order
       const purchaseOrder = await tx.purchase_orders.create({
         data: {
           ...createPurchaseOrderDto,
+          organization_id,
+          order_number,
           subtotal,
           total_amount: totalAmount,
           order_date: new Date(),

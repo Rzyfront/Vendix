@@ -181,6 +181,32 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/products',
     },
     {
+      label: 'Inventario',
+      icon: 'warehouse',
+      children: [
+        {
+          label: 'Dashboard',
+          icon: 'circle',
+          route: '/admin/inventory',
+        },
+        {
+          label: 'Proveedores',
+          icon: 'circle',
+          route: '/admin/inventory/suppliers',
+        },
+        {
+          label: 'Órdenes de Compra',
+          icon: 'circle',
+          route: '/admin/inventory/orders',
+        },
+        {
+          label: 'Ajustes de Stock',
+          icon: 'circle',
+          route: '/admin/inventory/adjustments',
+        },
+      ],
+    },
+    {
       label: 'Pedidos',
       icon: 'cart',
       route: '/admin/orders',

@@ -7,7 +7,6 @@ import {
   Body,
   Param,
   UseGuards,
-  Request,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -19,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
   EnablePaymentMethodDto,
   UpdateStorePaymentMethodDto,
@@ -26,7 +26,7 @@ import {
 } from '../dto';
 
 @ApiTags('Store Payment Methods')
-@Controller('store/stores/:storeId/payment-methods')
+@Controller('store/payment-methods')
 @ApiBearerAuth()
 export class StorePaymentMethodsController {
   constructor(
@@ -39,11 +39,8 @@ export class StorePaymentMethodsController {
     status: 200,
     description: 'Available payment methods retrieved successfully',
   })
-  async getAvailable(@Param('storeId') storeId: string, @Request() req) {
-    return this.storePaymentMethodsService.getAvailableForStore(
-      parseInt(storeId),
-      req.user,
-    );
+  async getAvailable() {
+    return this.storePaymentMethodsService.getAvailableForStore();
   }
 
   @Get()
@@ -52,11 +49,8 @@ export class StorePaymentMethodsController {
     status: 200,
     description: 'Enabled payment methods retrieved successfully',
   })
-  async getEnabled(@Param('storeId') storeId: string, @Request() req) {
-    return this.storePaymentMethodsService.getEnabledForStore(
-      parseInt(storeId),
-      req.user,
-    );
+  async getEnabled() {
+    return this.storePaymentMethodsService.getEnabledForStore();
   }
 
   @Get(':methodId')
@@ -66,16 +60,8 @@ export class StorePaymentMethodsController {
     description: 'Payment method retrieved successfully',
   })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
-  async findOne(
-    @Param('storeId') storeId: string,
-    @Param('methodId') methodId: string,
-    @Request() req,
-  ) {
-    return this.storePaymentMethodsService.findOne(
-      parseInt(storeId),
-      parseInt(methodId),
-      req.user,
-    );
+  async findOne(@Param('methodId') methodId: string) {
+    return this.storePaymentMethodsService.findOne(parseInt(methodId));
   }
 
   @Post('enable/:systemMethodId')
@@ -87,16 +73,12 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 403, description: 'Access denied' })
   async enable(
-    @Param('storeId') storeId: string,
     @Param('systemMethodId') systemMethodId: string,
     @Body() enableDto: EnablePaymentMethodDto,
-    @Request() req,
   ) {
     return this.storePaymentMethodsService.enableForStore(
-      parseInt(storeId),
       parseInt(systemMethodId),
       enableDto,
-      req.user,
     );
   }
 
@@ -109,16 +91,12 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
   async update(
-    @Param('storeId') storeId: string,
     @Param('methodId') methodId: string,
     @Body() updateDto: UpdateStorePaymentMethodDto,
-    @Request() req,
   ) {
     return this.storePaymentMethodsService.updateStoreMethod(
-      parseInt(storeId),
       parseInt(methodId),
       updateDto,
-      req.user,
     );
   }
 
@@ -130,16 +108,8 @@ export class StorePaymentMethodsController {
   })
   @ApiResponse({ status: 403, description: 'Access denied' })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
-  async disable(
-    @Param('storeId') storeId: string,
-    @Param('methodId') methodId: string,
-    @Request() req,
-  ) {
-    return this.storePaymentMethodsService.disableForStore(
-      parseInt(storeId),
-      parseInt(methodId),
-      req.user,
-    );
+  async disable(@Param('methodId') methodId: string) {
+    return this.storePaymentMethodsService.disableForStore(parseInt(methodId));
   }
 
   @Delete(':methodId')
@@ -152,16 +122,8 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 400, description: 'Payment method is in use' })
   @ApiResponse({ status: 403, description: 'Access denied' })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
-  async remove(
-    @Param('storeId') storeId: string,
-    @Param('methodId') methodId: string,
-    @Request() req,
-  ) {
-    return this.storePaymentMethodsService.removeFromStore(
-      parseInt(storeId),
-      parseInt(methodId),
-      req.user,
-    );
+  async remove(@Param('methodId') methodId: string) {
+    return this.storePaymentMethodsService.removeFromStore(parseInt(methodId));
   }
 
   @Post('reorder')
@@ -172,15 +134,17 @@ export class StorePaymentMethodsController {
     description: 'Payment methods reordered successfully',
   })
   @ApiResponse({ status: 403, description: 'Access denied' })
-  async reorder(
-    @Param('storeId') storeId: string,
-    @Body() reorderDto: ReorderPaymentMethodsDto,
-    @Request() req,
-  ) {
-    return this.storePaymentMethodsService.reorderMethods(
-      parseInt(storeId),
-      reorderDto,
-      req.user,
-    );
+  async reorder(@Body() reorderDto: ReorderPaymentMethodsDto) {
+    return this.storePaymentMethodsService.reorderMethods(reorderDto);
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get payment method statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment method statistics retrieved successfully',
+  })
+  async getStats() {
+    return this.storePaymentMethodsService.getStats();
   }
 }

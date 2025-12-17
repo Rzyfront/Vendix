@@ -3,7 +3,6 @@ import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
-import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { SalesOrdersModule } from './sales-orders/sales-orders.module';
 import { StockTransfersModule } from './stock-transfers/stock-transfers.module';
 import { ReturnOrdersModule } from './return-orders/return-orders.module';
@@ -13,7 +12,6 @@ import { PaymentsModule } from '../payments/payments.module';
   imports: [
     ResponseModule,
     PrismaModule,
-    PurchaseOrdersModule,
     SalesOrdersModule,
     StockTransfersModule,
     ReturnOrdersModule,
@@ -23,4 +21,4 @@ import { PaymentsModule } from '../payments/payments.module';
   providers: [OrdersService],
   exports: [OrdersService],
 })
-export class OrdersModule {}
+export class OrdersModule { }
