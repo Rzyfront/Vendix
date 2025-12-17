@@ -3,14 +3,24 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
+import { RequestContextService } from '@common/context/request-context.service';
+import { BadRequestException } from '@nestjs/common';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   create(createSupplierDto: CreateSupplierDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new BadRequestException('Organization context is missing');
+    }
+
     return this.prisma.suppliers.create({
-      data: createSupplierDto,
+      data: {
+        ...createSupplierDto,
+        organization_id: context.organization_id,
+      },
       include: {
         addresses: true,
         supplier_products: {
