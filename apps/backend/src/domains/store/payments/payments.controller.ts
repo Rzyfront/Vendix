@@ -20,7 +20,7 @@ import {
 } from '@nestjs/swagger';
 
 import { PaymentsService } from './payments.service';
-import { ResponseService } from '../../../../common/responses/response.service';
+import { ResponseService } from '../../../common/responses/response.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
