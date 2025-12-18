@@ -19,6 +19,7 @@ import {
 
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { ResponseService } from '../../../../common/responses/response.service';
 import {
   EnablePaymentMethodDto,
   UpdateStorePaymentMethodDto,
@@ -31,6 +32,7 @@ import {
 export class StorePaymentMethodsController {
   constructor(
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
+    private readonly responseService: ResponseService,
   ) { }
 
   @Get('available')
@@ -40,7 +42,18 @@ export class StorePaymentMethodsController {
     description: 'Available payment methods retrieved successfully',
   })
   async getAvailable() {
-    return this.storePaymentMethodsService.getAvailableForStore();
+    try {
+      const result = await this.storePaymentMethodsService.getAvailableForStore();
+      return this.responseService.success(
+        result,
+        'Available payment methods retrieved successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to retrieve available payment methods',
+        error,
+      );
+    }
   }
 
   @Get()
@@ -50,7 +63,39 @@ export class StorePaymentMethodsController {
     description: 'Enabled payment methods retrieved successfully',
   })
   async getEnabled() {
-    return this.storePaymentMethodsService.getEnabledForStore();
+    try {
+      const result = await this.storePaymentMethodsService.getEnabledForStore();
+      return this.responseService.success(
+        result,
+        'Enabled payment methods retrieved successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to retrieve enabled payment methods',
+        error,
+      );
+    }
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get payment method statistics' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment method statistics retrieved successfully',
+  })
+  async getStats() {
+    try {
+      const result = await this.storePaymentMethodsService.getStats();
+      return this.responseService.success(
+        result,
+        'Payment method statistics retrieved successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to retrieve payment method statistics',
+        error,
+      );
+    }
   }
 
   @Get(':methodId')
@@ -61,7 +106,23 @@ export class StorePaymentMethodsController {
   })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
   async findOne(@Param('methodId') methodId: string) {
-    return this.storePaymentMethodsService.findOne(parseInt(methodId));
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error('Invalid payment method ID', '', 400);
+      }
+
+      const result = await this.storePaymentMethodsService.findOne(method_id_num);
+      return this.responseService.success(
+        result,
+        'Payment method retrieved successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to retrieve payment method',
+        error,
+      );
+    }
   }
 
   @Post('enable/:systemMethodId')
@@ -76,10 +137,26 @@ export class StorePaymentMethodsController {
     @Param('systemMethodId') systemMethodId: string,
     @Body() enableDto: EnablePaymentMethodDto,
   ) {
-    return this.storePaymentMethodsService.enableForStore(
-      parseInt(systemMethodId),
-      enableDto,
-    );
+    try {
+      const system_method_id_num = parseInt(systemMethodId);
+      if (!system_method_id_num || isNaN(system_method_id_num)) {
+        return this.responseService.error('Invalid system payment method ID', '', 400);
+      }
+
+      const result = await this.storePaymentMethodsService.enableForStore(
+        system_method_id_num,
+        enableDto,
+      );
+      return this.responseService.created(
+        result,
+        'Payment method enabled successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to enable payment method',
+        error,
+      );
+    }
   }
 
   @Patch(':methodId')
@@ -94,10 +171,26 @@ export class StorePaymentMethodsController {
     @Param('methodId') methodId: string,
     @Body() updateDto: UpdateStorePaymentMethodDto,
   ) {
-    return this.storePaymentMethodsService.updateStoreMethod(
-      parseInt(methodId),
-      updateDto,
-    );
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error('Invalid payment method ID', '', 400);
+      }
+
+      const result = await this.storePaymentMethodsService.updateStoreMethod(
+        method_id_num,
+        updateDto,
+      );
+      return this.responseService.updated(
+        result,
+        'Payment method updated successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to update payment method',
+        error,
+      );
+    }
   }
 
   @Patch(':methodId/disable')
@@ -109,7 +202,23 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
   async disable(@Param('methodId') methodId: string) {
-    return this.storePaymentMethodsService.disableForStore(parseInt(methodId));
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error('Invalid payment method ID', '', 400);
+      }
+
+      const result = await this.storePaymentMethodsService.disableForStore(method_id_num);
+      return this.responseService.success(
+        result,
+        'Payment method disabled successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to disable payment method',
+        error,
+      );
+    }
   }
 
   @Delete(':methodId')
@@ -123,7 +232,22 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   @ApiResponse({ status: 404, description: 'Payment method not found' })
   async remove(@Param('methodId') methodId: string) {
-    return this.storePaymentMethodsService.removeFromStore(parseInt(methodId));
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error('Invalid payment method ID', '', 400);
+      }
+
+      await this.storePaymentMethodsService.removeFromStore(method_id_num);
+      return this.responseService.deleted(
+        'Payment method removed successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to remove payment method',
+        error,
+      );
+    }
   }
 
   @Post('reorder')
@@ -135,16 +259,17 @@ export class StorePaymentMethodsController {
   })
   @ApiResponse({ status: 403, description: 'Access denied' })
   async reorder(@Body() reorderDto: ReorderPaymentMethodsDto) {
-    return this.storePaymentMethodsService.reorderMethods(reorderDto);
-  }
-
-  @Get('stats')
-  @ApiOperation({ summary: 'Get payment method statistics' })
-  @ApiResponse({
-    status: 200,
-    description: 'Payment method statistics retrieved successfully',
-  })
-  async getStats() {
-    return this.storePaymentMethodsService.getStats();
+    try {
+      const result = await this.storePaymentMethodsService.reorderMethods(reorderDto);
+      return this.responseService.success(
+        result,
+        'Payment methods reordered successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to reorder payment methods',
+        error,
+      );
+    }
   }
 }

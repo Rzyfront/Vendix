@@ -28,6 +28,20 @@ export const INVENTORY_ROUTES: Routes = [
                     ),
             },
             {
+                path: 'orders/new',
+                loadComponent: () =>
+                    import('./purchase-orders/pop/pop.component').then(
+                        (m) => m.PopComponent
+                    ),
+            },
+            {
+                path: 'locations',
+                loadComponent: () =>
+                    import('./locations/locations.component').then(
+                        (m) => m.LocationsComponent
+                    ),
+            },
+            {
                 path: 'adjustments',
                 loadComponent: () =>
                     import('./operations/stock-adjustments.component').then(

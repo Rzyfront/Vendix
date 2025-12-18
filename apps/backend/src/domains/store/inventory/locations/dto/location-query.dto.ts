@@ -1,4 +1,4 @@
-import { IsOptional, IsInt, IsEnum, IsBoolean } from 'class-validator';
+import { IsOptional, IsInt, IsEnum, IsBoolean, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { location_type_enum } from '@prisma/client';
 
@@ -19,5 +19,20 @@ export class LocationQueryDto {
 
   @IsOptional()
   @IsBoolean()
+  @Type(() => Boolean)
   is_active?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  limit?: number;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

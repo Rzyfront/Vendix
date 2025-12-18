@@ -4,12 +4,16 @@ import {
   IsEnum,
   IsInt,
   IsBoolean,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { location_type_enum } from '@prisma/client';
+import { CreateAddressDto } from '../../../addresses/dto/index';
 
 export class CreateLocationDto {
+  @IsOptional()
   @IsInt()
-  organization_id: number;
+  organization_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -32,4 +36,9 @@ export class CreateLocationDto {
   @IsOptional()
   @IsInt()
   address_id?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateAddressDto)
+  address?: CreateAddressDto;
 }
