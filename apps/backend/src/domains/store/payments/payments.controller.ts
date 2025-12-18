@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 
 import { PaymentsService } from './payments.service';
+import { ResponseService } from '../../../../common/responses/response.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -32,7 +33,10 @@ import {
 @Controller('store/payments')
 @ApiBearerAuth()
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly responseService: ResponseService,
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Process payment for existing order' })
@@ -43,7 +47,8 @@ export class PaymentsController {
     @Body() createPaymentDto: CreatePaymentDto,
     @Request() req,
   ) {
-    return this.paymentsService.processPayment(createPaymentDto, req.user);
+    const result = await this.paymentsService.processPayment(createPaymentDto, req.user);
+    return this.responseService.success(result, 'Payment processed successfully');
   }
 
   @Post('with-order')
@@ -57,10 +62,11 @@ export class PaymentsController {
     @Body() createOrderPaymentDto: CreateOrderPaymentDto,
     @Request() req,
   ) {
-    return this.paymentsService.processPaymentWithOrder(
+    const result = await this.paymentsService.processPaymentWithOrder(
       createOrderPaymentDto,
       req.user,
     );
+    return this.responseService.created(result, 'Order created and payment processed');
   }
 
   @Post(':paymentId/refund')
@@ -72,11 +78,12 @@ export class PaymentsController {
     @Body() refundPaymentDto: RefundPaymentDto,
     @Request() req,
   ) {
-    return this.paymentsService.refundPayment(
+    const result = await this.paymentsService.refundPayment(
       paymentId,
       refundPaymentDto,
       req.user,
     );
+    return this.responseService.success(result, 'Payment refunded successfully');
   }
 
   @Get(':paymentId/status')
@@ -87,14 +94,21 @@ export class PaymentsController {
     @Param('paymentId') paymentId: string,
     @Request() req,
   ) {
-    return this.paymentsService.getPaymentStatus(paymentId, req.user);
+    const result = await this.paymentsService.getPaymentStatus(paymentId, req.user);
+    return this.responseService.success(result, 'Payment status retrieved');
   }
 
   @Get()
   @ApiOperation({ summary: 'Get all payments with pagination' })
   @ApiResponse({ status: 200, description: 'Payments retrieved successfully' })
   async findAll(@Query() query: PaymentQueryDto, @Request() req) {
-    return this.paymentsService.findAll(query, req.user);
+    const result = await this.paymentsService.findAll(query, req.user);
+    // Assuming findAll returns { data, total, page, limit } or similar, 
+    // but ResponseService.paginated needs explicit args. 
+    // If result is just array or standard paginated object, we need to adapt.
+    // Ideally PaymentsService.findAll returns a standard paginated structure.
+    // For now, wrapping in success to be safe if structure varies.
+    return this.responseService.success(result, 'Payments retrieved successfully');
   }
 
   @Post('pos')
@@ -139,10 +153,11 @@ export class PaymentsController {
     @Body() createPosPaymentDto: CreatePosPaymentDto,
     @Request() req,
   ) {
-    return this.paymentsService.processPosPayment(
+    const result = await this.paymentsService.processPosPayment(
       createPosPaymentDto,
       req.user,
     );
+    return this.responseService.created(result, 'POS payment processed successfully');
   }
 
   @Get('payment-methods')
@@ -153,19 +168,17 @@ export class PaymentsController {
   })
   async getMyStorePaymentMethods(@Request() req) {
     if (!req.user.store_id) {
-      // Si el usuario no tiene scope de tienda (ej. es org admin global),
-      // intentamos usar la primera tienda a la que tiene acceso o lanzamos error.
-      // Para POS, se asume que hay un contexto de tienda.
-      // Sin embargo, el error original venía de intentar usar ID 1.
-      // Vamos a permitir que el servicio maneje o lanzar error si no hay contexto.
-      throw new BadRequestException(
+      return this.responseService.error(
         'User session does not have a specific store context',
+        'Missing store_id in user context',
+        HttpStatus.BAD_REQUEST,
       );
     }
-    return this.paymentsService.getStorePaymentMethods(
+    const result = await this.paymentsService.getStorePaymentMethods(
       req.user.store_id,
       req.user,
     );
+    return this.responseService.success(result, 'Payment methods retrieved successfully');
   }
 
   @Get(':paymentId')
@@ -173,7 +186,8 @@ export class PaymentsController {
   @ApiResponse({ status: 200, description: 'Payment retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Payment not found' })
   async findOne(@Param('paymentId') paymentId: string, @Request() req) {
-    return this.paymentsService.findOne(paymentId, req.user);
+    const result = await this.paymentsService.findOne(paymentId, req.user);
+    return this.responseService.success(result, 'Payment retrieved successfully');
   }
 
   @Get('stores/:storeId/payment-methods')
@@ -186,10 +200,11 @@ export class PaymentsController {
     @Param('storeId') storeId: string,
     @Request() req,
   ) {
-    return this.paymentsService.getStorePaymentMethods(
+    const result = await this.paymentsService.getStorePaymentMethods(
       parseInt(storeId),
       req.user,
     );
+    return this.responseService.success(result, 'Payment methods retrieved successfully');
   }
 
   @Post('stores/:storeId/payment-methods')
@@ -203,10 +218,11 @@ export class PaymentsController {
     @Body() createPaymentMethodDto: any,
     @Request() req,
   ) {
-    return this.paymentsService.createStorePaymentMethod(
+    const result = await this.paymentsService.createStorePaymentMethod(
       parseInt(storeId),
       createPaymentMethodDto,
       req.user,
     );
+    return this.responseService.created(result, 'Payment method created successfully');
   }
 }

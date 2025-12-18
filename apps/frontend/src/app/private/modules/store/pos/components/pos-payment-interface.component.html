@@ -75,33 +75,12 @@
       Opciones de Venta
     </h3>
 
-    <!-- Opción de Venta a Crédito -->
-    <div class="mb-6">
-      <div
-        (click)="processCreditSale()"
-        class="payment-method-card credit-sale-card cursor-pointer p-5 text-center"
-        role="button"
-        tabindex="0"
-        (keydown.enter)="processCreditSale()"
-        (keydown.space)="processCreditSale()"
-        [attr.aria-label]="'Procesar venta a crédito'"
-      >
-        <div class="flex flex-col items-center">
-          <app-icon
-            name="calendar"
-            [size]="40"
-            color="var(--color-warning)"
-            class="mb-3"
-          ></app-icon>
-          <span class="text-base font-semibold text-[var(--color-text-primary)]"
-            >Venta a Crédito</span
-          >
-          <span class="text-sm text-[var(--color-text-secondary)] mt-1"
-            >Generar orden sin pago inmediato</span
-          >
-        </div>
-      </div>
+    <!-- Option Credit Sale (Removed hardcoded, should be dynamic if needed) -->
+    <!--
+    <div class="mb-6" *ngIf="false">
+       ...
     </div>
+    -->
 
     <!-- Métodos de Pago -->
     <div>

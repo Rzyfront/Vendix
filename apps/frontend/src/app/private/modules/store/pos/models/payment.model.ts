@@ -1,7 +1,7 @@
 export interface PaymentMethod {
   id: string;
   name: string;
-  type: 'cash' | 'card' | 'transfer' | 'digital_wallet';
+  type: 'cash' | 'card' | 'transfer' | 'digital_wallet' | string;
   icon: string;
   enabled: boolean;
   requiresReference?: boolean;
@@ -16,6 +16,8 @@ export interface PaymentRequest {
   cashReceived?: number;
   customerEmail?: string;
   customerPhone?: string;
+  customerId?: number | string;
+  customerName?: string;
 }
 
 export interface PaymentResponse {

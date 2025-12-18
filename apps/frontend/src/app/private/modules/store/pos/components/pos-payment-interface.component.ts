@@ -23,6 +23,7 @@ import {
   CardComponent,
   IconComponent,
 } from '../../../../../shared/components';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -514,6 +515,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   constructor(
     private fb: FormBuilder,
     private paymentService: PosPaymentService,
+    private toastService: ToastService,
   ) {
     this.paymentForm = this.createPaymentForm();
   }
@@ -570,11 +572,11 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   }
 
   getPaymentMethodClasses(method: PaymentMethod): string {
-    const baseClasses = ['payment-method-card'];
+    const base_classes = ['payment-method-card'];
     if (this.paymentState.selectedMethod?.id === method.id) {
-      baseClasses.push('selected');
+      base_classes.push('selected');
     }
-    return baseClasses.join(' ');
+    return base_classes.join(' ');
   }
 
   setCashAmount(amount: number): void {
@@ -582,9 +584,9 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   }
 
   appendNumber(num: number): void {
-    const currentValue = this.cashReceivedControl.value || 0;
-    const newValue = parseFloat(currentValue.toString() + num.toString());
-    this.cashReceivedControl.setValue(newValue);
+    const current_value = this.cashReceivedControl.value || 0;
+    const new_value = parseFloat(current_value.toString() + num.toString());
+    this.cashReceivedControl.setValue(new_value);
   }
 
   clearCashAmount(): void {
@@ -639,9 +641,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (!this.cartState.customer) {
+      this.toastService.show({
+        variant: 'error',
+        title: 'Error',
+        description: 'Debe seleccionar un cliente para procesar la venta',
+      });
+      return;
+    }
+
     this.paymentState.isProcessing = true;
 
-    const paymentRequest = {
+    const payment_request = {
       orderId: 'ORDER_' + Date.now(),
       amount: this.cartState.summary.total,
       paymentMethod: this.paymentState.selectedMethod,
@@ -650,7 +661,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     };
 
     this.paymentService
-      .processSaleWithPayment(this.cartState, paymentRequest, 'current_user')
+      .processSaleWithPayment(this.cartState, payment_request, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -666,11 +677,21 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
             this.onModalClosed();
           } else {
             console.error('Payment failed:', response.message);
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: response.message || 'Error al procesar el pago',
+            });
           }
         },
         error: (error) => {
           this.paymentState.isProcessing = false;
           console.error('Payment error:', error);
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error',
+            description: error.message || 'Error de conexión al procesar el pago',
+          });
         },
       });
   }
@@ -696,51 +717,66 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
             this.onModalClosed();
           } else {
             console.error('Credit sale failed:', response.message);
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: response.message || 'Error al procesar la venta a crédito',
+            });
           }
-        },
+      },
         error: (error) => {
           this.paymentState.isProcessing = false;
           console.error('Credit sale error:', error);
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error',
+            description: error.message || 'Error al procesar la venta a crédito',
+          });
         },
       });
-  }
+}
 
-  saveAsDraft(): void {
-    if (!this.cartState) return;
+saveAsDraft(): void {
+  if(!this.cartState) return;
 
-    this.paymentState.isProcessing = true;
+  this.paymentState.isProcessing = true;
 
-    this.paymentService
-      .saveDraft(this.cartState, 'current_user')
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (response) => {
-          this.paymentState.isProcessing = false;
-          if (response.success) {
-            this.draftSaved.emit({
-              success: true,
-              order: response.order,
-              message: response.message,
-            });
-            this.onModalClosed();
-          }
-        },
-        error: (error) => {
-          this.paymentState.isProcessing = false;
-          console.error('Save draft error:', error);
-        },
-      });
-  }
+  this.paymentService
+    .saveDraft(this.cartState, 'current_user')
+    .pipe(takeUntil(this.destroy$))
+    .subscribe({
+      next: (response) => {
+        this.paymentState.isProcessing = false;
+        if (response.success) {
+          this.draftSaved.emit({
+            success: true,
+            order: response.order,
+            message: response.message,
+          });
+          this.onModalClosed();
+        }
+      },
+      error: (error) => {
+        this.paymentState.isProcessing = false;
+        console.error('Save draft error:', error);
+        this.toastService.show({
+          variant: 'error',
+          title: 'Error',
+          description: error.message || 'Error al guardar el borrador',
+        });
+      },
+    });
+}
 
-  onModalClosed(): void {
-    this.paymentState = {
-      selectedMethod: null,
-      cashReceived: 0,
-      reference: '',
-      isProcessing: false,
-      change: 0,
-    };
-    this.paymentForm.reset();
-    this.closed.emit();
-  }
+onModalClosed(): void {
+  this.paymentState = {
+    selectedMethod: null,
+    cashReceived: 0,
+    reference: '',
+    isProcessing: false,
+    change: 0,
+  };
+  this.paymentForm.reset();
+  this.closed.emit();
+}
 }

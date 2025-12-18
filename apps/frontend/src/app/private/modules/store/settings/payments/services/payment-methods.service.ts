@@ -19,7 +19,7 @@ import {
 export class PaymentMethodsService {
   private readonly api_base_url = `${environment.apiUrl}/store`;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   getStorePaymentMethods(
     params?: PaymentMethodsQueryParams,
@@ -68,63 +68,75 @@ export class PaymentMethodsService {
   }
 
   getStorePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
-    return this.http
-      .get<StorePaymentMethod>(
-        `${this.api_base_url}/payment-methods/${method_id}`,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.get<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   enablePaymentMethod(
     system_method_id: string,
     data: EnablePaymentMethodDto,
   ): Observable<StorePaymentMethod> {
-    return this.http
-      .post<StorePaymentMethod>(
-        `${this.api_base_url}/payment-methods/enable/${system_method_id}`,
-        data,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.post<any>(
+      `${this.api_base_url}/payment-methods/enable/${system_method_id}`,
+      data,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   updateStorePaymentMethod(
     method_id: string,
     data: UpdateStorePaymentMethodDto,
   ): Observable<StorePaymentMethod> {
-    return this.http
-      .patch<StorePaymentMethod>(
-        `${this.api_base_url}/payment-methods/${method_id}`,
-        data,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.patch<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+      data,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   disablePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
-    return this.http
-      .patch<StorePaymentMethod>(
-        `${this.api_base_url}/payment-methods/${method_id}/disable`,
-        {},
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.patch<any>(
+      `${this.api_base_url}/payment-methods/${method_id}/disable`,
+      {},
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   deletePaymentMethod(method_id: string): Observable<void> {
-    return this.http
-      .delete<void>(
-        `${this.api_base_url}/payment-methods/${method_id}`,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.delete<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   reorderPaymentMethods(
     data: ReorderPaymentMethodsDto,
   ): Observable<StorePaymentMethod[]> {
-    return this.http
-      .post<StorePaymentMethod[]>(
-        `${this.api_base_url}/payment-methods/reorder`,
-        data
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.post<any>(
+      `${this.api_base_url}/payment-methods/reorder`,
+      data
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   getPaymentMethodStats(): Observable<PaymentMethodStats> {
