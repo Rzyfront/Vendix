@@ -1,6 +1,7 @@
 import {
   Controller,
   Post,
+  Put,
   Get,
   Delete,
   Body,
@@ -25,6 +26,7 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
 } from './dto/password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
@@ -202,6 +204,70 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener el perfil',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Put('profile')
+  @UseGuards(RolesGuard)
+  async updateProfile(
+    @Req() req: AuthenticatedRequest,
+    @Body() updateProfileDto: UpdateProfileDto,
+  ) {
+    try {
+      const result = await this.authService.updateProfile(
+        req.user.id,
+        updateProfileDto,
+      );
+      return this.responseService.success(
+        result,
+        'Perfil actualizado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar el perfil',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('settings')
+  async getSettings(@Req() req: AuthenticatedRequest) {
+    try {
+      const settings = await this.authService.getSettings(req.user.id);
+      return this.responseService.success(
+        settings,
+        'Configuración obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la configuración',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Put('settings')
+  async updateSettings(
+    @Req() req: AuthenticatedRequest,
+    @Body() updateSettingsDto: any, // Use dedicated DTO if strict typing is needed here
+  ) {
+    try {
+      const result = await this.authService.updateSettings(
+        req.user.id,
+        updateSettingsDto,
+      );
+      return this.responseService.success(
+        result,
+        'Configuración actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al actualizar la configuración',
         error.response?.message || error.message,
         error.status || 400,
       );

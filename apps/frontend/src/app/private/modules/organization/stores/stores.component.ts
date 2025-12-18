@@ -13,7 +13,7 @@ import {
   StoreListItem,
   StoreQueryDto,
   Store,
-  StoreStats,
+
   StoreFilters,
   StoreType,
 } from './interfaces/store.interface';
@@ -21,7 +21,6 @@ import { OrganizationStoresService } from './services/organization-stores.servic
 
 // Import new components
 import {
-  StoreStatsComponent,
   StoreEmptyStateComponent,
   StoreCreateModalComponent,
   StoreEditModalComponent,
@@ -40,7 +39,20 @@ import {
   ButtonComponent,
   ToastService,
 } from '../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../shared/components/index';
+import {
+  TableColumn,
+  TableAction,
+  StatsComponent,
+} from '../../../../shared/components/index';
+
+interface StatItem {
+  title: string;
+  value: string | number;
+  smallText: string;
+  iconName: string;
+  iconBgColor: string;
+  iconColor: string;
+}
 
 @Component({
   selector: 'app-stores',
@@ -49,7 +61,7 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    StoreStatsComponent,
+    StatsComponent,
     StoreEmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
@@ -62,7 +74,18 @@ import { TableColumn, TableAction } from '../../../../shared/components/index';
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <app-store-stats [stats]="stats"></app-store-stats>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <app-stats
+          *ngFor="let item of statsItems"
+          [title]="item.title"
+          [value]="item.value"
+          [smallText]="item.smallText"
+          [iconName]="item.iconName"
+          [iconBgColor]="item.iconBgColor"
+          [iconColor]="item.iconColor"
+        >
+        </app-stats>
+      </div>
 
       <!-- Stores List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -309,7 +332,7 @@ export class StoresComponent implements OnInit, OnDestroy {
     },
   ];
 
-  stats: StoreStats | null = null;
+
 
   // Modal state
   isCreateModalOpen = false;
@@ -506,36 +529,76 @@ export class StoresComponent implements OnInit, OnDestroy {
     });
   }
 
+  statsItems: StatItem[] = [];
+
   loadStats(): void {
     this.storesService
       .getOrganizationStoreStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (response) => {
-          this.stats = {
-            totalStores: response.data?.total_stores || 0,
-            activeStores: response.data?.active_stores || 0,
-            inactiveStores: response.data?.inactive_stores || 0,
-            storesGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            activeStoresGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            totalRevenue: Math.floor(Math.random() * 100000), // Mock revenue
-            revenueGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            totalProducts: Math.floor(Math.random() * 1000), // Mock products
-            productsGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            totalOrders: Math.floor(Math.random() * 5000), // Mock orders
-            ordersGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            averageOrderValue: Math.floor(Math.random() * 200), // Mock AOV
-            aovGrowthRate: Math.random() * 20 - 10, // Mock growth rate
-            conversionRate: Math.random() * 5, // Mock conversion rate
-            conversionGrowthRate: Math.random() * 2 - 1, // Mock growth rate
-            customerSatisfaction: Math.random() * 2 + 3, // Mock satisfaction (3-5)
-            satisfactionGrowthRate: Math.random() * 1 - 0.5, // Mock growth rate
-          };
+        next: (response: any) => {
+          const data = response.data || {};
+
+          this.statsItems = [
+            {
+              title: 'Total Tiendas',
+              value: data.total_stores || 0,
+              smallText: 'Registradas',
+              iconName: 'building',
+              iconBgColor: 'bg-primary/10',
+              iconColor: 'text-primary'
+            },
+            {
+              title: 'Activas',
+              value: data.active_stores || 0,
+              smallText: 'En funcionamiento',
+              iconName: 'check-circle',
+              iconBgColor: 'bg-green-100',
+              iconColor: 'text-green-600'
+            },
+            {
+              title: 'Total Pedidos',
+              value: this.formatNumber(data.total_orders || 0),
+              smallText: 'Procesados',
+              iconName: 'shopping-cart',
+              iconBgColor: 'bg-pink-100',
+              iconColor: 'text-pink-600'
+            },
+            {
+              title: 'Total Ganancias',
+              value: this.formatCurrency(data.total_revenue || 0),
+              smallText: 'Ingresos totales',
+              iconName: 'dollar-sign',
+              iconBgColor: 'bg-blue-100',
+              iconColor: 'text-blue-600'
+            }
+          ];
         },
         error: (error) => {
           console.error('Error loading stats:', error);
+          this.toastService.error('Error al cargar estadísticas');
         },
       });
+  }
+
+  // Formatear número para visualización
+  private formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  }
+
+  // Formatear moneda
+  private formatCurrency(amount: number): string {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
   }
 
   refreshStores(): void {

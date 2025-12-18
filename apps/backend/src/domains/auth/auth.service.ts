@@ -33,6 +33,107 @@ export class AuthService {
     private readonly onboardingService: OnboardingService,
   ) { }
 
+  async updateProfile(userId: number, updateProfileDto: any) {
+    const { first_name, last_name, phone, address, document_type, document_number } = updateProfileDto;
+
+    // 1. Actualizar datos básicos del usuario
+    const updateData: any = {};
+    if (first_name) updateData.first_name = first_name;
+    if (last_name) updateData.last_name = last_name;
+    if (phone !== undefined) updateData.phone = phone;
+    if (document_type !== undefined) updateData.document_type = document_type;
+    if (document_number !== undefined) updateData.document_number = document_number;
+
+    let user = await this.prismaService.users.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    // 2. Manejar la dirección si se proporciona
+    if (address) {
+      // Buscar si el usuario ya tiene una dirección (priorizar la principal)
+      const existingAddress = await this.prismaService.addresses.findFirst({
+        where: { user_id: userId },
+        orderBy: { is_primary: 'desc' }, // Primero la principal si existe
+      });
+
+      if (existingAddress) {
+        // Actualizar existente
+        const addressUpdateData: any = {
+          address_line1: address.address_line_1,
+          address_line2: address.address_line_2,
+          city: address.city,
+          country_code: address.country,
+          postal_code: address.postal_code,
+          state_province: address.state,
+          latitude: address.latitude ? parseFloat(address.latitude) : undefined,
+          longitude: address.longitude ? parseFloat(address.longitude) : undefined,
+        };
+
+        await this.prismaService.addresses.update({
+          where: { id: existingAddress.id },
+          data: addressUpdateData,
+        });
+      } else {
+        // Crear nueva
+        await this.prismaService.addresses.create({
+          data: {
+            user_id: userId,
+            address_line1: address.address_line_1,
+            address_line2: address.address_line_2,
+            city: address.city,
+            country_code: address.country,
+            postal_code: address.postal_code,
+            state_province: address.state,
+            is_primary: true,
+            type: 'shipping', // Default type
+            latitude: address.latitude ? parseFloat(address.latitude) : null,
+            longitude: address.longitude ? parseFloat(address.longitude) : null,
+            // Necesitamos el organization_id del usuario
+            organization_id: user.organization_id,
+          },
+        });
+      }
+    }
+
+    // Retornar perfil actualizado
+    return this.getProfile(userId);
+  }
+
+  async getSettings(userId: number) {
+    const settings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+
+    if (!settings) {
+      // Return default or empty if not found, or maybe create one.
+      // For now, let's return null or empty object if specific behavior isn't defined
+      return null;
+    }
+    return settings;
+  }
+
+  async updateSettings(userId: number, updateSettingsDto: any) {
+    const { config } = updateSettingsDto;
+
+    // Upsert logic: create if not exists, update if exists
+    // But since user_settings usually created at registration, update should suffice or upsert is safer.
+
+    return this.prismaService.user_settings.upsert({
+      where: { user_id: userId },
+      update: {
+        config: config ? config : undefined,
+        updated_at: new Date(),
+      },
+      create: {
+        user_id: userId,
+        config: config || {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+  }
+
   async registerOwner(
     registerOwnerDto: RegisterOwnerDto,
     client_info?: { ip_address?: string; user_agent?: string },
@@ -1373,6 +1474,7 @@ export class AuthService {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: {
+        addresses: true,
         user_roles: {
           include: {
             roles: {

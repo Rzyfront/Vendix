@@ -1,17 +1,10 @@
 <!-- Vendix Multi-Store Application -->
 
 <!-- Loading State -->
-<div
-  *ngIf="isLoading$ | async"
-  class="min-h-screen flex items-center justify-center bg-background"
->
+<div *ngIf="isLoading$ | async" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
-      <app-spinner
-        size="lg"
-        text="Cargando Aplicación..."
-        [center]="true"
-      ></app-spinner>
+      <app-spinner size="lg" text="Cargando Aplicación..." [center]="true"></app-spinner>
       <p class="text-text-secondary mt-4">
         Por favor espere mientras preparamos su solicitud
       </p>
@@ -20,10 +13,7 @@
 </div>
 
 <!-- Error State -->
-<div
-  *ngIf="(error$ | async) as error"
-  class="min-h-screen flex items-center justify-center bg-background"
->
+<div *ngIf="(error$ | async) as error" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
       <div class="text-6xl mb-4">⚠️</div>
@@ -43,3 +33,4 @@
 
 <!-- Toasts (global) -->
 <app-toast-container></app-toast-container>
+<app-global-user-modals></app-global-user-modals>

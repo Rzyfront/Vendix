@@ -9,7 +9,7 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
-import { UserStatsService } from './services/user-stats.service';
+
 import {
   UserCreateModalComponent,
   UserEditModalComponent,
@@ -24,9 +24,7 @@ import {
   TableAction,
   DialogService,
   ToastService,
-  ButtonComponent,
-  IconComponent,
-  InputsearchComponent,
+  StatsComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -57,8 +55,7 @@ interface StatItem {
     UserCardComponent,
     TableComponent,
     ButtonComponent,
-    IconComponent,
-    InputsearchComponent,
+    StatsComponent,
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
@@ -160,7 +157,6 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   constructor(
     private usersService: UsersService,
-    private userStatsService: UserStatsService,
     private fb: FormBuilder,
     private dialogService: DialogService,
     private toastService: ToastService,
@@ -258,9 +254,26 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUserStats(): void {
-    // Calculate stats from current users list
-    this.userStats = this.userStatsService.calculateStats(this.users);
-    this.updateStatsItems();
+    const filters = this.filterForm.value;
+    // Pass current filters to stats if needed, or empty for global
+    // Typically stats on dashboard are global or filtered?
+    // The backend endpoint accepts filters.
+    // Let's pass the same filters as the list for consistency, or maybe just global?
+    // Given the UI is "Stats Cards", usually they reflect the current filter context ONLY IF explicitly desired.
+    // However, usually "Total Users" card should show TOTAL users, not "Total Users matching search 'bob'".
+    // But "Active Users" card matching search 'bob' might be weird.
+    // Standard pattern: Dashboard stats are often global or time-range filtered.
+    // Let's pass empty object for global stats as per typical requirement, or pass current filters if user wants "filtered stats".
+    // The prompt says "que los stats funcionen". Local calculation *was* doing filtered stats (on the current page!! which was wrong).
+    // Let's default to global stats for now as that's safer for "Total Users".
+
+    this.usersService.getUsersStats().subscribe({
+      next: (stats) => {
+        this.userStats = stats;
+        this.updateStatsItems();
+      },
+      error: (err) => console.error('Error loading user stats', err)
+    });
   }
 
   private updateStatsItems(): void {
