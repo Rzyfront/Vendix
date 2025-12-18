@@ -6,8 +6,11 @@ import {
   TemplateRef,
   ContentChild,
   AfterContentInit,
+  OnDestroy, // ← add
+  ChangeDetectorRef, // ← add
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 
 export interface TableColumn {
@@ -26,13 +29,15 @@ export interface TableColumn {
     colorMap?: Record<string, string>; // For custom mapping of values to colors
     size?: 'sm' | 'md' | 'lg';
   };
+  mobilePriority?: number; // 1 = alta, 2 = media, 3 = baja prioridad en móvil
+  hidden?: boolean; // Nueva propiedad para ocultar columnas responsivamente
 }
 
 export interface TableAction {
   label: string | ((item: any) => string);
   icon?: string | ((item: any) => string);
   action: (item: any) => void;
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'ghost';
   disabled?: (item: any) => boolean;
   show?: (item: any) => boolean;
 }
@@ -47,7 +52,7 @@ export type SortDirection = 'asc' | 'desc' | null;
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss',
 })
-export class TableComponent implements AfterContentInit {
+export class TableComponent implements AfterContentInit, OnDestroy {
   @Input() data: any[] = [];
   @Input() columns: TableColumn[] = [];
   @Input() actions?: TableAction[];
@@ -55,12 +60,19 @@ export class TableComponent implements AfterContentInit {
   @Input() loading = false;
   @Input() emptyMessage = 'No hay datos disponibles';
   @Input() showHeader = true;
-  @Input() striped = false;
+  @Input() striped = true;
   @Input() hoverable = true;
   @Input() bordered = false;
   @Input() compact = false;
   @Input() sortable = false;
   @Input() customClasses = '';
+  @Input() mobileBreakpoint = 768; // Nuevo input configurable
+  @Input() filterForm: FormGroup | null = null; // Soporte para formularios Reactive externos
+
+  // Scroll and layout configuration
+  @Input() maxHeight = '600px';
+  @Input() enableScroll = true;
+  @Input() stickyHeader = true;
 
   @Output() sort = new EventEmitter<{
     column: string;
@@ -73,6 +85,15 @@ export class TableComponent implements AfterContentInit {
   sortColumn: string | null = null;
   sortDirection: SortDirection = null;
 
+  // Nuevas propiedades para responsive
+  isMobileView: boolean = false;
+  isTabletView: boolean = false;
+  isDesktopView: boolean = false;
+  private resizeListener?: () => void;
+
+  constructor(private cdr: ChangeDetectorRef) {
+    this.checkViewport();
+  }
   ngAfterContentInit(): void {
     // Validar que las columnas tengan las propiedades necesarias
     this.columns.forEach((col) => {
@@ -83,6 +104,58 @@ export class TableComponent implements AfterContentInit {
         );
       }
     });
+
+    // Automáticamente hacer verdes los botones de editar
+    if (this.actions) {
+      this.actions.forEach((action) => {
+        const label =
+          typeof action.label === 'function' ? action.label({}) : action.label;
+        const icon =
+          typeof action.icon === 'function' ? action.icon({}) : action.icon;
+
+        // Si es botón de editar (por label o icono), forzar variante success
+        if (
+          (label && label.toLowerCase().includes('editar')) ||
+          (icon && icon === 'edit') ||
+          action.icon === 'edit'
+        ) {
+          action.variant = 'success';
+        }
+      });
+    }
+  }
+
+  ngOnDestroy(): void {
+    if (this.resizeListener) {
+      window.removeEventListener('resize', this.resizeListener);
+    }
+  }
+
+  private checkViewport(): void {
+    if (typeof window !== 'undefined') {
+      const width = window.innerWidth;
+
+      // ✅ Breakpoints corregidos
+      this.isMobileView = width <= 767; // Mobile: <= 767px
+      this.isTabletView = width >= 768 && width <= 1023; // Tablet: 768-1023px
+      this.isDesktopView = width >= 1024; // Desktop: >= 1024px
+
+      this.resizeListener = () => {
+        const new_width = window.innerWidth;
+        const new_mobile_view = new_width <= 767;
+        // const new_tablet_view = new_width >= 768 && new_width <= 1023;
+        // const new_desktop_view = new_width >= 1024;
+
+        if (new_mobile_view !== this.isMobileView) {
+          this.isMobileView = new_mobile_view;
+          // this.isTabletView = new_tablet_view;
+          // this.isDesktopView = new_desktop_view;
+          this.cdr.markForCheck();
+        }
+      };
+
+      window.addEventListener('resize', this.resizeListener);
+    }
   }
 
   onSort(column: TableColumn): void {
@@ -224,6 +297,16 @@ export class TableComponent implements AfterContentInit {
     return [...baseClasses, ...sizeClasses[this.size]].join(' ');
   }
 
+  getMobileCardClasses(index: number): string {
+    let classes = 'mobile-card';
+
+    if (this.striped && index % 2 !== 0) {
+      classes += ' bg-muted/10';
+    }
+
+    return classes;
+  }
+
   getCellClasses(column: TableColumn): string {
     const alignClasses = {
       left: ['text-left'],
@@ -241,9 +324,6 @@ export class TableComponent implements AfterContentInit {
       'inline-flex',
       'items-center',
       'gap-1',
-      'px-2',
-      'py-1',
-      'rounded',
       'text-xs',
       'font-medium',
       'transition-all',
@@ -252,6 +332,13 @@ export class TableComponent implements AfterContentInit {
       'focus:ring-2',
       'focus:ring-offset-1',
     ];
+
+    // Ajustes específicos para móvil
+    if (this.isMobileView) {
+      baseClasses.push('px-6', 'py-2', 'rounded-full'); // Más grandes y en forma de píldora
+    } else {
+      baseClasses.push('px-2', 'py-1', 'rounded'); // Normal en desktop
+    }
 
     const variantClasses = {
       primary: [
@@ -271,6 +358,12 @@ export class TableComponent implements AfterContentInit {
         'text-white',
         'hover:bg-red-700',
         'focus:ring-red-500',
+      ],
+      success: [
+        'bg-green-600',
+        'text-white',
+        'hover:bg-green-700',
+        'focus:ring-green-500/50',
       ],
       ghost: [
         'text-text-secondary',
@@ -532,5 +625,355 @@ export class TableComponent implements AfterContentInit {
     }
 
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  /**
+   * Get columns to show in mobile view based on priority
+   */
+  getMobileColumns(): TableColumn[] {
+    return this.columns; // Devuelve todas las columnas en lugar de filtrar por prioridad
+  }
+
+  /**
+   * Get responsive columns with intelligent priority system for any table type
+   */
+  getResponsiveColumns(): TableColumn[] {
+    if (!this.isMobileView) {
+      const screenWidth =
+        typeof window !== 'undefined' ? window.innerWidth : 1024;
+      const breakpoints = this.getResponsiveBreakpoints(this.columns.length);
+
+      let maxColumns: number;
+
+      // Determinar cantidad máxima de columnas por breakpoint
+      if (screenWidth < 1024) {
+        maxColumns = breakpoints.small;
+      } else if (screenWidth < 1440) {
+        maxColumns = breakpoints.medium;
+      } else {
+        maxColumns = breakpoints.large;
+      }
+
+      // Ordenar por prioridad inteligente y tomar las N más importantes
+      return this.columns
+        .map((col) => ({ ...col, priority: this.getColumnPriority(col) }))
+        .sort((a, b) => a.priority - b.priority)
+        .slice(0, maxColumns)
+        .map((col) => ({
+          ...col,
+          width: this.getAdaptiveWidth(col, maxColumns),
+        }));
+    }
+
+    return this.columns;
+  }
+
+  /**
+   * Enhanced intelligent priority system with more patterns and better scoring
+   */
+  private getColumnPriority(column: TableColumn): number {
+    const key = column.key.toLowerCase();
+    const label = column.label.toLowerCase();
+
+    // PRIORIDAD 1: Identificadores principales (máxima importancia)
+    if (
+      key === 'id' ||
+      key === 'code' ||
+      key === 'sku' ||
+      key.includes('name') ||
+      key.includes('title') ||
+      key.includes('nombre') ||
+      key.includes('título') ||
+      label.includes('nombre') ||
+      label.includes('código')
+    ) {
+      return 1;
+    }
+
+    // PRIORIDAD 2: Información de contacto (alta importancia)
+    if (
+      key.includes('email') ||
+      key.includes('mail') ||
+      key.includes('phone') ||
+      key.includes('teléfono') ||
+      key.includes('contact') ||
+      key.includes('contacto') ||
+      key.includes('mobile') ||
+      key.includes('celular')
+    ) {
+      return 2;
+    }
+
+    // PRIORIDAD 3: Estados y categorías (importancia media-alta)
+    if (
+      key.includes('state') ||
+      key.includes('status') ||
+      key.includes('estado') ||
+      key.includes('estatus') ||
+      key.includes('type') ||
+      key.includes('tipo') ||
+      key.includes('category') ||
+      key.includes('categoría') ||
+      key.includes('role') ||
+      key.includes('rol') ||
+      key.includes('active') ||
+      key.includes('activo') ||
+      key.includes('enabled') ||
+      key.includes('habilitado')
+    ) {
+      return 3;
+    }
+
+    // PRIORIDAD 4: Información financiera/valores (importancia media)
+    if (
+      key.includes('price') ||
+      key.includes('precio') ||
+      key.includes('cost') ||
+      key.includes('costo') ||
+      key.includes('amount') ||
+      key.includes('monto') ||
+      key.includes('total') ||
+      key.includes('subtotal') ||
+      key.includes('value') ||
+      key.includes('valor') ||
+      key.includes('quantity') ||
+      key.includes('cantidad') ||
+      key.includes('stock') ||
+      key.includes('inventario')
+    ) {
+      return 4;
+    }
+
+    // PRIORIDAD 5: Fechas importantes (importancia media)
+    if (
+      key.includes('created') ||
+      key.includes('creado') ||
+      key.includes('updated') ||
+      key.includes('actualizado') ||
+      key.includes('modified') ||
+      key.includes('modificado') ||
+      key.includes('date') ||
+      key.includes('fecha') ||
+      key.includes('time') ||
+      key.includes('hora') ||
+      key.includes('login') ||
+      key.includes('acceso') ||
+      key.includes('last') ||
+      key.includes('último')
+    ) {
+      return 5;
+    }
+
+    // PRIORIDAD 6: Ubicación/dirección (importancia media-baja)
+    if (
+      key.includes('address') ||
+      key.includes('dirección') ||
+      key.includes('location') ||
+      key.includes('ubicación') ||
+      key.includes('city') ||
+      key.includes('ciudad') ||
+      key.includes('country') ||
+      key.includes('país') ||
+      key.includes('state') ||
+      key.includes('provincia')
+    ) {
+      return 6;
+    }
+
+    // PRIORIDAD 7: Información descriptiva (baja importancia)
+    if (
+      key.includes('description') ||
+      key.includes('descripción') ||
+      key.includes('notes') ||
+      key.includes('notas') ||
+      key.includes('comment') ||
+      key.includes('comentario') ||
+      key.includes('observation') ||
+      key.includes('observación') ||
+      key.includes('detail') ||
+      key.includes('detalle')
+    ) {
+      return 7;
+    }
+
+    // PRIORIDAD 8: Información técnica/metadata (muy baja importancia)
+    if (
+      key.includes('internal') ||
+      key.includes('meta') ||
+      key.includes('system') ||
+      key.includes('sistema') ||
+      key.startsWith('_') ||
+      key.includes('uuid') ||
+      key.includes('hash') ||
+      key.includes('token')
+    ) {
+      return 8;
+    }
+
+    // DEFAULT: Prioridad media para campos no reconocidos
+    return 4;
+  }
+
+  /**
+   * Get responsive breakpoints with smoother transitions
+   */
+  private getResponsiveBreakpoints(totalColumns: number) {
+    // Sistema de breakpoints más granular para transiciones suaves
+    if (totalColumns <= 3) {
+      return { small: totalColumns, medium: totalColumns, large: totalColumns };
+    }
+
+    if (totalColumns <= 5) {
+      return { small: 3, medium: 4, large: totalColumns };
+    }
+
+    if (totalColumns <= 8) {
+      return { small: 4, medium: 6, large: totalColumns };
+    }
+
+    if (totalColumns <= 12) {
+      return { small: 5, medium: 8, large: 10 };
+    }
+
+    // Para tablas muy grandes, mostrar máximo 12 columnas en pantallas grandes
+    return { small: 6, medium: 9, large: 12 };
+  }
+
+  /**
+   * Get standardized max height based on screen size (following Context.md guidelines)
+   */
+  getMaxHeight(): string {
+    if (typeof window === 'undefined') return '600px';
+
+    const width = window.innerWidth;
+
+    // Extra large screens (2xl): 1280px+
+    if (width >= 1280) {
+      return '800px';
+    }
+
+    // Large screens (xl): 1024px+
+    if (width >= 1024) {
+      return '700px';
+    }
+
+    // Default: 600px for smaller screens
+    return '600px';
+  }
+
+  /**
+   * Enhanced adaptive width calculation with better spacing logic
+   */
+  private getAdaptiveWidth(column: TableColumn, visibleCount: number): string {
+    const key = column.key.toLowerCase();
+    const priority = this.getColumnPriority(column);
+
+    // Base widths más precisas por tipo de dato y prioridad
+    let baseWidth = 110; // Base más conservadora
+
+    // Ajustes por tipo de contenido
+    if (
+      key.includes('name') ||
+      key.includes('title') ||
+      key.includes('nombre') ||
+      key.includes('título')
+    ) {
+      baseWidth = 150; // Nombres necesitan más espacio
+    } else if (key.includes('email') || key.includes('mail')) {
+      baseWidth = 190; // Emails son largos
+    } else if (
+      key.includes('description') ||
+      key.includes('descripción') ||
+      key.includes('comment')
+    ) {
+      baseWidth = 180; // Descripciones variables
+    } else if (key.includes('address') || key.includes('dirección')) {
+      baseWidth = 170; // Direcciones son largas
+    } else if (
+      key.includes('date') ||
+      key.includes('fecha') ||
+      key.includes('created') ||
+      key.includes('updated')
+    ) {
+      baseWidth = 125; // Fechas tienen formato estándar
+    } else if (
+      key.includes('phone') ||
+      key.includes('teléfono') ||
+      key.includes('mobile')
+    ) {
+      baseWidth = 130; // Números de teléfono
+    } else if (
+      key.includes('price') ||
+      key.includes('precio') ||
+      key.includes('cost') ||
+      key.includes('amount')
+    ) {
+      baseWidth = 110; // Valores monetarios
+    } else if (
+      key.includes('state') ||
+      key.includes('status') ||
+      key.includes('estado') ||
+      key.includes('type')
+    ) {
+      baseWidth = 105; // Estados cortos
+    } else if (
+      key.includes('quantity') ||
+      key.includes('cantidad') ||
+      key.includes('stock')
+    ) {
+      baseWidth = 95; // Números pequeños
+    }
+
+    // Ajustes por cantidad de columnas visibles (más sofisticado)
+    if (visibleCount >= 8) {
+      // Muchas columnas: comprimir más
+      baseWidth = Math.max(baseWidth * 0.75, 85);
+    } else if (visibleCount >= 6) {
+      // Columnas moderadas: ligero compresión
+      baseWidth = Math.max(baseWidth * 0.85, 90);
+    } else if (visibleCount >= 4) {
+      // Columnas razonables: ancho normal
+      baseWidth = baseWidth * 0.95;
+    } else if (visibleCount <= 2) {
+      // Muy pocas columnas: dar más espacio
+      baseWidth = baseWidth * 1.2;
+    }
+
+    // Ajuste final por prioridad (columnas más importantes tienen leve preferencia)
+    if (priority <= 2) {
+      baseWidth = baseWidth * 1.05; // 5% más para alta prioridad
+    }
+
+    // Redondear a múltiplos de 5 para consistencia
+    const rounded = Math.round(baseWidth / 5) * 5;
+
+    return `${Math.max(rounded, 80)}px`; // Mínimo 80px para legibilidad
+  }
+
+  /**
+   * Get the badge column value for mobile cards
+   */
+  getBadgeValue(item: any): string {
+    const badgeColumn = this.columns.find((c) => c.badge);
+    if (!badgeColumn) return '';
+
+    const value = this.getNestedValue(item, badgeColumn.key);
+    return badgeColumn.transform ? badgeColumn.transform(value) : value;
+  }
+
+  /**
+   * Get the title for mobile cards (first column value)
+   */
+  getCardTitle(item: any): any {
+    return this.columns[0]
+      ? this.getNestedValue(item, this.columns[0].key)
+      : '';
+  }
+
+  /**
+   * Get the badge column
+   */
+  getBadgeColumn(): TableColumn | undefined {
+    return this.columns.find((c) => c.badge);
   }
 }

@@ -22,9 +22,6 @@ import {
   TableComponent,
   TableColumn,
   TableAction,
-  InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
   DialogService,
   ToastService,
   StatsComponent,
@@ -57,8 +54,6 @@ interface StatItem {
     UserEmptyStateComponent,
     UserCardComponent,
     TableComponent,
-    InputsearchComponent,
-    IconComponent,
     ButtonComponent,
     StatsComponent,
   ],
@@ -84,14 +79,16 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true },
-    { key: 'last_name', label: 'Apellido', sortable: true },
-    { key: 'username', label: 'Usuario', sortable: true },
-    { key: 'email', label: 'Email', sortable: true },
+    { key: 'first_name', label: 'Nombre', sortable: true, width: '120px' },
+    { key: 'last_name', label: 'Apellido', sortable: true, width: '120px' },
+    { key: 'username', label: 'Usuario', sortable: true, width: '140px' },
+    { key: 'email', label: 'Email', sortable: true, width: '180px' },
     {
       key: 'state',
       label: 'Estado',
       sortable: true,
+      width: '100px',
+      align: 'center',
       badge: true,
       badgeConfig: {
         type: 'status',
@@ -103,18 +100,21 @@ export class UsersComponent implements OnInit, OnDestroy {
       key: 'app',
       label: 'Aplicación',
       sortable: false,
+      width: '120px',
       defaultValue: 'N/A',
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
+      width: '140px',
       transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
     },
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
+      width: '140px',
       transform: (value: string) => this.formatDate(value),
     },
   ];
@@ -124,7 +124,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'primary',
+      variant: 'success',
     },
     {
       label: 'Eliminar',

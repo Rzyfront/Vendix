@@ -76,20 +76,20 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
-    { key: 'slug', label: 'Slug', sortable: true, width: '150px' },
+    { key: 'name', label: 'Nombre', sortable: true, width: '160px' },
+    { key: 'slug', label: 'Slug', sortable: true, width: '120px' },
     {
       key: 'organizations.name',
       label: 'Organización',
       sortable: true,
-      width: '180px',
+      width: '140px',
       defaultValue: 'N/A',
     },
     {
       key: 'addresses',
       label: 'Dirección',
       sortable: false,
-      width: '200px',
+      width: '150px',
       transform: (value: any[]) => {
         if (!value || value.length === 0) return 'N/A';
         const primaryAddress = value.find((addr: any) => addr.is_primary);
@@ -103,7 +103,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       key: 'store_type',
       label: 'Tipo',
       sortable: true,
-      width: '120px',
+      width: '100px',
       align: 'center',
       badge: true,
       badgeConfig: {
@@ -123,7 +123,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       key: '_count.store_users',
       label: 'Usuarios',
       sortable: false,
-      width: '100px',
+      width: '80px',
       align: 'center',
       defaultValue: '0',
     },
@@ -131,7 +131,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       key: 'is_active',
       label: 'Estado',
       sortable: true,
-      width: '100px',
+      width: '80px',
       align: 'center',
       badge: true,
       badgeConfig: {
@@ -147,7 +147,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'primary',
+      variant: 'success',
     },
     {
       label: 'Configuración',
