@@ -4,27 +4,88 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { CreateLocationDto } from './dto/create-location.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
 import { LocationQueryDto } from './dto/location-query.dto';
+import { BadRequestException } from '@nestjs/common';
 
 @Injectable()
 export class LocationsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
-  create(createLocationDto: CreateLocationDto) {
+  async create(createLocationDto: CreateLocationDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new BadRequestException('Organization context is missing');
+    }
+
+    const { address, ...locationData } = createLocationDto;
+
     return this.prisma.inventory_locations.create({
-      data: createLocationDto,
+      data: {
+        ...(locationData as any),
+        organization_id: context.organization_id,
+        store_id: createLocationDto.store_id || context.store_id,
+        addresses: address ? {
+          create: {
+            address_line1: address.address_line_1,
+            address_line2: address.address_line_2,
+            city: address.city,
+            state_province: address.state,
+            postal_code: address.postal_code,
+            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
+            organization_id: context.organization_id,
+            store_id: createLocationDto.store_id || context.store_id,
+          }
+        } : undefined
+      },
+      include: {
+        addresses: true
+      }
     });
   }
 
-  findAll(query: LocationQueryDto) {
-    return this.prisma.inventory_locations.findMany({
-      where: {
-        type: query.type,
-        is_active: query.is_active,
+  async findAll(query: LocationQueryDto) {
+    const context = RequestContextService.getContext();
+    const where: any = {
+      organization_id: context?.organization_id,
+      is_active: query.is_active,
+      type: query.type,
+    };
+
+    // Add search filter
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { code: { contains: query.search, mode: 'insensitive' } },
+      ];
+    }
+
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.inventory_locations.findMany({
+        where,
+        include: {
+          addresses: true,
+        },
+        orderBy: {
+          name: 'asc',
+        },
+        skip,
+        take: limit,
+      }),
+      this.prisma.inventory_locations.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
-      include: {
-        addresses: true,
-      },
-    });
+    };
   }
 
   findOne(id: number) {
@@ -36,10 +97,52 @@ export class LocationsService {
     });
   }
 
-  update(id: number, updateLocationDto: UpdateLocationDto) {
+  async update(id: number, updateLocationDto: UpdateLocationDto) {
+    const context = RequestContextService.getContext();
+    const { address, ...locationData } = updateLocationDto;
+
+    const data: any = { ...locationData };
+
+    if (address) {
+      // Check if location already has an address
+      const location = await this.prisma.inventory_locations.findUnique({
+        where: { id },
+        select: { address_id: true }
+      });
+
+      if (location?.address_id) {
+        data.addresses = {
+          update: {
+            address_line1: address.address_line_1,
+            address_line2: address.address_line_2,
+            city: address.city,
+            state_province: address.state,
+            postal_code: address.postal_code,
+            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
+          }
+        };
+      } else {
+        data.addresses = {
+          create: {
+            address_line1: address.address_line_1,
+            address_line2: address.address_line_2,
+            city: address.city,
+            state_province: address.state,
+            postal_code: address.postal_code,
+            country_code: (address.country && address.country.length <= 3) ? address.country : 'COL',
+            organization_id: context?.organization_id,
+            store_id: updateLocationDto.store_id || context?.store_id,
+          }
+        };
+      }
+    }
+
     return this.prisma.inventory_locations.update({
       where: { id },
-      data: updateLocationDto,
+      data,
+      include: {
+        addresses: true
+      }
     });
   }
 

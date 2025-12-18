@@ -52,10 +52,24 @@ export interface SupplierQueryDto {
 }
 
 // ============================================================
+// ============================================================
 // LOCATION INTERFACES
 // ============================================================
 
 export type LocationType = 'warehouse' | 'store' | 'virtual' | 'transit';
+
+export interface Address {
+    id?: number;
+    address_line_1: string;
+    address_line_2?: string;
+    city: string;
+    state: string;
+    country: string;
+    postal_code: string;
+    phone_number?: string;
+    type?: string;
+    is_primary?: boolean;
+}
 
 export interface InventoryLocation {
     id: number;
@@ -66,18 +80,20 @@ export interface InventoryLocation {
     type?: LocationType;
     is_active: boolean;
     address_id?: number;
+    address?: Address;
     created_at?: string;
     updated_at?: string;
 }
 
 export interface CreateLocationDto {
-    organization_id: number;
+    organization_id?: number;
     store_id?: number;
     name: string;
     code: string;
     type?: LocationType;
     is_active?: boolean;
     address_id?: number;
+    address?: Omit<Address, 'id'>;
 }
 
 export interface UpdateLocationDto extends Partial<CreateLocationDto> { }

@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError } from 'rxjs';
+import { Observable, catchError, throwError, map } from 'rxjs';
+import { environment } from '../../../../../../../environments/environment';
 import {
   SystemPaymentMethod,
   StorePaymentMethod,
@@ -16,7 +17,7 @@ import {
   providedIn: 'root',
 })
 export class PaymentMethodsService {
-  private readonly api_base_url = 'store';
+  private readonly api_base_url = `${environment.apiUrl}/store`;
 
   constructor(private http: HttpClient) {}
 
@@ -33,19 +34,37 @@ export class PaymentMethodsService {
     }
 
     return this.http
-      .get<PaginatedPaymentMethods>(
+      .get<any>(
         `${this.api_base_url}/payment-methods`,
         { params: http_params },
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   getAvailablePaymentMethods(): Observable<SystemPaymentMethod[]> {
     return this.http
-      .get<SystemPaymentMethod[]>(
+      .get<any>(
         `${this.api_base_url}/payment-methods/available`
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   getStorePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
@@ -110,10 +129,19 @@ export class PaymentMethodsService {
 
   getPaymentMethodStats(): Observable<PaymentMethodStats> {
     return this.http
-      .get<PaymentMethodStats>(
+      .get<any>(
         `${this.api_base_url}/payment-methods/stats`,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   testPaymentMethodConfiguration(

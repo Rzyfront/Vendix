@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
+import { Router, ActivatedRoute } from '@angular/router';
 
 import {
     ButtonComponent,
@@ -122,16 +123,16 @@ import { PurchaseOrderDetailModalComponent } from './components/purchase-order-d
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
                 
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nueva Orden"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nueva Orden</span>
-                </app-button>
-              </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="createOrder()"
+                    title="Nueva Orden"
+                  >
+                    <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                    <span class="hidden sm:inline">Nueva Orden</span>
+                  </app-button>
+                </div>
           </div>
         </div>
 
@@ -292,7 +293,9 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
         private purchaseOrdersService: PurchaseOrdersService,
         private suppliersService: SuppliersService,
         private toastService: ToastService,
-        private dialogService: DialogService
+        private dialogService: DialogService,
+        private router: Router,
+        private route: ActivatedRoute
     ) { }
 
     ngOnInit(): void {
@@ -398,6 +401,10 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
 
     openCreateModal(): void {
         this.is_create_modal_open = true;
+    }
+
+    createOrder(): void {
+        this.router.navigate(['new'], { relativeTo: this.route });
     }
 
     closeCreateModal(): void {

@@ -176,6 +176,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/pos',
     },
     {
+      label: 'Órdenes',
+      icon: 'cart',
+      route: '/admin/orders',
+    },
+    {
       label: 'Productos',
       icon: 'package',
       route: '/admin/products',
@@ -190,11 +195,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           route: '/admin/inventory',
         },
         {
-          label: 'Proveedores',
-          icon: 'circle',
-          route: '/admin/inventory/suppliers',
-        },
-        {
           label: 'Órdenes de Compra',
           icon: 'circle',
           route: '/admin/inventory/orders',
@@ -204,13 +204,17 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/inventory/adjustments',
         },
+        {
+          label: 'Ubicaciones',
+          icon: 'circle',
+          route: '/admin/inventory/locations',
+        },
+        {
+          label: 'Proveedores',
+          icon: 'circle',
+          route: '/admin/inventory/suppliers',
+        },
       ],
-    },
-    {
-      label: 'Pedidos',
-      icon: 'cart',
-      route: '/admin/orders',
-      badge: '8',
     },
     {
       label: 'Clientes',
