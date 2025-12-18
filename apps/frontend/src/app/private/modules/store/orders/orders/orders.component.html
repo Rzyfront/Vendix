@@ -50,15 +50,7 @@
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="exportOrders()"
-              title="Exportar CSV"
-            >
-              <app-icon name="download" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">Exportar CSV</span>
-            </app-button>
+            
             <app-button
               variant="primary"
               size="sm"
@@ -95,7 +87,7 @@
     </app-order-empty-state>
 
     <!-- Tabla de Órdenes -->
-    <div *ngIf="!isLoading && orders.length > 0" class="p-6">
+    <div *ngIf="!isLoading" class="p-6">
       <app-orders-list
         [filters]="filters"
         (viewOrder)="viewOrderDetails($event)"

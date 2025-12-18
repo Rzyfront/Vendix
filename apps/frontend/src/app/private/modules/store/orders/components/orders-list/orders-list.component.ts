@@ -8,9 +8,10 @@ import {
   OnChanges,
   SimpleChanges,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, forkJoin } from 'rxjs';
 
 import {
   TableComponent,
@@ -23,6 +24,7 @@ import {
 } from '../../../../../../shared/components/index';
 
 import { StoreOrdersService } from '../../services/store-orders.service';
+import { CustomersService } from '../../../../store/customers/services/customers.service';
 import {
   Order,
   OrderQuery,
@@ -62,10 +64,9 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   columns: TableColumn[] = [
     { key: 'order_number', label: 'Order ID', sortable: true },
     {
-      key: 'customer_id',
-      label: 'Customer ID',
+      key: 'customer_name',
+      label: 'Customer',
       sortable: true,
-      transform: (order: Order) => order.customer_id?.toString() || 'N/A',
     },
     {
       key: 'state',
@@ -86,36 +87,37 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
           finished: '#8b5cf6',
         },
       },
-      transform: (order: Order) => this.formatStatus(order.state),
+      transform: (value: any) => this.formatStatus(value),
     },
     {
       key: 'grand_total',
       label: 'Total',
       sortable: true,
-      transform: (order: Order) => `$${order.grand_total.toFixed(2)}`,
+      transform: (value: any) => `$${(value || 0).toFixed(2)}`,
     },
     {
       key: 'created_at',
       label: 'Date',
       sortable: true,
-      transform: (order: Order) =>
-        new Date(order.created_at).toLocaleDateString(),
+      transform: (value: any) => {
+        if (!value) return 'N/A';
+        const date = new Date(value);
+        return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleDateString();
+      },
     },
   ];
 
   actions: TableAction[] = [
-    {
-      label: 'View',
-      action: (order: Order) => this.handleViewOrder(order.id.toString()),
-      variant: 'ghost',
-    },
+    
     {
       label: 'Edit',
+      icon : 'edit',
       action: (order: Order) => this.editOrder(order.id.toString()),
       variant: 'ghost',
     },
     {
-      label: 'Delete',
+      label: 'Pay',
+      icon : 'credit-card',
       action: (order: Order) => this.deleteOrder(order.id.toString()),
       variant: 'danger',
     },
@@ -125,8 +127,10 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
 
   constructor(
     private ordersService: StoreOrdersService,
+    private customersService: CustomersService,
     private dialogService: DialogService,
     private toastService: ToastService,
+    private router: Router
   ) {}
 
   ngOnInit(): void {
@@ -152,15 +156,67 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
       .getOrders(this.filters)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (response: PaginatedOrdersResponse) => {
-          this.orders = response.data;
-          this.totalItems = response.pagination.total;
-          this.loading = false;
-          this.ordersLoaded.emit({
-            orders: this.orders,
-            totalItems: this.totalItems,
-            filters: this.filters,
-          });
+        next: (response: any) => {
+          // Unwrap ResponseService wrapper if present
+          const paginatedData = response.data || response;
+          
+          const rawOrders = paginatedData.data || paginatedData || [];
+          
+          // Normalize numeric strings to numbers
+          const normalizedOrders = rawOrders.map((order: any) => ({
+            ...order,
+            customer_id: typeof order.customer_id === 'string' ? parseInt(order.customer_id) : order.customer_id,
+            grand_total: typeof order.grand_total === 'string' ? parseFloat(order.grand_total) : order.grand_total,
+            subtotal_amount: typeof order.subtotal_amount === 'string' ? parseFloat(order.subtotal_amount) : order.subtotal_amount,
+            tax_amount: typeof order.tax_amount === 'string' ? parseFloat(order.tax_amount) : order.tax_amount,
+            shipping_cost: typeof order.shipping_cost === 'string' ? parseFloat(order.shipping_cost) : order.shipping_cost,
+            discount_amount: typeof order.discount_amount === 'string' ? parseFloat(order.discount_amount) : order.discount_amount,
+          }));
+
+          // Get pagination info safely
+          const paginationInfo = paginatedData.pagination || { total: rawOrders.length };
+          this.totalItems = paginationInfo.total || 0;
+
+          // Fetch customer details
+          const customerIds: number[] = [...new Set<number>(normalizedOrders.map((o: any) => o.customer_id).filter((id: number) => id))];
+          if (customerIds.length > 0) {
+            forkJoin(customerIds.map(id => this.customersService.getCustomer(id)))
+              .pipe(takeUntil(this.destroy$))
+              .subscribe({
+                next: (customers) => {
+                  const customerMap = new Map(customers.map(c => [c.id, c]));
+                  this.orders = normalizedOrders.map((order: any) => ({
+                    ...order,
+                    customer_name: order.customer_id ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() || 'N/A' : 'N/A'
+                  }));
+                  
+                  this.loading = false;
+                  this.ordersLoaded.emit({
+                    orders: this.orders,
+                    totalItems: this.totalItems,
+                    filters: this.filters,
+                  });
+                },
+                error: (error) => {
+                  console.error('Error loading customers:', error);
+                  this.orders = normalizedOrders.map((order:any) => ({ ...order, customer_name: 'N/A' }));
+                  this.loading = false;
+                  this.ordersLoaded.emit({
+                    orders: this.orders,
+                    totalItems: this.totalItems,
+                    filters: this.filters,
+                  });
+                }
+              });
+          } else {
+            this.orders = normalizedOrders.map((order:any) => ({ ...order, customer_name: 'N/A' }));
+            this.loading = false;
+            this.ordersLoaded.emit({
+              orders: this.orders,
+              totalItems: this.totalItems,
+              filters: this.filters,
+            });
+          }
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
@@ -198,34 +254,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   deleteOrder(orderId: string): void {
-    this.dialogService
-      .confirm({
-        title: 'Delete Order',
-        message:
-          'Are you sure you want to delete this order? This action cannot be undone.',
-        confirmText: 'Delete',
-        cancelText: 'Cancel',
-        confirmVariant: 'danger',
-      })
-      .then((confirmed: boolean) => {
-        if (confirmed) {
-          this.ordersService
-            .deleteOrder(orderId)
-            .pipe(takeUntil(this.destroy$))
-            .subscribe({
-              next: () => {
-                this.loadOrders();
-                this.toastService.success('Order deleted successfully');
-              },
-              error: (error: any) => {
-                console.error('Error deleting order:', error);
-                this.toastService.error(
-                  'Failed to delete order. Please try again.',
-                );
-              },
-            });
-        }
-      });
+    this.router.navigate(['/admin/pos']);
   }
 
   exportOrders(): void {
@@ -251,11 +280,13 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   // Helper methods for formatting
-  formatStatus(status: string): string {
+  formatStatus(status: string | undefined): string {
+    if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
   }
 
-  formatPaymentStatus(status: string): string {
+  formatPaymentStatus(status: string | undefined): string {
+    if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
   }
 

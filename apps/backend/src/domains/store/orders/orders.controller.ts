@@ -65,6 +65,24 @@ export class OrdersController {
     }
   }
 
+  @Get('stats')
+  @Permissions('store:orders:read')
+  async getStats() {
+    try {
+      const result = await this.ordersService.getStats();
+      return this.responseService.success(
+        result,
+        'Estadísticas de órdenes obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener estadísticas de órdenes',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Get(':id')
   @Permissions('store:orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -119,21 +137,5 @@ export class OrdersController {
     }
   }
 
-  @Get('stats')
-  @Permissions('store:orders:read')
-  async getStats() {
-    try {
-      const result = await this.ordersService.getStats();
-      return this.responseService.success(
-        result,
-        'Estadísticas de órdenes obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener estadísticas de órdenes',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
-  }
+  
 }

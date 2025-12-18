@@ -5,24 +5,26 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  OnChanges,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
+import { ModalComponent, DialogService } from '../../../../../../shared/components';
 import {
   Order,
   OrderState,
-  PaymentStatus,
 } from '../../interfaces/order.interface';
 
 @Component({
   selector: 'app-order-details',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, ModalComponent],
   templateUrl: './order-details.component.html',
   styleUrls: ['./order-details.component.css'],
 })
-export class OrderDetailsComponent implements OnInit, OnDestroy {
+export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
   @Input() orderId: string | null = null;
   @Input() isVisible = false;
   @Output() close = new EventEmitter<void>();
@@ -31,6 +33,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   order: Order | null = null;
   isLoading = false;
   error: string | null = null;
+  private lastLoadedOrderId: string | null = null;
 
   // Status constants for template
   readonly orderStatusOptions = [
@@ -43,18 +46,13 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     'refunded',
     'finished',
   ] as const;
-  readonly paymentStatusOptions = [
-    'pending',
-    'processing',
-    'completed',
-    'failed',
-    'refunded',
-    'cancelled',
-  ] as const;
 
   private destroy$ = new Subject<void>();
 
-  constructor(private ordersService: StoreOrdersService) {}
+  constructor(
+    private ordersService: StoreOrdersService,
+    private dialogService: DialogService,
+  ) {}
 
   ngOnInit(): void {
     if (this.orderId && this.isVisible) {
@@ -62,9 +60,13 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     }
   }
 
-  ngOnChanges(): void {
-    if (this.orderId && this.isVisible) {
-      this.loadOrderDetails();
+  ngOnChanges(changes: SimpleChanges): void {
+    // Solo cargar si el orderId cambió a un valor diferente
+    if (changes['orderId'] && changes['orderId'].currentValue && 
+        changes['orderId'].currentValue !== this.lastLoadedOrderId) {
+      if (this.isVisible) {
+        this.loadOrderDetails();
+      }
     }
   }
 
@@ -74,7 +76,9 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   loadOrderDetails(): void {
-    if (!this.orderId) return;
+    if (!this.orderId) {
+      return;
+    }
 
     this.isLoading = true;
     this.error = null;
@@ -83,14 +87,33 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
       .getOrderById(this.orderId)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (order: Order) => {
-          this.order = order;
+        next: (response: any) => {
+          // Unwrap ResponseService wrapper if present
+          const orderData = response.data || response;
+
+          // Normalize numeric strings to numbers
+          const normalizedOrder = {
+          ...orderData,
+          grand_total: Number(orderData.grand_total),
+          subtotal_amount: Number(orderData.subtotal_amount),
+          tax_amount: Number(orderData.tax_amount),
+          shipping_cost: Number(orderData.shipping_cost),
+          discount_amount: Number(orderData.discount_amount),
+          order_items: (orderData.order_items || []).map((item: any) => ({
+            ...item,
+            unit_price: Number(item.unit_price),
+            total_price: Number(item.total_price),
+            quantity: Number(item.quantity),
+          })),
+        };
+          this.order = normalizedOrder;
+          this.lastLoadedOrderId = this.orderId; // Marcar como cargado
           this.isLoading = false;
         },
         error: (err: any) => {
+          console.error('Error loading order details:', err);
           this.error = 'Failed to load order details. Please try again.';
           this.isLoading = false;
-          console.error('Error loading order details:', err);
         },
       });
   }
@@ -100,42 +123,57 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   updateOrderStatus(newStatus: string): void {
-    if (!this.order) return;
+    if (!this.order || this.order.id == null) return;
 
-    this.ordersService
-      .updateOrderStatus(this.order.id.toString(), newStatus as OrderState)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (updatedOrder: Order) => {
-          this.order = updatedOrder;
-          this.orderUpdated.emit(updatedOrder);
-        },
-        error: (err: any) => {
-          console.error('Error updating order status:', err);
-          this.error = 'Failed to update order status.';
-        },
-      });
-  }
-
-  updatePaymentStatus(newStatus: string): void {
-    if (!this.order) return;
-
-    this.ordersService
-      .updatePaymentStatus(this.order.id.toString(), {
-        paymentStatus: newStatus as PaymentStatus,
+    this.dialogService
+      .confirm({
+        title: 'Change Order Status',
+        message: `Are you sure you want to change the order status to "${this.formatStatus(newStatus)}"? This action cannot be undone and may affect order processing.`,
+        confirmText: 'Change Status',
+        cancelText: 'Cancel',
+        confirmVariant: 'danger',
       })
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (updatedOrder: Order) => {
-          this.order = updatedOrder;
-          this.orderUpdated.emit(updatedOrder);
-        },
-        error: (err: any) => {
-          console.error('Error updating payment status:', err);
-          this.error = 'Failed to update payment status.';
-        },
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.ordersService
+            .updateOrderStatus(String(this.order!.id), newStatus as OrderState)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+              next: (response: any) => {
+                // Unwrap ResponseService wrapper if present
+                const orderData = response.data || response;
+
+                // Normalize numeric strings to numbers
+                const normalizedOrder = {
+                  ...orderData,
+                  grand_total: Number(orderData.grand_total),
+                  subtotal_amount: Number(orderData.subtotal_amount),
+                  tax_amount: Number(orderData.tax_amount),
+                  shipping_cost: Number(orderData.shipping_cost),
+                  discount_amount: Number(orderData.discount_amount),
+                  order_items: (orderData.order_items || []).map((item: any) => ({
+                    ...item,
+                    unit_price: Number(item.unit_price),
+                    total_price: Number(item.total_price),
+                    quantity: Number(item.quantity),
+                  })),
+                };
+                this.order = normalizedOrder;
+                if (this.order) {
+                  this.orderUpdated.emit(this.order);
+                }
+              },
+              error: (err) => {
+                console.error(err);
+                this.error = 'Failed to update order status.';
+              },
+            });
+        }
       });
   }
+
+
+
 
   printOrder(): void {
     if (!this.order) return;
@@ -175,10 +213,10 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
           
           <div class="section">
             <h2>Order Summary</h2>
-            <p>Subtotal: $${this.order.subtotal_amount.toFixed(2)}</p>
-            <p>Tax: $${this.order.tax_amount.toFixed(2)}</p>
-            <p>Shipping: $${this.order.shipping_cost.toFixed(2)}</p>
-            <p>Discount: $${this.order.discount_amount.toFixed(2)}</p>
+            <p>Subtotal: $${(this.order.subtotal_amount || 0).toFixed(2)}</p>
+            <p>Tax: $${(this.order.tax_amount || 0).toFixed(2)}</p>
+            <p>Shipping: $${(this.order.shipping_cost || 0).toFixed(2)}</p>
+            <p>Discount: $${(this.order.discount_amount || 0).toFixed(2)}</p>
           </div>
           
           <div class="section">
@@ -189,7 +227,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
                   (item) => `
               <div class="item">
                 <div>${item.product_name} (${item.variant_sku || 'N/A'})</div>
-                <div>Quantity: ${item.quantity} × $${item.unit_price.toFixed(2)} = $${item.total_price.toFixed(2)}</div>
+                <div>Quantity: ${item.quantity} × $${(item.unit_price || 0).toFixed(2)} = $${(item.total_price || 0).toFixed(2)}</div>
               </div>
             `,
                 )
@@ -198,7 +236,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
           </div>
           
           <div class="section">
-            <div class="total">Grand Total: $${this.order.grand_total.toFixed(2)}</div>
+            <div class="total">Grand Total: $${(this.order.grand_total || 0).toFixed(2)}</div>
           </div>
         </body>
       </html>
@@ -206,7 +244,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   // Helper methods for status display
-  getStatusColor(status: OrderState | PaymentStatus): string {
+  getStatusColor(status: OrderState): string {
     const statusColors: Record<string, string> = {
       // Order Status
       draft: 'bg-gray-100 text-gray-800',
@@ -219,27 +257,26 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
       cancelled: 'bg-red-100 text-red-800',
       refunded: 'bg-orange-100 text-orange-800',
       returned: 'bg-pink-100 text-pink-800',
-
-      // Payment Status
+      created: 'bg-gray-100 text-gray-800',
+      pending_payment: 'bg-yellow-100 text-yellow-800',
       processing: 'bg-blue-100 text-blue-800',
-      paid: 'bg-green-100 text-green-800',
-      partial: 'bg-yellow-100 text-yellow-800',
-      overpaid: 'bg-purple-100 text-purple-800',
-      failed: 'bg-red-100 text-red-800',
-      disputed: 'bg-orange-100 text-orange-800',
+      finished: 'bg-green-100 text-green-800',
     };
 
     return statusColors[status] || 'bg-gray-100 text-gray-800';
   }
 
-  formatStatus(status: string): string {
+  formatStatus(status: string | undefined): string {
+    if (!status) return 'Unknown';
     return (
       status.charAt(0).toUpperCase() +
       status.slice(1).replace(/([A-Z])/g, ' $1')
     );
   }
 
-  formatDate(dateString: string): string {
-    return new Date(dateString).toLocaleString();
+  formatDate(dateString: string | undefined): string {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return isNaN(date.getTime()) ? 'Invalid Date' : date.toLocaleString();
   }
 }

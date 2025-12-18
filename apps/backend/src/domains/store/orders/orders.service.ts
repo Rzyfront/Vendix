@@ -97,7 +97,8 @@ export class OrdersService {
       status,
       customer_id,
       store_id,
-      sort,
+      sort_by,
+      sort_order,
       date_from,
       date_to,
     } = query;
@@ -122,9 +123,8 @@ export class OrdersService {
     };
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
-    if (sort) {
-      const [field, direction] = sort.split(':');
-      orderBy[field] = direction === 'desc' ? 'desc' : 'asc';
+    if (sort_by) {
+      orderBy[sort_by] = sort_order === 'desc' ? 'desc' : 'asc';
     } else {
       orderBy.created_at = 'desc';
     }
@@ -178,6 +178,13 @@ export class OrdersService {
     return this.prisma.orders.update({
       where: { id },
       data: { ...updateOrderDto, updated_at: new Date() },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: { include: { products: true, product_variants: true } },
+        addresses_orders_billing_address_idToaddresses: true,
+        addresses_orders_shipping_address_idToaddresses: true,
+        payments: true,
+      },
     });
   }
 
@@ -216,7 +223,12 @@ export class OrdersService {
       await Promise.all([
         this.prisma.orders.count({ where }),
         this.prisma.orders.aggregate({
-          where,
+          where: {
+            ...where,
+            state: {
+              in: ['shipped', 'delivered','finished'] as order_state_enum[],
+            },
+          },
           _sum: { grand_total: true },
         }),
         this.prisma.orders.count({

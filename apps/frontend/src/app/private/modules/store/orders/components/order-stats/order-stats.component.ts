@@ -26,23 +26,25 @@ export class OrderStatsComponent {
   };
 
   // Formatear número para visualización
-  formatNumber(num: number): string {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
+  formatNumber(num: number | string): string {
+    const numValue = typeof num === 'string' ? parseFloat(num) : num;
+    if (numValue >= 1000000) {
+      return (numValue / 1000000).toFixed(1) + 'M';
+    } else if (numValue >= 1000) {
+      return (numValue / 1000).toFixed(1) + 'K';
     }
-    return num.toString();
+    return numValue.toString();
   }
 
   // Formatear moneda para visualización
-  formatCurrency(value: number): string {
-    if (value >= 1000000) {
-      return '$' + (value / 1000000).toFixed(1) + 'M';
-    } else if (value >= 1000) {
-      return '$' + (value / 1000).toFixed(1) + 'K';
+  formatCurrency(value: number | string): string {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value;
+    if (numValue >= 1000000) {
+      return '$' + (numValue / 1000000).toFixed(1) + 'M';
+    } else if (numValue >= 1000) {
+      return '$' + (numValue / 1000).toFixed(1) + 'K';
     }
-    return '$' + value.toFixed(2);
+    return '$' + numValue.toFixed(2);
   }
 
   // Calcular porcentaje de crecimiento
