@@ -1,0 +1,15 @@
+meta {
+  name: Post bulk product
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/store/products/bulk/validate
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}
