@@ -48,7 +48,11 @@ export class OrderQueryDto {
 
   @IsOptional()
   @IsString()
-  sort?: string;
+  sort_by?: string;
+
+  @IsOptional()
+  @IsString()
+  sort_order?: 'asc' | 'desc';
 
   @IsOptional()
   @IsDateString()

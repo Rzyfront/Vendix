@@ -1,4 +1,4 @@
-import { Component, ViewChild, OnInit, OnDestroy } from '@angular/core';
+import { Component, ViewChild, OnInit, OnDestroy, AfterViewInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -44,7 +44,7 @@ import { StoreOrdersService } from '../services/store-orders.service';
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.css'],
 })
-export class OrdersComponent implements OnInit, OnDestroy {
+export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedOrderId: string | null = null;
   showOrderDetails = false;
 
@@ -96,6 +96,13 @@ export class OrdersComponent implements OnInit, OnDestroy {
     this.loadOrderStats();
   }
 
+  ngAfterViewInit(): void {
+    // Cargar órdenes después de que la vista se haya inicializado
+    if (this.ordersList) {
+      this.ordersList.loadOrders();
+    }
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -106,7 +113,8 @@ export class OrdersComponent implements OnInit, OnDestroy {
       .getOrderStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (stats: any) => {
+        next: (response: any) => {
+          const stats = response.data || response;
           this.orderStats = {
             ...stats,
             ordersGrowthRate: 5.2, // Mock data - should come from backend
@@ -120,6 +128,7 @@ export class OrdersComponent implements OnInit, OnDestroy {
         },
       });
   }
+  
 
   get hasFilters(): boolean {
     return !!(
@@ -171,7 +180,9 @@ export class OrdersComponent implements OnInit, OnDestroy {
     this.searchTerm = searchTerm;
     this.filters.search = searchTerm;
     this.filters.page = 1;
-    this.ordersList.loadOrders();
+    if (this.ordersList) {
+      this.ordersList.loadOrders();
+    }
   }
 
   // Filter dropdown change
@@ -185,7 +196,9 @@ export class OrdersComponent implements OnInit, OnDestroy {
     this.filters.date_range = query.date_range;
     this.filters.page = 1;
 
-    this.ordersList.loadOrders();
+    if (this.ordersList) {
+      this.ordersList.loadOrders();
+    }
   }
 
   // Clear all filters
@@ -201,12 +214,16 @@ export class OrdersComponent implements OnInit, OnDestroy {
     this.filters.date_range = undefined;
     this.filters.page = 1;
 
-    this.ordersList.loadOrders();
+    if (this.ordersList) {
+      this.ordersList.loadOrders();
+    }
   }
 
   // Refresh orders
   refreshOrders(): void {
-    this.ordersList.loadOrders();
+    if (this.ordersList) {
+      this.ordersList.loadOrders();
+    }
     this.loadOrderStats();
   }
 
@@ -222,7 +239,8 @@ export class OrdersComponent implements OnInit, OnDestroy {
   }
 
   // Format currency helper
-  formatCurrency(amount: number): string {
-    return `$${amount?.toFixed(2) || '0.00'}`;
+  formatCurrency(amount: number | string): string {
+    const numValue = typeof amount === 'string' ? parseFloat(amount) : amount;
+    return `$${numValue?.toFixed(2) || '0.00'}`;
   }
 }

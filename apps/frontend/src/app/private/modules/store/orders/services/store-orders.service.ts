@@ -40,7 +40,7 @@ export class StoreOrdersService {
         if (Array.isArray(value)) {
           // Manejar arrays: status[]=pending&status[]=confirmed
           value.forEach((item) => params.append(key, item.toString()));
-        } else if (key === 'dateRange' && value) {
+        } else if (key === 'date_range' && value) {
           // Manejar rangos de fecha predefinidos
           this.handleDateRange(value, params);
         } else {
@@ -144,10 +144,10 @@ export class StoreOrdersService {
     }
 
     if (fromDate) {
-      params.append('dateFrom', fromDate.toISOString());
+      params.append('date_from', fromDate.toISOString());
     }
-    if (toDate && dateRange !== 'today') {
-      params.append('dateTo', toDate.toISOString());
+    if (toDate) {
+      params.append('date_to', toDate.toISOString());
     }
   }
 
