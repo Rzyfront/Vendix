@@ -13,11 +13,16 @@ RUN npm prune --production
 # ---- Production Stage ----
 FROM node:20-alpine
 WORKDIR /app
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
+# Copy package files first
 COPY --from=builder /app/package*.json ./
-COPY prisma ./prisma
-COPY prisma.config.ts ./
+# Copy all node_modules including generated Prisma client
+COPY --from=builder /app/node_modules ./node_modules
+# Copy the compiled application
+COPY --from=builder /app/dist ./dist
+# Copy Prisma schema and generated client
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./
+# Copy environment files
 COPY .env* ./
 EXPOSE 3000
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]

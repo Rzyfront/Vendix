@@ -47,8 +47,8 @@ async function bootstrap() {
     // CloudFront distributions
     'https://d10fsx06e3z6rc.cloudfront.net',
     'https://d1y0m1duatgngc.cloudfront.net',
-    // AWS App Runner deployment
-    'https://2bd2zjyqme.us-east-1.awsapprunner.com',
+    // AWS EC2 deployment
+    'https://api.vendix.online',
     // Allow any subdomain for multi-tenant (dynamic based on base domain)
     new RegExp(
       `^https://([a-zA-Z0-9-]+\\.)?${baseDomain.replace('.', '\\.')}$`,
