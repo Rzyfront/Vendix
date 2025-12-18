@@ -99,7 +99,7 @@ jobs:
         # Wait for EC2 instance to be ready and copy deployment script
         echo "⏳ Waiting for EC2 instance to be ready..."
         for i in {1..30}; do
-          if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ubuntu@$EC2_PUBLIC_IP "echo 'EC2 is ready'" 2>/dev/null; then
+          if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP "echo 'EC2 is ready'" 2>/dev/null; then
             echo "✅ EC2 instance is ready!"
             break
           fi
@@ -108,8 +108,8 @@ jobs:
         done
 
         # Copy and run deployment script
-        scp -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem /tmp/deploy.sh ubuntu@$EC2_PUBLIC_IP:/tmp/
-        ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ubuntu@$EC2_PUBLIC_IP "ECR_REGISTRY=$ECR_REGISTRY ECR_REPOSITORY=$ECR_REPOSITORY IMAGE_TAG=$IMAGE_TAG DATABASE_URL='$DATABASE_URL' NODE_ENV='$NODE_ENV' JWT_SECRET='$JWT_SECRET' CORS_ORIGIN='$CORS_ORIGIN' sudo bash /tmp/deploy.sh"
+        scp -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem /tmp/deploy.sh ec2-user@$EC2_PUBLIC_IP:/tmp/
+        ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP "ECR_REGISTRY=$ECR_REGISTRY ECR_REPOSITORY=$ECR_REPOSITORY IMAGE_TAG=$IMAGE_TAG DATABASE_URL='$DATABASE_URL' NODE_ENV='$NODE_ENV' JWT_SECRET='$JWT_SECRET' CORS_ORIGIN='$CORS_ORIGIN' sudo bash /tmp/deploy.sh"
 
         echo "🎉 Backend deployment to EC2 completed successfully!"
         echo "🌐 Backend URL: http://$EC2_PUBLIC_IP:3000"
