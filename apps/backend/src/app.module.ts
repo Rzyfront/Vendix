@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { TestDBController } from './test-db-connection';
 import { AuthModule } from './domains/auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './domains/organization/users/users.module';
@@ -26,7 +25,7 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     TestModule,
     DomainsModule, // ✅ Módulo de dominios (público y privado)
   ],
-  controllers: [AppController, TestDBController],
+  controllers: [AppController],
   providers: [
     AppService,
     RequestContextService, // ✅ Servicio de contexto con AsyncLocalStorage
@@ -40,4 +39,4 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
