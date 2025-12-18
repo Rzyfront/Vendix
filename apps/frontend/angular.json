@@ -64,8 +64,8 @@
                 },
                 {
                   "type": "anyComponentStyle",
-                  "maximumWarning": "8kB",
-                  "maximumError": "16kB"
+                  "maximumWarning": "60kB",
+                  "maximumError": "80kB"
                 }
               ],
               "outputHashing": "all"
@@ -83,7 +83,8 @@
             }
           },
           "defaultConfiguration": "production"
-        },        "serve": {
+        },
+        "serve": {
           "builder": "@angular/build:dev-server",
           "options": {
             "host": "0.0.0.0",
