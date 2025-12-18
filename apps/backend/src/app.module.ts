@@ -39,4 +39,4 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }

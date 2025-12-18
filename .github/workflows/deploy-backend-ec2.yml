@@ -1,0 +1,115 @@
+name: Deploy Backend to EC2
+
+on:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'apps/backend/**'
+      - 'apps/backend/Dockerfile'
+      - 'apps/backend/package*.json'
+      - 'apps/backend/prisma/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build, tag, and push Docker image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: vendix-backend
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        cd apps/backend
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    - name: Deploy to EC2 instance
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: vendix-backend
+        IMAGE_TAG: ${{ github.sha }}
+        EC2_INSTANCE_ID: i-0289ed0e0e3816f8a
+        SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
+      run: |
+        echo "🚀 Deploying to EC2 instance: $EC2_INSTANCE_ID"
+
+        # Get EC2 instance public IP
+        EC2_PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $EC2_INSTANCE_ID --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+        echo "📍 EC2 Public IP: $EC2_PUBLIC_IP"
+
+        # Save SSH key to file
+        echo "$SSH_KEY" > /tmp/vendix-key.pem
+        chmod 400 /tmp/vendix-key.pem
+
+        # Create deployment script
+        cat > /tmp/deploy.sh << 'EOF'
+        #!/bin/bash
+        set -e
+
+        echo "📦 Pulling latest Docker image..."
+        sudo docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+        echo "🛑 Stopping current container..."
+        sudo docker stop vendix-backend || true
+        sudo docker rm vendix-backend || true
+
+        echo "🚀 Starting new container..."
+        sudo docker run -d \
+          --name vendix-backend \
+          --restart unless-stopped \
+          -p 3000:3000 \
+          -e DATABASE_URL="$DATABASE_URL" \
+          -e NODE_ENV="$NODE_ENV" \
+          -e JWT_SECRET="$JWT_SECRET" \
+          -e CORS_ORIGIN="$CORS_ORIGIN" \
+          $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+        echo "🧹 Cleaning up old images..."
+        sudo docker image prune -f
+
+        echo "✅ Deployment completed!"
+        EOF
+
+        # Make deployment script executable
+        chmod +x /tmp/deploy.sh
+
+        # Wait for EC2 instance to be ready and copy deployment script
+        echo "⏳ Waiting for EC2 instance to be ready..."
+        for i in {1..30}; do
+          if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ubuntu@$EC2_PUBLIC_IP "echo 'EC2 is ready'" 2>/dev/null; then
+            echo "✅ EC2 instance is ready!"
+            break
+          fi
+          echo "⏳ Attempt $i/30: EC2 not ready yet, waiting 10 seconds..."
+          sleep 10
+        done
+
+        # Copy and run deployment script
+        scp -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem /tmp/deploy.sh ubuntu@$EC2_PUBLIC_IP:/tmp/
+        ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ubuntu@$EC2_PUBLIC_IP "ECR_REGISTRY=$ECR_REGISTRY ECR_REPOSITORY=$ECR_REPOSITORY IMAGE_TAG=$IMAGE_TAG DATABASE_URL='$DATABASE_URL' NODE_ENV='$NODE_ENV' JWT_SECRET='$JWT_SECRET' CORS_ORIGIN='$CORS_ORIGIN' sudo bash /tmp/deploy.sh"
+
+        echo "🎉 Backend deployment to EC2 completed successfully!"
+        echo "🌐 Backend URL: http://$EC2_PUBLIC_IP:3000"
