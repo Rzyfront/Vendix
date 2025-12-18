@@ -45,29 +45,28 @@ import { Subscription } from 'rxjs';
                     </div>
                 </div>
                 <!-- Placeholder for Global Actions -->
-        <app-button variant="outline" size="sm">
-            <app-icon name="upload" class="mr-2" [size]="16"></app-icon>
-            Importar CSV
-        </app-button>
-        </div>
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <app-selector
-            [options]="supplierOptions"
-            [(ngModel)]="selectedSupplierId"
-            (valueChange)="onSupplierChange($event)"
-            label="Proveedor"
-            placeholder="Seleccionar proveedor..."
-        ></app-selector>
-        <app-selector
-            [options]="locationOptions"
-            [(ngModel)]="selectedLocationId"
-            (valueChange)="onLocationChange($event)"
-            label="Ubicación de Destino"
-            placeholder="Seleccionar bodega/tienda..."
-        ></app-selector>
-    </div>
-    </app-card>
+                <app-button variant="outline" size="sm">
+                    <app-icon name="upload" class="mr-2" [size]="16"></app-icon>
+                    Importar CSV
+                </app-button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <app-selector
+                    [options]="supplierOptions"
+                    [(ngModel)]="selectedSupplierId"
+                    (valueChange)="onSupplierChange($event)"
+                    label="Proveedor"
+                    placeholder="Seleccionar proveedor..."
+                ></app-selector>
+                <app-selector
+                    [options]="locationOptions"
+                    [(ngModel)]="selectedLocationId"
+                    (valueChange)="onLocationChange($event)"
+                    label="Ubicación de Destino"
+                    placeholder="Seleccionar bodega/tienda..."
+                ></app-selector>
+            </div>
+        </app-card>
       </div>
 
       <!-- Main Content Grid -->

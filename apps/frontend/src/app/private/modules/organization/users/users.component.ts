@@ -25,6 +25,9 @@ import {
   DialogService,
   ToastService,
   StatsComponent,
+  ButtonComponent,
+  IconComponent,
+  InputsearchComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -55,6 +58,8 @@ interface StatItem {
     UserCardComponent,
     TableComponent,
     ButtonComponent,
+    IconComponent,
+    InputsearchComponent,
     StatsComponent,
   ],
   templateUrl: './users.component.html',
