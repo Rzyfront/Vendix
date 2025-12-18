@@ -131,7 +131,7 @@ export class RolesComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (role: Role) => this.editRole(role),
-      variant: 'primary',
+      variant: 'success',
     },
     {
       label: 'Permisos',
@@ -450,20 +450,20 @@ export class RolesComponent implements OnInit, OnDestroy {
         // Execute all operations
         operations.length === 1
           ? operations[0].subscribe({
-            next: () => this.handlePermissionsUpdateSuccess(),
-            error: (error) => this.handlePermissionsUpdateError(error),
-          })
+              next: () => this.handlePermissionsUpdateSuccess(),
+              error: (error) => this.handlePermissionsUpdateError(error),
+            })
           : operations.length === 2
             ? // Execute both operations in parallel
-            operations.forEach((op) =>
-              op.subscribe({
-                next: () => {
-                  // Wait for both operations to complete
-                  // This is a simplified approach, in production you might want more sophisticated handling
-                },
-                error: (error) => this.handlePermissionsUpdateError(error),
-              }),
-            )
+              operations.forEach((op) =>
+                op.subscribe({
+                  next: () => {
+                    // Wait for both operations to complete
+                    // This is a simplified approach, in production you might want more sophisticated handling
+                  },
+                  error: (error) => this.handlePermissionsUpdateError(error),
+                }),
+              )
             : null;
 
         // For simplicity, we'll wait a bit and then complete

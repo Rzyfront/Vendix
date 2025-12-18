@@ -1,194 +1,164 @@
-<div class="table-container" [class]="getTableClasses()">
+<!-- Table Container with Standardized Heights -->
+<div
+  class="bg-surface rounded-card shadow-card border border-border flex flex-col max-h-[600px] xl:max-h-[700px] 2xl:max-h-[800px] overflow-hidden">
   <!-- Loading overlay -->
   <div *ngIf="loading" class="loading-overlay">
     <div class="loading-content">
       <svg class="loading-spinner" fill="none" viewBox="0 0 24 24">
-        <circle
-          class="opacity-25"
-          cx="12"
-          cy="12"
-          r="10"
-          stroke="currentColor"
-          stroke-width="4"
-        ></circle>
-        <path
-          class="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        ></path>
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor"
+          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+        </path>
       </svg>
       <span>Cargando...</span>
     </div>
   </div>
 
-  <!-- Table -->
-  <table class="table-element">
-    <!-- Header -->
-    <thead *ngIf="showHeader" [class]="getHeaderClasses()">
-      <tr>
-        <!-- Column headers -->
-        <th
-          *ngFor="let column of columns"
-          [class]="getCellClasses(column)"
-          (click)="onSort(column)"
-          [class.sortable-header]="sortable && column.sortable"
-        >
-          <div
-            class="header-content"
-            [class.header-align-right]="column.align === 'right'"
-            [class.header-align-center]="column.align === 'center'"
-          >
-            <span>{{ column.label }}</span>
-          </div>
-        </th>
+  <!-- Table Content (Scrollable) -->
+  <div class="p-6 xl:p-8 2xl:p-10 overflow-y-auto flex-1 min-w-0" [style.max-height]="maxHeight">
 
-        <!-- Actions header -->
-        <th *ngIf="actions || actionsTemplate" class="actions-header">
-          <span>Acciones</span>
-        </th>
-      </tr>
-    </thead>
+    <!-- 🖥 DESKTOP TABLE -->
+    <table class="desktop-table" *ngIf="!isMobileView">
+      <!-- Header -->
+      <thead *ngIf="showHeader">
+        <tr>
+          <th *ngFor="let column of getResponsiveColumns()" [ngClass]="{ hidden: column.hidden }"
+            (click)="onSort(column)" [class.sortable-header]="sortable && column.sortable">
+            {{ column.label }}
+          </th>
+          <th *ngIf="actions || actionsTemplate">Acciones</th>
+        </tr>
+      </thead>
 
-    <!-- Body -->
-    <tbody>
-      <!-- Data rows -->
-      <ng-container *ngIf="data.length > 0">
-        <tr
-          *ngFor="let item of data; let i = index"
-          [class]="getRowClasses(i)"
-          (click)="onRowClick(item)"
-          [class.clickable-row]="rowClick.observers.length > 0"
-        >
+      <!-- Body -->
+      <tbody>
+        <tr *ngFor="let item of data; let i = index" [class]="getRowClasses(i)" (click)="onRowClick(item)"
+          [class.clickable-row]="rowClick.observers.length > 0">
           <!-- Data cells -->
-          <td *ngFor="let column of columns" [class]="getCellClasses(column)">
+          <td *ngFor="let column of getResponsiveColumns()" [ngClass]="{ hidden: column.hidden }">
             <!-- Badge template -->
             <ng-container *ngIf="column.badge">
-              <span
-                class="status-badge"
-                [ngClass]="
-                  getBadgeClasses(column, getNestedValue(item, column.key))
-                "
-                [style.background-color]="
-                  getBadgeBackgroundColor(
-                    column,
-                    getNestedValue(item, column.key)
-                  )
-                "
-                [style.color]="
-                  getBadgeTextColor(column, getNestedValue(item, column.key))
-                "
-                [style.border-color]="
-                  getBadgeBorderColor(column, getNestedValue(item, column.key))
-                "
-              >
-                {{
-                  column.transform
-                    ? column.transform(getNestedValue(item, column.key))
-                    : getNestedValue(item, column.key)
-                }}
+              <span class="status-badge" [ngClass]="getBadgeClasses(column, getNestedValue(item, column.key))"
+                [style.background-color]="getBadgeBackgroundColor(column, getNestedValue(item, column.key))"
+                [style.color]="getBadgeTextColor(column, getNestedValue(item, column.key))"
+                [style.border-color]="getBadgeBorderColor(column, getNestedValue(item, column.key))">
+                {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item,
+                column.key) }}
               </span>
             </ng-container>
 
-            <!-- Custom template if provided (only when not a badge) -->
-            <ng-container
-              *ngIf="!column.badge && column.template"
-              [ngTemplateOutlet]="column.template"
-              [ngTemplateOutletContext]="{ $implicit: item, column: column }"
-            ></ng-container>
+            <!-- Custom template -->
+            <ng-container *ngIf="!column.badge && column.template" [ngTemplateOutlet]="column.template"
+              [ngTemplateOutletContext]="{ $implicit: item, column: column }">
+            </ng-container>
 
-            <!-- Default content (only when not a badge and no custom template) -->
+            <!-- Default content -->
             <ng-container *ngIf="!column.badge && !column.template">
               <span class="cell-content">
                 <ng-container
-                  *ngIf="
-                    getNestedValue(item, column.key) !== null &&
-                      getNestedValue(item, column.key) !== undefined &&
-                      getNestedValue(item, column.key) !== '';
-                    else noDataTemplate
-                  "
-                >
-                  {{
-                    column.transform
-                      ? column.transform(getNestedValue(item, column.key))
-                      : getNestedValue(item, column.key)
-                  }}
+                  *ngIf="getNestedValue(item, column.key) !== null && getNestedValue(item, column.key) !== undefined && getNestedValue(item, column.key) !== ''; else noDataTemplate">
+                  {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item,
+                  column.key) }}
                 </ng-container>
                 <ng-template #noDataTemplate>
-                  <span class="cell-content-empty">{{
-                    column.defaultValue || "Datos no encontrados"
-                  }}</span>
+                  <span class="cell-content-empty">{{ column.defaultValue || "Datos no encontrados" }}</span>
                 </ng-template>
               </span>
             </ng-container>
           </td>
 
           <!-- Actions cell -->
-          <td *ngIf="actions || actionsTemplate" class="actions-cell">
-            <!-- Custom actions template -->
-            <ng-container
-              *ngIf="actionsTemplate; else defaultActions"
-              [ngTemplateOutlet]="actionsTemplate"
-              [ngTemplateOutletContext]="{ $implicit: item }"
-            ></ng-container>
-
-            <!-- Default actions -->
+          <td *ngIf="actions || actionsTemplate" class="actions">
+            <ng-container *ngIf="actionsTemplate; else defaultActions" [ngTemplateOutlet]="actionsTemplate"
+              [ngTemplateOutletContext]="{ $implicit: item }">
+            </ng-container>
             <ng-template #defaultActions>
               <div class="table-actions">
-                <ng-container *ngFor="let action of actions">
-                  <!-- Debug: {{ action.icon ? 'Icon: ' + action.icon : 'No icon' }} -->
-                  <button
-                    *ngIf="isActionVisible(action, item)"
-                    [class]="getActionClasses(action, item)"
-                    [disabled]="isActionDisabled(action, item)"
-                    (click)="
-                      executeAction(action, item); $event.stopPropagation()
-                    "
-                    [attr.title]="getActionLabel(action, item)"
-                  >
-                    <!-- Icon if provided -->
-                    <app-icon
-                      *ngIf="getActionIcon(action, item)"
-                      [name]="getActionIcon(action, item)"
-                      [size]="12"
-                    ></app-icon>
-
-                    <!-- Label (only show if no icon or on larger sizes) -->
-                    <span
-                      *ngIf="!getActionIcon(action, item) || size === 'lg'"
-                      >{{ getActionLabel(action, item) }}</span
-                    >
-                  </button>
-                </ng-container>
+                <button *ngFor="let action of actions" [class]="getActionClasses(action, item)"
+                  [disabled]="isActionDisabled(action, item)"
+                  (click)="executeAction(action, item); $event.stopPropagation()"
+                  [attr.title]="getActionLabel(action, item)">
+                  <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)"
+                    [size]="12"></app-icon>
+                  <span *ngIf="!getActionIcon(action, item) || size === 'lg'">{{ getActionLabel(action, item)
+                    }}</span>
+                </button>
               </div>
             </ng-template>
           </td>
         </tr>
-      </ng-container>
+      </tbody>
+    </table>
 
-      <!-- Empty state -->
-      <tr *ngIf="!loading && data.length === 0">
-        <td
-          [attr.colspan]="columns.length + (actions || actionsTemplate ? 1 : 0)"
-          class="empty-cell"
-        >
-          <div class="empty-state">
-            <svg
-              class="empty-icon"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              ></path>
-            </svg>
-            <span class="empty-message">{{ emptyMessage }}</span>
+    <!-- 📱 MOBILE CARDS -->
+    <div class="mobile-cards overflow-y-auto" *ngIf="isMobileView" [style.max-height]="maxHeight">
+      <div class="mobile-card" *ngFor="let item of data; let i = index" [class]="getMobileCardClasses(i)"
+        [class.clickable-card]="rowClick.observers.length > 0" (click)="onRowClick(item)">
+
+        <!-- Card Header -->
+        <div class="card-header">
+          <div class="title">{{ getCardTitle(item) }}</div>
+          <!-- Status badge if exists -->
+          <span *ngIf="getBadgeColumn()" class="badge"
+            [ngClass]="getBadgeClasses(getBadgeColumn()!, getNestedValue(item, getBadgeColumn()!.key))"
+            [style.background-color]="getBadgeBackgroundColor(getBadgeColumn()!, getNestedValue(item, getBadgeColumn()!.key))"
+            [style.color]="getBadgeTextColor(getBadgeColumn()!, getNestedValue(item, getBadgeColumn()!.key))"
+            [style.border-color]="getBadgeBorderColor(getBadgeColumn()!, getNestedValue(item, getBadgeColumn()!.key))">
+            {{ getBadgeValue(item) }}
+          </span>
+        </div>
+
+        <!-- Card Body -->
+        <div class="card-body">
+          <div class="row" *ngFor="let column of getMobileColumns().slice(1)">
+            <span class="label">{{ column.label }}</span>
+            <span class="value">
+              <ng-container *ngIf="column.badge">
+                <span class="status-badge" [ngClass]="getBadgeClasses(column, getNestedValue(item, column.key))"
+                  [style.background-color]="getBadgeBackgroundColor(column, getNestedValue(item, column.key))"
+                  [style.color]="getBadgeTextColor(column, getNestedValue(item, column.key))"
+                  [style.border-color]="getBadgeBorderColor(column, getNestedValue(item, column.key))">
+                  {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item,
+                  column.key) }}
+                </span>
+              </ng-container>
+              <ng-container *ngIf="!column.badge && column.template" [ngTemplateOutlet]="column.template"
+                [ngTemplateOutletContext]="{ $implicit: item, column: column }">
+              </ng-container>
+              <ng-container *ngIf="!column.badge && !column.template">
+                {{ column.transform ? column.transform(getNestedValue(item, column.key)) : getNestedValue(item,
+                column.key) }}
+              </ng-container>
+            </span>
           </div>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+        </div>
+
+        <!-- Card Actions -->
+        <div class="card-actions" *ngIf="actions || actionsTemplate">
+          <ng-container *ngIf="actionsTemplate; else defaultActions" [ngTemplateOutlet]="actionsTemplate"
+            [ngTemplateOutletContext]="{ $implicit: item }">
+          </ng-container>
+          <ng-template #defaultActions>
+            <button *ngFor="let action of actions" [class]="getActionClasses(action, item)"
+              [disabled]="isActionDisabled(action, item)"
+              (click)="executeAction(action, item); $event.stopPropagation()"
+              class="w-8 h-8 rounded-md flex items-center justify-center p-0"
+              [attr.title]="getActionLabel(action, item)">
+              <app-icon *ngIf="getActionIcon(action, item)" [name]="getActionIcon(action, item)" [size]="16"></app-icon>
+            </button>
+          </ng-template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div *ngIf="!loading && data.length === 0" class="empty-state">
+      <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z">
+        </path>
+      </svg>
+      <span class="empty-message">{{ emptyMessage }}</span>
+    </div>
+  </div>
 </div>
