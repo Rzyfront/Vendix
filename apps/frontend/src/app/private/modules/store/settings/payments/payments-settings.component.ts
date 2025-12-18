@@ -6,14 +6,15 @@ import {
   PaymentMethodStats,
   StorePaymentMethod,
 } from './interfaces/payment-methods.interface';
-import { PaymentMethodsStatsComponent } from './components/payment-methods-stats.component';
-import { PaymentMethodsListComponent } from './components/payment-methods-list.component';
-import { PaymentMethodsEmptyStateComponent } from './components/payment-methods-empty-state.component';
 import {
   ButtonComponent,
-  ModalComponent,
   ToastService,
   IconComponent,
+  StatsComponent,
+  TableComponent,
+  TableColumn,
+  TableAction,
+  DialogService,
 } from '../../../../../../app/shared/components/index';
 
 @Component({
@@ -21,188 +22,115 @@ import {
   standalone: true,
   imports: [
     CommonModule,
-    PaymentMethodsStatsComponent,
-    PaymentMethodsListComponent,
-    PaymentMethodsEmptyStateComponent,
     ButtonComponent,
-    ModalComponent,
     IconComponent,
+    StatsComponent,
+    TableComponent,
   ],
   template: `
-    <div class="p-6">
-      <div class="mb-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-3xl font-bold text-gray-900 mb-2">
-              Payment Methods
-            </h1>
-            <p class="text-gray-600">
-              Configure payment methods and processing settings for your store
-            </p>
-          </div>
-          <app-button
-            variant="primary"
-            (clicked)="openEnablePaymentMethodModal()"
-            [loading]="is_loading"
-          >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Add Payment Method
-          </app-button>
-        </div>
+    <div class="p-6 space-y-6">
+      <!-- Stats Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <app-stats
+          title="Total de Métodos"
+          [value]="payment_method_stats?.total_methods || 0"
+          iconName="credit-card"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+        <app-stats
+          title="Métodos Activos"
+          [value]="payment_method_stats?.enabled_methods || 0"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+        <app-stats
+          title="Requieren Configuración"
+          [value]="payment_method_stats?.requires_config || 0"
+          iconName="settings"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
+        ></app-stats>
+        <app-stats
+          title="Transacciones Exitosas"
+          [value]="payment_method_stats?.successful_transactions || 0"
+          iconName="check"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
       </div>
 
-      <!-- Statistics Section -->
-      <app-payment-methods-stats
-        [stats]="payment_method_stats"
-        [is_loading]="is_loading_stats"
-      >
-      </app-payment-methods-stats>
-
-      <!-- Payment Methods List -->
-      <div class="mt-8">
-        <div class="bg-white rounded-lg shadow-sm border">
-          <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">
-              Enabled Payment Methods
-            </h2>
-            <p class="text-sm text-gray-600 mt-1">
-              Manage payment methods available to your customers
-            </p>
-          </div>
-
-          <div class="p-6">
-            <!-- Loading State -->
-            <div
-              *ngIf="is_loading"
-              class="flex items-center justify-center py-12"
-            >
-              <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
-              ></div>
+      <!-- Payment Methods Tables -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Store Payment Methods Table -->
+        <div class="bg-surface rounded-lg shadow-sm border border-border">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div>
+              <h3 class="text-lg font-semibold text-text-primary">
+                Métodos de Pago Activados ({{ payment_methods.length }})
+              </h3>
+              <p class="text-sm text-text-secondary">
+                Métodos configurados para tu tienda
+              </p>
             </div>
-
-            <!-- Empty State -->
-            <app-payment-methods-empty-state
-              *ngIf="!is_loading && payment_methods.length === 0"
-              (addPaymentMethod)="openEnablePaymentMethodModal()"
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="loadPaymentMethods()"
+              [disabled]="is_loading"
             >
-            </app-payment-methods-empty-state>
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+          </div>
+          <div class="p-4">
+            <app-table
+              [data]="payment_methods"
+              [columns]="enabled_payment_methods_columns"
+              [actions]="enabled_payment_methods_actions"
+              [loading]="is_loading"
+              [emptyMessage]="'No hay métodos de pago activados'"
+              size="md"
+              [hoverable]="true"
+              [bordered]="true"
+            ></app-table>
+          </div>
+        </div>
 
-            <!-- Payment Methods List -->
-            <app-payment-methods-list
-              *ngIf="!is_loading && payment_methods.length > 0"
-              [payment_methods]="payment_methods"
-              [is_loading]="is_loading"
-              (edit)="openEditPaymentMethodModal($event)"
-              (toggle)="togglePaymentMethod($event)"
-              (delete)="deletePaymentMethod($event)"
-              (reorder)="reorderPaymentMethods($event)"
+        <!-- Available Payment Methods Table -->
+        <div class="bg-surface rounded-lg shadow-sm border border-border">
+          <div class="flex items-center justify-between px-4 py-3 border-b border-border">
+            <div>
+              <h3 class="text-lg font-semibold text-text-primary">
+                Métodos Disponibles ({{ available_payment_methods.length }})
+              </h3>
+              <p class="text-sm text-text-secondary">
+                Activa nuevos métodos para tu tienda
+              </p>
+            </div>
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="loadAvailablePaymentMethods()"
+              [disabled]="is_loading_available"
             >
-            </app-payment-methods-list>
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+          </div>
+          <div class="p-4">
+            <app-table
+              [data]="available_payment_methods"
+              [columns]="available_payment_methods_columns"
+              [actions]="available_payment_methods_actions"
+              [loading]="is_loading_available"
+              [emptyMessage]="'No hay métodos disponibles'"
+              size="md"
+              [hoverable]="true"
+              [bordered]="true"
+            ></app-table>
           </div>
         </div>
       </div>
-
-      <!-- Enable Payment Method Modal -->
-      <app-modal
-        *ngIf="show_enable_modal"
-        [size]="'lg'"
-        [title]="'Add Payment Method'"
-        (closed)="closeEnablePaymentMethodModal()"
-      >
-        <div class="p-6">
-          <p class="text-gray-600 mb-4">
-            Select a payment method to enable for your store. You can configure
-            it after enabling.
-          </p>
-
-          <div class="space-y-3">
-            <div
-              *ngFor="let method of available_payment_methods"
-              class="border rounded-lg p-4 cursor-pointer transition-colors hover:bg-gray-50"
-              [class.border-blue-500]="selected_method?.id === method.id"
-              [class.bg-blue-50]="selected_method?.id === method.id"
-              (click)="selectPaymentMethod(method)"
-            >
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                  <app-icon
-                    [name]="getPaymentMethodIcon(method.type)"
-                    [size]="24"
-                  ></app-icon>
-                  <div>
-                    <h3 class="font-medium text-gray-900">
-                      {{ method.display_name }}
-                    </h3>
-                    <p class="text-sm text-gray-600">
-                      {{ method.description }}
-                    </p>
-                  </div>
-                </div>
-                <div class="flex items-center space-x-2">
-                  <span
-                    class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
-                  >
-                    {{ getPaymentMethodTypeLabel(method.type) }}
-                  </span>
-                  <div
-                    *ngIf="selected_method?.id === method.id"
-                    class="w-5 h-5 rounded-full bg-blue-600 flex items-center justify-center"
-                  >
-                    <app-icon
-                      name="check"
-                      [size]="12"
-                      class="text-white"
-                    ></app-icon>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            *ngIf="!available_payment_methods.length && !is_loading_available"
-            class="text-center py-8"
-          >
-            <app-icon
-              name="info"
-              [size]="48"
-              class="text-gray-400 mx-auto mb-3"
-            ></app-icon>
-            <p class="text-gray-600">
-              No additional payment methods are available to enable.
-            </p>
-          </div>
-
-          <div
-            *ngIf="is_loading_available"
-            class="flex items-center justify-center py-8"
-          >
-            <div
-              class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"
-            ></div>
-          </div>
-        </div>
-
-        <div
-          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3"
-        >
-          <app-button
-            variant="secondary"
-            (clicked)="closeEnablePaymentMethodModal()"
-          >
-            Cancel
-          </app-button>
-          <app-button
-            variant="primary"
-            (clicked)="enableSelectedPaymentMethod()"
-            [disabled]="!selected_method || is_enabling"
-          >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Enable Payment Method
-          </app-button>
-        </div>
-      </app-modal>
     </div>
   `,
   styles: [
@@ -226,12 +154,116 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   is_loading_available = false;
   is_enabling = false;
 
-  show_enable_modal = false;
-  selected_method: any = null;
+  
+  // Table configuration for enabled payment methods
+  enabled_payment_methods_columns: TableColumn[] = [
+    {
+      key: 'display_name',
+      label: 'Método',
+      transform: (value: any) => value || 'Sin nombre'
+    },
+    {
+      key: 'system_payment_method.provider',
+      label: 'Proveedor',
+      defaultValue: '-'
+    },
+    {
+      key: 'state',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: { type: 'status' },
+      transform: (value: string) => {
+        const state_map: Record<string, string> = {
+          enabled: 'Activo',
+          disabled: 'Inactivo',
+          requires_configuration: 'Requiere Configuración',
+          archived: 'Archivado',
+        };
+        return state_map[value] || value;
+      }
+    },
+    {
+      key: 'system_payment_method.type',
+      label: 'Tipo',
+      transform: (value: string) => {
+        const type_map: Record<string, string> = {
+          cash: 'Efectivo',
+          card: 'Tarjeta',
+          paypal: 'PayPal',
+          bank_transfer: 'Transferencia Bancaria',
+        };
+        return type_map[value] || value;
+      }
+    }
+  ];
+
+  // Table configuration for available payment methods
+  available_payment_methods_columns: TableColumn[] = [
+    {
+      key: 'display_name',
+      label: 'Método'
+    },
+    {
+      key: 'provider',
+      label: 'Origen',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          'system': '#64748b',
+          'organization': '#7c3aed'
+        }
+      },
+      transform: (value: string) => {
+        return value === 'system' ? 'Sistema' : 'Organización';
+      }
+    },
+    {
+      key: 'type',
+      label: 'Tipo',
+      transform: (value: string) => {
+        const type_map: Record<string, string> = {
+          cash: 'Efectivo',
+          card: 'Tarjeta',
+          paypal: 'PayPal',
+          bank_transfer: 'Transferencia Bancaria',
+        };
+        return type_map[value] || value;
+      }
+    }
+  ];
+
+  // Actions for enabled payment methods
+  enabled_payment_methods_actions: TableAction[] = [
+    {
+      label: 'Configurar',
+      icon: 'settings',
+      action: (method: StorePaymentMethod) => this.openEditPaymentMethodModal(method),
+      variant: 'ghost'
+    },
+    {
+      label: (method: StorePaymentMethod) => method.state === 'enabled' ? 'Desactivar' : 'Activar',
+      icon: (method: StorePaymentMethod) => method.state === 'enabled' ? 'pause' : 'play',
+      action: (method: StorePaymentMethod) => this.togglePaymentMethod(method),
+      variant: 'ghost'
+    }
+  ];
+
+  // Actions for available payment methods
+  available_payment_methods_actions: TableAction[] = [
+    {
+      label: 'Activar',
+      icon: 'plus',
+      action: (method: any) => this.enablePaymentMethod(method),
+      variant: 'primary',
+      disabled: () => this.is_enabling
+    }
+  ];
 
   constructor(
     private payment_methods_service: PaymentMethodsService,
     private toast_service: ToastService,
+    private dialog_service: DialogService,
   ) {}
 
   ngOnInit(): void {
@@ -252,13 +284,15 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: any) => {
-          this.payment_methods = response.data;
+          // Service already extracted data from ResponseService format
+          this.payment_methods = response.data || response;
           this.is_loading = false;
         },
         error: (error: any) => {
           this.toast_service.error(
             'Failed to load payment methods: ' + error.message,
           );
+          this.payment_methods = [];
           this.is_loading = false;
         },
       });
@@ -271,13 +305,15 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats: any) => {
-          this.payment_method_stats = stats;
+          // Service already extracted data from ResponseService format
+          this.payment_method_stats = stats.data || stats;
           this.is_loading_stats = false;
         },
         error: (error: any) => {
           this.toast_service.error(
             'Failed to load payment statistics: ' + error.message,
           );
+          this.payment_method_stats = null;
           this.is_loading_stats = false;
         },
       });
@@ -290,58 +326,74 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (methods: any) => {
-          this.available_payment_methods = methods;
+          // Service already extracted data from ResponseService format
+          const methods_data = methods.data || methods;
+          // Sort methods: organization methods first, then system methods
+          this.available_payment_methods = this.sortAvailableMethods(methods_data);
           this.is_loading_available = false;
         },
         error: (error: any) => {
           this.toast_service.error(
             'Failed to load available payment methods: ' + error.message,
           );
+          this.available_payment_methods = [];
           this.is_loading_available = false;
         },
       });
   }
 
-  openEnablePaymentMethodModal(): void {
-    this.show_enable_modal = true;
-    this.selected_method = null;
-    if (this.available_payment_methods.length === 0) {
-      this.loadAvailablePaymentMethods();
-    }
+  enablePaymentMethod(method: any): void {
+    this.dialog_service.confirm({
+      title: 'Activar Método de Pago',
+      message: `¿Deseas activar ${method.display_name} para tu tienda?`,
+      confirmText: 'Activar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary'
+    }).then((confirmed) => {
+      if (confirmed) {
+        this.is_enabling = true;
+        this.payment_methods_service
+          .enablePaymentMethod(method.id, {
+            display_name: method.display_name
+          })
+          .pipe(takeUntil(this.destroy$))
+          .subscribe({
+            next: () => {
+              this.toast_service.success('Método de pago activado correctamente');
+              this.loadPaymentMethods();
+              this.loadPaymentMethodStats();
+              this.loadAvailablePaymentMethods();
+              this.is_enabling = false;
+            },
+            error: (error: any) => {
+              this.toast_service.error(
+                'Error al activar método de pago: ' + error.message,
+              );
+              this.is_enabling = false;
+            },
+          });
+      }
+    });
   }
 
-  closeEnablePaymentMethodModal(): void {
-    this.show_enable_modal = false;
-    this.selected_method = null;
+  sortAvailableMethods(methods: any[]): any[] {
+    return methods.sort((a, b) => {
+      // Prioritize organization methods (assuming they have a flag or different provider pattern)
+      const aIsOrg = this.isOrganizationMethod(a);
+      const bIsOrg = this.isOrganizationMethod(b);
+
+      if (aIsOrg && !bIsOrg) return -1;
+      if (!aIsOrg && bIsOrg) return 1;
+
+      return a.display_name.localeCompare(b.display_name);
+    });
   }
 
-  selectPaymentMethod(method: any): void {
-    this.selected_method = method;
-  }
-
-  enableSelectedPaymentMethod(): void {
-    if (!this.selected_method) return;
-
-    this.is_enabling = true;
-    this.payment_methods_service
-      .enablePaymentMethod(this.selected_method.id, {})
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: () => {
-          this.toast_service.success('Payment method enabled successfully');
-          this.closeEnablePaymentMethodModal();
-          this.loadPaymentMethods();
-          this.loadPaymentMethodStats();
-          this.loadAvailablePaymentMethods();
-          this.is_enabling = false;
-        },
-        error: (error: any) => {
-          this.toast_service.error(
-            'Failed to enable payment method: ' + error.message,
-          );
-          this.is_enabling = false;
-        },
-      });
+  isOrganizationMethod(method: any): boolean {
+    // Organization methods are those where the provider is not 'system'
+    // System methods have provider = 'system'
+    // Organization methods might have provider = 'organization' or the organization name
+    return method.provider !== 'system';
   }
 
   openEditPaymentMethodModal(method: StorePaymentMethod): void {
@@ -392,13 +444,5 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           );
         },
       });
-  }
-
-  getPaymentMethodIcon(type: string): string {
-    return this.payment_methods_service.getPaymentMethodIcon(type);
-  }
-
-  getPaymentMethodTypeLabel(type: string): string {
-    return this.payment_methods_service.getPaymentMethodTypeLabel(type);
   }
 }

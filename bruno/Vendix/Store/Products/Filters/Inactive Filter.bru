@@ -1,0 +1,24 @@
+meta {
+  name: Inactive Filter
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/store/products?include_inactive=true
+  body: none
+  auth: inherit
+}
+
+params:query {
+  include_inactive: true
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg3MjQwOCwiZXhwIjoxNzY0ODc2MDA4fQ.3-DxgqyxBrN7npCRzZ7fsCV9Znapo5-3m0TfP_Zhrqc
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

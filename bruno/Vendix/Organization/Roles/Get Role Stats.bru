@@ -1,0 +1,42 @@
+meta {
+  name: Get Role Stats
+  type: http
+  seq: 6
+}
+
+get {
+  url: http://{{url}}/organization/roles/stats
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get role stats successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Estadísticas obtenidas exitosamente');
+  });
+
+  test("Stats data structure is valid", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('total_roles');
+    expect(res.body.data).to.have.property('system_roles');
+    expect(res.body.data).to.have.property('custom_roles');
+    expect(res.body.data).to.have.property('total_permissions');
+  });
+
+  test("Stats are numbers", function() {
+    expect(res.body.data.total_roles).to.be.a('number');
+    expect(res.body.data.system_roles).to.be.a('number');
+    expect(res.body.data.custom_roles).to.be.a('number');
+    expect(res.body.data.total_permissions).to.be.a('number');
+  });
+
+  test("Stats consistency check", function() {
+    const total = res.body.data.total_roles;
+    const system = res.body.data.system_roles;
+    const custom = res.body.data.custom_roles;
+    expect(total).to.equal(system + custom);
+  });
+}

@@ -1,0 +1,71 @@
+meta {
+  name: "Verify Consolidated Stock Levels After Creation"
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/inventory/stock-levels/product/{{productId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Stock levels created for all locations", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.data).to.have.length(3); // 3 ubicaciones configuradas
+  });
+  
+  test("Stock levels contain correct quantities", function() {
+    const stockLevels = res.body.data;
+  
+    // Buscar stock levels por location_id
+    const location1 = stockLevels.find(sl => sl.location_id === 1);
+    const location2 = stockLevels.find(sl => sl.location_id === 2);
+    const location3 = stockLevels.find(sl => sl.location_id === 3);
+  
+    expect(location1).to.exist;
+    expect(location1.quantity_available).to.equal(10);
+    expect(location1.quantity_reserved).to.equal(0);
+    expect(location1.quantity_on_hand).to.equal(10);
+  
+    expect(location2).to.exist;
+    expect(location2.quantity_available).to.equal(5);
+    expect(location2.quantity_reserved).to.equal(0);
+    expect(location2.quantity_on_hand).to.equal(5);
+  
+    expect(location3).to.exist;
+    expect(location3.quantity_available).to.equal(3);
+    expect(location3.quantity_reserved).to.equal(0);
+    expect(location3.quantity_on_hand).to.equal(3);
+  });
+  
+  test("Stock levels include location details", function() {
+    const stockLevels = res.body.data;
+    const firstStockLevel = stockLevels[0];
+  
+    expect(firstStockLevel).to.have.property('inventory_locations');
+    expect(firstStockLevel.inventory_locations).to.have.property('id');
+    expect(firstStockLevel.inventory_locations).to.have.property('name');
+    expect(firstStockLevel.inventory_locations).to.have.property('type');
+  });
+  
+  test("All stock levels belong to correct product", function() {
+    const stockLevels = res.body.data;
+    stockLevels.forEach(stockLevel => {
+      expect(stockLevel.product_id).to.equal(parseInt({{productId}}));
+    });
+  });
+  
+  test("Last updated timestamps are set", function() {
+    const stockLevels = res.body.data;
+    stockLevels.forEach(stockLevel => {
+      expect(stockLevel).to.have.property('last_updated');
+      expect(stockLevel.last_updated).to.not.be.null;
+      expect(stockLevel).to.have.property('updated_at');
+    });
+  });
+}

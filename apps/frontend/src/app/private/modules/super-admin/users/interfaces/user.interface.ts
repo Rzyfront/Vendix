@@ -41,7 +41,7 @@ export enum UserState {
   INACTIVE = 'inactive',
   PENDING_VERIFICATION = 'pending_verification',
   SUSPENDED = 'suspended',
-  ARCHIVED = 'archived'
+  ARCHIVED = 'archived',
 }
 
 export interface CreateUserDto {

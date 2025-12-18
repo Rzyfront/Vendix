@@ -1,8 +1,24 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from './prisma.service';
+import { GlobalPrismaService } from './services/global-prisma.service';
+import { OrganizationPrismaService } from './services/organization-prisma.service';
+import { StorePrismaService } from './services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
+import { AccessValidationService } from '@common/services/access-validation.service';
 
 @Module({
-  providers: [PrismaService],
-  exports: [PrismaService],
+  providers: [
+    GlobalPrismaService,
+    OrganizationPrismaService,
+    StorePrismaService,
+    RequestContextService,
+    AccessValidationService,
+  ],
+  exports: [
+    GlobalPrismaService,
+    OrganizationPrismaService,
+    StorePrismaService,
+    RequestContextService,
+    AccessValidationService,
+  ],
 })
 export class PrismaModule {}

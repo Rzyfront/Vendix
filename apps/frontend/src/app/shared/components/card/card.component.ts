@@ -6,25 +6,31 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-  <div [class]="cardClasses" [ngStyle]="cardStyles">
+    <div [class]="cardClasses" [ngStyle]="cardStyles">
       <!-- Header -->
-      <div 
-        *ngIf="hasHeader" 
+      <div
+        *ngIf="hasHeader"
         class="px-6 py-4 border-b border-[var(--color-border)]"
         [class.pb-0]="!hasBody && !hasFooter"
       >
-        <h3 *ngIf="title" class="text-lg font-semibold text-[var(--color-text-primary)]">
+        <h3
+          *ngIf="title"
+          class="text-lg font-semibold text-[var(--color-text-primary)]"
+        >
           {{ title }}
         </h3>
-        <p *ngIf="subtitle" class="text-sm text-[var(--color-text-secondary)] mt-1">
+        <p
+          *ngIf="subtitle"
+          class="text-sm text-[var(--color-text-secondary)] mt-1"
+        >
           {{ subtitle }}
         </p>
         <ng-content select="[slot=header]"></ng-content>
       </div>
 
       <!-- Body -->
-      <div 
-        *ngIf="hasBody" 
+      <div
+        *ngIf="hasBody"
         class="p-6"
         [class.pt-0]="hasHeader"
         [class.pb-0]="hasFooter"
@@ -33,8 +39,8 @@ import { CommonModule } from '@angular/common';
       </div>
 
       <!-- Footer -->
-      <div 
-        *ngIf="hasFooter" 
+      <div
+        *ngIf="hasFooter"
         class="px-6 py-4 border-t border-[var(--color-border)] bg-[var(--color-background)]"
         [class.pt-0]="!hasBody"
       >
@@ -42,21 +48,23 @@ import { CommonModule } from '@angular/common';
       </div>
     </div>
   `,
-  styles: [`
-    @keyframes slide-up-fade-in {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
+  styles: [
+    `
+      @keyframes slide-up-fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
       }
-      to {
-        opacity: 1;
-        transform: translateY(0);
+      .animate-slide-up-fade-in {
+        animation: slide-up-fade-in 0.4s ease-out forwards;
       }
-    }
-    .animate-slide-up-fade-in {
-      animation: slide-up-fade-in 0.4s ease-out forwards;
-    }
-  `]
+    `,
+  ],
 })
 export class CardComponent {
   @Input() title?: string;
@@ -76,7 +84,7 @@ export class CardComponent {
       'border',
       'border-[var(--color-border)]',
       'rounded-lg',
-      'overflow-hidden'
+      'overflow-hidden',
     ];
 
     const shadowClasses = {
@@ -84,18 +92,20 @@ export class CardComponent {
       sm: ['shadow-[var(--shadow-sm)]'],
       md: ['shadow-[var(--shadow-md)]'],
       lg: ['shadow-[var(--shadow-lg)]'],
-      xl: ['shadow-[var(--shadow-xl)]']
+      xl: ['shadow-[var(--shadow-xl)]'],
     };
 
     const paddingClasses = this.padding ? [] : ['p-0'];
 
-    const animationClasses = this.animateOnLoad ? ['animate-slide-up-fade-in'] : [];
+    const animationClasses = this.animateOnLoad
+      ? ['animate-slide-up-fade-in']
+      : [];
 
     const classes = [
       ...baseClasses,
       ...shadowClasses[this.shadow],
       ...paddingClasses,
-      ...animationClasses
+      ...animationClasses,
     ];
 
     if (this.customClasses) {

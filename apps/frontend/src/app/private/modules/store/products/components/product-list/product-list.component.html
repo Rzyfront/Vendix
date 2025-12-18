@@ -1,138 +1,62 @@
 <div class="space-y-6">
-  <!-- Stats Cards -->
-  <app-product-stats [stats]="stats"></app-product-stats>
-
-  <!-- Products List -->
-  <div class="bg-surface rounded-card shadow-card border border-border">
+  <!-- Lista de Productos -->
+  <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
     <div class="px-6 py-4 border-b border-border">
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-      >
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
-            All Products ({{ products.length }})
+            Todos los Productos ({{ products.length }})
           </h2>
         </div>
 
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-        >
-          <!-- Input de búsqueda compacto -->
-          <app-inputsearch
-            class="w-full sm:w-64"
-            size="sm"
-            placeholder="Search products..."
-            [debounceTime]="1000"
-            (searchChange)="onSearchChange($event)"
-          ></app-inputsearch>
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <!-- Quick search input -->
+          <app-inputsearch class="w-full sm:w-64 flex-shrink-0" size="sm" placeholder="Buscar productos..."
+            [debounceTime]="1000" [ngModel]="searchTerm" (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
-          <!-- Filtro de estado -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onStateChange($event)"
-            [value]="selectedState"
-          >
-            <option value="">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="archived">Archived</option>
-          </select>
+          <!-- Filter dropdown -->
+          <app-product-filter-dropdown [searchTerm]="searchTerm" [selectedState]="selectedState"
+            [selectedCategory]="selectedCategory" [selectedBrand]="selectedBrand" [categories]="categories"
+            [brands]="brands" [isLoading]="isLoading" (filterChange)="onFilterDropdownChange($event)"
+            (clearAllFilters)="clearFilters()"></app-product-filter-dropdown>
 
-          <!-- Filtro de categoría -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onCategoryChange($event)"
-            [value]="selectedCategory"
-          >
-            <option value="">All Categories</option>
-            <option *ngFor="let category of categories" [value]="category.id">
-              {{ category.name }}
-            </option>
-          </select>
-
-          <!-- Filtro de marca -->
-          <select
-            class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-            (change)="onBrandChange($event)"
-            [value]="selectedBrand"
-          >
-            <option value="">All Brands</option>
-            <option *ngFor="let brand of brands" [value]="brand.id">
-              {{ brand.name }}
-            </option>
-          </select>
-
-          <div class="flex gap-2 items-center">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="refreshProducts()"
-              [disabled]="isLoading"
-              title="Refresh"
-            >
+          <!-- Action buttons -->
+          <div class="flex gap-2 items-center ml-auto">
+            <app-button variant="outline" size="sm" (clicked)="refresh.emit()" [disabled]="isLoading"
+              title="Actualizar">
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="openCreateProductModal()"
-              title="New Product"
-            >
+            <app-button variant="outline" size="sm" (clicked)="bulkUpload.emit()" [disabled]="isLoading"
+              title="Carga Masiva">
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button variant="primary" size="sm" (clicked)="create.emit()" title="Nuevo Producto">
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">New Product</span>
+              <span class="hidden sm:inline">Nuevo Producto</span>
             </app-button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Loading State -->
+    <!-- Estado de Carga -->
     <div *ngIf="isLoading" class="p-8 text-center">
-      <div
-        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-      ></div>
-      <p class="mt-2 text-text-secondary">Loading products...</p>
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <p class="mt-2 text-text-secondary">Cargando productos...</p>
     </div>
 
-    <!-- Empty State -->
-    <app-product-empty-state
-      *ngIf="!isLoading && products.length === 0"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      [showAdditionalActions]="hasFilters"
-      (actionClick)="openCreateProductModal()"
-      (refreshClick)="refreshProducts()"
-      (clearFiltersClick)="clearFilters()"
-    >
+    <!-- Estado Vacío -->
+    <app-product-empty-state *ngIf="!isLoading && products.length === 0" [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()" [showAdditionalActions]="hasFilters" (actionClick)="create.emit()"
+      (refreshClick)="refresh.emit()" (clearFiltersClick)="clearFilters()">
     </app-product-empty-state>
 
-    <!-- Products Table -->
+    <!-- Tabla de Productos -->
     <div *ngIf="!isLoading && products.length > 0" class="p-6">
-      <app-table
-        [data]="products"
-        [columns]="tableColumns"
-        [actions]="tableActions"
-        [loading]="isLoading"
-        [sortable]="true"
-        [hoverable]="true"
-        [striped]="true"
-        size="md"
-        (sort)="onTableSort($event)"
-        (rowClick)="viewProduct($event)"
-      >
+      <app-table [data]="products" [columns]="tableColumns" [actions]="tableActions" [loading]="isLoading"
+        [sortable]="true" [hoverable]="true" [striped]="true" size="md" (sort)="sort.emit($event)"
+        (rowClick)="edit.emit($event)">
       </app-table>
     </div>
   </div>
-
-  <!-- Create Product Modal -->
-  <app-product-create-modal
-    [isOpen]="isCreateModalOpen"
-    [isSubmitting]="isCreatingProduct"
-    (openChange)="onCreateModalChange($event)"
-    (submit)="createProduct($event)"
-    (cancel)="onCreateModalCancel()"
-  ></app-product-create-modal>
-
-  <!-- Edit Product Modal -->
-  <!-- TODO: Create edit modal component when needed -->
 </div>

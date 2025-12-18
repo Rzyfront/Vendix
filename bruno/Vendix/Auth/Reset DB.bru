@@ -1,0 +1,17 @@
+meta {
+  name: Reset DB (Clean + Seed)
+  type: http
+  seq: 9
+}
+
+post {
+  url: http://{{url}}/reset
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "secretKey": "vendix-dangerous-reset"
+  }
+}

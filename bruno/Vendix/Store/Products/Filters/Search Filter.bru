@@ -1,0 +1,24 @@
+meta {
+  name: Search Filter
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/store/products?search=iphone
+  body: none
+  auth: inherit
+}
+
+params:query {
+  search: iphone
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg2ODc5OCwiZXhwIjoxNzY0ODcyMzk4fQ.0FN_BlLTbizsm3kpaaXzj07mKXOIp-Fm6I8XklgMFsQ
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

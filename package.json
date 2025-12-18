@@ -24,5 +24,9 @@
   },
   "devDependencies": {
     "prettier": "^3.4.2"
+  },
+  "dependencies": {
+    "@types/xlsx": "^0.0.35",
+    "xlsx": "^0.18.5"
   }
 }

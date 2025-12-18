@@ -1,0 +1,24 @@
+meta {
+  name: Unknown Filters
+  type: http
+  seq: 11
+}
+
+get {
+  url: http://{{url}}/store/products?filter_by_color=red
+  body: none
+  auth: inherit
+}
+
+params:query {
+  filter_by_color: red
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg4NjU1OSwiZXhwIjoxNzY0ODkwMTU5fQ.bXQ3QfXMPwK5LFqA48lduZ41bLpP9iLrUx5tT0mW8pk
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

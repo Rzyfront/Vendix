@@ -94,7 +94,7 @@ export interface WizardCompletionResult {
   providedIn: 'root',
 })
 export class OnboardingWizardService {
-  private readonly apiUrl = `${environment.apiUrl}/onboarding-wizard`;
+  private readonly apiUrl = `${environment.apiUrl}/organization/onboarding-wizard`;
 
   // Wizard state management
   private currentStepSubject = new BehaviorSubject<number>(1);

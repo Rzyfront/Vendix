@@ -26,6 +26,7 @@ import { PosCustomerModalComponent } from './components/pos-customer-modal.compo
 import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
+import { PosRegisterConfigModalComponent } from './components/pos-register-config-modal.component';
 
 @Component({
   selector: 'app-pos',
@@ -42,6 +43,7 @@ import { PosCartComponent } from './cart/pos-cart.component';
     PosPaymentInterfaceComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
+    PosRegisterConfigModalComponent,
   ],
   template: `
     <div class="h-full flex flex-col gap-4 p-4 overflow-hidden">
@@ -61,11 +63,11 @@ import { PosCartComponent } from './cart/pos-cart.component';
           >
             <div class="flex items-center gap-3">
               <div
-                class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center shadow-md"
+                class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-lg shadow-primary-600/20"
               >
                 <app-icon
-                  name="store"
-                  [size]="20"
+                  name="shopping-cart"
+                  [size]="24"
                   class="text-white"
                 ></app-icon>
               </div>
@@ -139,28 +141,14 @@ import { PosCartComponent } from './cart/pos-cart.component';
                 <app-button
                   variant="ghost"
                   size="md"
-                  (clicked)="onViewOrders()"
-                  title="Ver órdenes"
-                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg"
+                  (clicked)="onOpenRegisterConfigModal()"
+                  title="Configurar Caja"
+                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg text-text-secondary hover:text-primary hover:bg-primary-light/10 transition-colors"
                 >
                   <app-icon
-                    name="history"
+                    name="settings"
                     [size]="20"
-                    class="text-text-secondary"
-                  ></app-icon>
-                </app-button>
-
-                <app-button
-                  variant="ghost"
-                  size="md"
-                  (clicked)="onQuickSearch()"
-                  title="Búsqueda rápida"
-                  class="w-10 h-10 !p-0 flex items-center justify-center rounded-lg"
-                >
-                  <app-icon
-                    name="search"
-                    [size]="20"
-                    class="text-text-secondary"
+                    class="currentColor"
                   ></app-icon>
                 </app-button>
               </div>
@@ -230,6 +218,12 @@ import { PosCartComponent } from './cart/pos-cart.component';
         (closed)="onOrderConfirmationClosed()"
         (newSale)="onStartNewSale()"
       ></app-pos-order-confirmation>
+
+      <app-pos-register-config-modal
+        [isOpen]="showRegisterConfigModal"
+        (closed)="onRegisterConfigModalClosed()"
+        (saved)="onRegisterConfigSaved($event)"
+      ></app-pos-register-config-modal>
     </div>
   `,
   styles: [
@@ -250,6 +244,8 @@ export class PosComponent implements OnInit, OnDestroy {
 
   showPaymentModal = false;
   selectedPaymentMethod: any = null;
+
+  showRegisterConfigModal = false;
 
   showOrderConfirmation = false;
 
@@ -274,7 +270,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.setupSubscriptions();
@@ -492,18 +488,16 @@ export class PosComponent implements OnInit, OnDestroy {
     }
   }
 
-  onQuickSearch(): void {
-    // Dispatch an event or focus the search input
-    const searchInput = document.querySelector(
-      'input[type="search"]',
-    ) as HTMLInputElement;
-    if (searchInput) {
-      searchInput.focus();
-    }
+  onOpenRegisterConfigModal(): void {
+    this.showRegisterConfigModal = true;
   }
 
-  onViewOrders(): void {
-    this.toastService.info('Historial de ventas próximamente');
+  onRegisterConfigModalClosed(): void {
+    this.showRegisterConfigModal = false;
+  }
+
+  onRegisterConfigSaved(registerId: string): void {
+    this.toastService.success(`Caja configurada: ${registerId}`);
   }
 
   onOrderConfirmationClosed(): void {

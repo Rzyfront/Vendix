@@ -1,9 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { DomainConfig, AppEnvironment } from '../models/domain-config.interface';
+import {
+  DomainConfig,
+  AppEnvironment,
+} from '../models/domain-config.interface';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class NavigationService {
   private router = inject(Router);
@@ -12,10 +15,7 @@ export class NavigationService {
    * Redirección inteligente después del login basada en rol y contexto.
    * Ahora simplemente determina la ruta por defecto para el entorno del usuario.
    */
-  redirectAfterLogin(
-    userRoles: string[],
-    domainConfig: DomainConfig
-  ): string {
+  redirectAfterLogin(userRoles: string[], domainConfig: DomainConfig): string {
     // La lógica compleja de resolución de layout ya no es necesaria.
     // Simplemente obtenemos la ruta por defecto para el entorno actual.
     return this.getDefaultRouteForEnvironment(domainConfig.environment);

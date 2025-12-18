@@ -5,7 +5,7 @@
 :host {
   display: block;
   height: 100vh;
-  font-family: 'Inter', sans-serif;
+  font-family: "Inter", sans-serif;
 }
 
 .flex {
@@ -43,7 +43,8 @@ main {
 }
 
 /* Responsive design */
-@media (max-width: 48em) {  /* 768px */
+@media (max-width: 48em) {
+  /* 768px */
   .p-6 {
     padding: 1rem;
   }

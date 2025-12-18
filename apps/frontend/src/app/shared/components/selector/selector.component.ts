@@ -41,25 +41,23 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
     },
   ],
   template: `
-    <div class="selector-container" [class]="containerClasses">
+    <div [class]="containerClasses">
       <label
         *ngIf="label"
-        class="selector-label"
         [class]="labelClasses"
         [for]="id"
       >
         {{ label }}
         <span
           *ngIf="required"
-          style="color: var(--color-destructive); margin-left: 0.25rem;"
+          class="text-[var(--color-destructive)] ml-0.5"
           >*</span
         >
       </label>
 
-      <div class="selector-wrapper" [class]="wrapperClasses">
+      <div [class]="wrapperClasses">
         <select
           [id]="id"
-          class="selector-select"
           [class]="selectClasses"
           [disabled]="disabled"
           [required]="required"
@@ -68,7 +66,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           (blur)="onBlur()"
           (focus)="onFocus()"
         >
-          <option *ngIf="placeholder" value="" disabled selected>
+          <option *ngIf="placeholder" value="" disabled selected class="text-text-muted">
             {{ placeholder }}
           </option>
           <option
@@ -80,16 +78,16 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           </option>
         </select>
 
-        <div class="selector-icon" [class]="iconClasses">
+        <div [class]="iconClasses">
           <app-icon name="chevron-down" [size]="iconSize"></app-icon>
         </div>
       </div>
 
-      <div *ngIf="helpText || errorText" class="selector-help">
-        <span *ngIf="helpText && !errorText" class="text-text-secondary">
+      <div *ngIf="helpText || errorText" class="mt-1 text-sm">
+        <span *ngIf="helpText && !errorText" class="text-[var(--color-text-secondary)]">
           {{ helpText }}
         </span>
-        <span *ngIf="errorText" class="text-error-500 flex items-center gap-1">
+        <span *ngIf="errorText" class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
           <app-icon name="alert-circle" [size]="12"></app-icon>
           {{ errorText }}
         </span>
@@ -100,8 +98,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class SelectorComponent
-  implements ControlValueAccessor, OnInit, OnDestroy
-{
+  implements ControlValueAccessor, OnInit, OnDestroy {
   @Input() id = `selector-${Math.random().toString(36).substr(2, 9)}`;
   @Input() label = '';
   @Input() placeholder = '';
@@ -121,10 +118,10 @@ export class SelectorComponent
   private destroy$ = new Subject<void>();
 
   // ControlValueAccessor callbacks
-  private onChange: (value: string | number | null) => void = () => {};
-  private onTouched: () => void = () => {};
+  private onChange: (value: string | number | null) => void = () => { };
+  private onTouched: () => void = () => { };
 
-  ngOnInit(): void {}
+  ngOnInit(): void { }
 
   ngOnDestroy(): void {
     this.destroy$.next();
@@ -173,10 +170,9 @@ export class SelectorComponent
   // CSS classes
   get containerClasses(): string {
     return [
-      'selector-container',
-      this.size && `selector-${this.size}`,
-      this.variant && `selector-${this.variant}`,
-      this.errorText ? 'selector-error' : '',
+      'w-full',
+      // 'mt-4' removed to allow proper alignment in tables. 
+      // Add margin in parent if needed (e.g. forms).
     ]
       .filter(Boolean)
       .join(' ');
@@ -184,7 +180,11 @@ export class SelectorComponent
 
   get labelClasses(): string {
     return [
-      'selector-label',
+      'block',
+      'text-sm',
+      'font-medium',
+      'text-[var(--color-text-primary)]',
+      'mb-2',
       this.disabled ? 'opacity-50 cursor-not-allowed' : '',
     ]
       .filter(Boolean)
@@ -192,22 +192,70 @@ export class SelectorComponent
   }
 
   get wrapperClasses(): string {
-    return ['selector-wrapper'].filter(Boolean).join(' ');
+    return ['relative'].filter(Boolean).join(' ');
   }
 
   get selectClasses(): string {
+    const baseClasses = [
+      'appearance-none',
+      'block',
+      'w-full',
+      'border',
+      'rounded-sm',
+      'transition-colors',
+      'duration-200',
+      'focus:outline-none',
+      'focus:ring-2',
+      'bg-[var(--color-surface)]',
+      'text-[var(--color-text-primary)]',
+      'pr-10', // Space for chevron
+    ];
+
+    const sizeClasses = {
+      sm: ['px-3', 'py-1.5', 'text-sm'],
+      md: ['px-4', 'py-2', 'text-base'],
+      lg: ['px-4', 'py-3', 'text-lg'],
+    };
+
+    let stateClasses: string[];
+    if (this.errorText) {
+      stateClasses = [
+        'border-[var(--color-destructive)]',
+        'focus:border-[var(--color-destructive)]',
+        'focus:ring-[var(--color-destructive)]/30',
+        'bg-[rgba(239, 68, 68, 0.1)]',
+      ];
+    } else {
+      stateClasses = [
+        'border-border',
+        'hover:border-border',
+        'focus:ring-primary/50',
+        'focus:border-primary',
+      ];
+    }
+
     return [
-      'selector-select',
-      this.size && `selector-${this.size}`,
-      this.variant && `selector-${this.variant}`,
-      this.errorText ? 'border-error-500 focus:ring-error-500' : '',
+      ...baseClasses,
+      ...sizeClasses[this.size],
+      ...stateClasses,
+      this.variant && this.variant !== 'default' ? `selector-${this.variant}` : '',
     ]
       .filter(Boolean)
       .join(' ');
   }
 
   get iconClasses(): string {
-    return ['selector-icon'].filter(Boolean).join(' ');
+    return ['absolute', 'right-3', 'top-1/2', '-translate-y-1/2', 'pointer-events-none', 'text-[var(--color-text-secondary)]'].filter(Boolean).join(' ');
+  }
+
+  get placeholderClasses(): string {
+    return [
+      'selector-placeholder',
+      this.size && `selector-placeholder-${this.size}`,
+      this.disabled ? 'selector-placeholder-disabled' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   get iconSize(): number {

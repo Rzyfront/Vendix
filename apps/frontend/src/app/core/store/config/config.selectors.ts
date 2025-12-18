@@ -5,20 +5,20 @@ export const selectConfigState = createFeatureSelector<ConfigState>('config');
 
 export const selectAppConfig = createSelector(
   selectConfigState,
-  (state: ConfigState) => state.appConfig
+  (state: ConfigState) => state.appConfig,
 );
 
 export const selectIsLoading = createSelector(
   selectConfigState,
-  (state: ConfigState) => state.loading
+  (state: ConfigState) => state.loading,
 );
 
 export const selectError = createSelector(
   selectConfigState,
-  (state: ConfigState) => state.error
+  (state: ConfigState) => state.error,
 );
 
 export const selectDomainConfig = createSelector(
   selectAppConfig,
-  (appConfig) => appConfig?.domainConfig || null
+  (appConfig) => appConfig?.domainConfig || null,
 );

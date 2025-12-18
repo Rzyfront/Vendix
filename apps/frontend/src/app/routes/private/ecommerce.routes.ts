@@ -10,5 +10,5 @@ export const ecommerceRoutes: Routes = [
   {
     path: 'orders',
     // loadComponent: () => import('../../private/modules/customer/orders/orders.component').then(c => c.OrdersComponent)
-  }
+  },
 ];

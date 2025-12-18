@@ -60,17 +60,54 @@ import {
   Save,
   Maximize,
   Minimize,
+  ArrowLeft,
+  ArrowRight,
+  SkipForward,
+  Loader2,
+  Sparkles,
+  Mail,
+  Palette,
+  CheckSquare,
+  Lightbulb,
+  LayoutDashboard,
+  ShoppingBag,
+  Layout,
+  MapPin,
+  Building2,
+  AlignLeft,
+  Droplet,
+  UserCircle,
+  CircleAlert,
+  Book,
+  Calendar,
+  ClipboardList,
+  Cog,
+  Download,
+  Gift,
+  Hash,
+  Image,
+  ImageOff,
+  Key,
+  Minus,
+  Coins,
+  Copy,
+  FolderOpen,
+  GitBranch,
+  History,
+  Pause,
+  Server,
+  Unlock,
+  UploadCloud,
   LucideIconData,
 } from 'lucide-angular';
 
 /**
  * Registry mapping current icon names to Lucide icons
- * This maintains backward compatibility while using Lucide internally
  */
 export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // Basic UI icons
   menu: Menu,
-  chevron: ChevronDown, // Default chevron points down
+  chevron: ChevronDown,
   'chevron-down': ChevronDown,
   'chevron-up': ChevronUp,
   'chevron-left': ChevronLeft,
@@ -94,7 +131,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'chart-line': TrendingUp,
   'credit-card': CreditCard,
   headset: Headphones,
-  refresh: RefreshCw,
+  refresh: RefreshCw, // ← solo una vez
   archive: Archive,
   shield: Shield,
   'check-circle': CheckCircle,
@@ -123,7 +160,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Marketing and communication icons
   megaphone: Megaphone,
-  bullhorn: Megaphone, // Alternative name for backward compatibility
+  bullhorn: Megaphone,
 
   // UI elements
   circle: Circle,
@@ -153,6 +190,55 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Default fallback icon
   default: HelpCircle,
+
+  // Onboarding icons
+  'arrow-left': ArrowLeft,
+  'arrow-right': ArrowRight,
+  'skip-forward': SkipForward,
+  'loader-2': Loader2,
+  sparkles: Sparkles,
+  mail: Mail,
+  palette: Palette,
+  x: X,
+  'check-square': CheckSquare,
+  globe: Globe,
+  lightbulb: Lightbulb,
+  'chart-bar': BarChart3,
+  'layout-dashboard': LayoutDashboard,
+  'shopping-bag': ShoppingBag,
+  layout: Layout,
+  'refresh-cw': RefreshCw,
+  'map-pin': MapPin,
+  'building-2': Building2,
+  'align-left': AlignLeft,
+  droplet: Droplet,
+  'help-circle': HelpCircle,
+  'user-circle': UserCircle,
+  'alert-circle': CircleAlert,
+  book: Book,
+  calendar: Calendar,
+  'clipboard-list': ClipboardList,
+  cog: Cog,
+  download: Download,
+  gift: Gift,
+  hash: Hash,
+  image: Image,
+  'image-off': ImageOff,
+  key: Key,
+  minus: Minus,
+  coins: Coins,
+  'folder-open': FolderOpen,
+  'git-branch': GitBranch,
+  history: History,
+  link: Link,
+  'log-out': LogOut,
+  pause: Pause,
+  server: Server,
+  'shopping-cart': ShoppingCart,
+  'trending-up': TrendingUp,
+  unlock: Unlock,
+  'upload-cloud': UploadCloud,
+  copy: Copy,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

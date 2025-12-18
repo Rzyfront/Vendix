@@ -1,0 +1,31 @@
+meta {
+  name: "Create Product"
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/store/stores
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "New Downtown Store",
+    "store_code": "DT-002",
+    "email": "downtown@example.com",
+    "phone": "+1234567890"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("productId", res.body.data.id);
+  }
+}

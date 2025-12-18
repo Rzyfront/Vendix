@@ -1,20 +1,20 @@
 import { Controller, Get, UseGuards, Post, Body } from '@nestjs/common';
-import { RolesGuard } from '../modules/auth/guards/roles.guard';
-import { PermissionsGuard } from '../modules/auth/guards/permissions.guard';
-import { Roles } from '../modules/auth/decorators/roles.decorator';
-import { RequirePermissions } from '../modules/auth/decorators/permissions.decorator';
+import { RolesGuard } from '../domains/auth/guards/roles.guard';
+import { PermissionsGuard } from '../domains/auth/guards/permissions.guard';
+import { Roles } from '../domains/auth/decorators/roles.decorator';
+import { RequirePermissions } from '../domains/auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
-import { AuthenticatedRequest } from '../common/interfaces/authenticated-request.interface';
-import { Public } from '../modules/auth/decorators/public.decorator';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { Public } from '../domains/auth/decorators/public.decorator';
 import { EmailService } from '../email/email.service';
-import { PrismaService } from '../prisma/prisma.service';
-import { ResponseService } from '../common/responses/response.service';
+import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
+import { ResponseService } from '@common/responses/response.service';
 
 @Controller('test')
 export class TestController {
   constructor(
     private readonly emailService: EmailService,
-    private readonly prismaService: PrismaService,
+    private readonly prismaService: GlobalPrismaService,
     private readonly responseService: ResponseService,
   ) {}
 

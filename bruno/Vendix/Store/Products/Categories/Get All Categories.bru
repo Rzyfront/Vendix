@@ -1,0 +1,38 @@
+meta {
+  name: Get All Categories
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/store/categories
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Get categories successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+  });
+  
+  test("Categories have required structure", function() {
+    if (res.body.data.length > 0) {
+      const category = res.body.data[0];
+      expect(category).to.have.property('id');
+      expect(category).to.have.property('name');
+      expect(category).to.have.property('description');
+      expect(category).to.have.property('created_at');
+      expect(category).to.have.property('updated_at');
+    }
+  });
+  
+  test("No sensitive data exposed", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.not.have.property('password');
+      expect(res.body.data[0]).to.not.have.property('token');
+    }
+  });
+}

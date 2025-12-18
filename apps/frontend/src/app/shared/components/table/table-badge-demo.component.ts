@@ -13,19 +13,22 @@ import { TableComponent, TableColumn } from './table.component';
       [columns]="tableColumns"
       [size]="'md'"
       [striped]="true"
-      [hoverable]="true">
+      [hoverable]="true"
+    >
     </app-table>
   `,
-  styles: [`
-    :host {
-      display: block;
-      padding: 20px;
-    }
-    
-    h2 {
-      margin-bottom: 20px;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+        padding: 20px;
+      }
+
+      h2 {
+        margin-bottom: 20px;
+      }
+    `,
+  ],
 })
 export class TableBadgeDemoComponent {
   tableData = [
@@ -35,7 +38,7 @@ export class TableBadgeDemoComponent {
       status: 'active',
       category: 'electronics',
       priority: 'high',
-      rating: 4.5
+      rating: 4.5,
     },
     {
       id: 2,
@@ -43,7 +46,7 @@ export class TableBadgeDemoComponent {
       status: 'inactive',
       category: 'clothing',
       priority: 'medium',
-      rating: 3.8
+      rating: 3.8,
     },
     {
       id: 3,
@@ -51,7 +54,7 @@ export class TableBadgeDemoComponent {
       status: 'suspended',
       category: 'books',
       priority: 'low',
-      rating: 4.2
+      rating: 4.2,
     },
     {
       id: 4,
@@ -59,7 +62,7 @@ export class TableBadgeDemoComponent {
       status: 'draft',
       category: 'home',
       priority: 'high',
-      rating: 4.0
+      rating: 4.0,
     },
     {
       id: 5,
@@ -67,27 +70,27 @@ export class TableBadgeDemoComponent {
       status: 'pending',
       category: 'sports',
       priority: 'medium',
-      rating: 3.5
-    }
+      rating: 3.5,
+    },
   ];
 
   tableColumns: TableColumn[] = [
     {
       key: 'id',
       label: 'ID',
-      align: 'center'
+      align: 'center',
     },
     {
       key: 'name',
-      label: 'Nombre'
+      label: 'Nombre',
     },
     {
       key: 'status',
       label: 'Estado',
       badge: true,
       badgeConfig: {
-        type: 'status'
-      }
+        type: 'status',
+      },
     },
     {
       key: 'category',
@@ -96,13 +99,13 @@ export class TableBadgeDemoComponent {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'electronics': '#6366f1',
-          'clothing': '#10b981', 
-          'books': '#f59e0b',
-          'home': '#ef4444',
-          'sports': '#8b5cf6'
-        }
-      }
+          electronics: '#6366f1',
+          clothing: '#10b981',
+          books: '#f59e0b',
+          home: '#ef4444',
+          sports: '#8b5cf6',
+        },
+      },
     },
     {
       key: 'priority',
@@ -111,11 +114,11 @@ export class TableBadgeDemoComponent {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'high': '#ef4444',
-          'medium': '#f59e0b',
-          'low': '#10b981'
-        }
-      }
+          high: '#ef4444',
+          medium: '#f59e0b',
+          low: '#10b981',
+        },
+      },
     },
     {
       key: 'rating',
@@ -124,16 +127,16 @@ export class TableBadgeDemoComponent {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'high': '#10b981',   // Green for high ratings (4-5)
-          'medium': '#f59e0b',  // Amber for medium ratings (3-4)
-          'low': '#ef4444'      // Red for low ratings (0-3)
-        }
+          high: '#10b981', // Green for high ratings (4-5)
+          medium: '#f59e0b', // Amber for medium ratings (3-4)
+          low: '#ef4444', // Red for low ratings (0-3)
+        },
       },
       // We'll handle the rating to category mapping in the template or component
       transform: (value: number) => {
         // Return the display value
         return `${value.toFixed(1)} ★`;
-      }
-    }
+      },
+    },
   ];
 }

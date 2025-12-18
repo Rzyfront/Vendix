@@ -8,20 +8,27 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
   standalone: true,
   imports: [CommonModule, ButtonComponent],
   template: `
-    <div class="store-landing-container" [style.background]="branding?.background">
+    <div
+      class="store-landing-container"
+      [style.background]="branding?.background"
+    >
       <header class="store-header">
         <div class="store-logo">
-          <img 
-            *ngIf="branding?.logo" 
-            [src]="branding.logo" 
+          <img
+            *ngIf="branding?.logo"
+            [src]="branding.logo"
             [alt]="storeName + ' Logo'"
             class="logo-image"
-          >
+          />
           <h1 *ngIf="!branding?.logo">{{ storeName }}</h1>
         </div>
         <nav class="store-nav">
-          <button class="nav-button" (click)="navigateToLogin()">Acceso Empleados</button>
-          <button class="nav-button primary" (click)="navigateToShop()">Comprar Ahora</button>
+          <button class="nav-button" (click)="navigateToLogin()">
+            Acceso Empleados
+          </button>
+          <button class="nav-button primary" (click)="navigateToShop()">
+            Comprar Ahora
+          </button>
         </nav>
       </header>
 
@@ -35,7 +42,11 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
             <app-button (click)="navigateToShop()" variant="primary" size="lg">
               Explorar Productos
             </app-button>
-            <app-button (click)="navigateToLogin()" variant="secondary" size="lg">
+            <app-button
+              (click)="navigateToLogin()"
+              variant="secondary"
+              size="lg"
+            >
               Acceso Staff
             </app-button>
           </div>
@@ -46,11 +57,17 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
           <div class="products-grid">
             <div *ngFor="let product of featuredProducts" class="product-card">
               <div class="product-image">
-                <img [src]="product.image" [alt]="product.name" class="product-img">
+                <img
+                  [src]="product.image"
+                  [alt]="product.name"
+                  class="product-img"
+                />
               </div>
               <div class="product-info">
                 <h4>{{ product.name }}</h4>
-                <p class="product-price">{{ product.price | currency:'USD':'symbol':'1.2-2' }}</p>
+                <p class="product-price">
+                  {{ product.price | currency: 'USD' : 'symbol' : '1.2-2' }}
+                </p>
                 <app-button (click)="addToCart(product)" size="sm">
                   Agregar al Carrito
                 </app-button>
@@ -78,7 +95,7 @@ import { ButtonComponent } from '../../../../shared/components/button/button.com
       </main>
     </div>
   `,
-  styleUrls: ['./store-landing.component.scss']
+  styleUrls: ['./store-landing.component.scss'],
 })
 export class StoreLandingComponent implements OnInit {
   storeName = 'Tienda';
@@ -98,7 +115,9 @@ export class StoreLandingComponent implements OnInit {
   ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
-      console.warn('[STORE-LANDING] App config not available, using default values');
+      console.warn(
+        '[STORE-LANDING] App config not available, using default values',
+      );
       this.loadDefaultData();
       return;
     }
@@ -106,8 +125,9 @@ export class StoreLandingComponent implements OnInit {
     const domainConfig = appConfig.domainConfig;
     this.storeName = domainConfig.store_slug || 'Tienda';
     this.branding = appConfig.branding || {};
-    this.storeDescription = appConfig.domainConfig.customConfig?.description || '';
-    
+    this.storeDescription =
+      appConfig.domainConfig.customConfig?.description || '';
+
     this.featuredProducts = this.generateSampleProducts();
   }
 
@@ -117,13 +137,34 @@ export class StoreLandingComponent implements OnInit {
 
   private generateSampleProducts(): any[] {
     return [
-      { id: 1, name: 'Producto Destacado 1', price: 29.99, image: '/assets/images/product-placeholder.jpg' },
-      { id: 2, name: 'Producto Destacado 2', price: 39.99, image: '/assets/images/product-placeholder.jpg' },
-      { id: 3, name: 'Producto Destacado 3', price: 49.99, image: '/assets/images/product-placeholder.jpg' }
+      {
+        id: 1,
+        name: 'Producto Destacado 1',
+        price: 29.99,
+        image: '/assets/images/product-placeholder.jpg',
+      },
+      {
+        id: 2,
+        name: 'Producto Destacado 2',
+        price: 39.99,
+        image: '/assets/images/product-placeholder.jpg',
+      },
+      {
+        id: 3,
+        name: 'Producto Destacado 3',
+        price: 49.99,
+        image: '/assets/images/product-placeholder.jpg',
+      },
     ];
   }
 
-  navigateToLogin() { window.location.href = '/auth/login'; }
-  navigateToShop() { window.location.href = '/shop'; }
-  addToCart(product: any) { console.log('Agregar al carrito:', product); }
+  navigateToLogin() {
+    window.location.href = '/auth/login';
+  }
+  navigateToShop() {
+    window.location.href = '/shop';
+  }
+  addToCart(product: any) {
+    console.log('Agregar al carrito:', product);
+  }
 }

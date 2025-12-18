@@ -4,12 +4,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
-import { PrismaService } from '../../prisma/prisma.service';
+import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class SessionValidationMiddleware implements NestMiddleware {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: GlobalPrismaService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Solo validar para rutas protegidas que usan refresh tokens

@@ -17,7 +17,7 @@ body:json {
 }
 
 vars:post-response {
-  new_access_token: res.body.data.tokens.accessToken
+  token: res.body.data.access_token
   new_refresh_token: res.body.data.tokens.refreshToken
 }
 

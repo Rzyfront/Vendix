@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
   PosOrder,
@@ -26,6 +27,7 @@ import { PosCustomer } from '../models/customer.model';
   providedIn: 'root',
 })
 export class PosOrderService {
+  private readonly apiUrl = environment.apiUrl;
   private readonly orders$ = new BehaviorSubject<PosOrder[]>([]);
   private readonly loading$ = new BehaviorSubject<boolean>(false);
   private readonly currentOrder$ = new BehaviorSubject<PosOrder | null>(null);
@@ -99,38 +101,40 @@ export class PosOrderService {
     };
 
     // Call unified POS endpoint
-    return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
-      map((response: any) => {
-        if (response.success) {
-          // If the response order is simplified, we might want to merge it with our request data
-          // to have a complete local object until we refresh
-          const fullOrder = {
-            ...response.order,
-            items: posPaymentRequest.items,
-            customer_id: posPaymentRequest.customer_id,
-            customer_name: posPaymentRequest.customer_name,
-            subtotal_amount: posPaymentRequest.subtotal,
-            tax_amount: posPaymentRequest.tax_amount,
-            total_amount: posPaymentRequest.total_amount,
-            created_at: new Date(),
-            updated_at: new Date(),
-          };
-          return this.mapBackendOrderToPosOrder(fullOrder);
-        } else {
-          throw new Error(response.message || 'Error creating order');
-        }
-      }),
-      tap((order) => {
-        const currentOrders = this.orders$.value;
-        this.orders$.next([order, ...currentOrders]);
-        this.currentOrder$.next(order);
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .post(`${this.apiUrl}/store/payments/pos`, posPaymentRequest)
+      .pipe(
+        map((response: any) => {
+          if (response.success) {
+            // If the response order is simplified, we might want to merge it with our request data
+            // to have a complete local object until we refresh
+            const fullOrder = {
+              ...response.order,
+              items: posPaymentRequest.items,
+              customer_id: posPaymentRequest.customer_id,
+              customer_name: posPaymentRequest.customer_name,
+              subtotal_amount: posPaymentRequest.subtotal,
+              tax_amount: posPaymentRequest.tax_amount,
+              total_amount: posPaymentRequest.total_amount,
+              created_at: new Date(),
+              updated_at: new Date(),
+            };
+            return this.mapBackendOrderToPosOrder(fullOrder);
+          } else {
+            throw new Error(response.message || 'Error creating order');
+          }
+        }),
+        tap((order) => {
+          const currentOrders = this.orders$.value;
+          this.orders$.next([order, ...currentOrders]);
+          this.currentOrder$.next(order);
+          this.loading$.next(false);
+        }),
+        catchError((error) => {
+          this.loading$.next(false);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -227,7 +231,7 @@ export class PosOrderService {
       discount_amount: Number((request.discountAmount || 0).toFixed(2)),
       total_amount: Number(request.amount.toFixed(2)),
       requires_payment: true, // Cash sale
-      payment_method_id: parseInt(request.paymentMethod.id),
+      store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: request.cashReceived
         ? Number(request.cashReceived.toFixed(2))
         : undefined,
@@ -239,63 +243,65 @@ export class PosOrderService {
     };
 
     // Call unified POS endpoint
-    return this.http.post('/api/payments/pos', posPaymentRequest).pipe(
-      map((response: any) => {
-        if (response.success) {
-          // Reconstruct simplified order from response + request data
-          const fullOrder = {
-            ...response.order,
-            items: posPaymentRequest.items,
-            customer_id: posPaymentRequest.customer_id,
-            customer_name: posPaymentRequest.customer_name,
-            subtotal_amount: posPaymentRequest.subtotal,
-            tax_amount: posPaymentRequest.tax_amount,
-            total_amount: posPaymentRequest.total_amount,
-            created_at: new Date(),
-            updated_at: new Date(),
-          };
+    return this.http
+      .post(`${this.apiUrl}/store/payments/pos`, posPaymentRequest)
+      .pipe(
+        map((response: any) => {
+          if (response.success) {
+            // Reconstruct simplified order from response + request data
+            const fullOrder = {
+              ...response.order,
+              items: posPaymentRequest.items,
+              customer_id: posPaymentRequest.customer_id,
+              customer_name: posPaymentRequest.customer_name,
+              subtotal_amount: posPaymentRequest.subtotal,
+              tax_amount: posPaymentRequest.tax_amount,
+              total_amount: posPaymentRequest.total_amount,
+              created_at: new Date(),
+              updated_at: new Date(),
+            };
 
-          // Map backend payment to frontend model
-          let mappedPayment: any = undefined;
-          if (response.payment) {
-            mappedPayment = {
-              id: response.payment.id?.toString() || this.generatePaymentId(),
-              paymentMethod: request.paymentMethod,
-              amount: response.payment.amount,
-              status: response.payment.status,
-              transactionId: response.payment.transaction_id,
-              createdAt: new Date(),
+            // Map backend payment to frontend model
+            let mappedPayment: any = undefined;
+            if (response.payment) {
+              mappedPayment = {
+                id: response.payment.id?.toString() || this.generatePaymentId(),
+                paymentMethod: request.paymentMethod,
+                amount: response.payment.amount,
+                status: response.payment.status,
+                transactionId: response.payment.transaction_id,
+                createdAt: new Date(),
+              };
+            }
+
+            return {
+              success: true,
+              payment: mappedPayment,
+              order: this.mapBackendOrderToPosOrder(fullOrder),
+              change: response.payment?.change,
+              message: response.message,
+            };
+          } else {
+            return {
+              success: false,
+              message: response.message || 'Error processing payment',
+              errors: response.errors,
             };
           }
-
-          return {
-            success: true,
-            payment: mappedPayment,
-            order: this.mapBackendOrderToPosOrder(fullOrder),
-            change: response.payment?.change,
-            message: response.message,
-          };
-        } else {
-          return {
-            success: false,
-            message: response.message || 'Error processing payment',
-            errors: response.errors,
-          };
-        }
-      }),
-      tap((response) => {
-        if (response.success && response.order) {
-          const currentOrders = this.orders$.value;
-          this.orders$.next([response.order, ...currentOrders]);
-          this.currentOrder$.next(response.order);
-        }
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
-    );
+        }),
+        tap((response) => {
+          if (response.success && response.order) {
+            const currentOrders = this.orders$.value;
+            this.orders$.next([response.order, ...currentOrders]);
+            this.currentOrder$.next(response.order);
+          }
+          this.loading$.next(false);
+        }),
+        catchError((error) => {
+          this.loading$.next(false);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**

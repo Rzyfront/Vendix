@@ -1,0 +1,15 @@
+meta {
+  name: Failed Logins
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{url}}/security-logs/failed-logins
+  body: none
+  auth: inherit
+}
+
+params:query {
+  limit: 50
+}

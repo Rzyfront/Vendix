@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import * as GlobalSelectors from './global.selectors';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class GlobalFacade {
   private store = inject(Store);
@@ -13,11 +13,21 @@ export class GlobalFacade {
   readonly appState$ = this.store.select(GlobalSelectors.selectAppState);
   readonly userContext$ = this.store.select(GlobalSelectors.selectUserContext);
   readonly appReady$ = this.store.select(GlobalSelectors.selectAppReady);
-  readonly brandingContext$ = this.store.select(GlobalSelectors.selectBrandingContext);
-  readonly permissionContext$ = this.store.select(GlobalSelectors.selectPermissionContext);
-  readonly navigationContext$ = this.store.select(GlobalSelectors.selectNavigationContext);
-  readonly globalLoadingState$ = this.store.select(GlobalSelectors.selectGlobalLoadingState);
-  readonly dataFreshness$ = this.store.select(GlobalSelectors.selectDataFreshness);
+  readonly brandingContext$ = this.store.select(
+    GlobalSelectors.selectBrandingContext,
+  );
+  readonly permissionContext$ = this.store.select(
+    GlobalSelectors.selectPermissionContext,
+  );
+  readonly navigationContext$ = this.store.select(
+    GlobalSelectors.selectNavigationContext,
+  );
+  readonly globalLoadingState$ = this.store.select(
+    GlobalSelectors.selectGlobalLoadingState,
+  );
+  readonly dataFreshness$ = this.store.select(
+    GlobalSelectors.selectDataFreshness,
+  );
 
   // Debug observable (only in development)
   readonly debugInfo$ = this.store.select(GlobalSelectors.selectDebugInfo);
@@ -25,31 +35,37 @@ export class GlobalFacade {
   // Synchronous getters for templates
   getUserContext(): any {
     let result: any = null;
-    this.userContext$.subscribe(context => result = context).unsubscribe();
+    this.userContext$.subscribe((context) => (result = context)).unsubscribe();
     return result;
   }
 
   getAppReady(): any {
     let result: any = null;
-    this.appReady$.subscribe(ready => result = ready).unsubscribe();
+    this.appReady$.subscribe((ready) => (result = ready)).unsubscribe();
     return result;
   }
 
   getPermissionContext(): any {
     let result: any = null;
-    this.permissionContext$.subscribe(context => result = context).unsubscribe();
+    this.permissionContext$
+      .subscribe((context) => (result = context))
+      .unsubscribe();
     return result;
   }
 
   getNavigationContext(): any {
     let result: any = null;
-    this.navigationContext$.subscribe(context => result = context).unsubscribe();
+    this.navigationContext$
+      .subscribe((context) => (result = context))
+      .unsubscribe();
     return result;
   }
 
   getBrandingContext(): any {
     let result: any = null;
-    this.brandingContext$.subscribe(context => result = context).unsubscribe();
+    this.brandingContext$
+      .subscribe((context) => (result = context))
+      .unsubscribe();
     return result;
   }
 
@@ -90,7 +106,7 @@ export class GlobalFacade {
   // Debug method
   getDebugInfo(): any {
     let result: any = null;
-    this.debugInfo$.subscribe(info => result = info).unsubscribe();
+    this.debugInfo$.subscribe((info) => (result = info)).unsubscribe();
     return result;
   }
 }

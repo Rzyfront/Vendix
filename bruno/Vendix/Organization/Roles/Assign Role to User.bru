@@ -1,0 +1,44 @@
+meta {
+  name: Assign Role to User
+  type: http
+  seq: 10
+}
+
+post {
+  url: http://{{url}}/organization/roles/assign-to-user
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "user_id": {{admin_user_id}},
+    "role_id": {{created_role_id}}
+  }
+}
+
+vars:post-response {
+  assigned_user_role_id: res.body.data.id
+}
+
+tests {
+  test("Assign role to user successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Rol asignado exitosamente');
+  });
+
+  test("Response contains user role data", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('user_id', bru.getEnvVar('admin_user_id'));
+    expect(res.body.data).to.have.property('role_id', bru.getEnvVar('created_role_id'));
+    expect(res.body.data).to.have.property('users');
+    expect(res.body.data).to.have.property('roles');
+  });
+
+  test("User role ID extracted", function() {
+    expect(bru.getEnvVar('assigned_user_role_id')).to.be.a('number');
+  });
+}

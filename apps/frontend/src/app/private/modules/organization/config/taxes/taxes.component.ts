@@ -7,11 +7,12 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   template: `
     <div class="p-6">
-      <h1 class="text-2xl font-bold mb-6">Tax Configuration</h1>
+      <h1 class="text-2xl font-bold mb-6">Configuración de impuestos</h1>
 
       <div class="bg-white rounded-lg shadow p-6">
         <p class="text-gray-600">
-          Tax settings and rate management will be displayed here
+          Aquí se mostrarán las configuraciones de impuestos y la gestión de
+          tasas.
         </p>
       </div>
     </div>

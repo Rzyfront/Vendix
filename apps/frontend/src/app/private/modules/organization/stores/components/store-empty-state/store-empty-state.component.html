@@ -1,0 +1,37 @@
+<div class="flex flex-col items-center justify-center py-12 px-4">
+  <!-- Empty State Icon -->
+  <div
+    class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6"
+  >
+    <app-icon name="building" [size]="48" class="text-gray-400"></app-icon>
+  </div>
+
+  <!-- Empty State Content -->
+  <div class="text-center max-w-md">
+    <h3 class="text-xl font-semibold text-text-primary mb-2">
+      Aún no hay tiendas
+    </h3>
+    <p class="text-text-secondary mb-6">
+      Comienza creando tu primera tienda. Podrás agregar productos, gestionar
+      inventario y registrar ventas una vez que tu tienda esté configurada.
+    </p>
+
+    <!-- Action Button -->
+    <app-button (clicked)="onCreateStore()" variant="primary" size="lg">
+      <app-icon name="plus" [size]="20" slot="icon"></app-icon>
+      Crea tu Primera Tienda
+    </app-button>
+  </div>
+
+  <!-- Additional Help Links -->
+  <div class="mt-8 flex flex-col sm:flex-row gap-4 text-sm">
+    <a href="#" class="flex items-center text-primary hover:underline">
+      <app-icon name="file-text" [size]="16" class="mr-2"></app-icon>
+      Guía de Configuración de Tienda
+    </a>
+    <a href="#" class="flex items-center text-primary hover:underline">
+      <app-icon name="book" [size]="16" class="mr-2"></app-icon>
+      Documentación
+    </a>
+  </div>
+</div>

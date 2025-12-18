@@ -55,7 +55,7 @@ export class AuditService {
     if (query.offset) params = params.set('offset', query.offset.toString());
 
     return this.http
-      .get<any>(`${this.apiUrl}/admin/audit/logs`, { params })
+      .get<any>(`${this.apiUrl}/superadmin/admin/audit/logs`, { params })
       .pipe(
         map((response) => {
           // Mapear la respuesta de la API a la estructura esperada por el frontend
@@ -85,7 +85,7 @@ export class AuditService {
     if (toDate) params = params.set('toDate', toDate);
 
     return this.http
-      .get<any>(`${this.apiUrl}/admin/audit/dashboard`, { params })
+      .get<any>(`${this.apiUrl}/superadmin/admin/audit/dashboard`, { params })
       .pipe(
         map((response) => {
           return response.data as AuditStats;
@@ -103,7 +103,7 @@ export class AuditService {
    */
   getAuditLogById(id: string): Observable<AuditLog> {
     return this.http
-      .get<AuditLog>(`${this.apiUrl}/admin/audit/logs/${id}`)
+      .get<AuditLog>(`${this.apiUrl}/superadmin/admin/audit/logs/${id}`)
       .pipe(
         catchError((error) => {
           console.error('Error getting audit log:', error);

@@ -1,0 +1,6 @@
+/* Logs Component Styles */
+:host {
+  display: block;
+}
+
+/* Additional styles specific to audit logs can be added here */

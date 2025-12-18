@@ -1,0 +1,24 @@
+meta {
+  name: Get Audit Stats
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{url}}/organization/admin/audit/stats
+}
+
+tests {
+  test("Audit stats retrieved successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Response contains stats object", function() {
+    expect(res.body.data).to.be.an('object');
+    expect(res.body.data).to.have.property('total_logs');
+    expect(res.body.data).to.have.property('logs_by_action');
+    expect(res.body.data).to.have.property('logs_by_resource');
+  });
+}

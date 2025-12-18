@@ -110,7 +110,7 @@ import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
   `,
 })
 export class HeaderComponent implements OnInit, OnDestroy {
-  @Input() title: string = 'Dashboard';
+  @Input() title: string = 'Panel Principal';
   @Input() breadcrumb: any = {};
   @Input() user: any = {};
   @Output() toggleSidebar = new EventEmitter<void>();

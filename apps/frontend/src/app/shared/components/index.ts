@@ -1,6 +1,7 @@
 // Components
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
+export { StatsComponent } from './stats/stats.component';
 export { ChartComponent } from './chart';
 export { InputComponent } from './input/input.component';
 export { SpinnerComponent } from './spinner/spinner.component';
@@ -47,4 +48,10 @@ export type {
   SelectorSize,
   SelectorVariant,
 } from './selector/selector.component';
-export type { ChartData, ChartOptions } from './chart';
+export type {
+  ChartData,
+  ChartOptions,
+  ExtendedChartType,
+  ChartTheme,
+} from './chart';
+export { CHART_THEMES } from './chart';

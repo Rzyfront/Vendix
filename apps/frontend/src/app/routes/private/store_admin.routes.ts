@@ -39,8 +39,8 @@ export const storeAdminRoutes: Routes = [
             pathMatch: 'full',
             loadComponent: () =>
               import(
-                '../../private/modules/store/products/components/product-list/product-list.component'
-              ).then((c) => c.ProductListComponent),
+                '../../private/modules/store/products/products.component'
+              ).then((c) => c.ProductsComponent),
           },
           {
             path: ':id',
@@ -51,6 +51,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Inventory Routes
+      {
+        path: 'inventory',
+        loadChildren: () =>
+          import('../../private/modules/store/inventory/inventory.routes').then(
+            (m) => m.INVENTORY_ROUTES
+          ),
+      },
       // Orders Routes
       {
         path: 'orders',
@@ -58,20 +66,27 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'list',
+            redirectTo: 'dashboard',
+          },
+          {
+            path: 'dashboard',
+            loadComponent: () =>
+              import('../../private/modules/store/orders/orders').then(
+                (c) => c.OrdersComponent,
+              ),
           },
           {
             path: 'list',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/list/orders-list.component'
+                '../../private/modules/store/orders/components/orders-list'
               ).then((c) => c.OrdersListComponent),
           },
           {
             path: ':id',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/details/order-details.component'
+                '../../private/modules/store/orders/components/order-details'
               ).then((c) => c.OrderDetailsComponent),
           },
         ],
@@ -89,8 +104,8 @@ export const storeAdminRoutes: Routes = [
             path: 'all',
             loadComponent: () =>
               import(
-                '../../private/modules/store/customers/all/all-customers.component'
-              ).then((c) => c.AllCustomersComponent),
+                '../../private/modules/store/customers/customers.component'
+              ).then((c) => c.CustomersComponent),
           },
           {
             path: ':id',
@@ -180,6 +195,13 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/settings/general/general-settings.component'
               ).then((c) => c.GeneralSettingsComponent),
+          },
+          {
+            path: 'payments',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/payments/payments-settings.component'
+              ).then((c) => c.PaymentsSettingsComponent),
           },
           {
             path: 'appearance',

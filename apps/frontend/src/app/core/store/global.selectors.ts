@@ -11,8 +11,8 @@ export const selectAppState = createSelector(
   AuthSelectors.selectAuthState,
   (tenantState, authState) => ({
     tenant: tenantState,
-    auth: authState
-  })
+    auth: authState,
+  }),
 );
 
 // User context selector - combines user info with tenant context
@@ -28,8 +28,8 @@ export const selectUserContext = createSelector(
     environment,
     isAuthenticated: !!user,
     hasOrganization: !!organization,
-    hasStore: !!store
-  })
+    hasStore: !!store,
+  }),
 );
 
 // Application readiness selector
@@ -43,8 +43,8 @@ export const selectAppReady = createSelector(
     authReady: !authLoading, // Auth is ready when not loading
     appReady: tenantInitialized && !tenantLoading && !authLoading,
     isAuthenticated,
-    loading: tenantLoading || authLoading
-  })
+    loading: tenantLoading || authLoading,
+  }),
 );
 
 // Branding context selector - combines tenant branding with user preferences
@@ -58,9 +58,9 @@ export const selectBrandingContext = createSelector(
       theme: tenantConfig?.theme,
       userPreferences: user?.preferences || {},
       logo: branding?.logo,
-      customCSS: branding?.customCSS
+      customCSS: branding?.customCSS,
     };
-  }
+  },
 );
 
 // Permission context selector - combines user roles with tenant features
@@ -75,10 +75,23 @@ export const selectPermissionContext = createSelector(
     canAccessAdmin: isAdmin || userRole === 'OWNER',
     canManageUsers: isAdmin || userRole === 'OWNER' || userRole === 'MANAGER',
     canManageStore: isAdmin || userRole === 'OWNER' || userRole === 'MANAGER',
-    canViewReports: isAdmin || userRole === 'OWNER' || userRole === 'MANAGER' || userRole === 'SUPERVISOR',
-    canProcessSales: ['ADMIN', 'OWNER', 'MANAGER', 'SUPERVISOR', 'EMPLOYEE', 'CASHIER'].includes(userRole || ''),
-    availableFeatures: Object.keys(features || {}).filter(key => features?.[key])
-  })
+    canViewReports:
+      isAdmin ||
+      userRole === 'OWNER' ||
+      userRole === 'MANAGER' ||
+      userRole === 'SUPERVISOR',
+    canProcessSales: [
+      'ADMIN',
+      'OWNER',
+      'MANAGER',
+      'SUPERVISOR',
+      'EMPLOYEE',
+      'CASHIER',
+    ].includes(userRole || ''),
+    availableFeatures: Object.keys(features || {}).filter(
+      (key) => features?.[key],
+    ),
+  }),
 );
 
 // Navigation context selector - combines routing info with permissions
@@ -91,10 +104,11 @@ export const selectNavigationContext = createSelector(
     environment,
     isVendixDomain,
     showAdminMenu: permissions.canAccessAdmin,
-    showStoreMenu: permissions.canManageStore && environment !== AppEnvironment.VENDIX_ADMIN,
+    showStoreMenu:
+      permissions.canManageStore && environment !== AppEnvironment.VENDIX_ADMIN,
     showReportsMenu: permissions.canViewReports,
-    showUserManagement: permissions.canManageUsers
-  })
+    showUserManagement: permissions.canManageUsers,
+  }),
 );
 
 // Loading states selector - combines all loading states
@@ -110,9 +124,9 @@ export const selectGlobalLoadingState = createSelector(
     hasError: !!tenantError || !!authError,
     errors: {
       tenant: tenantError,
-      auth: authError
-    }
-  })
+      auth: authError,
+    },
+  }),
 );
 
 // Data freshness selector - tracks when data was last updated
@@ -122,8 +136,8 @@ export const selectDataFreshness = createSelector(
   (tenantConfig, user) => ({
     tenantConfigUpdated: tenantConfig ? new Date().toISOString() : null,
     userUpdated: user ? new Date().toISOString() : null,
-    isStale: false // Could be enhanced with timestamp comparisons
-  })
+    isStale: false, // Could be enhanced with timestamp comparisons
+  }),
 );
 
 // Debug selector - for development and debugging
@@ -138,7 +152,7 @@ export const selectDebugInfo = createSelector(
     timestamp: new Date().toISOString(),
     environment: {
       isDev: true, // Could be from environment config
-      version: '1.0.0' // Could be from build info
-    }
-  })
+      version: '1.0.0', // Could be from build info
+    },
+  }),
 );

@@ -1,0 +1,16 @@
+meta {
+  name: "Get Product by ID"
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/products/{{productId}}
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

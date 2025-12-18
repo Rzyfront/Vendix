@@ -242,7 +242,8 @@
 }
 
 // Mobile responsiveness
-@media (max-width: 48em) {  /* 768px */
+@media (max-width: 48em) {
+  /* 768px */
   .slide-message {
     font-size: 2.2rem;
     margin-bottom: 1rem;
@@ -293,7 +294,8 @@
   }
 }
 
-@media (max-width: 30em) {  /* 480px */
+@media (max-width: 30em) {
+  /* 480px */
   .slide-message {
     font-size: 1.8rem;
   }

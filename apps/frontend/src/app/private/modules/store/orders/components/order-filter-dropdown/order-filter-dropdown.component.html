@@ -1,0 +1,128 @@
+<div class="filter-dropdown-container" #dropdownContainer>
+  <!-- Trigger Button -->
+  <button
+    type="button"
+    class="filter-dropdown-trigger"
+    (click)="toggleDropdown()"
+    [attr.aria-expanded]="isOpen"
+    [attr.aria-haspopup]="true"
+  >
+    <app-icon name="filter" [size]="16"></app-icon>
+    <span>Filtros</span>
+    <span
+      *ngIf="activeFiltersCount > 0"
+      class="filter-count-badge"
+      [attr.aria-label]="activeFiltersCount + ' filtros activos'"
+    >
+      {{ activeFiltersCount }}
+    </span>
+    <app-icon name="chevron-down" [size]="14" class="ml-auto"></app-icon>
+  </button>
+
+  <!-- Dropdown Content -->
+  <div
+    *ngIf="isOpen"
+    class="filter-dropdown-content"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="filter-header">
+      <h3 class="filter-title">Filtrar Órdenes</h3>
+      <button
+        *ngIf="activeFiltersCount > 0"
+        class="clear-all-btn"
+        (click)="onClearAllFilters()"
+        type="button"
+      >
+        <app-icon name="x" [size]="14"></app-icon>
+        Limpiar todos
+      </button>
+    </div>
+
+    <div class="filter-body">
+      <!-- Status Filter -->
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <label class="filter-label">Estado</label>
+          <button
+            *ngIf="hasActiveFilter('status')"
+            class="clear-filter-btn"
+            (click)="onClearFilter('status')"
+            type="button"
+            title="Limpiar estado"
+          >
+            <app-icon name="x" [size]="12"></app-icon>
+          </button>
+        </div>
+        <app-selector
+          [options]="statusSelectorOptions"
+          [(ngModel)]="localSelectedStatus"
+          (valueChange)="onStatusChange($event)"
+          size="sm"
+          placeholder="Seleccionar estado"
+        ></app-selector>
+      </div>
+
+      <!-- Payment Status Filter -->
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <label class="filter-label">Estado de Pago</label>
+          <button
+            *ngIf="hasActiveFilter('payment_status')"
+            class="clear-filter-btn"
+            (click)="onClearFilter('payment_status')"
+            type="button"
+            title="Limpiar estado de pago"
+          >
+            <app-icon name="x" [size]="12"></app-icon>
+          </button>
+        </div>
+        <app-selector
+          [options]="paymentStatusSelectorOptions"
+          [(ngModel)]="localSelectedPaymentStatus"
+          (valueChange)="onPaymentStatusChange($event)"
+          size="sm"
+          placeholder="Seleccionar estado de pago"
+        ></app-selector>
+      </div>
+
+      <!-- Date Range Filter -->
+      <div class="filter-section">
+        <div class="filter-section-header">
+          <label class="filter-label">Período</label>
+          <button
+            *ngIf="hasActiveFilter('date_range')"
+            class="clear-filter-btn"
+            (click)="onClearFilter('date_range')"
+            type="button"
+            title="Limpiar período"
+          >
+            <app-icon name="x" [size]="12"></app-icon>
+          </button>
+        </div>
+        <app-selector
+          [options]="dateRangeSelectorOptions"
+          [(ngModel)]="localSelectedDateRange"
+          (valueChange)="onDateRangeChange($event)"
+          size="sm"
+          placeholder="Seleccionar período"
+        ></app-selector>
+      </div>
+    </div>
+
+    <!-- Footer Actions -->
+    <div class="filter-footer">
+      <app-button variant="outline" size="sm" (clicked)="isOpen = false">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        size="sm"
+        (clicked)="onApplyFilters()"
+        [disabled]="isLoading"
+      >
+        <app-icon name="check" [size]="14" slot="icon"></app-icon>
+        Aplicar Filtros
+      </app-button>
+    </div>
+  </div>
+</div>

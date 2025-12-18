@@ -383,8 +383,7 @@ import {
   ],
 })
 export class RolePermissionsModalComponent
-  implements OnInit, OnChanges, OnDestroy
-{
+  implements OnInit, OnChanges, OnDestroy {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() role: Role | null = null;
@@ -420,7 +419,7 @@ export class RolePermissionsModalComponent
   selectedModule = '';
   searchTerm = '';
 
-  constructor(private rolesService: RolesService) {}
+  constructor(private rolesService: RolesService) { }
 
   ngOnInit(): void {
     // Setup search debounce
@@ -598,7 +597,7 @@ export class RolePermissionsModalComponent
     if (!this.role) return;
 
     const permissionData: AssignPermissionsDto = {
-      permissionIds: this.selectedPermissions,
+      permission_ids: this.selectedPermissions,
     };
 
     this.submit.emit(permissionData);

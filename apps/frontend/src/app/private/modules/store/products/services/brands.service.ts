@@ -24,7 +24,7 @@ export class BrandsService {
       ? new HttpParams().set('store_id', storeId.toString())
       : new HttpParams();
     return this.http
-      .get<ApiResponse<Brand[]>>(`${this.apiUrl}/brands`, { params })
+      .get<ApiResponse<Brand[]>>(`${this.apiUrl}/store/brands`, { params })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -33,25 +33,25 @@ export class BrandsService {
 
   getBrandById(id: number): Observable<Brand> {
     return this.http
-      .get<Brand>(`${this.apiUrl}/brands/${id}`)
+      .get<Brand>(`${this.apiUrl}/store/brands/${id}`)
       .pipe(catchError(this.handleError));
   }
 
   createBrand(brand: Partial<Brand>): Observable<Brand> {
     return this.http
-      .post<Brand>(`${this.apiUrl}/brands`, brand)
+      .post<Brand>(`${this.apiUrl}/store/brands`, brand)
       .pipe(catchError(this.handleError));
   }
 
   updateBrand(id: number, brand: Partial<Brand>): Observable<Brand> {
     return this.http
-      .patch<Brand>(`${this.apiUrl}/brands/${id}`, brand)
+      .patch<Brand>(`${this.apiUrl}/store/brands/${id}`, brand)
       .pipe(catchError(this.handleError));
   }
 
   deleteBrand(id: number): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/brands/${id}`)
+      .delete<void>(`${this.apiUrl}/store/brands/${id}`)
       .pipe(catchError(this.handleError));
   }
 

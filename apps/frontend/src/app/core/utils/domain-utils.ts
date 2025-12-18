@@ -1,24 +1,23 @@
 import { DomainType, AppEnvironment } from '../models/environment.enum';
 
 export class DomainUtils {
-  
   /**
    * Extrae el subdominio de la URL actual
    */
   static getSubdomain(): string {
     const hostname = window.location.hostname;
     const parts = hostname.split('.');
-    
+
     // Si es localhost o IP, no hay subdominio
     if (hostname === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
       return '';
     }
-    
+
     // Para dominios como subdomain.example.com, el subdominio es la primera parte
     if (parts.length > 2) {
       return parts[0];
     }
-    
+
     return '';
   }
 
@@ -60,7 +59,12 @@ export class DomainUtils {
   private static isStoreDomain(hostname: string): boolean {
     // En desarrollo, asumimos que cualquier dominio que no sea Vendix es una tienda
     // En producción, esto se consultaría con la API
-    const vendixDomains = ['vendix.com', 'www.vendix.com', 'localhost', '127.0.0.1'];
+    const vendixDomains = [
+      'vendix.com',
+      'www.vendix.com',
+      'localhost',
+      '127.0.0.1',
+    ];
     return !vendixDomains.includes(hostname) && !hostname.includes('admin.');
   }
 
@@ -79,13 +83,16 @@ export class DomainUtils {
     const hostname = window.location.hostname;
     const environmentType = this.detectEnvironmentType();
 
-    if (environmentType === DomainType.STORE || environmentType === DomainType.ECOMMERCE) {
+    if (
+      environmentType === DomainType.STORE ||
+      environmentType === DomainType.ECOMMERCE
+    ) {
       // Para tiendas con subdominio: store.organization.com
       const subdomain = this.getSubdomain();
       if (subdomain && subdomain !== 'www') {
         return subdomain;
       }
-      
+
       // Para dominios personalizados: mystore.com
       return hostname;
     }
@@ -96,27 +103,30 @@ export class DomainUtils {
   /**
    * Genera URLs para diferentes entornos
    */
-  static generateEnvironmentUrl(environmentType: DomainType, slug?: string): string {
+  static generateEnvironmentUrl(
+    environmentType: DomainType,
+    slug?: string,
+  ): string {
     const protocol = window.location.protocol;
     const baseDomain = this.getBaseDomain();
 
     switch (environmentType) {
       case DomainType.VENDIX_CORE:
         return `${protocol}//${baseDomain}`;
-      
+
       case DomainType.ORGANIZATION:
         if (!slug) throw new Error('Organization slug is required');
         return `${protocol}//${slug}.${baseDomain}`;
-      
+
       case DomainType.STORE:
         if (!slug) throw new Error('Store slug is required');
         // Para desarrollo, asumimos store.organization.com
         return `${protocol}//${slug}.${baseDomain}`;
-      
+
       case DomainType.ECOMMERCE:
         if (!slug) throw new Error('Store slug is required');
         return `${protocol}//${slug}`;
-      
+
       default:
         return `${protocol}//${baseDomain}`;
     }
@@ -127,7 +137,7 @@ export class DomainUtils {
    */
   private static getBaseDomain(): string {
     const hostname = window.location.hostname;
-    
+
     if (hostname === 'localhost') {
       return 'localhost';
     }
@@ -168,10 +178,10 @@ export class DomainUtils {
   static getCorsConfig(): { origin: string; credentials: boolean } {
     const hostname = window.location.hostname;
     const protocol = window.location.protocol;
-    
+
     return {
       origin: `${protocol}//${hostname}`,
-      credentials: true
+      credentials: true,
     };
   }
 
@@ -192,33 +202,41 @@ export class DomainUtils {
         return {
           ...defaultMeta,
           'og:title': 'Vendix - Multi-Tenant E-commerce Platform',
-          'og:description': 'La plataforma de e-commerce multi-tenant más avanzada para organizaciones y tiendas',
+          'og:description':
+            'La plataforma de e-commerce multi-tenant más avanzada para organizaciones y tiendas',
           'og:image': `${baseUrl}/assets/vlogo.png`,
           'twitter:title': 'Vendix - Multi-Tenant E-commerce Platform',
-          'twitter:description': 'La plataforma de e-commerce multi-tenant más avanzada',
+          'twitter:description':
+            'La plataforma de e-commerce multi-tenant más avanzada',
         };
-      
+
       case DomainType.ORGANIZATION:
         return {
           ...defaultMeta,
           'og:title': tenantConfig?.organization?.name || 'Organización',
-          'og:description': tenantConfig?.organization?.description || 'Tienda en línea',
-          'og:image': tenantConfig?.branding?.logo || `${baseUrl}/assets/vlogo.png`,
+          'og:description':
+            tenantConfig?.organization?.description || 'Tienda en línea',
+          'og:image':
+            tenantConfig?.branding?.logo || `${baseUrl}/assets/vlogo.png`,
           'twitter:title': tenantConfig?.organization?.name || 'Organización',
-          'twitter:description': tenantConfig?.organization?.description || 'Tienda en línea',
+          'twitter:description':
+            tenantConfig?.organization?.description || 'Tienda en línea',
         };
-      
+
       case DomainType.STORE:
       case DomainType.ECOMMERCE:
         return {
           ...defaultMeta,
           'og:title': tenantConfig?.store?.name || 'Tienda',
-          'og:description': tenantConfig?.store?.description || 'Bienvenido a nuestra tienda',
-          'og:image': tenantConfig?.branding?.logo || `${baseUrl}/assets/vlogo.png`,
+          'og:description':
+            tenantConfig?.store?.description || 'Bienvenido a nuestra tienda',
+          'og:image':
+            tenantConfig?.branding?.logo || `${baseUrl}/assets/vlogo.png`,
           'twitter:title': tenantConfig?.store?.name || 'Tienda',
-          'twitter:description': tenantConfig?.store?.description || 'Bienvenido a nuestra tienda',
+          'twitter:description':
+            tenantConfig?.store?.description || 'Bienvenido a nuestra tienda',
         };
-      
+
       default:
         return defaultMeta;
     }

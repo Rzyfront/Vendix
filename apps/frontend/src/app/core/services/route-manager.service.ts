@@ -100,7 +100,7 @@ export class RouteManagerService implements OnDestroy {
               ).then((c) => c.EmailVerificationComponent),
           },
         ],
-      }
+      },
     ];
   }
 

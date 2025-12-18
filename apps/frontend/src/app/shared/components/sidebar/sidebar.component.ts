@@ -1,4 +1,16 @@
-import { Component, Input, Output, EventEmitter, Renderer2, OnDestroy, ElementRef, AfterViewInit, ChangeDetectorRef, OnChanges, SimpleChanges } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  Renderer2,
+  OnDestroy,
+  ElementRef,
+  AfterViewInit,
+  ChangeDetectorRef,
+  OnChanges,
+  SimpleChanges,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
@@ -31,7 +43,9 @@ export interface MenuItem {
     <aside
       [class]="getSidebarClasses()"
       [attr.aria-hidden]="isMobile && !isMobileOpen ? 'true' : null"
-      [attr.aria-label]="isMobile ? 'Mobile navigation sidebar' : 'Desktop navigation sidebar'"
+      [attr.aria-label]="
+        isMobile ? 'Mobile navigation sidebar' : 'Desktop navigation sidebar'
+      "
       [attr.inert]="isMobile && !isMobileOpen ? 'true' : null"
       role="navigation"
     >
@@ -153,7 +167,11 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   private keydownListener?: () => void;
   private focusableElements: HTMLElement[] = [];
 
-  constructor(private renderer: Renderer2, private elementRef: ElementRef, private cdr: ChangeDetectorRef) {
+  constructor(
+    private renderer: Renderer2,
+    private elementRef: ElementRef,
+    private cdr: ChangeDetectorRef,
+  ) {
     // Initialize mobile detection
     this.checkMobile();
     this.resizeListener = this.renderer.listen('window', 'resize', () => {
@@ -192,7 +210,8 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   }
 
   private updateFocusableElements() {
-    const sidebarElement = this.elementRef.nativeElement.querySelector('.sidebar');
+    const sidebarElement =
+      this.elementRef.nativeElement.querySelector('.sidebar');
     if (!sidebarElement) return;
 
     const focusableSelectors = [
@@ -201,11 +220,11 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
       'input:not([disabled])',
       'select:not([disabled])',
       'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])'
+      '[tabindex]:not([tabindex="-1"])',
     ];
 
     this.focusableElements = Array.from(
-      sidebarElement.querySelectorAll(focusableSelectors.join(', '))
+      sidebarElement.querySelectorAll(focusableSelectors.join(', ')),
     ) as HTMLElement[];
   }
 
@@ -276,7 +295,9 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
 
     // Return focus to the trigger button (hamburger menu)
     setTimeout(() => {
-      const triggerButton = document.querySelector('[aria-label*="menu"], button[app-icon="menu"]') as HTMLElement;
+      const triggerButton = document.querySelector(
+        '[aria-label*="menu"], button[app-icon="menu"]',
+      ) as HTMLElement;
       if (triggerButton) {
         triggerButton.focus();
       }
@@ -288,10 +309,18 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     this.removeEventListeners();
 
     // Click outside listener
-    this.documentClickListener = this.renderer.listen('document', 'click', this.onDocumentClick.bind(this));
+    this.documentClickListener = this.renderer.listen(
+      'document',
+      'click',
+      this.onDocumentClick.bind(this),
+    );
 
     // Keyboard navigation listener
-    this.keydownListener = this.renderer.listen('document', 'keydown', this.onKeydown.bind(this));
+    this.keydownListener = this.renderer.listen(
+      'document',
+      'keydown',
+      this.onKeydown.bind(this),
+    );
   }
 
   private onDocumentClick(event: MouseEvent) {
@@ -322,7 +351,8 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     if (this.focusableElements.length === 0) return;
 
     const firstElement = this.focusableElements[0];
-    const lastElement = this.focusableElements[this.focusableElements.length - 1];
+    const lastElement =
+      this.focusableElements[this.focusableElements.length - 1];
 
     if (event.shiftKey) {
       // Shift + Tab: go backwards

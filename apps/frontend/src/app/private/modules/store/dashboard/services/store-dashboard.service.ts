@@ -62,9 +62,7 @@ export class StoreDashboardService {
 
   getDashboardStats(storeId: string): Observable<StoreDashboardStats> {
     return this.http
-      .get<StoreDashboardStats>(
-        `${this.apiUrl}/stores/${storeId}/dashboard/stats`,
-      )
+      .get<StoreDashboardStats>(`${this.apiUrl}/store/stores/${storeId}/stats`)
       .pipe(
         catchError((error) => {
           console.error('Error fetching store dashboard stats:', error);
@@ -75,113 +73,124 @@ export class StoreDashboardService {
       );
   }
 
-  getSalesStats(
-    storeId: string,
-    period: 'week' | 'month' | 'year' = 'month',
-  ): Observable<any> {
-    return this.http
-      .get(`${this.apiUrl}/stores/${storeId}/sales/stats?period=${period}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching store sales stats:', error);
-          return throwError(() => new Error('Failed to fetch sales stats'));
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getSalesStats(
+  //   storeId: string,
+  //   period: 'week' | 'month' | 'year' = 'month',
+  // ): Observable<any> {
+  //   return this.http
+  //     .get(
+  //       `${this.apiUrl}/store/stores/${storeId}/sales/stats?period=${period}`,
+  //     )
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching store sales stats:', error);
+  //         return throwError(() => new Error('Failed to fetch sales stats'));
+  //       }),
+  //     );
+  // }
 
   getProductsStats(storeId: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/products/stats/store/${storeId}`).pipe(
-      catchError((error) => {
-        console.error('Error fetching store products stats:', error);
-        return throwError(() => new Error('Failed to fetch products stats'));
-      }),
-    );
-  }
-
-  getCustomersStats(storeId: string): Observable<any> {
     return this.http
-      .get(`${this.apiUrl}/stores/${storeId}/customers/stats`)
+      .get(`${this.apiUrl}/store/products/stats/store/${storeId}`)
       .pipe(
         catchError((error) => {
-          console.error('Error fetching store customers stats:', error);
-          return throwError(() => new Error('Failed to fetch customers stats'));
+          console.error('Error fetching store products stats:', error);
+          return throwError(() => new Error('Failed to fetch products stats'));
         }),
       );
   }
 
-  getTopProducts(storeId: string, limit: number = 5): Observable<TopProduct[]> {
-    return this.http
-      .get<
-        TopProduct[]
-      >(`${this.apiUrl}/stores/${storeId}/products/top?limit=${limit}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching top products:', error);
-          return throwError(() => new Error('Failed to fetch top products'));
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getCustomersStats(storeId: string): Observable<any> {
+  //   return this.http
+  //     .get(`${this.apiUrl}/store/stores/${storeId}/customers/stats`)
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching store customers stats:', error);
+  //         return throwError(() => new Error('Failed to fetch customers stats'));
+  //       }),
+  //     );
+  // }
 
-  getRecentOrders(
-    storeId: string,
-    limit: number = 10,
-  ): Observable<RecentOrder[]> {
-    return this.http
-      .get<
-        RecentOrder[]
-      >(`${this.apiUrl}/stores/${storeId}/orders/recent?limit=${limit}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching recent orders:', error);
-          return throwError(() => new Error('Failed to fetch recent orders'));
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getTopProducts(storeId: string, limit: number = 5): Observable<TopProduct[]> {
+  //   return this.http
+  //     .get<
+  //       TopProduct[]
+  //     >(`${this.apiUrl}/store/stores/${storeId}/products/top?limit=${limit}`)
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching top products:', error);
+  //         return throwError(() => new Error('Failed to fetch top products'));
+  //       }),
+  //     );
+  // }
 
-  getCustomerActivity(
-    storeId: string,
-    period: 'week' | 'month' = 'week',
-  ): Observable<CustomerActivity[]> {
-    return this.http
-      .get<
-        CustomerActivity[]
-      >(`${this.apiUrl}/stores/${storeId}/customers/activity?period=${period}`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching customer activity:', error);
-          return throwError(
-            () => new Error('Failed to fetch customer activity'),
-          );
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getRecentOrders(
+  //   storeId: string,
+  //   limit: number = 10,
+  // ): Observable<RecentOrder[]> {
+  //   return this.http
+  //     .get<
+  //       RecentOrder[]
+  //     >(`${this.apiUrl}/store/stores/${storeId}/orders/recent?limit=${limit}`)
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching recent orders:', error);
+  //         return throwError(() => new Error('Failed to fetch recent orders'));
+  //       }),
+  //     );
+  // }
 
-  getInventoryStats(storeId: string): Observable<any> {
-    return this.http
-      .get(`${this.apiUrl}/stores/${storeId}/inventory/stats`)
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching inventory stats:', error);
-          return throwError(() => new Error('Failed to fetch inventory stats'));
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getCustomerActivity(
+  //   storeId: string,
+  //   period: 'week' | 'month' = 'week',
+  // ): Observable<CustomerActivity[]> {
+  //   return this.http
+  //     .get<
+  //       CustomerActivity[]
+  //     >(`${this.apiUrl}/store/stores/${storeId}/customers/activity?period=${period}`)
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching customer activity:', error);
+  //         return throwError(
+  //           () => new Error('Failed to fetch customer activity'),
+  //         );
+  //       }),
+  //     );
+  // }
 
-  getRevenueAnalytics(
-    storeId: string,
-    period: 'week' | 'month' | 'year' = 'month',
-  ): Observable<any> {
-    return this.http
-      .get(
-        `${this.apiUrl}/stores/${storeId}/revenue/analytics?period=${period}`,
-      )
-      .pipe(
-        catchError((error) => {
-          console.error('Error fetching revenue analytics:', error);
-          return throwError(
-            () => new Error('Failed to fetch revenue analytics'),
-          );
-        }),
-      );
-  }
+  // Commented out: endpoint does not exist in backend
+  // getInventoryStats(storeId: string): Observable<any> {
+  //   return this.http
+  //     .get(`${this.apiUrl}/store/stores/${storeId}/inventory/stats`)
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching inventory stats:', error);
+  //         return throwError(() => new Error('Failed to fetch inventory stats'));
+  //       }),
+  //     );
+  // }
+
+  // Commented out: endpoint does not exist in backend
+  // getRevenueAnalytics(
+  //   storeId: string,
+  //   period: 'week' | 'month' | 'year' = 'month',
+  // ): Observable<any> {
+  //   return this.http
+  //     .get(
+  //       `${this.apiUrl}/store/stores/${storeId}/revenue/analytics?period=${period}`,
+  //     )
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error fetching revenue analytics:', error);
+  //         return throwError(
+  //           () => new Error('Failed to fetch revenue analytics'),
+  //         );
+  //       }),
+  //     );
+  // }
 }

@@ -1,10 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
-import { PrismaService } from './prisma/prisma.service';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { AllExceptionsFilter } from './common/filters/http-exception.filter';
-import { DomainConfigService } from './common/config/domain.config';
+import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
+import { DomainConfigService } from '@common/config/domain.config';
+import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -30,6 +30,12 @@ async function bootstrap() {
   const corsOrigins = process.env.CORS_ORIGIN?.split(',') || [
     'http://localhost:4200',
     'http://localhost',
+    // HTTP origins for local development
+    'http://vendix.com',
+    'http://www.vendix.com',
+    // HTTPS origins for local development
+    'https://vendix.com',
+    'https://www.vendix.com',
     // Production origins for base domain
     `https://${baseDomain}`,
     `https://www.${baseDomain}`,
@@ -90,7 +96,7 @@ async function bootstrap() {
     });
   });
 
-  const prismaService = app.get(PrismaService);
+  const prismaService = app.get(GlobalPrismaService);
   await prismaService.enableShutdownHooks(app);
 
   const port = process.env.PORT ?? 3000;

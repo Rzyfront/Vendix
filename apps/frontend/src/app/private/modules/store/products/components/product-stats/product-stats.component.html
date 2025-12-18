@@ -1,11 +1,11 @@
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-  <!-- Total Products -->
+  <!-- Total de Productos -->
   <div
     class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
   >
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm text-text-secondary mb-1">Total Products</p>
+        <p class="text-sm text-text-secondary mb-1">Total de Productos</p>
         <p class="text-2xl font-bold text-text-primary">
           {{ stats?.total_products || 0 }}
         </p>
@@ -16,7 +16,7 @@
           >
             {{ getGrowthPercentage(stats?.productsGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -27,13 +27,13 @@
     </div>
   </div>
 
-  <!-- Active Products -->
+  <!-- Productos Activos -->
   <div
     class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
   >
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm text-text-secondary mb-1">Active Products</p>
+        <p class="text-sm text-text-secondary mb-1">Productos Activos</p>
         <p class="text-2xl font-bold text-text-primary">
           {{ stats?.active_products || 0 }}
         </p>
@@ -44,7 +44,7 @@
           >
             {{ getGrowthPercentage(stats?.activeProductsGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -59,13 +59,13 @@
     </div>
   </div>
 
-  <!-- Low Stock Products -->
+  <!-- Productos con Stock Bajo -->
   <div
     class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
   >
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm text-text-secondary mb-1">Low Stock Products</p>
+        <p class="text-sm text-text-secondary mb-1">Productos con Stock Bajo</p>
         <p class="text-2xl font-bold text-text-primary">
           {{ stats?.low_stock_products || 0 }}
         </p>
@@ -76,7 +76,7 @@
           >
             {{ getGrowthPercentage(stats?.lowStockGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div
@@ -91,13 +91,13 @@
     </div>
   </div>
 
-  <!-- Products Without Images -->
+  <!-- Productos sin Imágenes -->
   <div
     class="bg-surface p-6 rounded-lg border border-border hover:shadow-md transition-shadow cursor-pointer"
   >
     <div class="flex items-center justify-between">
       <div>
-        <p class="text-sm text-text-secondary mb-1">Products Without Images</p>
+        <p class="text-sm text-text-secondary mb-1">Productos sin Imágenes</p>
         <p class="text-2xl font-bold text-text-primary">
           {{ stats?.products_without_images || 0 }}
         </p>
@@ -108,7 +108,7 @@
           >
             {{ getGrowthPercentage(stats?.noImagesGrowthRate || 0) }}
           </span>
-          <span class="text-xs text-text-secondary ml-2">vs last month</span>
+          <span class="text-xs text-text-secondary ml-2">vs mes anterior</span>
         </div>
       </div>
       <div

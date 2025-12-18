@@ -1,0 +1,32 @@
+meta {
+  name: Update Organization Profile - Invalid Data
+  type: http
+  seq: 4
+}
+
+patch {
+  url: http://{{url}}/organization/organizations/profile
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "A",
+    "email": "invalid-email"
+  }
+}
+
+tests {
+  test("Update profile fails with invalid data", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.false;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Error');
+  });
+
+  test("No data returned on error", function() {
+    expect(res.body).to.not.have.property('data');
+  });
+}

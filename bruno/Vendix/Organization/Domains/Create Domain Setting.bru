@@ -1,0 +1,49 @@
+meta {
+  name: Create Domain Setting
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/organization/domains
+  body: json
+}
+
+body:json {
+  {
+    "hostname": "test-domain.vendix.com",
+    "domain_type": "ecommerce",
+    "status": "pending_dns",
+    "is_primary": false,
+    "ownership": "vendix_subdomain",
+    "organization_id": 1,
+    "config": {
+      "branding": {
+        "company_name": "Test Company",
+        "store_name": "Test Store"
+      },
+      "seo": {
+        "title": "Test Store",
+        "description": "A test ecommerce store"
+      }
+    }
+  }
+}
+
+vars:post-response {
+  domainId: res.body.data.id
+}
+
+tests {
+  test("Domain setting created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+  });
+
+  test("Domain data is correct", function() {
+    expect(res.body.data.hostname).to.equal('test-domain.vendix.com');
+    expect(res.body.data.domain_type).to.equal('ecommerce');
+  });
+}

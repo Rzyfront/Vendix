@@ -26,7 +26,7 @@ export class CategoriesService {
     return this.http
       .get<
         ApiResponse<ProductCategory[]>
-      >(`${this.apiUrl}/categories`, { params })
+      >(`${this.apiUrl}/store/categories`, { params })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -35,7 +35,7 @@ export class CategoriesService {
 
   getCategoryById(id: number): Observable<ProductCategory> {
     return this.http
-      .get<ProductCategory>(`${this.apiUrl}/categories/${id}`)
+      .get<ProductCategory>(`${this.apiUrl}/store/categories/${id}`)
       .pipe(catchError(this.handleError));
   }
 
@@ -43,7 +43,7 @@ export class CategoriesService {
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .post<ProductCategory>(`${this.apiUrl}/categories`, category)
+      .post<ProductCategory>(`${this.apiUrl}/store/categories`, category)
       .pipe(catchError(this.handleError));
   }
 
@@ -52,13 +52,13 @@ export class CategoriesService {
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .patch<ProductCategory>(`${this.apiUrl}/categories/${id}`, category)
+      .patch<ProductCategory>(`${this.apiUrl}/store/categories/${id}`, category)
       .pipe(catchError(this.handleError));
   }
 
   deleteCategory(id: number): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/categories/${id}`)
+      .delete<void>(`${this.apiUrl}/store/categories/${id}`)
       .pipe(catchError(this.handleError));
   }
 

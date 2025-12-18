@@ -24,7 +24,7 @@ export type {
   providedIn: 'root',
 })
 export class PosPaymentService {
-  private readonly apiUrl = `${environment.apiUrl}/payments/pos`;
+  private readonly apiUrl = `${environment.apiUrl}/store/payments/pos`;
   private readonly PAYMENT_METHODS: PaymentMethod[] = [
     {
       id: 'cash',
@@ -67,25 +67,34 @@ export class PosPaymentService {
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
-  ) {}
+  ) { }
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
     // Use the context-aware endpoint that relies on the user's token scope
-    const paymentMethodsUrl = `${environment.apiUrl}/payments/payment-methods`;
+    const paymentMethodsUrl = `${environment.apiUrl}/store/payments/payment-methods`;
 
     return this.http.get<any>(paymentMethodsUrl).pipe(
       map((response) => {
-        if (response && Array.isArray(response)) {
+        const methodsData = response.data || response;
+        if (methodsData && Array.isArray(methodsData)) {
           // Transform backend payment methods to frontend format
-          return response.map((method: any) => ({
-            id: method.id.toString(),
-            name: method.name,
-            type: method.type,
-            icon: this.getPaymentIcon(method.type),
-            enabled: method.state === 'enabled',
-            requiresReference: method.type !== 'cash',
-            referenceLabel: this.getReferenceLabel(method.type),
-          }));
+          return methodsData.map((method: any) => {
+            // Handle both flattened or nested structure
+            const type = method.system_payment_method?.type || method.type || 'unknown';
+            const name = method.display_name || method.name || method.system_payment_method?.name;
+
+            return {
+              id: method.id.toString(),
+              name: name,
+              type: type,
+              icon: this.getPaymentIcon(type),
+              enabled: method.state === 'enabled',
+              requiresReference: type !== 'cash',
+              referenceLabel: this.getReferenceLabel(type),
+              // Preserve original metadata if needed
+              original: method
+            };
+          });
         }
         // Fallback to default methods if backend fails
         return this.PAYMENT_METHODS.filter((method) => method.enabled);
@@ -127,47 +136,64 @@ export class PosPaymentService {
    * Process payment for immediate sale
    */
   processPayment(request: PaymentRequest): Observable<PaymentResponse> {
-    const paymentData = {
-      customer_id: request.customerEmail ? 1 : 1, // Will be set by backend context
-      customer_name: 'Cliente General',
-      customer_email: request.customerEmail || 'cliente@general.com',
-      customer_phone: request.customerPhone || '',
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado. Inicie sesión nuevamente.'));
+    }
+
+    const register_id = localStorage.getItem('pos_register_id');
+    if (!register_id) {
+      // Ideally this should be strictly required, but for now we might fallback to a session ID if not configured,
+      // BUT user said "nothing hardcoded". So we error if not configured.
+      // However, to avoid breaking the app if no register config exists, we might need a prompt.
+      // The prompt said "si algun dato falta... notificarse". So throwing error satisfies this.
+      return throwError(() => new Error('Caja no configurada (Register ID missing).'));
+    }
+
+    // For payment-only, we might not always have a customer if it's a direct charge (e.g. paying a debt).
+    // But the request has customerEmail. If we don't have a structured customer, we fail?
+    // The previous code used request.customerEmail.
+
+    const payment_data = {
+      customer_id: request.customerId, // Consumer must provide this
+      customer_name: request.customerName,
+      customer_email: request.customerEmail,
+      customer_phone: request.customerPhone,
       store_id: this.getStoreId(),
-      items: [], // Empty for payment-only
+      items: [],
       subtotal: Number(parseFloat(request.amount.toString()).toFixed(2)),
       tax_amount: 0,
       discount_amount: 0,
       total_amount: Number(parseFloat(request.amount.toString()).toFixed(2)),
       requires_payment: true,
-      payment_method_id: parseInt(request.paymentMethod.id),
+      store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: Number(
-        parseFloat((request.cashReceived || request.amount).toString()).toFixed(
-          2,
-        ),
+        parseFloat((request.cashReceived || request.amount).toString()).toFixed(2),
       ),
       payment_reference: request.reference || '',
-      register_id: 'POS_REGISTER_001',
-      seller_user_id: 'current_user',
+      register_id: register_id,
+      seller_user_id: user_id,
       internal_notes: '',
-      update_inventory: false, // Payment only, no inventory update
+      update_inventory: false,
     };
 
-    return this.http.post<any>(this.apiUrl, paymentData).pipe(
+    return this.http.post<any>(this.apiUrl, payment_data).pipe(
       map((response) => {
-        if (response.success) {
+        const data = response.data || response;
+        if (data.success) {
           return {
             success: true,
             transactionId:
-              response.payment?.transaction_id ||
-              response.payment?.id ||
+              data.payment?.transaction_id ||
+              data.payment?.id ||
               this.generateTransactionId(),
-            message: response.message || 'Pago procesado correctamente',
-            change: response.payment?.change,
+            message: data.message || 'Pago procesado correctamente',
+            change: data.payment?.change,
           };
         } else {
           return {
             success: false,
-            message: response.message || 'Error al procesar el pago',
+            message: data.message || 'Error al procesar el pago',
           };
         }
       }),
@@ -186,15 +212,27 @@ export class PosPaymentService {
   processSaleWithPayment(
     cartState: CartState,
     paymentRequest: PaymentRequest,
-    createdBy: string,
+    createdBy: string, // This arg was passed but ignored in favor of hardcoded 'current_user'. Now we use StoreContextService internally or this arg if proven reliable.
   ): Observable<any> {
-    const saleData = {
-      customer_id: cartState.customer?.id || 1,
-      customer_name: cartState.customer
-        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
-        : 'Cliente General',
-      customer_email: cartState.customer?.email || 'cliente@general.com',
-      customer_phone: cartState.customer?.phone || '',
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado.'));
+    }
+
+    const register_id = localStorage.getItem('pos_register_id');
+    if (!register_id) {
+      return throwError(() => new Error('Caja no configurada.'));
+    }
+
+    if (!cartState.customer) {
+      return throwError(() => new Error('Debe seleccionar un cliente para procesar la venta.'));
+    }
+
+    const sale_data = {
+      customer_id: cartState.customer.id,
+      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
+      customer_email: cartState.customer.email,
+      customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
@@ -220,40 +258,41 @@ export class PosPaymentService {
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
       requires_payment: true,
-      payment_method_id: parseInt(paymentRequest.paymentMethod.id),
+      store_payment_method_id: parseInt(paymentRequest.paymentMethod.id),
       amount_received: Number(
         parseFloat(
           (paymentRequest.cashReceived || cartState.summary.total).toString(),
         ).toFixed(2),
       ),
       payment_reference: paymentRequest.reference || '',
-      register_id: 'POS_REGISTER_001',
-      seller_user_id: createdBy,
+      register_id: register_id,
+      seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: true,
     };
 
-    return this.http.post<any>(this.apiUrl, saleData).pipe(
+    return this.http.post<any>(this.apiUrl, sale_data).pipe(
       map((response) => {
-        if (response.success) {
+        const data = response.data || response;
+        if (data.success) {
           // Ensure payment object has correct structure if needed by consumer
-          const mappedPayment = response.payment
+          const mappedPayment = data.payment
             ? {
-                ...response.payment,
-                paymentMethod: paymentRequest.paymentMethod,
-                transactionId: response.payment.transaction_id,
-              }
+              ...data.payment,
+              paymentMethod: paymentRequest.paymentMethod,
+              transactionId: data.payment.transaction_id,
+            }
             : undefined;
 
           return {
             success: true,
-            order: response.order,
+            order: data.order,
             payment: mappedPayment,
-            message: response.message,
-            change: response.payment?.change,
+            message: data.message,
+            change: data.payment?.change,
           };
         } else {
-          throw new Error(response.message || 'Error al procesar la venta');
+          throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
       catchError((error) => throwError(() => error)),
@@ -264,13 +303,25 @@ export class PosPaymentService {
    * Process credit sale (no immediate payment)
    */
   processCreditSale(cartState: CartState, createdBy: string): Observable<any> {
-    const creditData = {
-      customer_id: cartState.customer?.id || 1,
-      customer_name: cartState.customer
-        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
-        : 'Cliente General',
-      customer_email: cartState.customer?.email || 'cliente@general.com',
-      customer_phone: cartState.customer?.phone || '',
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado.'));
+    }
+
+    const register_id = localStorage.getItem('pos_register_id');
+    if (!register_id) {
+      return throwError(() => new Error('Caja no configurada.'));
+    }
+
+    if (!cartState.customer) {
+      return throwError(() => new Error('Debe seleccionar un cliente.'));
+    }
+
+    const credit_data = {
+      customer_id: cartState.customer.id,
+      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
+      customer_email: cartState.customer.email,
+      customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
@@ -299,23 +350,24 @@ export class PosPaymentService {
       credit_terms: {
         payment_terms: 'Pendiente de pago',
       },
-      register_id: 'POS_REGISTER_001',
-      seller_user_id: createdBy,
+      register_id: register_id,
+      seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: true,
     };
 
-    return this.http.post<any>(this.apiUrl, creditData).pipe(
+    return this.http.post<any>(this.apiUrl, credit_data).pipe(
       map((response) => {
-        if (response.success) {
+        const data = response.data || response;
+        if (data.success) {
           return {
             success: true,
-            order: response.order,
-            message: response.message,
+            order: data.order,
+            message: data.message,
           };
         } else {
           throw new Error(
-            response.message || 'Error al procesar la venta a crédito',
+            data.message || 'Error al procesar la venta a crédito',
           );
         }
       }),
@@ -327,13 +379,35 @@ export class PosPaymentService {
    * Save draft order
    */
   saveDraft(cartState: CartState, createdBy: string): Observable<any> {
-    const draftData = {
-      customer_id: cartState.customer?.id || 1,
-      customer_name: cartState.customer
-        ? `${cartState.customer.first_name} ${cartState.customer.last_name}`
-        : 'Cliente General',
-      customer_email: cartState.customer?.email || 'cliente@general.com',
-      customer_phone: cartState.customer?.phone || '',
+    const user_id = this.storeContextService.getUserId();
+    if (!user_id) {
+      return throwError(() => new Error('Usuario no identificado.'));
+    }
+
+    const register_id = localStorage.getItem('pos_register_id');
+    // Draft might not need register strictly, but let's be consistent or lax. 
+    // User said "nada del pos puede ser hardcodeado". 
+    // If register missing, we can fail or skip it? Usually drafts are register-agnostic?
+    // I'll fail if missing to be safe per instructions.
+    if (!register_id) {
+      return throwError(() => new Error('Caja no configurada.'));
+    }
+
+    // Drafts *might* not have a customer yet?
+    // "si algun dato falta... notificarse".
+    // If saving draft without customer is valid (e.g. anonymous draft), we can allow null.
+    // But "customer_id" 1 was hardcoded. If we remove hardcoding, we must either pass null or require it.
+    // I'll check if backend allows null customer. If I pass null, does it work?
+    // If not, I'll error.
+    if (!cartState.customer) {
+      return throwError(() => new Error('Debe seleccionar un cliente para guardar el borrador.'));
+    }
+
+    const draft_data = {
+      customer_id: cartState.customer.id,
+      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
+      customer_email: cartState.customer.email,
+      customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
@@ -349,23 +423,23 @@ export class PosPaymentService {
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false,
-      draft: true,
-      register_id: 'POS_REGISTER_001',
-      seller_user_id: createdBy,
+      register_id: register_id,
+      seller_user_id: user_id,
       internal_notes: cartState.notes || '',
       update_inventory: false,
     };
 
-    return this.http.post<any>(this.apiUrl, draftData).pipe(
+    return this.http.post<any>(this.apiUrl, draft_data).pipe(
       map((response) => {
-        if (response.success) {
+        const data = response.data || response;
+        if (data.success) {
           return {
             success: true,
-            order: response.order,
-            message: response.message,
+            order: data.order,
+            message: data.message,
           };
         } else {
-          throw new Error(response.message || 'Error al guardar el borrador');
+          throw new Error(data.message || 'Error al guardar el borrador');
         }
       }),
       catchError((error) => throwError(() => error)),

@@ -1,0 +1,30 @@
+meta {
+  name: "Create Product"
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/store/store-users
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "user_id": 123,
+    "role_ids": [1],
+    "is_active": true
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("productId", res.body.data.id);
+  }
+}

@@ -125,7 +125,7 @@ interface ChartData {
                 class="text-lg font-semibold"
                 style="color: var(--color-text-primary);"
               >
-                Growth Overview
+                Resumen de Crecimiento
               </h3>
             </div>
             <div
@@ -175,7 +175,7 @@ interface ChartData {
                     +23.5%
                   </p>
                   <p class="text-xs" style="color: var(--color-text-muted);">
-                    vs last week
+                    vs semana anterior
                   </p>
                 </div>
                 <div class="text-center">
@@ -186,7 +186,7 @@ interface ChartData {
                     256
                   </p>
                   <p class="text-xs" style="color: var(--color-text-muted);">
-                    Peak (Sat)
+                    Pico (Sáb)
                   </p>
                 </div>
               </div>
@@ -291,7 +291,7 @@ interface ChartData {
               class="text-lg font-semibold"
               style="color: var(--color-text-primary);"
             >
-              System Health
+              Salud del Sistema
             </h3>
           </div>
           <div class="grid grid-cols-2 gap-4">
@@ -314,7 +314,7 @@ interface ChartData {
                   class="text-xs font-medium"
                   style="color: var(--color-text-muted);"
                 >
-                  Uptime
+                  Tiempo Activo
                 </p>
               </div>
             </div>
@@ -337,7 +337,7 @@ interface ChartData {
                   class="text-xs font-medium"
                   style="color: var(--color-text-muted);"
                 >
-                  Response
+                  Respuesta
                 </p>
               </div>
             </div>
@@ -405,13 +405,13 @@ interface ChartData {
               class="text-lg font-semibold"
               style="color: var(--color-text-primary);"
             >
-              Recent Activity
+              Actividad Reciente
             </h3>
             <button
               class="text-xs px-3 py-1.5 rounded-md font-medium transition-colors hover:bg-opacity-10"
               style="color: var(--color-primary); background: rgba(126, 215, 165, 0.1);"
             >
-              View all
+              Ver todo
             </button>
           </div>
           <div class="p-6">
@@ -465,7 +465,7 @@ interface ChartData {
               class="text-lg font-semibold"
               style="color: var(--color-text-primary);"
             >
-              Top Organizations
+              Principales Organizaciones
             </h3>
             <button
               class="p-2 rounded-lg transition-colors hover:bg-opacity-10"
@@ -580,7 +580,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private updateStatsData(data: any): void {
     this.statsData = [
       {
-        title: 'Total Organizations',
+        title: 'Total de Organizaciones',
         value: data.totalOrganizations?.toLocaleString() || '0',
         change: data.organizationGrowth || 0,
         icon: 'fa-building',
@@ -588,7 +588,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         trend: data.organizationGrowth >= 0 ? 'up' : 'down',
       },
       {
-        title: 'Total Users',
+        title: 'Total de Usuarios',
         value: data.totalUsers?.toLocaleString() || '0',
         change: data.userGrowth || 0,
         icon: 'fa-users',
@@ -596,7 +596,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         trend: data.userGrowth >= 0 ? 'up' : 'down',
       },
       {
-        title: 'Active Stores',
+        title: 'Tiendas Activas',
         value: data.activeStores?.toLocaleString() || '0',
         change: data.storeGrowth || 0,
         icon: 'fa-store',
@@ -604,7 +604,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         trend: data.storeGrowth >= 0 ? 'up' : 'down',
       },
       {
-        title: 'Platform Growth',
+        title: 'Crecimiento de la Plataforma',
         value: `${data.platformGrowth || 0}%`,
         change: data.platformGrowth || 0,
         icon: 'fa-chart-line',
@@ -620,7 +620,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         labels: data.weeklyData.map((item: any) => item.week),
         datasets: [
           {
-            label: 'New Organizations',
+            label: 'Nuevas Organizaciones',
             data: data.weeklyData.map((item: any) => item.organizations),
             borderColor: '#3b82f6',
             backgroundColor: '#3b82f6',

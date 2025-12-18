@@ -168,14 +168,32 @@ export class AuthService {
   // === MÉTODOS RESTAURADOS PARA LOS EFFECTS ===
   registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> {
     // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
-    this.checkAndCleanAuthResidues();
+    this.authFacade.clearAuthState(); // Limpiar estado de NgRx
+    this.clearAllAuthData(); // Limpiar LocalStorage completamente
 
-    console.log('🔐 Iniciando registro de owner con estado limpio');
+    // 🔒 DOBLE SEGURIDAD: Establecer bandera para prevenir restauración de environment
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('vendix_logged_out_recently', Date.now().toString());
+      // Forzar limpieza del environment cacheado específicamente para nuevos registros
+      localStorage.removeItem('vendix_user_environment');
+      localStorage.removeItem('vendix_app_config');
+    }
 
-    return this.http.post<AuthResponse>(
-      `${this.API_URL}/register-owner`,
-      registerData,
-    );
+    console.log('🔐 Iniciando registro de owner con estado limpio y sin environment previo');
+
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/register-owner`, registerData)
+      .pipe(
+        tap((response) => {
+          if (response.success && response.data) {
+            const { access_token, refresh_token } = response.data;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('access_token', access_token);
+              localStorage.setItem('refresh_token', refresh_token);
+            }
+          }
+        }),
+      );
   }
   logout(): Observable<any> {
     const refreshToken = this.getRefreshToken();
@@ -219,6 +237,29 @@ export class AuthService {
   resetOwnerPassword(token: string, new_password: string): Observable<any> {
     return this.http.post(`${this.API_URL}/reset-owner-password`, {
       token,
+      new_password,
+    });
+  }
+
+  getProfile(): Observable<any> {
+    return this.http.get(`${this.API_URL}/profile`);
+  }
+
+  updateProfile(data: any): Observable<any> {
+    return this.http.put(`${this.API_URL}/profile`, data);
+  }
+
+  getSettings(): Observable<any> {
+    return this.http.get(`${this.API_URL}/settings`);
+  }
+
+  updateSettings(data: any): Observable<any> {
+    return this.http.put(`${this.API_URL}/settings`, data);
+  }
+
+  changePassword(current_password: string, new_password: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/change-password`, {
+      current_password,
       new_password,
     });
   }

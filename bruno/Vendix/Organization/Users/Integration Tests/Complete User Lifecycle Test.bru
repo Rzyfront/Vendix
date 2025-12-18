@@ -1,0 +1,36 @@
+meta {
+  name: Complete User Lifecycle Test
+  type: http
+  seq: 12
+}
+
+post {
+  url: http://{{url}}/users
+  body: json
+  auth: none
+}
+
+body:json {
+  "app": "ORG_ADMIN",
+  "organization_id": 16,
+  "first_name": "Lifecycle",
+  "last_name": "User",
+  "username": "lifecycle_user_{{timestamp}}",
+  "email": "lifecycle{{timestamp}}@example.com",
+  "password": "TempPassword123!",
+  "state": "pending_verification"
+}
+
+vars:post-response {
+  lifecycle_user_id: res.body.data.id
+  lifecycle_user_email: res.body.data.email
+}
+
+tests {
+  test("Create lifecycle user successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property('state', 'pending_verification');
+  });
+}

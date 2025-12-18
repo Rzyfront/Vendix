@@ -5,20 +5,30 @@ import {
   EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
+import { InputComponent } from '../../input/input.component'; // ✅ Importar
 import {
   CountryService,
   Country,
   Timezone,
+  Department,
+  City,
 } from '../../../../services/country.service';
 
 @Component({
   selector: 'app-store-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    IconComponent,
+    InputComponent,
+  ], // ✅ Agregar InputComponent
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -307,7 +317,7 @@ import {
         </div>
 
         <!-- Store Form -->
-        <div class="store-form">
+        <form class="store-form" [formGroup]="formGroup">
           <!-- Basic Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -330,7 +340,7 @@ import {
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('name')"
+                  formControlName="name"
                   placeholder="Tienda Principal"
                 />
               </div>
@@ -340,10 +350,8 @@ import {
                   Zona horaria
                   <span class="field-optional">(opcional)</span>
                 </label>
-                <select
-                  class="field-input"
-                  [formControl]="formGroup.get('timezone')"
-                >
+                <select class="field-input" formControlName="timezone">
+                  <option value="">Selecciona una zona horaria</option>
                   <option
                     *ngFor="let timezone of timezones"
                     [value]="timezone.value"
@@ -485,59 +493,15 @@ import {
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('address_line1')"
+                  formControlName="address_line1"
                   placeholder="Calle Principal #123"
                 />
               </div>
 
               <div class="form-field">
-                <label class="field-label">
-                  Ciudad
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('city')"
-                  placeholder="Ciudad de México"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  Estado
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('state_province')"
-                  placeholder="CDMX"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  Código postal
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('postal_code')"
-                  placeholder="06000"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  País
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <select
-                  class="field-input"
-                  [formControl]="formGroup.get('country_code')"
-                >
+                <label class="field-label">País</label>
+                <select class="field-input" formControlName="country_code">
+                  <option value="">Selecciona un país</option>
                   <option
                     *ngFor="let country of countries"
                     [value]="country.code"
@@ -546,9 +510,42 @@ import {
                   </option>
                 </select>
               </div>
+
+              <div class="form-field">
+                <label class="field-label">Departamento</label>
+                <select class="field-input" formControlName="state_province">
+                  <option value="">Selecciona un departamento</option>
+                  <option *ngFor="let dep of departments" [value]="dep.id">
+                    {{ dep.name }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Ciudad -->
+              <div class="form-field">
+                <label class="field-label">Ciudad</label>
+                <select class="field-input" formControlName="city">
+                  <option value="">Selecciona una ciudad</option>
+                  <option *ngFor="let city of cities" [value]="city.id">
+                    {{ city.name }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- ✅ Código postal con app-input -->
+              <div class="form-field">
+                <app-input
+                  label="Código postal"
+                  formControlName="postal_code"
+                  type="tel"
+                  placeholder="06000"
+                  customWrapperClass="-mt-4"
+                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-amber-400 focus:!ring-2 focus:!ring-amber-400/10"
+                ></app-input>
+              </div>
             </div>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   `,
@@ -561,11 +558,88 @@ export class StoreSetupStepComponent implements OnInit {
 
   countries: Country[] = [];
   timezones: Timezone[] = [];
+  departments: Department[] = [];
+  cities: City[] = [];
 
-  constructor(private countryService: CountryService) {}
+  constructor(
+    private countryService: CountryService,
+    private cdr: ChangeDetectorRef,
+  ) {}
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
     this.timezones = this.countryService.getTimezones();
+
+    if (!this.formGroup) return;
+
+    const countryControl = this.formGroup.get('country_code');
+    const depControl = this.formGroup.get('state_province');
+    const cityControl = this.formGroup.get('city');
+
+    // Cargar departamentos al cambiar país
+    countryControl.valueChanges.subscribe((code: string) => {
+      if (code === 'CO') {
+        this.loadDepartments();
+      } else {
+        this.departments = [];
+        this.cities = [];
+        depControl.setValue(null);
+        cityControl.setValue(null);
+        this.cdr.markForCheck();
+      }
+    });
+
+    // Cargar ciudades al cambiar departamento
+    depControl.valueChanges.subscribe((depId: any) => {
+      if (depId) {
+        const numericDepId = Number(depId);
+        this.loadCities(numericDepId);
+      } else {
+        this.cities = [];
+        cityControl.setValue(null);
+        this.cdr.markForCheck();
+      }
+    });
+
+    // Cargar datos iniciales si están presentes
+    this.initializeFormData(countryControl, depControl, cityControl);
+  }
+
+  private async initializeFormData(
+    countryControl: any,
+    depControl: any,
+    cityControl: any,
+  ): Promise<void> {
+    const countryValue = countryControl.value;
+    const depValue = depControl.value ? Number(depControl.value) : null;
+    const cityValue = cityControl.value ? Number(cityControl.value) : null;
+
+    // Si el país es Colombia, cargar departamentos
+    if (countryValue === 'CO') {
+      await this.loadDepartments();
+      this.cdr.markForCheck();
+
+      // Si hay un departamento guardado, cargar sus ciudades
+      if (depValue) {
+        depControl.setValue(depValue, { emitEvent: false });
+        await this.loadCities(depValue);
+        this.cdr.markForCheck();
+
+        // Si hay una ciudad guardada, establecerla
+        if (cityValue) {
+          cityControl.setValue(cityValue, { emitEvent: false });
+        }
+      }
+    }
+  }
+
+  async loadDepartments(): Promise<void> {
+    this.departments = await this.countryService.getDepartments();
+    this.cdr.markForCheck();
+  }
+
+  async loadCities(depId: number): Promise<void> {
+    this.cities = await this.countryService.getCitiesByDepartment(depId);
+    this.cdr.markForCheck();
   }
 }

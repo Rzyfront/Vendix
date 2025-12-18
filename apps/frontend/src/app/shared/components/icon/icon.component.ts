@@ -22,12 +22,18 @@ import { ICON_REGISTRY, IconName } from './icons.registry';
       [style.animation]="spin ? 'spin 1s linear infinite' : 'none'"
     ></i-lucide>
   `,
-  styles: [`
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
-  `],
+  styles: [
+    `
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    `,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IconComponent {

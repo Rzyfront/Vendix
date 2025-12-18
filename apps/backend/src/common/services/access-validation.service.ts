@@ -3,11 +3,11 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 
 @Injectable()
 export class AccessValidationService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: GlobalPrismaService) { }
 
   /**
    * Valida si un usuario tiene acceso a una tienda específica
@@ -29,37 +29,40 @@ export class AccessValidationService {
     });
 
     if (!store) {
-      throw new NotFoundException('Store not found');
+      throw new NotFoundException(`Store with ID ${storeId} not found`);
     }
 
-    // Verificar si es super_admin
-    const isSuperAdmin = user.user_roles?.some(
-      (userRole: any) => userRole.roles?.name === 'super_admin',
-    );
-
-    // Si es super_admin, permitir acceso a cualquier tienda
-    if (isSuperAdmin) {
-      return true;
-    }
-
-    // Verificar acceso a nivel de organización
-    const hasOrgAccess = user.user_roles?.some(
+    // 1. Check if user is an Organization Admin/Owner for the store's organization
+    // Users with organization-level access (Owner, Org Admin) have access to all stores in their org
+    // Note: The user object might not directly have organization_id if it's not part of the authentication payload.
+    // This check assumes `user.organization_id` is available and represents the primary organization of the user,
+    // or that user.user_roles contains the organization_id for org-level roles.
+    const hasOrgLevelRoleForStoreOrg = user.user_roles?.some(
       (userRole: any) =>
         userRole.organization_id === store.organization_id &&
-        userRole.store_id === null, // Rol a nivel de org
+        (userRole.roles?.name === 'owner' ||
+          userRole.roles?.name === 'admin' ||
+          userRole.roles?.name === 'org_admin')
     );
 
-    if (hasOrgAccess) {
+    if (hasOrgLevelRoleForStoreOrg) {
       return true;
     }
 
-    // Verificar acceso directo a la tienda específica
-    const hasStoreAccess = user.user_roles?.some(
-      (userRole: any) => userRole.store_id === storeId,
-    );
+    // 2. Check direct store access via store_users table
+    // Fetch store_users relation directly since it might not be populated on the user object
+    // We use this.prisma (GlobalPrismaService) to query the relation
+    const storeUser = await this.prisma.store_users.findUnique({
+        where: {
+            store_id_user_id: {
+                store_id: storeId,
+                user_id: user.id
+            }
+        }
+    });
 
-    if (hasStoreAccess) {
-      return true;
+    if (storeUser) {
+        return true;
     }
 
     throw new ForbiddenException(
@@ -95,24 +98,24 @@ export class AccessValidationService {
       return true;
     }
 
-    // Verificar acceso a nivel de organización
-    const hasOrgAccess = user.user_roles?.some(
-      (userRole: any) =>
-        userRole.organization_id === organizationId &&
-        userRole.store_id === null, // Rol a nivel de org
-    );
-
-    if (hasOrgAccess) {
-      return true;
+    // Verify organization access
+    // We check if the user's assigned organization_id matches the target
+    if (user.organization_id === organizationId) {
+       return true;
     }
 
-    // Verificar si pertenece a la organización (aunque tenga rol de tienda específica)
-    const belongsToOrg = user.user_roles?.some(
-      (userRole: any) => userRole.organization_id === organizationId,
+    // Also check if any role grants specific access (if logic required, but usually org_id on user is authoratative for membership)
+    // For now, if the token says they belong to the org, they have access.
+    // Logic for "belongsToOrg" is redundant if we check user.organization_id
+    
+    // Check if they have an org-admin role (just in case strict role check is needed)
+    const hasOrgAdminRole = user.user_roles?.some(
+        (ur: any) => 
+            (ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'org_admin')
     );
 
-    if (belongsToOrg) {
-      return true;
+    if (hasOrgAdminRole && user.organization_id === organizationId) {
+        return true;
     }
 
     throw new ForbiddenException(

@@ -60,32 +60,34 @@ export class UsersService {
     if (query.organization_id)
       params = params.set('organization_id', query.organization_id.toString());
 
-    return this.http.get<any>(`${this.apiUrl}/admin/users`, { params }).pipe(
-      map((response) => {
-        // Mapear la respuesta de la API a la estructura esperada por el frontend
-        return {
-          data: response.data,
-          pagination: {
-            page: response.meta.page,
-            limit: response.meta.limit,
-            total: response.meta.total,
-            total_pages: response.meta.totalPages,
-          },
-        } as PaginatedUsersResponse;
-      }),
-      finalize(() => this.isLoading$.next(false)),
-      catchError((error) => {
-        console.error('Error loading users:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .get<any>(`${this.apiUrl}/superadmin/users`, { params })
+      .pipe(
+        map((response) => {
+          // Mapear la respuesta de la API a la estructura esperada por el frontend
+          return {
+            data: response.data,
+            pagination: {
+              page: response.meta.page,
+              limit: response.meta.limit,
+              total: response.meta.total,
+              total_pages: response.meta.totalPages,
+            },
+          } as PaginatedUsersResponse;
+        }),
+        finalize(() => this.isLoading$.next(false)),
+        catchError((error) => {
+          console.error('Error loading users:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
    * Obtener usuario por ID
    */
   getUserById(id: number): Observable<User> {
-    return this.http.get<User>(`${this.apiUrl}/admin/users/${id}`).pipe(
+    return this.http.get<User>(`${this.apiUrl}/superadmin/users/${id}`).pipe(
       catchError((error) => {
         console.error('Error getting user:', error);
         return throwError(() => error);
@@ -99,13 +101,15 @@ export class UsersService {
   createUser(userData: CreateUserDto): Observable<User> {
     this.isCreatingUser$.next(true);
 
-    return this.http.post<User>(`${this.apiUrl}/admin/users`, userData).pipe(
-      finalize(() => this.isCreatingUser$.next(false)),
-      catchError((error) => {
-        console.error('Error creating user:', error);
-        return throwError(() => error);
-      }),
-    );
+    return this.http
+      .post<User>(`${this.apiUrl}/superadmin/users`, userData)
+      .pipe(
+        finalize(() => this.isCreatingUser$.next(false)),
+        catchError((error) => {
+          console.error('Error creating user:', error);
+          return throwError(() => error);
+        }),
+      );
   }
 
   /**
@@ -115,7 +119,7 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .patch<User>(`${this.apiUrl}/admin/users/${id}`, userData)
+      .patch<User>(`${this.apiUrl}/superadmin/users/${id}`, userData)
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
@@ -131,7 +135,7 @@ export class UsersService {
   deleteUser(id: number): Observable<void> {
     this.isDeletingUser$.next(true);
 
-    return this.http.delete<void>(`${this.apiUrl}/admin/users/${id}`).pipe(
+    return this.http.delete<void>(`${this.apiUrl}/superadmin/users/${id}`).pipe(
       finalize(() => this.isDeletingUser$.next(false)),
       catchError((error) => {
         console.error('Error deleting user:', error);
@@ -147,7 +151,7 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/admin/users/${id}/archive`, {})
+      .post<User>(`${this.apiUrl}/superadmin/users/${id}/archive`, {})
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
@@ -164,7 +168,7 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/admin/users/${id}/reactivate`, {})
+      .post<User>(`${this.apiUrl}/superadmin/users/${id}/reactivate`, {})
       .pipe(
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
@@ -208,7 +212,7 @@ export class UsersService {
     return this.http
       .get<{
         data: UserStats;
-      }>(`${this.apiUrl}/admin/users/dashboard`, { params })
+      }>(`${this.apiUrl}/superadmin/users/dashboard`, { params })
       .pipe(
         map((response) => response.data),
         catchError((error) => {
@@ -227,25 +231,25 @@ export class UsersService {
   /**
    * Resetear contraseña de usuario
    */
-  resetUserPassword(id: number, newPassword: string): Observable<void> {
-    return this.http
-      .post<void>(`${this.apiUrl}/admin/users/${id}/reset-password`, {
-        password: newPassword,
-      })
-      .pipe(
-        catchError((error) => {
-          console.error('Error resetting password:', error);
-          return throwError(() => error);
-        }),
-      );
-  }
+  // resetUserPassword(id: number, newPassword: string): Observable<void> {
+  //   return this.http
+  //     .post<void>(`${this.apiUrl}/superadmin/users/${id}/reset-password`, {
+  //       password: newPassword,
+  //     })
+  //     .pipe(
+  //       catchError((error) => {
+  //         console.error('Error resetting password:', error);
+  //         return throwError(() => error);
+  //       }),
+  //     );
+  // }
 
   /**
    * Toggle 2FA para usuario
    */
   toggleUser2FA(id: number, enabled: boolean): Observable<User> {
     return this.http
-      .patch<User>(`${this.apiUrl}/admin/users/${id}/2fa`, { enabled })
+      .patch<User>(`${this.apiUrl}/superadmin/users/${id}/2fa`, { enabled })
       .pipe(
         catchError((error) => {
           console.error('Error toggling 2FA:', error);
@@ -259,7 +263,7 @@ export class UsersService {
    */
   verifyUserEmail(id: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/admin/users/${id}/verify-email`, {})
+      .post<User>(`${this.apiUrl}/superadmin/users/${id}/verify-email`, {})
       .pipe(
         catchError((error) => {
           console.error('Error verifying email:', error);
@@ -273,7 +277,7 @@ export class UsersService {
    */
   unlockUser(id: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/admin/users/${id}/unlock`, {})
+      .post<User>(`${this.apiUrl}/superadmin/users/${id}/unlock`, {})
       .pipe(
         catchError((error) => {
           console.error('Error unlocking user:', error);

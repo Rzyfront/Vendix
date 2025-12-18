@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, BehaviorSubject, catchError, throwError } from 'rxjs';
+import { Observable, catchError, throwError, map } from 'rxjs';
+import { environment } from '../../../../../../../environments/environment';
 import {
   SystemPaymentMethod,
   StorePaymentMethod,
@@ -16,27 +17,13 @@ import {
   providedIn: 'root',
 })
 export class PaymentMethodsService {
-  private readonly api_base_url = 'api';
-  private current_store_id = new BehaviorSubject<string | null>(null);
+  private readonly api_base_url = `${environment.apiUrl}/store`;
 
-  constructor(private http: HttpClient) {}
-
-  setCurrentStoreId(store_id: string): void {
-    this.current_store_id.next(store_id);
-  }
-
-  getCurrentStoreId(): string | null {
-    return this.current_store_id.value;
-  }
+  constructor(private http: HttpClient) { }
 
   getStorePaymentMethods(
     params?: PaymentMethodsQueryParams,
   ): Observable<PaginatedPaymentMethods> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
     let http_params = new HttpParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
@@ -47,143 +34,138 @@ export class PaymentMethodsService {
     }
 
     return this.http
-      .get<PaginatedPaymentMethods>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods`,
+      .get<any>(
+        `${this.api_base_url}/payment-methods`,
         { params: http_params },
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   getAvailablePaymentMethods(): Observable<SystemPaymentMethod[]> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
     return this.http
-      .get<
-        SystemPaymentMethod[]
-      >(`${this.api_base_url}/stores/${store_id}/payment-methods/available`)
-      .pipe(catchError(this.handleError));
+      .get<any>(
+        `${this.api_base_url}/payment-methods/available`
+      )
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   getStorePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .get<StorePaymentMethod>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/${method_id}`,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.get<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   enablePaymentMethod(
     system_method_id: string,
     data: EnablePaymentMethodDto,
   ): Observable<StorePaymentMethod> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .post<StorePaymentMethod>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/enable/${system_method_id}`,
-        data,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.post<any>(
+      `${this.api_base_url}/payment-methods/enable/${system_method_id}`,
+      data,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   updateStorePaymentMethod(
     method_id: string,
     data: UpdateStorePaymentMethodDto,
   ): Observable<StorePaymentMethod> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .patch<StorePaymentMethod>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/${method_id}`,
-        data,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.patch<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+      data,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   disablePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .patch<StorePaymentMethod>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/${method_id}/disable`,
-        {},
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.patch<any>(
+      `${this.api_base_url}/payment-methods/${method_id}/disable`,
+      {},
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   deletePaymentMethod(method_id: string): Observable<void> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .delete<void>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/${method_id}`,
-      )
-      .pipe(catchError(this.handleError));
+    return this.http.delete<any>(
+      `${this.api_base_url}/payment-methods/${method_id}`,
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   reorderPaymentMethods(
     data: ReorderPaymentMethodsDto,
   ): Observable<StorePaymentMethod[]> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
-    return this.http
-      .post<
-        StorePaymentMethod[]
-      >(`${this.api_base_url}/stores/${store_id}/payment-methods/reorder`, data)
-      .pipe(catchError(this.handleError));
+    return this.http.post<any>(
+      `${this.api_base_url}/payment-methods/reorder`,
+      data
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
   }
 
   getPaymentMethodStats(): Observable<PaymentMethodStats> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
     return this.http
-      .get<PaymentMethodStats>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/stats`,
+      .get<any>(
+        `${this.api_base_url}/payment-methods/stats`,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        // Extract data from ResponseService format
+        map((response: any) => {
+          if (response.success && response.data) {
+            return response.data;
+          }
+          return response;
+        }),
+        catchError(this.handleError)
+      );
   }
 
   testPaymentMethodConfiguration(
     method_id: string,
     config: Record<string, any>,
   ): Observable<{ success: boolean; message?: string }> {
-    const store_id = this.getCurrentStoreId();
-    if (!store_id) {
-      return throwError(() => new Error('Store ID is required'));
-    }
-
     return this.http
       .post<{
         success: boolean;
         message?: string;
       }>(
-        `${this.api_base_url}/stores/${store_id}/payment-methods/${method_id}/test`,
+        `${this.api_base_url}/payment-methods/${method_id}/test`,
         { config },
       )
       .pipe(catchError(this.handleError));

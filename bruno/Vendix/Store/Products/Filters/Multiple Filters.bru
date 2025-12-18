@@ -1,0 +1,27 @@
+meta {
+  name: Multiple Filters
+  type: http
+  seq: 9
+}
+
+get {
+  url: http://{{url}}/store/products?search=pro&include_inactive=true&page=1&limit=5
+  body: none
+  auth: inherit
+}
+
+params:query {
+  search: pro
+  include_inactive: true
+  page: 1
+  limit: 5
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg4NjU1OSwiZXhwIjoxNzY0ODkwMTU5fQ.bXQ3QfXMPwK5LFqA48lduZ41bLpP9iLrUx5tT0mW8pk
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -1,0 +1,33 @@
+meta {
+  name: "Create Product"
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/store/addresses
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "street": "123 Main St",
+    "city": "New York",
+    "country_code": "US",
+    "postal_code": "10001",
+    "type": "billing",
+    "is_primary": true
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("productId", res.body.data.id);
+  }
+}

@@ -16,5 +16,5 @@ export type {
   OrganizationDetails,
   CreateOrganizationForm,
   OrganizationTableColumn,
-  OrganizationTableAction
+  OrganizationTableAction,
 } from './interfaces/organization.interface';

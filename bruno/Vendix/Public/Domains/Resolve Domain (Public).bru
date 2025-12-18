@@ -1,0 +1,19 @@
+meta {
+  name: Resolve Domain (Public)
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/public/domains/resolve/vendix.com
+  body: none
+  auth: none
+}
+
+tests {
+  test("Resolve domain successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+}

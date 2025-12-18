@@ -9,6 +9,7 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
+import { GlobalUsersService } from './services/global-users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
@@ -70,10 +71,10 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true },
-    { key: 'last_name', label: 'Apellido', sortable: true },
-    { key: 'username', label: 'Usuario', sortable: true },
-    { key: 'email', label: 'Email', sortable: true },
+    { key: 'first_name', label: 'Nombre', sortable: true, mobilePriority: 1 },
+    { key: 'last_name', label: 'Apellido', sortable: true, mobilePriority: 1 },
+    { key: 'username', label: 'Usuario', sortable: true, mobilePriority: 2 },
+    { key: 'email', label: 'Email', sortable: true, mobilePriority: 2 },
     {
       key: 'state',
       label: 'Estado',
@@ -84,24 +85,28 @@ export class UsersComponent implements OnInit, OnDestroy {
         size: 'sm',
       },
       transform: (value: UserState) => this.getStateDisplay(value).text,
+      mobilePriority: 1,
     },
     {
       key: 'organizations.name',
       label: 'Organización',
       sortable: false,
       defaultValue: 'N/A',
+      mobilePriority: 3,
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
       transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
+      mobilePriority: 3,
     },
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
       transform: (value: string) => this.formatDate(value),
+      mobilePriority: 3,
     },
   ];
 
@@ -110,7 +115,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'primary',
+      variant: 'success',
     },
     {
       label: 'Eliminar',

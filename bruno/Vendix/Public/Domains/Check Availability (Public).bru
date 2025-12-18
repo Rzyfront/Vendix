@@ -1,0 +1,19 @@
+meta {
+  name: Check Availability (Public)
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/public/domains/check/vendix.com
+  body: none
+  auth: none
+}
+
+tests {
+  test("Check availability successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+}

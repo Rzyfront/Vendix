@@ -1,0 +1,41 @@
+meta {
+  name: Get All Addresses
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{url}}/organization/addresses?page=1&limit=10
+  body: none
+}
+
+tests {
+  test("Addresses retrieved successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+  });
+
+  test("Response includes pagination meta", function() {
+    expect(res.body).to.have.property('meta');
+    expect(res.body.meta).to.have.property('total');
+    expect(res.body.meta).to.have.property('page');
+    expect(res.body.meta).to.have.property('limit');
+    // Ensure addresses have implicit organization scope, so we shouldn't see cross-org data.
+    // We can't easily assert that here without knowing the specific DB state, 
+    // but the structure check confirms the API contract.
+  });
+
+  test("Ensure data and meta properties exist", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body).to.have.property('meta');
+  });
+
+  test("No sensitive data exposed", function() {
+    if (res.body.data.length > 0) {
+      expect(res.body.data[0]).to.not.have.property('password');
+      expect(res.body.data[0]).to.not.have.property('token');
+    }
+  });
+}

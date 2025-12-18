@@ -6,7 +6,7 @@ import * as ConfigSelectors from './config.selectors';
 import { AppConfig } from '../../services/app-config.service';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ConfigFacade {
   private store = inject(Store<ConfigState>);
@@ -14,11 +14,13 @@ export class ConfigFacade {
   readonly appConfig$ = this.store.select(ConfigSelectors.selectAppConfig);
   readonly isLoading$ = this.store.select(ConfigSelectors.selectIsLoading);
   readonly error$ = this.store.select(ConfigSelectors.selectError);
-  readonly domainConfig$ = this.store.select(ConfigSelectors.selectDomainConfig);
+  readonly domainConfig$ = this.store.select(
+    ConfigSelectors.selectDomainConfig,
+  );
 
   getCurrentConfig(): AppConfig | null {
     let config: AppConfig | null = null;
-    this.appConfig$.pipe(take(1)).subscribe(c => config = c);
+    this.appConfig$.pipe(take(1)).subscribe((c) => (config = c));
     return config;
   }
 }

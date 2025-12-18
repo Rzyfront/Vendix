@@ -16,7 +16,14 @@ export class ToastService {
   private toastsSig = signal<Toast[]>([]);
   readonly toasts = this.toastsSig.asReadonly();
 
-  show(input: Partial<Toast> & { description?: string; title?: string; variant?: ToastVariant; duration?: number }) {
+  show(
+    input: Partial<Toast> & {
+      description?: string;
+      title?: string;
+      variant?: ToastVariant;
+      duration?: number;
+    },
+  ) {
     const toast: Toast = {
       id: Math.random().toString(36).slice(2),
       title: input.title,
@@ -41,7 +48,7 @@ export class ToastService {
           return { ...t, leaving: true };
         }
         return t;
-      })
+      }),
     );
     if (shouldScheduleRemoval) {
       setTimeout(() => {

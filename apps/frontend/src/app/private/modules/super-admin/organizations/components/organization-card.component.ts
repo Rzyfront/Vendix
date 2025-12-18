@@ -10,25 +10,36 @@ import { IconComponent } from '../../../../../shared/components/index';
   standalone: true,
   imports: [CommonModule, RouterModule, IconComponent],
   template: `
-    <div 
+    <div
       class="bg-white border border-border rounded-lg p-6 hover:shadow-md transition-shadow duration-200 cursor-pointer"
-      (click)="onCardClick()">
+      (click)="onCardClick()"
+    >
       <div class="flex items-center justify-between">
         <!-- Organization Info -->
         <div class="flex items-center gap-4 flex-1">
           <!-- Organization Icon -->
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10">
-            <app-icon name="building" [size]="20" class="text-primary"></app-icon>
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
+          >
+            <app-icon
+              name="building"
+              [size]="20"
+              class="text-primary"
+            ></app-icon>
           </div>
-          
+
           <!-- Organization Details -->
           <div class="flex-1">
-            <h3 class="font-semibold text-text-primary mb-1">{{ organization.name }}</h3>
-            <p class="text-sm text-text-secondary mb-2">{{ organization.email }}</p>
+            <h3 class="font-semibold text-text-primary mb-1">
+              {{ organization.name }}
+            </h3>
+            <p class="text-sm text-text-secondary mb-2">
+              {{ organization.email }}
+            </p>
             <div class="flex items-center gap-4 text-xs text-text-muted">
               <span>
                 <app-icon name="calendar" [size]="14" class="mr-1"></app-icon>
-                {{ organization.createdAt | date:'shortDate' }}
+                {{ organization.createdAt | date: 'shortDate' }}
               </span>
               <span>
                 <app-icon name="store" [size]="14" class="mr-1"></app-icon>
@@ -41,39 +52,59 @@ import { IconComponent } from '../../../../../shared/components/index';
         <!-- Status Badge & Actions -->
         <div class="flex items-center gap-3">
           <!-- Status Badge -->
-          <span 
-            [class]="'px-3 py-1 rounded-full text-xs font-medium ' + getStatusClasses()">
+          <span
+            [class]="
+              'px-3 py-1 rounded-full text-xs font-medium ' + getStatusClasses()
+            "
+          >
             {{ getStatusLabel() }}
           </span>
-          
+
           <!-- Actions Dropdown -->
           <div class="relative">
             <button
               class="p-2 rounded-lg hover:bg-gray-100 text-text-primary"
-              (click)="toggleMenu($event)">
+              (click)="toggleMenu($event)"
+            >
               <app-icon name="settings" [size]="16"></app-icon>
             </button>
-            
+
             <!-- Dropdown Menu -->
             <div
               *ngIf="showMenu"
-              class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-border z-10">
+              class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-border z-10"
+            >
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-t-lg flex items-center gap-2"
-                (click)="viewDetails($event)">
-                <app-icon name="search" [size]="14" class="text-text-secondary"></app-icon>
+                (click)="viewDetails($event)"
+              >
+                <app-icon
+                  name="search"
+                  [size]="14"
+                  class="text-text-secondary"
+                ></app-icon>
                 View Details
               </button>
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
-                (click)="editOrganization($event)">
-                <app-icon name="edit" [size]="14" class="text-text-secondary"></app-icon>
+                (click)="editOrganization($event)"
+              >
+                <app-icon
+                  name="edit"
+                  [size]="14"
+                  class="text-text-secondary"
+                ></app-icon>
                 Edit
               </button>
               <button
                 class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 rounded-b-lg flex items-center gap-2 text-destructive"
-                (click)="deleteOrganization($event)">
-                <app-icon name="delete" [size]="14" class="text-destructive"></app-icon>
+                (click)="deleteOrganization($event)"
+              >
+                <app-icon
+                  name="delete"
+                  [size]="14"
+                  class="text-destructive"
+                ></app-icon>
                 Delete
               </button>
             </div>
@@ -82,11 +113,13 @@ import { IconComponent } from '../../../../../shared/components/index';
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class OrganizationCardComponent {
   @Input() organization!: OrganizationListItem;

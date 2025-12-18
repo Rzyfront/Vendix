@@ -1,4 +1,10 @@
-import { Component, Input, Output, EventEmitter, OnChanges } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnChanges,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -6,7 +12,7 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   ModalComponent,
   InputComponent,
-  ButtonComponent
+  ButtonComponent,
 } from '../../../../../shared/components/index';
 import { OrganizationListItem } from '../interfaces/organization.interface';
 
@@ -19,7 +25,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   template: `
     <app-modal
@@ -32,8 +38,12 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
       <form [formGroup]="organizationForm" class="space-y-6">
         <!-- Basic Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Basic Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Basic Information
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="name"
@@ -70,7 +80,10 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
           </div>
 
           <div class="space-y-2">
-            <label for="description" class="block text-sm font-medium text-text-primary">
+            <label
+              for="description"
+              class="block text-sm font-medium text-text-primary"
+            >
               Description
             </label>
             <textarea
@@ -85,8 +98,12 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
 
         <!-- Legal Information -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Legal Information</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Legal Information
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="legalName"
@@ -104,10 +121,17 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
 
         <!-- Organization Status -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Organization Status</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Organization Status
+          </h3>
+
           <div class="space-y-2">
-            <label for="state" class="block text-sm font-medium text-text-primary">
+            <label
+              for="state"
+              class="block text-sm font-medium text-text-primary"
+            >
               Status
             </label>
             <select
@@ -128,10 +152,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-          >
+          <app-button variant="outline" (clicked)="onCancel()">
             Cancel
           </app-button>
           <app-button
@@ -145,7 +166,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class OrganizationEditModalComponent implements OnChanges {
   @Input() isOpen = false;
@@ -171,7 +192,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       description: [''],
       legalName: [''],
       taxId: [''],
-      state: ['active']
+      state: ['active'],
     });
   }
 
@@ -185,7 +206,7 @@ export class OrganizationEditModalComponent implements OnChanges {
         description: '',
         legalName: '',
         taxId: '',
-        state: this.organization.status
+        state: this.organization.status,
       });
     }
   }
@@ -200,7 +221,7 @@ export class OrganizationEditModalComponent implements OnChanges {
   onSubmit(): void {
     if (this.organizationForm.invalid) {
       // Mark all fields as touched to trigger validation messages
-      Object.keys(this.organizationForm.controls).forEach(key => {
+      Object.keys(this.organizationForm.controls).forEach((key) => {
         this.organizationForm.get(key)?.markAsTouched();
       });
       return;
@@ -216,7 +237,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       description: formData.description || undefined,
       legal_name: formData.legalName || undefined,
       tax_id: formData.taxId || undefined,
-      state: formData.state
+      state: formData.state,
     };
 
     this.submit.emit(organizationData);
@@ -235,7 +256,7 @@ export class OrganizationEditModalComponent implements OnChanges {
       description: '',
       legalName: '',
       taxId: '',
-      state: 'active'
+      state: 'active',
     });
   }
 }

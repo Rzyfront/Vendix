@@ -1,0 +1,15 @@
+meta {
+  name: Get Attempts
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{url}}/rate-limiting/attempts
+  body: none
+  auth: inherit
+}
+
+params:query {
+  ip: 127.0.0.1
+}

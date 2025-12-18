@@ -1,0 +1,31 @@
+meta {
+  name: Complete User Lifecycle Test - Verify Email
+  type: http
+  seq: 13
+}
+
+post {
+  url: http://{{url}}/users/{{lifecycle_user_id}}/verify-email
+  body: none
+  auth: none
+}
+
+tests {
+  test("Verify lifecycle user email successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Email verificado exitosamente');
+  });
+
+  test("User email is verified and state updated", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('email_verified', true);
+    expect(res.body.data).to.have.property('state', 'active');
+  });
+
+  test("Verified user ID matches", function() {
+    expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('lifecycle_user_id')));
+  });
+}

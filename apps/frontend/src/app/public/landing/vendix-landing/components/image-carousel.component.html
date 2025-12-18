@@ -1,7 +1,11 @@
 <div class="hero-carousel">
   @for (slide of slides; track slide.image; let i = $index) {
     <div class="carousel-slide {{ i === 0 ? 'active' : '' }}">
-      <img [src]="slide.image" [alt]="'Slide ' + slide.message" class="carousel-image" />
+      <img
+        [src]="slide.image"
+        [alt]="'Slide ' + slide.message"
+        class="carousel-image"
+      />
       <div class="carousel-overlay"></div>
       <div class="carousel-content">
         <div class="container mx-auto px-4 sm:px-6 lg:px-8">
@@ -10,8 +14,10 @@
             <p class="carousel-subtitle">{{ slide.subtitle }}</p>
             <div class="carousel-actions">
               @if (slide.buttonLink) {
-                <a [routerLink]="slide.buttonLink" 
-                   class="btn btn-primary carousel-btn">
+                <a
+                  [routerLink]="slide.buttonLink"
+                  class="btn btn-primary carousel-btn"
+                >
                   {{ slide.buttonText }}
                 </a>
               } @else {
@@ -19,14 +25,18 @@
                   {{ slide.buttonText }}
                 </button>
               }
-              
+
               @if (slide.secondaryButtonLink) {
-                <a [href]="slide.secondaryButtonLink" 
-                   class="btn btn-secondary carousel-btn carousel-btn-secondary">
+                <a
+                  [href]="slide.secondaryButtonLink"
+                  class="btn btn-secondary carousel-btn carousel-btn-secondary"
+                >
                   {{ slide.secondaryButtonText }}
                 </a>
               } @else {
-                <button class="btn btn-secondary carousel-btn carousel-btn-secondary">
+                <button
+                  class="btn btn-secondary carousel-btn carousel-btn-secondary"
+                >
                   {{ slide.secondaryButtonText }}
                 </button>
               }
@@ -36,14 +46,17 @@
       </div>
     </div>
   }
-  
+
   <!-- Carousel Indicators -->
   <div class="carousel-indicators">
     @for (slide of slides; track slide.image; let i = $index) {
-      <button class="indicator {{ i === 0 ? 'active' : '' }}" (click)="goToSlide(i)"></button>
+      <button
+        class="indicator {{ i === 0 ? 'active' : '' }}"
+        (click)="goToSlide(i)"
+      ></button>
     }
   </div>
-  
+
   <!-- Carousel Controls -->
   <button class="carousel-control prev" (click)="prevSlide()">
     <span>&#10094;</span>

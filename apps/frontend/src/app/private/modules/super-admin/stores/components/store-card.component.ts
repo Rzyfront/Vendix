@@ -2,7 +2,10 @@ import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 // Import shared components
-import { ButtonComponent, IconComponent } from '../../../../../shared/components';
+import {
+  ButtonComponent,
+  IconComponent,
+} from '../../../../../shared/components';
 
 // Import interfaces
 import { StoreListItem, StoreType } from '../interfaces/store.interface';
@@ -12,17 +15,22 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
   standalone: true,
   imports: [CommonModule, ButtonComponent, IconComponent],
   template: `
-    <div class="bg-surface rounded-card shadow-card border border-border p-6 hover:shadow-lg transition-shadow duration-200">
+    <div
+      class="bg-surface rounded-card shadow-card border border-border p-6 hover:shadow-lg transition-shadow duration-200"
+    >
       <!-- Header -->
       <div class="flex items-start justify-between mb-4">
         <div class="flex-1">
-          <h3 class="text-lg font-semibold text-text-primary mb-1">{{ store.name }}</h3>
+          <h3 class="text-lg font-semibold text-text-primary mb-1">
+            {{ store.name }}
+          </h3>
           <p class="text-sm text-text-secondary">{{ store.slug }}</p>
         </div>
         <div class="flex items-center gap-2">
           <span
             class="px-2 py-1 text-xs font-medium rounded-full"
-            [ngClass]="getStatusClasses(store.is_active)">
+            [ngClass]="getStatusClasses(store.is_active)"
+          >
             {{ formatActiveStatus(store.is_active) }}
           </span>
           <span
@@ -36,25 +44,46 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
       <!-- Store Info -->
       <div class="space-y-3 mb-4">
         <div class="flex items-center gap-2 text-sm">
-          <app-icon name="building" [size]="16" class="text-text-secondary"></app-icon>
-          <span class="text-text-primary">{{ store.organizations?.name || 'N/A' }}</span>
+          <app-icon
+            name="building"
+            [size]="16"
+            class="text-text-secondary"
+          ></app-icon>
+          <span class="text-text-primary">{{
+            store.organizations?.name || 'N/A'
+          }}</span>
         </div>
 
         <div class="flex items-center gap-2 text-sm" *ngIf="store.store_code">
-          <app-icon name="tag" [size]="16" class="text-text-secondary"></app-icon>
+          <app-icon
+            name="tag"
+            [size]="16"
+            class="text-text-secondary"
+          ></app-icon>
           <span class="text-text-primary">{{ store.store_code }}</span>
         </div>
-        
-        <div class="flex items-center gap-2 text-sm" *ngIf="store.addresses && store.addresses.length > 0">
-          <app-icon name="map-pin" [size]="16" class="text-text-secondary"></app-icon>
+
+        <div
+          class="flex items-center gap-2 text-sm"
+          *ngIf="store.addresses && store.addresses.length > 0"
+        >
+          <app-icon
+            name="map-pin"
+            [size]="16"
+            class="text-text-secondary"
+          ></app-icon>
           <span class="text-text-primary">
             {{ getPrimaryAddress(store.addresses)?.city || 'N/A' }},
             {{ getPrimaryAddress(store.addresses)?.state_province || 'N/A' }}
           </span>
         </div>
-        
+
         <div class="flex items-center gap-2 text-sm">
-          <app-icon name="clock" [size]="16" class="text-text-secondary"></app-icon>
+          <app-icon
+            name="clock"
+            [size]="16"
+            class="text-text-secondary"
+          ></app-icon>
           <span class="text-text-primary">{{ store.timezone }}</span>
         </div>
       </div>
@@ -62,15 +91,21 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
       <!-- Stats -->
       <div class="grid grid-cols-3 gap-4 mb-4">
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">{{ store._count?.products || 0 }}</p>
+          <p class="text-2xl font-bold text-text-primary">
+            {{ store._count?.products || 0 }}
+          </p>
           <p class="text-xs text-text-secondary">Products</p>
         </div>
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">{{ store._count?.orders || 0 }}</p>
+          <p class="text-2xl font-bold text-text-primary">
+            {{ store._count?.orders || 0 }}
+          </p>
           <p class="text-xs text-text-secondary">Orders</p>
         </div>
         <div class="text-center">
-          <p class="text-2xl font-bold text-text-primary">{{ store._count?.store_users || 0 }}</p>
+          <p class="text-2xl font-bold text-text-primary">
+            {{ store._count?.store_users || 0 }}
+          </p>
           <p class="text-xs text-text-secondary">Users</p>
         </div>
       </div>
@@ -86,7 +121,7 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
           <app-icon name="eye" [size]="16" slot="icon"></app-icon>
           View
         </app-button>
-        
+
         <app-button
           variant="primary"
           size="sm"
@@ -99,11 +134,13 @@ import { StoreListItem, StoreType } from '../interfaces/store.interface';
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class StoreCardComponent {
   @Input() store!: StoreListItem;
@@ -116,7 +153,7 @@ export class StoreCardComponent {
       [StoreType.ONLINE]: 'Online',
       [StoreType.HYBRID]: 'Híbrida',
       [StoreType.POPUP]: 'Temporal',
-      [StoreType.KIOSKO]: 'Kiosco'
+      [StoreType.KIOSKO]: 'Kiosco',
     };
     return typeMap[type] || type;
   }
@@ -127,7 +164,7 @@ export class StoreCardComponent {
 
   getStatusClasses(isActive: boolean): string {
     const baseClasses = 'px-2 py-1 text-xs font-medium rounded-full';
-    
+
     if (isActive) {
       return `${baseClasses} bg-green-100 text-green-800`;
     } else {
@@ -146,7 +183,7 @@ export class StoreCardComponent {
 
   getPrimaryAddress(addresses: any[]): any {
     if (!addresses || addresses.length === 0) return null;
-    return addresses.find(addr => addr.is_primary) || addresses[0];
+    return addresses.find((addr) => addr.is_primary) || addresses[0];
   }
 
   viewStore(): void {

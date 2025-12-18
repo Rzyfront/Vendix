@@ -21,7 +21,7 @@ import {
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   // CRUD Básico
   getProducts(
@@ -29,19 +29,23 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<PaginatedResponse<Product>>(`${this.apiUrl}/products`, { params })
+      .get<
+        PaginatedResponse<Product>
+      >(`${this.apiUrl}/store/products`, { params })
       .pipe(catchError(this.handleError));
   }
 
   getProductById(id: number): Observable<Product> {
     return this.http
-      .get<Product>(`${this.apiUrl}/products/${id}`)
+      .get<Product>(`${this.apiUrl}/store/products/${id}`)
       .pipe(catchError(this.handleError));
   }
 
   getProductBySlug(slug: string, storeId: number): Observable<Product> {
     return this.http
-      .get<Product>(`${this.apiUrl}/products/slug/${slug}/store/${storeId}`)
+      .get<Product>(
+        `${this.apiUrl}/store/products/slug/${slug}/store/${storeId}`,
+      )
       .pipe(catchError(this.handleError));
   }
 
@@ -53,38 +57,40 @@ export class ProductsService {
     return this.http
       .get<
         PaginatedResponse<Product>
-      >(`${this.apiUrl}/products/store/${storeId}`, { params })
+      >(`${this.apiUrl}/store/products/store/${storeId}`, { params })
       .pipe(catchError(this.handleError));
   }
 
   createProduct(product: CreateProductDto): Observable<Product> {
     return this.http
-      .post<Product>(`${this.apiUrl}/products`, product)
+      .post<Product>(`${this.apiUrl}/store/products`, product)
       .pipe(catchError(this.handleError));
   }
 
   updateProduct(id: number, product: UpdateProductDto): Observable<Product> {
     return this.http
-      .patch<Product>(`${this.apiUrl}/products/${id}`, product)
+      .patch<Product>(`${this.apiUrl}/store/products/${id}`, product)
       .pipe(catchError(this.handleError));
   }
 
   deactivateProduct(id: number): Observable<Product> {
     return this.http
-      .patch<Product>(`${this.apiUrl}/products/${id}/deactivate`, {})
+      .patch<Product>(`${this.apiUrl}/store/products/${id}/deactivate`, {})
       .pipe(catchError(this.handleError));
   }
 
   deleteProduct(id: number): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/products/${id}`)
+      .delete<void>(`${this.apiUrl}/store/products/${id}`)
       .pipe(catchError(this.handleError));
   }
 
   // Gestión de Variantes
   getProductVariants(productId: number): Observable<ProductVariant[]> {
     return this.http
-      .get<ProductVariant[]>(`${this.apiUrl}/products/${productId}/variants`)
+      .get<
+        ProductVariant[]
+      >(`${this.apiUrl}/store/products/${productId}/variants`)
       .pipe(catchError(this.handleError));
   }
 
@@ -94,7 +100,7 @@ export class ProductsService {
   ): Observable<ProductVariant> {
     return this.http
       .post<ProductVariant>(
-        `${this.apiUrl}/products/${productId}/variants`,
+        `${this.apiUrl}/store/products/${productId}/variants`,
         variant,
       )
       .pipe(catchError(this.handleError));
@@ -106,7 +112,7 @@ export class ProductsService {
   ): Observable<ProductVariant> {
     return this.http
       .patch<ProductVariant>(
-        `${this.apiUrl}/products/variants/${variantId}`,
+        `${this.apiUrl}/store/products/variants/${variantId}`,
         variant,
       )
       .pipe(catchError(this.handleError));
@@ -114,14 +120,14 @@ export class ProductsService {
 
   deleteProductVariant(variantId: number): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/products/variants/${variantId}`)
+      .delete<void>(`${this.apiUrl}/store/products/variants/${variantId}`)
       .pipe(catchError(this.handleError));
   }
 
   // Gestión de Imágenes
   getProductImages(productId: number): Observable<ProductImage[]> {
     return this.http
-      .get<ProductImage[]>(`${this.apiUrl}/products/${productId}/images`)
+      .get<ProductImage[]>(`${this.apiUrl}/store/products/${productId}/images`)
       .pipe(catchError(this.handleError));
   }
 
@@ -130,20 +136,23 @@ export class ProductsService {
     image: CreateProductImageDto,
   ): Observable<ProductImage> {
     return this.http
-      .post<ProductImage>(`${this.apiUrl}/products/${productId}/images`, image)
+      .post<ProductImage>(
+        `${this.apiUrl}/store/products/${productId}/images`,
+        image,
+      )
       .pipe(catchError(this.handleError));
   }
 
   deleteProductImage(imageId: number): Observable<void> {
     return this.http
-      .delete<void>(`${this.apiUrl}/products/images/${imageId}`)
+      .delete<void>(`${this.apiUrl}/store/products/images/${imageId}`)
       .pipe(catchError(this.handleError));
   }
 
   setMainImage(productId: number, imageId: number): Observable<ProductImage> {
     return this.http
       .patch<ProductImage>(
-        `${this.apiUrl}/products/${productId}/images/${imageId}/main`,
+        `${this.apiUrl}/store/products/${productId}/images/${imageId}/main`,
         {},
       )
       .pipe(catchError(this.handleError));
@@ -151,7 +160,7 @@ export class ProductsService {
 
   // Estadísticas
   getProductStats(storeId: number): Observable<ProductStats> {
-    const url = `${this.apiUrl}/products/stats/store/${storeId}`;
+    const url = `${this.apiUrl}/store/products/stats/store/${storeId}`;
     return this.http.get<ProductStats>(url).pipe(catchError(this.handleError));
   }
 
@@ -164,7 +173,7 @@ export class ProductsService {
     return this.http
       .get<
         PaginatedResponse<Product>
-      >(`${this.apiUrl}/products/search`, { params })
+      >(`${this.apiUrl}/store/products/search`, { params })
       .pipe(catchError(this.handleError));
   }
 
@@ -176,7 +185,7 @@ export class ProductsService {
     return this.http
       .get<
         PaginatedResponse<Product>
-      >(`${this.apiUrl}/products/category/${categoryId}`, { params })
+      >(`${this.apiUrl}/store/products/category/${categoryId}`, { params })
       .pipe(catchError(this.handleError));
   }
 
@@ -188,7 +197,7 @@ export class ProductsService {
     return this.http
       .get<
         PaginatedResponse<Product>
-      >(`${this.apiUrl}/products/brand/${brandId}`, { params })
+      >(`${this.apiUrl}/store/products/brand/${brandId}`, { params })
       .pipe(catchError(this.handleError));
   }
 
@@ -200,7 +209,25 @@ export class ProductsService {
     return this.http
       .get<
         PaginatedResponse<Product>
-      >(`${this.apiUrl}/products/low-stock/${threshold}`, { params })
+      >(`${this.apiUrl}/store/products/low-stock/${threshold}`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
+  // Carga Masiva
+  getBulkUploadTemplate(): Observable<any> {
+    return this.http
+      .get(`${this.apiUrl}/store/products/bulk/template/download`, {
+        responseType: 'text',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  uploadBulkProducts(file: File): Observable<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.http
+      .post(`${this.apiUrl}/store/products/bulk/upload/csv`, formData)
       .pipe(catchError(this.handleError));
   }
 

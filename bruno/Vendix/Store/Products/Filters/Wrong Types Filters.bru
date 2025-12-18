@@ -1,0 +1,24 @@
+meta {
+  name: Wrong Types Filters
+  type: http
+  seq: 10
+}
+
+get {
+  url: http://{{url}}/store/products?store_id=hola
+  body: none
+  auth: inherit
+}
+
+params:query {
+  store_id: hola
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg4NjU1OSwiZXhwIjoxNzY0ODkwMTU5fQ.bXQ3QfXMPwK5LFqA48lduZ41bLpP9iLrUx5tT0mW8pk
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

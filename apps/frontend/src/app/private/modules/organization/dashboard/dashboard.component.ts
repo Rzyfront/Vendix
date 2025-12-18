@@ -5,6 +5,7 @@ import {
   ChartData,
   ChartOptions,
   IconComponent,
+  CHART_THEMES,
 } from '../../../../shared/components';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
 import { ActivatedRoute } from '@angular/router';
@@ -44,14 +45,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Total Stores
+            Total de Tiendas
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.total_stores?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.total_stores?.sub_value || 0 }} new this
-            month
+            {{ dashboardStats?.stats?.total_stores?.sub_value || 0 }} nuevas
+            este mes
           </p>
         </div>
 
@@ -75,13 +76,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Active Users
+            Usuarios Activos
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.active_users?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.active_users?.sub_value || 0 }} online now
+            {{ dashboardStats?.stats?.active_users?.sub_value || 0 }} en línea
+            ahora
           </p>
         </div>
 
@@ -105,14 +107,14 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Monthly Orders
+            Pedidos Mensuales
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.monthly_orders?.value || 0 }}
           </p>
           <p class="text-xs mt-2" style="color: var(--muted-foreground);">
-            {{ dashboardStats?.stats?.monthly_orders?.sub_value || 0 }} orders
-            today
+            {{ dashboardStats?.stats?.monthly_orders?.sub_value || 0 }} pedidos
+            hoy
           </p>
         </div>
 
@@ -136,7 +138,7 @@ import { takeUntil } from 'rxjs/operators';
             class="text-sm font-medium mb-1"
             style="color: var(--muted-foreground);"
           >
-            Profit
+            Ganancia
           </h3>
           <p class="text-3xl font-bold" style="color: var(--text);">
             {{ dashboardStats?.stats?.revenue?.value || 0 | currency }}
@@ -154,7 +156,7 @@ import { takeUntil } from 'rxjs/operators';
                 (dashboardStats?.stats?.revenue?.sub_value || 0) > 0 ? '+' : ''
               }}{{ dashboardStats?.stats?.revenue?.sub_value || 0 | currency }}
             </span>
-            vs last month
+            vs mes pasado
           </p>
         </div>
       </div>
@@ -170,10 +172,10 @@ import { takeUntil } from 'rxjs/operators';
             <div class="flex items-center justify-between">
               <div>
                 <h2 class="text-lg font-semibold" style="color: var(--text);">
-                  Profit Overview
+                  Resumen de ganancias
                 </h2>
                 <p class="text-sm" style="color: var(--muted-foreground);">
-                  Monthly profit trends
+                  Tendencias de ganancias mensuales
                 </p>
               </div>
               <div class="flex gap-2">
@@ -225,9 +227,10 @@ import { takeUntil } from 'rxjs/operators';
           <div class="p-6">
             <app-chart
               [data]="revenueChartData"
-              type="line"
+              type="area"
               size="medium"
-              [options]="revenueChartOptions"
+              [theme]="CHART_THEMES['corporate']"
+              [animated]="true"
             >
             </app-chart>
           </div>
@@ -240,10 +243,10 @@ import { takeUntil } from 'rxjs/operators';
         >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
-              Sales Distribution
+              Distribución de ventas
             </h2>
             <p class="text-sm" style="color: var(--muted-foreground);">
-              By sales type (Physical vs Online)
+              Por tipo de venta (Físico vs En línea)
             </p>
           </div>
           <div class="p-6">
@@ -252,7 +255,8 @@ import { takeUntil } from 'rxjs/operators';
                 [data]="storeDistributionData"
                 type="doughnut"
                 size="small"
-                [options]="pieChartOptions"
+                [theme]="CHART_THEMES['vibrant']"
+                [animated]="true"
               >
               </app-chart>
               <!-- Center Text Overlay -->
@@ -316,10 +320,10 @@ import { takeUntil } from 'rxjs/operators';
         >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
-              Recent Activity
+              Actividad reciente
             </h2>
             <p class="text-sm" style="color: var(--muted-foreground);">
-              Latest updates across your organization
+              Últimas actualizaciones en toda su organización
             </p>
           </div>
           <div class="p-6">
@@ -340,16 +344,16 @@ import { takeUntil } from 'rxjs/operators';
                 </div>
                 <div class="flex-1">
                   <p class="text-sm font-medium" style="color: var(--text);">
-                    New store launched
+                    Lanzamiento de nueva tienda
                   </p>
                   <p class="text-sm" style="color: var(--muted-foreground);">
-                    Downtown location is now live
+                    La ubicación del centro ya está activa
                   </p>
                   <p
                     class="text-xs mt-1"
                     style="color: var(--muted-foreground);"
                   >
-                    2 hours ago
+                    hace 2 horas
                   </p>
                 </div>
               </div>
@@ -370,16 +374,16 @@ import { takeUntil } from 'rxjs/operators';
                 </div>
                 <div class="flex-1">
                   <p class="text-sm font-medium" style="color: var(--text);">
-                    New team member
+                    Nuevo miembro del equipo
                   </p>
                   <p class="text-sm" style="color: var(--muted-foreground);">
-                    Sarah Johnson joined as Store Manager
+                    Sarah Johnson se unió como gerente de tienda
                   </p>
                   <p
                     class="text-xs mt-1"
                     style="color: var(--muted-foreground);"
                   >
-                    5 hours ago
+                    hace 5 horas
                   </p>
                 </div>
               </div>
@@ -400,16 +404,16 @@ import { takeUntil } from 'rxjs/operators';
                 </div>
                 <div class="flex-1">
                   <p class="text-sm font-medium" style="color: var(--text);">
-                    Revenue milestone
+                    Hito de ingresos
                   </p>
                   <p class="text-sm" style="color: var(--muted-foreground);">
-                    Exceeded $100K monthly target
+                    Superó el objetivo mensual de $100.000
                   </p>
                   <p
                     class="text-xs mt-1"
                     style="color: var(--muted-foreground);"
                   >
-                    1 day ago
+                    Hace 1 día
                   </p>
                 </div>
               </div>
@@ -424,10 +428,10 @@ import { takeUntil } from 'rxjs/operators';
         >
           <div class="p-6 border-b border-border">
             <h2 class="text-lg font-semibold" style="color: var(--text);">
-              Top Performing Stores
+              Tiendas con mejor rendimiento
             </h2>
             <p class="text-sm" style="color: var(--muted-foreground);">
-              This month's leaders
+              Las líderes de este mes
             </p>
           </div>
           <div class="p-6">
@@ -442,10 +446,10 @@ import { takeUntil } from 'rxjs/operators';
                   </div>
                   <div>
                     <p class="text-sm font-medium" style="color: var(--text);">
-                      Downtown Store
+                      Tienda del centro
                     </p>
                     <p class="text-xs" style="color: var(--muted-foreground);">
-                      Retail
+                      Minorista
                     </p>
                   </div>
                 </div>
@@ -467,10 +471,10 @@ import { takeUntil } from 'rxjs/operators';
                   </div>
                   <div>
                     <p class="text-sm font-medium" style="color: var(--text);">
-                      Mall Location
+                      Ubicación del centro comercial
                     </p>
                     <p class="text-xs" style="color: var(--muted-foreground);">
-                      Food & Beverage
+                      Alimentos y bebidas
                     </p>
                   </div>
                 </div>
@@ -492,10 +496,10 @@ import { takeUntil } from 'rxjs/operators';
                   </div>
                   <div>
                     <p class="text-sm font-medium" style="color: var(--text);">
-                      Airport Branch
+                      Sucursal del aeropuerto
                     </p>
                     <p class="text-xs" style="color: var(--muted-foreground);">
-                      Services
+                      Servicios
                     </p>
                   </div>
                 </div>
@@ -535,6 +539,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     '#ec4899',
   ];
   storeDistributionLegend: any[] = [];
+  CHART_THEMES = CHART_THEMES;
 
   // Revenue Chart Data - Stacked Line Chart
   revenueChartData: ChartData = {
@@ -624,7 +629,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         labels: labels,
         datasets: [
           {
-            label: 'Revenue',
+            label: 'Ganancia',
             data: revenue,
             borderColor: '#3b82f6', // Blue color
             backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -638,7 +643,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             pointHoverRadius: 6,
           },
           {
-            label: 'Costs',
+            label: 'Costos',
             data: costs,
             borderColor: '#ef4444', // Red color
             backgroundColor: 'rgba(239, 68, 68, 0.1)',
@@ -652,7 +657,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             pointHoverRadius: 6,
           },
           {
-            label: 'Profit',
+            label: 'Ganancia',
             data: profit,
             borderColor: '#22c55e', // Success color
             backgroundColor: 'rgba(34, 197, 94, 0.1)',
@@ -686,7 +691,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         labels: labels,
         datasets: [
           {
-            label: 'Sales Distribution',
+            label: 'Distribución de ventas',
             data: values,
             backgroundColor: this.storeDistributionColors,
             borderColor: '#ffffff',
@@ -767,7 +772,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   // Store Distribution Data - Enhanced Doughnut Chart
   storeDistributionData: ChartData = {
-    labels: ['Retail', 'Food & Beverage', 'Services'],
+    labels: ['Minorista', 'Alimentos y bebidas', 'Servicios'],
     datasets: [
       {
         label: 'Store Distribution',

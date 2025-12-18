@@ -23,6 +23,7 @@ import {
   CardComponent,
   IconComponent,
 } from '../../../../../shared/components';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
   PosPaymentService,
   PaymentMethod,
@@ -52,58 +53,432 @@ interface PaymentState {
   templateUrl: './pos-payment-interface.component.html',
   styles: [
     `
+      /* Enhanced Payment Method Cards with Better Contrast */
       .payment-method-card {
+        position: relative;
         border: 2px solid var(--color-border);
-        border-radius: var(--radius-md);
+        border-radius: var(--radius-lg);
         background: var(--color-surface);
-        transition: all 0.2s ease;
+        transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        overflow: hidden;
+      }
+
+      .payment-method-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: transparent;
+        transition: background 0.25s ease;
       }
 
       .payment-method-card:hover {
         border-color: var(--color-primary);
-        transform: translateY(-2px);
-        box-shadow: var(--shadow-md);
+        transform: translateY(-3px);
+        box-shadow: var(--shadow-lg);
+      }
+
+      .payment-method-card:hover::before {
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
       }
 
       .payment-method-card.selected {
         border-color: var(--color-primary);
-        background: var(--color-primary-light);
+        background: linear-gradient(
+          135deg,
+          var(--color-primary-light),
+          rgba(126, 215, 165, 0.05)
+        );
+        box-shadow:
+          var(--shadow-md),
+          0 0 0 1px rgba(126, 215, 165, 0.2),
+          0 4px 12px rgba(126, 215, 165, 0.15);
+      }
+
+      .payment-method-card.selected::before {
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
+      }
+
+      /* Enhanced Keypad Buttons with Better Accessibility */
+      .keypad-btn {
+        position: relative;
+        padding: 1.25rem;
+        font-size: 1.25rem;
+        font-weight: var(--fw-semibold);
+        font-family: var(--font-primary);
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: linear-gradient(
+          135deg,
+          var(--color-surface),
+          rgba(248, 250, 252, 0.8)
+        );
+        color: var(--color-text-primary);
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+      }
+
+      .keypad-btn:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow:
+          0 0 0 3px rgba(126, 215, 165, 0.3),
+          var(--shadow-sm);
+      }
+
+      .keypad-btn:hover:not(:disabled) {
+        background: linear-gradient(
+          135deg,
+          var(--color-primary-light),
+          rgba(126, 215, 165, 0.15)
+        );
+        border-color: var(--color-primary);
+        transform: translateY(-1px);
         box-shadow: var(--shadow-md);
       }
 
-      .keypad-btn {
+      .keypad-btn:active {
+        transform: scale(0.96) translateY(0);
+        transition: transform 0.1s ease;
+      }
+
+      .keypad-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      /* Credit Sale Special Styling */
+      .credit-sale-card {
+        background: linear-gradient(
+          135deg,
+          rgba(251, 146, 60, 0.08),
+          rgba(251, 146, 60, 0.02)
+        );
+        border-color: rgba(251, 146, 60, 0.3);
+      }
+
+      .credit-sale-card:hover {
+        border-color: var(--color-warning);
+        box-shadow:
+          var(--shadow-md),
+          0 0 0 1px rgba(251, 146, 60, 0.2);
+      }
+
+      .credit-sale-card:hover::before {
+        background: linear-gradient(90deg, var(--color-warning), #f59e0b);
+      }
+
+      /* Enhanced Payment Summary Card */
+      .payment-summary-enhanced {
+        background: linear-gradient(
+          135deg,
+          var(--color-surface),
+          rgba(126, 215, 165, 0.02)
+        );
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .payment-summary-enhanced::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
+      }
+
+      /* Enhanced Change Display */
+      .change-display-enhanced {
+        background: linear-gradient(
+          135deg,
+          rgba(34, 197, 94, 0.12),
+          rgba(34, 197, 94, 0.04)
+        );
+        border: 2px solid rgba(34, 197, 94, 0.3);
+        border-radius: var(--radius-md);
         padding: 1rem;
-        font-size: 1.125rem;
-        font-weight: 500;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .change-display-enhanced::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, var(--color-success), #16a34a);
+      }
+
+      /* Enhanced Quick Amount Buttons */
+      .quick-amount-btn {
+        position: relative;
+        padding: 0.75rem;
+        font-weight: var(--fw-medium);
         border: 1px solid var(--color-border);
         border-radius: var(--radius-sm);
         background: var(--color-surface);
         color: var(--color-text-primary);
         cursor: pointer;
         transition: all 0.2s ease;
+        overflow: hidden;
       }
 
-      .keypad-btn:hover:not(:disabled) {
-        background: var(--color-primary-light);
+      .quick-amount-btn::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        background: rgba(126, 215, 165, 0.1);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition:
+          width 0.3s ease,
+          height 0.3s ease;
+      }
+
+      .quick-amount-btn:hover::before {
+        width: 100%;
+        height: 100%;
+      }
+
+      .quick-amount-btn:hover {
         border-color: var(--color-primary);
+        color: var(--color-primary);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
       }
 
-      .keypad-btn:active {
-        transform: scale(0.95);
+      .quick-amount-btn:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px rgba(126, 215, 165, 0.3);
+      }
+
+      /* Enhanced Section Headers */
+      .section-header-enhanced {
+        position: relative;
+        padding-left: 1rem;
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+      }
+
+      .section-header-enhanced::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 4px;
+        height: 1.5rem;
+        background: linear-gradient(
+          180deg,
+          var(--color-primary),
+          var(--color-accent)
+        );
+        border-radius: 2px;
+      }
+
+      /* Enhanced Payment Details Section */
+      .payment-details-enhanced {
+        background: linear-gradient(
+          135deg,
+          var(--color-surface),
+          rgba(6, 182, 212, 0.02)
+        );
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .payment-details-enhanced::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          var(--color-accent),
+          var(--color-primary)
+        );
+      }
+
+      /* Enhanced Input Styling */
+      .enhanced-cash-input {
+        position: relative;
+        border: 2px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background: var(--color-surface);
+        transition: all 0.2s ease;
+      }
+
+      .enhanced-cash-input:focus-within {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(126, 215, 165, 0.2);
+      }
+
+      .enhanced-cash-input input {
+        border: none;
+        outline: none;
+        background: transparent;
+        font-family: var(--font-primary);
+        font-size: 1.125rem;
+        font-weight: var(--fw-medium);
+        color: var(--color-text-primary);
+      }
+
+      /* Responsive Design Improvements */
+      @media (max-width: 768px) {
+        .keypad-btn {
+          padding: 1rem;
+          font-size: 1.125rem;
+        }
+
+        .payment-method-card {
+          border-radius: var(--radius-md);
+        }
+
+        .quick-amount-btn {
+          padding: 0.625rem;
+          font-size: var(--fs-sm-mobile);
+        }
+
+        .section-header-enhanced {
+          font-size: var(--fs-base-mobile);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .keypad-btn {
+          padding: 0.875rem;
+          font-size: 1rem;
+        }
+
+        .quick-amount-btn {
+          padding: 0.5rem;
+          font-size: var(--fs-xs-mobile);
+        }
+      }
+
+      /* Smooth Animations */
+      @keyframes slideInUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .animate-slide-in {
+        animation: slideInUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
       }
 
       @keyframes pulse-success {
         0%,
         100% {
           opacity: 1;
+          transform: scale(1);
         }
         50% {
-          opacity: 0.7;
+          opacity: 0.8;
+          transform: scale(1.02);
         }
       }
 
       .pulse-success {
-        animation: pulse-success 2s infinite;
+        animation: pulse-success 2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+      }
+
+      /* Enhanced Loading States */
+      .loading-enhanced {
+        position: relative;
+        pointer-events: none;
+        opacity: 0.7;
+      }
+
+      .loading-enhanced::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 20px;
+        height: 20px;
+        margin: -10px 0 0 -10px;
+        border: 2px solid var(--color-primary);
+        border-radius: 50%;
+        border-top-color: transparent;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* High Contrast Mode Support */
+      @media (prefers-contrast: high) {
+        .payment-method-card {
+          border-width: 3px;
+        }
+
+        .keypad-btn {
+          border-width: 2px;
+          font-weight: var(--fw-bold);
+        }
+
+        .quick-amount-btn {
+          border-width: 2px;
+        }
+      }
+
+      /* Reduced Motion Support */
+      @media (prefers-reduced-motion: reduce) {
+        .payment-method-card,
+        .keypad-btn,
+        .quick-amount-btn {
+          transition: none;
+        }
+
+        .pulse-success {
+          animation: none;
+        }
+
+        .loading-enhanced::after {
+          animation: none;
+        }
       }
     `,
   ],
@@ -140,6 +515,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   constructor(
     private fb: FormBuilder,
     private paymentService: PosPaymentService,
+    private toastService: ToastService,
   ) {
     this.paymentForm = this.createPaymentForm();
   }
@@ -196,11 +572,11 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   }
 
   getPaymentMethodClasses(method: PaymentMethod): string {
-    const baseClasses = ['payment-method-card'];
+    const base_classes = ['payment-method-card'];
     if (this.paymentState.selectedMethod?.id === method.id) {
-      baseClasses.push('selected');
+      base_classes.push('selected');
     }
-    return baseClasses.join(' ');
+    return base_classes.join(' ');
   }
 
   setCashAmount(amount: number): void {
@@ -208,9 +584,9 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   }
 
   appendNumber(num: number): void {
-    const currentValue = this.cashReceivedControl.value || 0;
-    const newValue = parseFloat(currentValue.toString() + num.toString());
-    this.cashReceivedControl.setValue(newValue);
+    const current_value = this.cashReceivedControl.value || 0;
+    const new_value = parseFloat(current_value.toString() + num.toString());
+    this.cashReceivedControl.setValue(new_value);
   }
 
   clearCashAmount(): void {
@@ -265,9 +641,18 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
+    if (!this.cartState.customer) {
+      this.toastService.show({
+        variant: 'error',
+        title: 'Error',
+        description: 'Debe seleccionar un cliente para procesar la venta',
+      });
+      return;
+    }
+
     this.paymentState.isProcessing = true;
 
-    const paymentRequest = {
+    const payment_request = {
       orderId: 'ORDER_' + Date.now(),
       amount: this.cartState.summary.total,
       paymentMethod: this.paymentState.selectedMethod,
@@ -276,7 +661,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     };
 
     this.paymentService
-      .processSaleWithPayment(this.cartState, paymentRequest, 'current_user')
+      .processSaleWithPayment(this.cartState, payment_request, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -292,11 +677,21 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
             this.onModalClosed();
           } else {
             console.error('Payment failed:', response.message);
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: response.message || 'Error al procesar el pago',
+            });
           }
         },
         error: (error) => {
           this.paymentState.isProcessing = false;
           console.error('Payment error:', error);
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error',
+            description: error.message || 'Error de conexión al procesar el pago',
+          });
         },
       });
   }
@@ -322,51 +717,66 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
             this.onModalClosed();
           } else {
             console.error('Credit sale failed:', response.message);
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: response.message || 'Error al procesar la venta a crédito',
+            });
           }
-        },
+      },
         error: (error) => {
           this.paymentState.isProcessing = false;
           console.error('Credit sale error:', error);
+          this.toastService.show({
+            variant: 'error',
+            title: 'Error',
+            description: error.message || 'Error al procesar la venta a crédito',
+          });
         },
       });
-  }
+}
 
-  saveAsDraft(): void {
-    if (!this.cartState) return;
+saveAsDraft(): void {
+  if(!this.cartState) return;
 
-    this.paymentState.isProcessing = true;
+  this.paymentState.isProcessing = true;
 
-    this.paymentService
-      .saveDraft(this.cartState, 'current_user')
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (response) => {
-          this.paymentState.isProcessing = false;
-          if (response.success) {
-            this.draftSaved.emit({
-              success: true,
-              order: response.order,
-              message: response.message,
-            });
-            this.onModalClosed();
-          }
-        },
-        error: (error) => {
-          this.paymentState.isProcessing = false;
-          console.error('Save draft error:', error);
-        },
-      });
-  }
+  this.paymentService
+    .saveDraft(this.cartState, 'current_user')
+    .pipe(takeUntil(this.destroy$))
+    .subscribe({
+      next: (response) => {
+        this.paymentState.isProcessing = false;
+        if (response.success) {
+          this.draftSaved.emit({
+            success: true,
+            order: response.order,
+            message: response.message,
+          });
+          this.onModalClosed();
+        }
+      },
+      error: (error) => {
+        this.paymentState.isProcessing = false;
+        console.error('Save draft error:', error);
+        this.toastService.show({
+          variant: 'error',
+          title: 'Error',
+          description: error.message || 'Error al guardar el borrador',
+        });
+      },
+    });
+}
 
-  onModalClosed(): void {
-    this.paymentState = {
-      selectedMethod: null,
-      cashReceived: 0,
-      reference: '',
-      isProcessing: false,
-      change: 0,
-    };
-    this.paymentForm.reset();
-    this.closed.emit();
-  }
+onModalClosed(): void {
+  this.paymentState = {
+    selectedMethod: null,
+    cashReceived: 0,
+    reference: '',
+    isProcessing: false,
+    change: 0,
+  };
+  this.paymentForm.reset();
+  this.closed.emit();
+}
 }

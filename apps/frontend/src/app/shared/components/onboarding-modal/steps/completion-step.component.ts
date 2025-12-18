@@ -1,4 +1,10 @@
-import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, IconComponent } from '../../index';
 
@@ -7,428 +13,434 @@ import { ButtonComponent, IconComponent } from '../../index';
   standalone: true,
   imports: [CommonModule, ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [`
-    .completion-step {
-      padding: 1.5rem 0;
-      min-height: 600px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }
-
-    .completion-container {
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 0 1.5rem;
-    }
-
-    .success-animation {
-      margin-bottom: 2rem;
-    }
-
-    .success-icon-wrapper {
-      position: relative;
-      display: inline-block;
-    }
-
-    .success-icon-bg {
-      width: 120px;
-      height: 120px;
-      background: linear-gradient(135deg, #22C55E 0%, #16A34A 100%);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto;
-      box-shadow: 0 12px 40px rgba(34, 197, 94, 0.32);
-      position: relative;
-      z-index: 2;
-      animation: successPop 0.6s ease-out;
-    }
-
-    @keyframes successPop {
-      0% {
-        transform: scale(0);
-        opacity: 0;
+  styles: [
+    `
+      .completion-step {
+        padding: 1.5rem 0;
+        min-height: 600px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
       }
-      50% {
-        transform: scale(1.1);
-      }
-      100% {
-        transform: scale(1);
-        opacity: 1;
-      }
-    }
 
-    .success-icon {
-      color: white;
-    }
-
-    .success-ripple {
-      position: absolute;
-      top: -20px;
-      left: -20px;
-      right: -20px;
-      bottom: -20px;
-      border: 2px solid rgba(34, 197, 94, 0.2);
-      border-radius: 50%;
-      animation: ripple 2s ease-out infinite;
-    }
-
-    @keyframes ripple {
-      0% {
-        transform: scale(1);
-        opacity: 1;
-      }
-      50% {
-        transform: scale(1.15);
-        opacity: 0.5;
-      }
-      100% {
-        transform: scale(1);
-        opacity: 1;
-      }
-    }
-
-    .completion-title {
-      font-size: 2.5rem;
-      font-weight: 700;
-      color: #1F2937;
-      margin-bottom: 0.75rem;
-      background: linear-gradient(135deg, #22C55E 0%, #16A34A 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .completion-subtitle {
-      font-size: 1.125rem;
-      color: #6B7280;
-      line-height: 1.6;
-      margin-bottom: 2rem;
-    }
-
-    .success-stats {
-      display: flex;
-      justify-content: center;
-      gap: 2rem;
-      margin-bottom: 2rem;
-    }
-
-    .stat-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .stat-number {
-      font-size: 2rem;
-      line-height: 1;
-    }
-
-    .stat-label {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #374151;
-    }
-
-    .completion-summary {
-      background: white;
-      border: 1px solid #E5E7EB;
-      border-radius: 1rem;
-      padding: 1.5rem;
-      margin-bottom: 2rem;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-
-    .summary-header {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid #F3F4F6;
-    }
-
-    .summary-icon {
-      width: 40px;
-      height: 40px;
-      background: #F0FDF4;
-      border-radius: 0.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .summary-icon-element {
-      color: #22C55E;
-    }
-
-    .summary-title {
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: #1F2937;
-      margin: 0;
-    }
-
-    .summary-items {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .summary-item {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.75rem;
-      border-radius: 0.5rem;
-      background: #F9FAFB;
-    }
-
-    .item-icon {
-      width: 36px;
-      height: 36px;
-      background: white;
-      border-radius: 0.375rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .item-icon-element {
-      color: #22C55E;
-    }
-
-    .item-content {
-      flex: 1;
-      text-align: left;
-    }
-
-    .item-label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: #374151;
-      margin-bottom: 0.25rem;
-    }
-
-    .item-value {
-      display: block;
-      font-size: 0.75rem;
-      color: #6B7280;
-    }
-
-    .item-check {
-      flex-shrink: 0;
-    }
-
-    .check-icon {
-      color: #22C55E;
-    }
-
-    .next-steps {
-      background: #F8FAFC;
-      border: 1px solid #E5E7EB;
-      border-radius: 1rem;
-      padding: 1.5rem;
-      margin-bottom: 2.5rem;
-    }
-
-    .next-steps-header {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-
-    .next-steps-icon {
-      width: 40px;
-      height: 40px;
-      background: #DBEAFE;
-      border-radius: 0.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .next-steps-icon-element {
-      color: #3B82F6;
-    }
-
-    .next-steps-title {
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: #1F2937;
-      margin: 0;
-    }
-
-    .next-steps-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1rem;
-    }
-
-    .next-step-card {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 1.25rem;
-      background: white;
-      border-radius: 0.75rem;
-      border: 1px solid #E5E7EB;
-      transition: all 0.2s ease;
-      text-align: center;
-    }
-
-    .next-step-card:hover {
-      border-color: #3B82F6;
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
-      transform: translateY(-2px);
-    }
-
-    .step-card-icon {
-      width: 48px;
-      height: 48px;
-      background: #DBEAFE;
-      border-radius: 0.5rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-    }
-
-    .step-card-icon-element {
-      color: #3B82F6;
-    }
-
-    .step-card-content {
-      flex: 1;
-    }
-
-    .step-card-title {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: #1F2937;
-      margin-bottom: 0.375rem;
-    }
-
-    .step-card-description {
-      font-size: 0.75rem;
-      color: #6B7280;
-      line-height: 1.5;
-    }
-
-    .completion-action {
-      margin-top: 2rem;
-      padding-top: 2rem;
-      border-top: 2px solid #E5E7EB;
-      display: flex;
-      justify-content: center;
-    }
-
-    .action-button {
-      min-width: 240px;
-      height: 56px;
-      font-size: 1.125rem;
-      font-weight: 600;
-      box-shadow: 0 4px 16px rgba(34, 197, 94, 0.24);
-      transition: all 0.2s ease;
-    }
-
-    .action-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 24px rgba(34, 197, 94, 0.32);
-    }
-
-    .action-button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none;
-    }
-
-    .loading-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-    }
-
-    .loading-content {
-      background: white;
-      padding: 2rem;
-      border-radius: 1rem;
-      text-align: center;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
-    }
-
-    .loading-spinner {
-      width: 40px;
-      height: 40px;
-      border: 4px solid #E5E7EB;
-      border-top: 4px solid #22C55E;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 1rem;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    .loading-text {
-      color: #374151;
-      font-weight: 500;
-    }
-
-    @media (max-width: 640px) {
       .completion-container {
-        padding: 0 1rem;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+      }
+
+      .success-animation {
+        margin-bottom: 2rem;
+      }
+
+      .success-icon-wrapper {
+        position: relative;
+        display: inline-block;
+      }
+
+      .success-icon-bg {
+        width: 120px;
+        height: 120px;
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto;
+        box-shadow: 0 12px 40px rgba(34, 197, 94, 0.32);
+        position: relative;
+        z-index: 2;
+        animation: successPop 0.6s ease-out;
+      }
+
+      @keyframes successPop {
+        0% {
+          transform: scale(0);
+          opacity: 0;
+        }
+        50% {
+          transform: scale(1.1);
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+      }
+
+      .success-icon {
+        color: white;
+      }
+
+      .success-ripple {
+        position: absolute;
+        top: -20px;
+        left: -20px;
+        right: -20px;
+        bottom: -20px;
+        border: 2px solid rgba(34, 197, 94, 0.2);
+        border-radius: 50%;
+        animation: ripple 2s ease-out infinite;
+      }
+
+      @keyframes ripple {
+        0% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scale(1.15);
+          opacity: 0.5;
+        }
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
       }
 
       .completion-title {
-        font-size: 2rem;
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 0.75rem;
+        background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .completion-subtitle {
+        font-size: 1.125rem;
+        color: #6b7280;
+        line-height: 1.6;
+        margin-bottom: 2rem;
       }
 
       .success-stats {
-        gap: 1rem;
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin-bottom: 2rem;
       }
 
-      .stat-number {
-        font-size: 1.5rem;
-      }
-
-      .next-steps-grid {
-        grid-template-columns: 1fr;
-        gap: 0.75rem;
-      }
-
-      .summary-header,
-      .next-steps-header {
+      .stat-item {
+        display: flex;
         flex-direction: column;
+        align-items: center;
         gap: 0.5rem;
       }
 
-      .next-step-card {
-        flex-direction: column;
-        text-align: center;
-        gap: 0.75rem;
+      .stat-number {
+        font-size: 2rem;
+        line-height: 1;
       }
-    }
-  `],
+
+      .stat-label {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #374151;
+      }
+
+      .completion-summary {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      }
+
+      .summary-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid #f3f4f6;
+      }
+
+      .summary-icon {
+        width: 40px;
+        height: 40px;
+        background: #f0fdf4;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .summary-icon-element {
+        color: #22c55e;
+      }
+
+      .summary-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin: 0;
+      }
+
+      .summary-items {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .summary-item {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        background: #f9fafb;
+      }
+
+      .item-icon {
+        width: 36px;
+        height: 36px;
+        background: white;
+        border-radius: 0.375rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .item-icon-element {
+        color: #22c55e;
+      }
+
+      .item-content {
+        flex: 1;
+        text-align: left;
+      }
+
+      .item-label {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #374151;
+        margin-bottom: 0.25rem;
+      }
+
+      .item-value {
+        display: block;
+        font-size: 0.75rem;
+        color: #6b7280;
+      }
+
+      .item-check {
+        flex-shrink: 0;
+      }
+
+      .check-icon {
+        color: #22c55e;
+      }
+
+      .next-steps {
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        border-radius: 1rem;
+        padding: 1.5rem;
+        margin-bottom: 2.5rem;
+      }
+
+      .next-steps-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .next-steps-icon {
+        width: 40px;
+        height: 40px;
+        background: #dbeafe;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .next-steps-icon-element {
+        color: #3b82f6;
+      }
+
+      .next-steps-title {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin: 0;
+      }
+
+      .next-steps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1rem;
+      }
+
+      .next-step-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1.25rem;
+        background: white;
+        border-radius: 0.75rem;
+        border: 1px solid #e5e7eb;
+        transition: all 0.2s ease;
+        text-align: center;
+      }
+
+      .next-step-card:hover {
+        border-color: #3b82f6;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+        transform: translateY(-2px);
+      }
+
+      .step-card-icon {
+        width: 48px;
+        height: 48px;
+        background: #dbeafe;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .step-card-icon-element {
+        color: #3b82f6;
+      }
+
+      .step-card-content {
+        flex: 1;
+      }
+
+      .step-card-title {
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 0.375rem;
+      }
+
+      .step-card-description {
+        font-size: 0.75rem;
+        color: #6b7280;
+        line-height: 1.5;
+      }
+
+      .completion-action {
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 2px solid #e5e7eb;
+        display: flex;
+        justify-content: center;
+      }
+
+      .action-button {
+        min-width: 240px;
+        height: 56px;
+        font-size: 1.125rem;
+        font-weight: 600;
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.24);
+        transition: all 0.2s ease;
+      }
+
+      .action-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 24px rgba(34, 197, 94, 0.32);
+      }
+
+      .action-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+
+      .loading-content {
+        background: white;
+        padding: 2rem;
+        border-radius: 1rem;
+        text-align: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.24);
+      }
+
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #e5e7eb;
+        border-top: 4px solid #22c55e;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 1rem;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      .loading-text {
+        color: #374151;
+        font-weight: 500;
+      }
+
+      @media (max-width: 640px) {
+        .completion-container {
+          padding: 0 1rem;
+        }
+
+        .completion-title {
+          font-size: 2rem;
+        }
+
+        .success-stats {
+          gap: 1rem;
+        }
+
+        .stat-number {
+          font-size: 1.5rem;
+        }
+
+        .next-steps-grid {
+          grid-template-columns: 1fr;
+          gap: 0.75rem;
+        }
+
+        .summary-header,
+        .next-steps-header {
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+
+        .next-step-card {
+          flex-direction: column;
+          text-align: center;
+          gap: 0.75rem;
+        }
+      }
+    `,
+  ],
   template: `
     <div class="step-content completion-step">
       <div class="completion-container">
@@ -436,7 +448,11 @@ import { ButtonComponent, IconComponent } from '../../index';
         <div class="success-animation">
           <div class="success-icon-wrapper">
             <div class="success-icon-bg">
-              <app-icon name="check-circle" size="64" class="success-icon"></app-icon>
+              <app-icon
+                name="check-circle"
+                size="64"
+                class="success-icon"
+              ></app-icon>
             </div>
             <div class="success-ripple"></div>
           </div>
@@ -469,7 +485,11 @@ import { ButtonComponent, IconComponent } from '../../index';
           <div class="completion-summary">
             <div class="summary-header">
               <div class="summary-icon">
-                <app-icon name="check-square" size="20" class="summary-icon-element"></app-icon>
+                <app-icon
+                  name="check-square"
+                  size="20"
+                  class="summary-icon-element"
+                ></app-icon>
               </div>
               <h3 class="summary-title">Resumen de tu configuración</h3>
             </div>
@@ -477,66 +497,111 @@ import { ButtonComponent, IconComponent } from '../../index';
             <div class="summary-items">
               <div class="summary-item" *ngIf="wizardData.user?.first_name">
                 <div class="item-icon">
-                  <app-icon name="user" size="18" class="item-icon-element"></app-icon>
+                  <app-icon
+                    name="user"
+                    size="18"
+                    class="item-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="item-content">
                   <span class="item-label">Perfil configurado</span>
-                  <span class="item-value">{{ wizardData.user.first_name }} {{ wizardData.user.last_name }}</span>
+                  <span class="item-value"
+                    >{{ wizardData.user.first_name }}
+                    {{ wizardData.user.last_name }}</span
+                  >
                 </div>
                 <div class="item-check">
-                  <app-icon name="check-circle" size="16" class="check-icon"></app-icon>
+                  <app-icon
+                    name="check-circle"
+                    size="16"
+                    class="check-icon"
+                  ></app-icon>
                 </div>
               </div>
 
               <div class="summary-item" *ngIf="wizardData.organization?.name">
                 <div class="item-icon">
-                  <app-icon name="building" size="18" class="item-icon-element"></app-icon>
+                  <app-icon
+                    name="building"
+                    size="18"
+                    class="item-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="item-content">
                   <span class="item-label">Organización creada</span>
-                  <span class="item-value">{{ wizardData.organization.name }}</span>
+                  <span class="item-value">{{
+                    wizardData.organization.name
+                  }}</span>
                 </div>
                 <div class="item-check">
-                  <app-icon name="check-circle" size="16" class="check-icon"></app-icon>
+                  <app-icon
+                    name="check-circle"
+                    size="16"
+                    class="check-icon"
+                  ></app-icon>
                 </div>
               </div>
 
               <div class="summary-item" *ngIf="wizardData.store?.name">
                 <div class="item-icon">
-                  <app-icon name="store" size="18" class="item-icon-element"></app-icon>
+                  <app-icon
+                    name="store"
+                    size="18"
+                    class="item-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="item-content">
                   <span class="item-label">Tienda configurada</span>
                   <span class="item-value">{{ wizardData.store.name }}</span>
                 </div>
                 <div class="item-check">
-                  <app-icon name="check-circle" size="16" class="check-icon"></app-icon>
+                  <app-icon
+                    name="check-circle"
+                    size="16"
+                    class="check-icon"
+                  ></app-icon>
                 </div>
               </div>
 
               <div class="summary-item">
                 <div class="item-icon">
-                  <app-icon name="globe" size="18" class="item-icon-element"></app-icon>
+                  <app-icon
+                    name="globe"
+                    size="18"
+                    class="item-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="item-content">
                   <span class="item-label">Dominio activo</span>
                   <span class="item-value">tu-dominio.vendix.com</span>
                 </div>
                 <div class="item-check">
-                  <app-icon name="check-circle" size="16" class="check-icon"></app-icon>
+                  <app-icon
+                    name="check-circle"
+                    size="16"
+                    class="check-icon"
+                  ></app-icon>
                 </div>
               </div>
 
               <div class="summary-item">
                 <div class="item-icon">
-                  <app-icon name="palette" size="18" class="item-icon-element"></app-icon>
+                  <app-icon
+                    name="palette"
+                    size="18"
+                    class="item-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="item-content">
                   <span class="item-label">Branding personalizado</span>
                   <span class="item-value">Colores y estilos aplicados</span>
                 </div>
                 <div class="item-check">
-                  <app-icon name="check-circle" size="16" class="check-icon"></app-icon>
+                  <app-icon
+                    name="check-circle"
+                    size="16"
+                    class="check-icon"
+                  ></app-icon>
                 </div>
               </div>
             </div>
@@ -546,7 +611,11 @@ import { ButtonComponent, IconComponent } from '../../index';
           <div class="next-steps">
             <div class="next-steps-header">
               <div class="next-steps-icon">
-                <app-icon name="lightbulb" size="20" class="next-steps-icon-element"></app-icon>
+                <app-icon
+                  name="lightbulb"
+                  size="20"
+                  class="next-steps-icon-element"
+                ></app-icon>
               </div>
               <h3 class="next-steps-title">Próximos pasos recomendados</h3>
             </div>
@@ -554,7 +623,11 @@ import { ButtonComponent, IconComponent } from '../../index';
             <div class="next-steps-grid">
               <div class="next-step-card">
                 <div class="step-card-icon">
-                  <app-icon name="package" size="24" class="step-card-icon-element"></app-icon>
+                  <app-icon
+                    name="package"
+                    size="24"
+                    class="step-card-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="step-card-content">
                   <h4 class="step-card-title">Agregar productos</h4>
@@ -566,7 +639,11 @@ import { ButtonComponent, IconComponent } from '../../index';
 
               <div class="next-step-card">
                 <div class="step-card-icon">
-                  <app-icon name="users" size="24" class="step-card-icon-element"></app-icon>
+                  <app-icon
+                    name="users"
+                    size="24"
+                    class="step-card-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="step-card-content">
                   <h4 class="step-card-title">Invitar equipo</h4>
@@ -578,7 +655,11 @@ import { ButtonComponent, IconComponent } from '../../index';
 
               <div class="next-step-card">
                 <div class="step-card-icon">
-                  <app-icon name="credit-card" size="24" class="step-card-icon-element"></app-icon>
+                  <app-icon
+                    name="credit-card"
+                    size="24"
+                    class="step-card-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="step-card-content">
                   <h4 class="step-card-title">Configurar pagos</h4>
@@ -590,7 +671,11 @@ import { ButtonComponent, IconComponent } from '../../index';
 
               <div class="next-step-card">
                 <div class="step-card-icon">
-                  <app-icon name="chart-bar" size="24" class="step-card-icon-element"></app-icon>
+                  <app-icon
+                    name="chart-bar"
+                    size="24"
+                    class="step-card-icon-element"
+                  ></app-icon>
                 </div>
                 <div class="step-card-content">
                   <h4 class="step-card-title">Ver reportes</h4>
@@ -611,8 +696,16 @@ import { ButtonComponent, IconComponent } from '../../index';
               [disabled]="isCompleting"
               class="action-button"
             >
-              <app-icon name="layout-dashboard" size="24" slot="icon"></app-icon>
-              {{ isCompleting ? 'Finalizando configuración...' : 'Ir a mi panel de control' }}
+              <app-icon
+                name="layout-dashboard"
+                size="24"
+                slot="icon"
+              ></app-icon>
+              {{
+                isCompleting
+                  ? 'Finalizando configuración...'
+                  : 'Ir a mi panel de control'
+              }}
             </app-button>
           </div>
 

@@ -4,7 +4,7 @@ import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
 import { AppConfig } from './app-config.service'; // Import AppConfig
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class ThemeService {
   private currentThemeSubject = new BehaviorSubject<ThemeConfig | null>(null);
@@ -103,7 +103,9 @@ export class ThemeService {
    * Establece un conjunto de variables CSS en el elemento raíz.
    * @param variables - Un objeto donde las claves son nombres de variables CSS y los valores son sus valores.
    */
-  private setCssVariables(variables: { [key: string]: string | undefined }): void {
+  private setCssVariables(variables: {
+    [key: string]: string | undefined;
+  }): void {
     const root = this.document.documentElement;
     Object.entries(variables).forEach(([key, value]) => {
       if (value) {
@@ -116,7 +118,10 @@ export class ThemeService {
    * Aplana un objeto anidado para usarlo como variables CSS.
    * ej: { sm: '1px' } con el prefijo 'shadow' se convierte en { '--shadow-sm': '1px' }
    */
-  private flattenObject(obj: object, prefix: string): { [key: string]: string } {
+  private flattenObject(
+    obj: object,
+    prefix: string,
+  ): { [key: string]: string } {
     const result: { [key: string]: string } = {};
     Object.entries(obj).forEach(([key, value]) => {
       result[`--${prefix}-${key}`] = value;
@@ -148,8 +153,16 @@ export class ThemeService {
    */
   private isGoogleFont(fontName: string): boolean {
     const googleFonts = [
-      'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 
-      'Poppins', 'Nunito', 'Ubuntu', 'Raleway', 'Work Sans'
+      'Inter',
+      'Roboto',
+      'Open Sans',
+      'Lato',
+      'Montserrat',
+      'Poppins',
+      'Nunito',
+      'Ubuntu',
+      'Raleway',
+      'Work Sans',
     ];
     return googleFonts.includes(fontName);
   }
@@ -171,15 +184,16 @@ export class ThemeService {
         resolve();
         return;
       }
-      
+
       const link = this.document.createElement('link');
       link.id = linkId;
       link.rel = 'stylesheet';
       link.href = `https://fonts.googleapis.com/css2?family=${fontName.replace(' ', '+')}:wght@300;400;500;600;700&display=swap`;
-      
+
       link.onload = () => resolve();
-      link.onerror = () => reject(new Error(`Failed to load Google Font: ${fontName}`));
-      
+      link.onerror = () =>
+        reject(new Error(`Failed to load Google Font: ${fontName}`));
+
       this.document.head.appendChild(link);
     });
   }
@@ -192,11 +206,11 @@ export class ThemeService {
       const oldElement = this.injectedStyleElements.get(id)!;
       oldElement.remove();
     }
-    
+
     const styleElement = this.document.createElement('style');
     styleElement.id = id;
     styleElement.textContent = css;
-    
+
     this.document.head.appendChild(styleElement);
     this.injectedStyleElements.set(id, styleElement);
   }
@@ -206,7 +220,9 @@ export class ThemeService {
    */
   updateFavicon(faviconUrl: string): void {
     try {
-      let favicon = this.document.querySelector('link[rel="icon"]') as HTMLLinkElement;
+      let favicon = this.document.querySelector(
+        'link[rel="icon"]',
+      ) as HTMLLinkElement;
       if (!favicon) {
         favicon = this.document.createElement('link');
         favicon.rel = 'icon';
@@ -223,19 +239,19 @@ export class ThemeService {
    */
   resetTheme(): void {
     const root = this.document.documentElement;
-    
+
     // Remover todos los estilos en línea para que se apliquen los de la hoja de estilos.
     root.removeAttribute('style');
-    
+
     // Remover CSS inyectado
     this.injectedStyleElements.forEach((element) => {
       element.remove();
     });
     this.injectedStyleElements.clear();
-    
+
     // Limpiar fuentes cargadas (no removemos los <link> de fuentes por simplicidad)
     this.loadedFonts.clear();
-    
+
     this.currentThemeSubject.next(null);
   }
 
@@ -255,7 +271,7 @@ export class ThemeService {
           primary: apiBranding.text_color,
           secondary: apiBranding.text_secondary_color,
           muted: apiBranding.text_muted_color,
-        }
+        },
       },
       fonts: {
         primary: apiBranding.font_primary,

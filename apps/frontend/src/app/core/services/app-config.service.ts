@@ -166,7 +166,7 @@ export class AppConfigService {
   ): Promise<DomainResolution | null> {
     const response = await this.http
       .get<DomainResolutionResponse>(
-        `${environment.apiUrl}/domains/resolve/${hostname}`,
+        `${environment.apiUrl}/public/domains/resolve/${hostname}`,
       )
       .pipe(catchError(() => of(null)))
       .toPromise();
@@ -191,6 +191,23 @@ export class AppConfigService {
   private getCachedUserEnvironment(): AppEnvironment | null {
     try {
       if (typeof localStorage === 'undefined') return null;
+
+      // 🔒 SECURITY CHECK: Verificar si el usuario acaba de cerrar sesión recientemente
+      const loggedOutRecently = localStorage.getItem('vendix_logged_out_recently');
+      if (loggedOutRecently) {
+        const logoutTime = parseInt(loggedOutRecently);
+        const currentTime = Date.now();
+        // Si el logout fue hace menos de 30 segundos, ignorar el environment cachado
+        if (currentTime - logoutTime < 30000) {
+          console.log('🔒 Recent logout detected, ignoring cached environment');
+          localStorage.removeItem('vendix_user_environment');
+          localStorage.removeItem('vendix_logged_out_recently');
+          return null;
+        }
+        // Limpiar bandera si pasó más tiempo
+        localStorage.removeItem('vendix_logged_out_recently');
+      }
+
       return localStorage.getItem(
         'vendix_user_environment',
       ) as AppEnvironment | null;

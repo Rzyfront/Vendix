@@ -13,95 +13,109 @@ export class PosApiService {
 
   // Customer endpoints
   createCustomer(customerData: any): Observable<any> {
-    return this.http.post(`${this.apiUrl}/customers`, customerData);
+    return this.http.post(`${this.apiUrl}/store/customers`, customerData);
   }
 
   searchCustomers(params: any): Observable<any> {
-    return this.http.get(`${this.apiUrl}/customers`, { params });
+    return this.http.get(`${this.apiUrl}/store/customers`, { params });
   }
 
   getCustomerById(id: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/customers/${id}`);
+    return this.http.get(`${this.apiUrl}/store/customers/${id}`);
   }
 
   updateCustomer(id: string, data: any): Observable<any> {
-    return this.http.patch(`${this.apiUrl}/customers/${id}`, data);
+    return this.http.patch(`${this.apiUrl}/store/customers/${id}`, data);
   }
 
   // Product endpoints
   searchProducts(params: any): Observable<any> {
-    return this.http.get(`${this.apiUrl}/products`, { params });
+    return this.http.get(`${this.apiUrl}/store/products`, { params });
   }
 
   getProductById(id: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/products/${id}`);
+    return this.http.get(`${this.apiUrl}/store/products/${id}`);
   }
 
   getProductByBarcode(barcode: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/products/by-barcode/${barcode}`);
+    return this.http.get(`${this.apiUrl}/store/products/by-barcode/${barcode}`);
   }
 
   getProductBySku(sku: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/products/by-sku/${sku}`);
+    return this.http.get(`${this.apiUrl}/store/products/by-sku/${sku}`);
   }
 
   updateStock(productId: string, data: any): Observable<any> {
-    return this.http.patch(`${this.apiUrl}/products/${productId}/stock`, data);
+    return this.http.patch(
+      `${this.apiUrl}/store/products/${productId}/stock`,
+      data,
+    );
   }
 
   // Order endpoints
   createOrder(orderData: any): Observable<any> {
-    return this.http.post(`${this.apiUrl}/orders`, orderData);
+    return this.http.post(`${this.apiUrl}/store/orders`, orderData);
   }
 
   createDraftOrder(orderData: any): Observable<any> {
-    return this.http.post(`${this.apiUrl}/orders/draft`, orderData);
+    return this.http.post(`${this.apiUrl}/store/orders/draft`, orderData);
   }
 
   updateOrder(id: string, data: any): Observable<any> {
-    return this.http.patch(`${this.apiUrl}/orders/${id}`, data);
+    return this.http.patch(`${this.apiUrl}/store/orders/${id}`, data);
   }
 
   getOrderById(id: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/orders/${id}`);
+    return this.http.get(`${this.apiUrl}/store/orders/${id}`);
   }
 
   getOrderByNumber(orderNumber: string): Observable<any> {
-    return this.http.get(`${this.apiUrl}/orders/by-number/${orderNumber}`);
+    return this.http.get(
+      `${this.apiUrl}/store/orders/by-number/${orderNumber}`,
+    );
   }
 
   searchOrders(params: any): Observable<any> {
-    return this.http.get(`${this.apiUrl}/orders`, { params });
+    return this.http.get(`${this.apiUrl}/store/orders`, { params });
   }
 
   cancelOrder(id: string, reason?: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/orders/${id}/cancel`, { reason });
+    return this.http.post(`${this.apiUrl}/store/orders/${id}/cancel`, {
+      reason,
+    });
   }
 
   refundOrder(id: string, reason?: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/orders/${id}/refund`, { reason });
+    return this.http.post(`${this.apiUrl}/store/orders/${id}/refund`, {
+      reason,
+    });
   }
 
   getOrderStats(params?: any): Observable<any> {
-    return this.http.get(`${this.apiUrl}/orders/stats`, { params });
+    return this.http.get(`${this.apiUrl}/store/orders/stats`, { params });
   }
 
   // Payment endpoints
   processPayment(paymentData: any): Observable<any> {
-    return this.http.post(`${this.apiUrl}/payments/with-order`, paymentData);
+    return this.http.post(
+      `${this.apiUrl}/store/payments/with-order`,
+      paymentData,
+    );
   }
 
   getPaymentMethods(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/payments/methods`);
+    return this.http.get(`${this.apiUrl}/store/payments/methods`);
   }
 
   refundPayment(paymentId: string, reason?: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/payments/${paymentId}/refund`, {
+    return this.http.post(`${this.apiUrl}/store/payments/${paymentId}/refund`, {
       reason,
     });
   }
 
   getTransactionHistory(params?: any): Observable<any> {
-    return this.http.get(`${this.apiUrl}/payments/transactions`, { params });
+    return this.http.get(`${this.apiUrl}/store/payments/transactions`, {
+      params,
+    });
   }
 }

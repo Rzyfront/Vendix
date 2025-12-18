@@ -29,8 +29,8 @@ export class PosCustomerService {
   private readonly selectedCustomer$ = new BehaviorSubject<PosCustomer | null>(
     null,
   );
-  private readonly apiUrl = `${environment.apiUrl}/users`;
-  private readonly registerUrl = `${environment.apiUrl}/auth/register-customer`;
+  private readonly apiUrl = `${environment.apiUrl}/store/customers`;
+  private readonly registerUrl = `${environment.apiUrl}/store/customers`;
 
   constructor(private http: HttpClient) {
     // Initialize with mock data for development if needed
@@ -239,20 +239,24 @@ export class PosCustomerService {
       errors.push({ field: 'firstName', message: 'Nombre es requerido' });
     }
 
-    // Document fields are now optional
-    // if (!request.document_type?.trim()) {
-    //   errors.push({
-    //     field: 'documentType',
-    //     message: 'Tipo de documento es requerido',
-    //   });
-    // }
+    if (!request.last_name?.trim()) {
+      errors.push({ field: 'lastName', message: 'Apellido es requerido' });
+    }
 
-    // if (!request.document_number?.trim()) {
-    //   errors.push({
-    //     field: 'documentNumber',
-    //     message: 'Número de documento es requerido',
-    //   });
-    // }
+    // Document fields are mandatory per requirements
+    if (!request.document_type?.trim()) {
+      errors.push({
+        field: 'documentType',
+        message: 'Tipo de documento es requerido',
+      });
+    }
+
+    if (!request.document_number?.trim()) {
+      errors.push({
+        field: 'documentNumber',
+        message: 'Número de documento es requerido',
+      });
+    }
 
     // Check for duplicate email
     const existingCustomer = this.customers$.value.find(

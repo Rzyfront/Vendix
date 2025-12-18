@@ -12,6 +12,7 @@ import { Router } from '@angular/router';
 import { Observable, Subject, takeUntil } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
+import { UserUiService } from '../../services/user-ui.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
@@ -82,6 +83,9 @@ export interface UserMenuOption {
         </div>
       </div>
     </div>
+    
+
+
   `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
@@ -97,7 +101,9 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
+
   private fullscreenService = inject(FullscreenService);
+  private userUiService = inject(UserUiService);
 
   userContext$: Observable<{
     user?: any;
@@ -236,11 +242,16 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private goToProfile() {
-    this.router.navigate(['/profile']);
+    console.log('UserDropdown: goToProfile clicked');
+    this.userUiService.openProfile();
+    this.isOpen = false;
+    this.closeDropdown.emit();
   }
 
   private goToSettings() {
-    this.router.navigate(['/settings']);
+    this.userUiService.openSettings();
+    this.isOpen = false;
+    this.closeDropdown.emit();
   }
 
   private logout() {

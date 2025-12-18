@@ -5,16 +5,29 @@ import {
   EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
-import { CountryService, Country } from '../../../../services/country.service';
+import {
+  CountryService,
+  Country,
+  Department,
+  City,
+} from '../../../../services/country.service';
+import { InputComponent } from '../../input/input.component';
 
 @Component({
   selector: 'app-user-setup-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    ReactiveFormsModule,
+    IconComponent,
+    InputComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -100,6 +113,10 @@ import { CountryService, Country } from '../../../../services/country.service';
       }
 
       .form-section {
+        margin-bottom: 2rem;
+      }
+
+      .form-section:last-child {
         margin-bottom: 0;
       }
 
@@ -142,6 +159,10 @@ import { CountryService, Country } from '../../../../services/country.service';
       .form-field {
         display: flex;
         flex-direction: column;
+      }
+
+      .form-field.full-width {
+        grid-column: 1 / -1;
       }
 
       .field-label {
@@ -272,7 +293,7 @@ import { CountryService, Country } from '../../../../services/country.service';
         </div>
 
         <!-- User Form -->
-        <div class="user-form">
+        <form class="user-form" [formGroup]="formGroup">
           <!-- Personal Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -295,7 +316,7 @@ import { CountryService, Country } from '../../../../services/country.service';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('first_name')"
+                  formControlName="first_name"
                   placeholder="Tu nombre"
                 />
               </div>
@@ -308,28 +329,22 @@ import { CountryService, Country } from '../../../../services/country.service';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('last_name')"
+                  formControlName="last_name"
                   placeholder="Tu apellido"
                 />
               </div>
 
+              <!-- Teléfono -->
               <div class="form-field">
-                <label class="field-label">
-                  Teléfono
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
+                <app-input
+                  label="Teléfono"
+                  formControlName="phone"
                   type="tel"
-                  class="field-input"
-                  [formControl]="formGroup.get('phone')"
-                  placeholder="+52 (555) 123-4567"
-                />
-                <div class="field-hint">
-                  <app-icon name="info" size="14" class="hint-icon"></app-icon>
-                  <span class="hint-text"
-                    >Solo para notificaciones importantes</span
-                  >
-                </div>
+                  placeholder="+57 123 456 7890"
+                  helperText="Solo para notificaciones importantes"
+                  customWrapperClass="-mt-4"
+                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-purple-500 focus:!ring-2 focus:!ring-purple-500/10"
+                ></app-input>
               </div>
             </div>
           </div>
@@ -348,7 +363,7 @@ import { CountryService, Country } from '../../../../services/country.service';
             </div>
 
             <div class="form-grid">
-              <div class="form-field" style="grid-column: 1 / -1;">
+              <div class="form-field full-width">
                 <label class="field-label">
                   Calle y número
                   <span class="field-optional">(opcional)</span>
@@ -356,12 +371,12 @@ import { CountryService, Country } from '../../../../services/country.service';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('address_line1')"
+                  formControlName="address_line1"
                   placeholder="Calle Principal 123"
                 />
               </div>
 
-              <div class="form-field" style="grid-column: 1 / -1;">
+              <div class="form-field full-width">
                 <label class="field-label">
                   Apartamento, suite, etc.
                   <span class="field-optional">(opcional)</span>
@@ -369,47 +384,8 @@ import { CountryService, Country } from '../../../../services/country.service';
                 <input
                   type="text"
                   class="field-input"
-                  [formControl]="formGroup.get('address_line2')"
+                  formControlName="address_line2"
                   placeholder="Apt 101, Suite 200"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  Ciudad
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('city')"
-                  placeholder="Ciudad de México"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  Estado/Provincia
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('state_province')"
-                  placeholder="Ciudad de México"
-                />
-              </div>
-
-              <div class="form-field">
-                <label class="field-label">
-                  Código Postal
-                  <span class="field-optional">(opcional)</span>
-                </label>
-                <input
-                  type="text"
-                  class="field-input"
-                  [formControl]="formGroup.get('postal_code')"
-                  placeholder="06000"
                 />
               </div>
 
@@ -418,10 +394,8 @@ import { CountryService, Country } from '../../../../services/country.service';
                   País
                   <span class="field-optional">(opcional)</span>
                 </label>
-                <select
-                  class="field-input"
-                  [formControl]="formGroup.get('country_code')"
-                >
+                <select class="field-input" formControlName="country_code">
+                  <option value="">Selecciona un país</option>
                   <option
                     *ngFor="let country of countries"
                     [value]="country.code"
@@ -430,9 +404,49 @@ import { CountryService, Country } from '../../../../services/country.service';
                   </option>
                 </select>
               </div>
+
+              <!-- Departamento (Estado/Provincia) -->
+              <div class="form-field">
+                <label class="field-label">
+                  Departamento
+                  <span class="field-optional">(opcional)</span>
+                </label>
+                <select class="field-input" formControlName="state_province">
+                  <option value="">Selecciona un departamento</option>
+                  <option *ngFor="let dep of departments" [value]="dep.id">
+                    {{ dep.name }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Ciudad -->
+              <div class="form-field">
+                <label class="field-label">
+                  Ciudad
+                  <span class="field-optional">(opcional)</span>
+                </label>
+                <select class="field-input" formControlName="city">
+                  <option value="">Selecciona una ciudad</option>
+                  <option *ngFor="let city of cities" [value]="city.id">
+                    {{ city.name }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Código postal -->
+              <div class="form-field">
+                <app-input
+                  label="Código postal"
+                  formControlName="postal_code"
+                  type="tel"
+                  placeholder="06000"
+                  customWrapperClass="-mt-4"
+                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-purple-500 focus:!ring-2 focus:!ring-purple-500/10"
+                ></app-input>
+              </div>
             </div>
           </div>
-        </div>
+        </form>
 
         <!-- Skip Information -->
         <div class="user-skip">
@@ -454,10 +468,64 @@ export class UserSetupStepComponent implements OnInit {
   @Output() previousStep = new EventEmitter<void>();
 
   countries: Country[] = [];
+  departments: Department[] = [];
+  cities: City[] = [];
 
-  constructor(private countryService: CountryService) {}
+  constructor(
+    private countryService: CountryService,
+    private cdr: ChangeDetectorRef,
+  ) {}
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
+
+    if (!this.formGroup) return;
+
+    const countryControl = this.formGroup.get('country_code');
+    const depControl = this.formGroup.get('state_province');
+    const cityControl = this.formGroup.get('city');
+
+    // Cargar departamentos al cambiar país
+    countryControl.valueChanges.subscribe((code: string) => {
+      if (code === 'CO') {
+        this.loadDepartments();
+      } else {
+        this.departments = [];
+        this.cities = [];
+        depControl.setValue('');
+        cityControl.setValue('');
+        this.cdr.markForCheck();
+      }
+    });
+
+    // Cargar ciudades al cambiar departamento
+    depControl.valueChanges.subscribe((depId: number) => {
+      if (depId) {
+        this.loadCities(depId);
+      } else {
+        this.cities = [];
+        cityControl.setValue('');
+        this.cdr.markForCheck();
+      }
+    });
+
+    // Si ya viene Colombia seleccionado, cargar departamentos
+    if (countryControl.value === 'CO') {
+      this.loadDepartments();
+      // Si además hay un departamento seleccionado, cargar sus ciudades
+      if (depControl.value) {
+        this.loadCities(depControl.value);
+      }
+    }
+  }
+
+  async loadDepartments(): Promise<void> {
+    this.departments = await this.countryService.getDepartments();
+    this.cdr.markForCheck();
+  }
+
+  async loadCities(departmentId: number): Promise<void> {
+    this.cities = await this.countryService.getCitiesByDepartment(departmentId);
+    this.cdr.markForCheck();
   }
 }

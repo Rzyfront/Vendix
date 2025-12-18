@@ -1,0 +1,31 @@
+meta {
+  name: "Create Product"
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/store/settings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "settings": {
+        "currency": "USD",
+        "timezone": "UTC"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("productId", res.body.data.id);
+  }
+}

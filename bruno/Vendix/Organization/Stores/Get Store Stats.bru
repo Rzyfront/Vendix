@@ -1,0 +1,84 @@
+meta {
+  name: Get Store Stats
+  type: http
+  seq: 6
+}
+
+get {
+  url: http://{{url}}/organization/stores/5/stats?start_date=2024-01-01&end_date=2024-12-31
+  body: none
+  auth: inherit
+}
+
+params:query {
+  start_date: 2024-01-01
+  end_date: 2024-12-31
+}
+
+tests {
+  test("Get store stats successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Estadísticas de tienda obtenidas exitosamente');
+  });
+  
+  test("Stats data structure is correct", function() {
+    expect(res.body).to.have.property('data');
+    const stats = res.body.data;
+    expect(stats).to.be.an('object');
+  });
+  
+  test("Stats contain expected metrics", function() {
+    const stats = res.body.data;
+  
+    // Métricas de ventas
+    if (stats.sales) {
+      expect(stats.sales).to.have.property('total_sales');
+      expect(stats.sales).to.have.property('total_orders');
+      expect(stats.sales).to.have.property('average_order_value');
+      expect(stats.sales.total_sales).to.be.a('number');
+      expect(stats.sales.total_orders).to.be.a('number');
+    }
+  
+    // Métricas de productos
+    if (stats.products) {
+      expect(stats.products).to.have.property('total_products');
+      expect(stats.products).to.have.property('active_products');
+      expect(stats.products).to.have.property('out_of_stock');
+      expect(stats.products.total_products).to.be.a('number');
+      expect(stats.products.active_products).to.be.a('number');
+    }
+  
+    // Métricas de clientes
+    if (stats.customers) {
+      expect(stats.customers).to.have.property('total_customers');
+      expect(stats.customers).to.have.property('new_customers');
+      expect(stats.customers.total_customers).to.be.a('number');
+      expect(stats.customers.new_customers).to.be.a('number');
+    }
+  
+    // Información del período
+    if (stats.period) {
+      expect(stats.period).to.have.property('start_date');
+      expect(stats.period).to.have.property('end_date');
+      expect(stats.period).to.have.property('total_days');
+    }
+  });
+  
+  test("Stats period is correct", function() {
+    const stats = res.body.data;
+    if (stats.period) {
+      expect(stats.period.start_date).to.include('2024-01-01');
+      expect(stats.period.end_date).to.include('2024-12-31');
+    }
+  });
+  
+  test("Stats store ID is included", function() {
+    const stats = res.body.data;
+    if (stats.store_id) {
+      expect(stats.store_id).to.equal(parseInt(bru.getEnvVar('created_store_id')));
+    }
+  });
+}

@@ -60,11 +60,15 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         class="px-6 py-3 bg-primary/5 border-b border-primary/20"
       >
         <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+          <div
+            class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center"
+          >
             <app-icon name="user" [size]="16" class="text-primary"></app-icon>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-xs text-text-secondary font-medium">Cliente asignado</p>
+            <p class="text-xs text-text-secondary font-medium">
+              Cliente asignado
+            </p>
             <p class="text-sm font-semibold text-text-primary truncate">
               {{ (cartState$ | async)?.customer?.name }}
             </p>

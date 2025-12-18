@@ -90,7 +90,7 @@ export class OrganizationsService {
     if (query?.state) params = params.set('state', query.state);
 
     return this.http.get<PaginatedResponse<Organization[]>>(
-      `${this.apiUrl}/admin/organizations`,
+      `${this.apiUrl}/superadmin/organizations`,
       { params },
     );
   }
@@ -100,7 +100,7 @@ export class OrganizationsService {
    */
   getOrganizationById(id: number): Observable<ApiResponse<Organization>> {
     return this.http.get<ApiResponse<Organization>>(
-      `${this.apiUrl}/admin/organizations/${id}`,
+      `${this.apiUrl}/superadmin/organizations/${id}`,
     );
   }
 
@@ -109,7 +109,7 @@ export class OrganizationsService {
    */
   getOrganizationBySlug(slug: string): Observable<ApiResponse<Organization>> {
     return this.http.get<ApiResponse<Organization>>(
-      `${this.apiUrl}/organizations/slug/${slug}`,
+      `${this.apiUrl}/superadmin/organizations/slug/${slug}`,
     );
   }
 
@@ -120,7 +120,7 @@ export class OrganizationsService {
     data: CreateOrganizationDto,
   ): Observable<ApiResponse<Organization>> {
     return this.http.post<ApiResponse<Organization>>(
-      `${this.apiUrl}/admin/organizations`,
+      `${this.apiUrl}/superadmin/organizations`,
       data,
     );
   }
@@ -133,7 +133,7 @@ export class OrganizationsService {
     data: UpdateOrganizationDto,
   ): Observable<ApiResponse<Organization>> {
     return this.http.patch<ApiResponse<Organization>>(
-      `${this.apiUrl}/admin/organizations/${id}`,
+      `${this.apiUrl}/superadmin/organizations/${id}`,
       data,
     );
   }
@@ -143,7 +143,7 @@ export class OrganizationsService {
    */
   deleteOrganization(id: number): Observable<ApiResponse<void>> {
     return this.http.delete<ApiResponse<void>>(
-      `${this.apiUrl}/admin/organizations/${id}`,
+      `${this.apiUrl}/superadmin/organizations/${id}`,
     );
   }
 
@@ -162,7 +162,7 @@ export class OrganizationsService {
       params = params.set('end_date', dashboardData.end_date);
 
     return this.http.get<ApiResponse<OrganizationDashboardResponse>>(
-      `${this.apiUrl}/organizations/${id}/stats`,
+      `${this.apiUrl}/superadmin/organizations/${id}/stats`,
       { params },
     );
   }
@@ -182,7 +182,7 @@ export class OrganizationsService {
     }>
   > {
     return this.http.get<ApiResponse<any>>(
-      `${this.apiUrl}/admin/organizations/dashboard`,
+      `${this.apiUrl}/superadmin/organizations/dashboard`,
     );
   }
 }

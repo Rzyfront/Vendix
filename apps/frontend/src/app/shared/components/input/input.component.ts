@@ -19,7 +19,8 @@ export type InputType =
   | 'number'
   | 'tel'
   | 'url'
-  | 'search';
+  | 'search'
+  | 'date';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({
@@ -34,12 +35,15 @@ export type InputSize = 'sm' | 'md' | 'lg';
     },
   ],
   template: `
-    <div class="w-full mt-4">
+    <div [class]="'w-full mt-4 ' + customWrapperClass">
       <!-- Label -->
       <label
         *ngIf="label"
         [for]="inputId"
-        class="block text-sm font-medium text-[var(--color-text-primary)] mb-2"
+        [class]="
+          'block text-sm font-medium text-[var(--color-text-primary)] mb-2 ' +
+          customLabelClass
+        "
       >
         {{ label }}
         <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
@@ -67,6 +71,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [value]="value"
           [step]="step"
           [class]="inputClasses"
+          [style]="customInputStyle"
           (input)="onInput($event)"
           (blur)="onBlur()"
           (focus)="onFocus()"
@@ -114,9 +119,15 @@ export class InputComponent implements ControlValueAccessor {
   @Input() prefixIcon = false;
   @Input() suffixIcon = false;
   @Input() suffixClickable = false;
-  @Input() customClasses = '';
   @Input() control?: AbstractControl | null;
   @Input() step?: string;
+
+  // ✅ Nuevos inputs para personalización de estilos
+  @Input() customInputStyle = ''; // Estilos inline personalizados
+  @Input() customWrapperClass = ''; // Clases para el wrapper
+  @Input() customLabelClass = ''; // Clases para el label
+  @Input() customInputClass = ''; // Clases adicionales para el input
+  @Input() customClasses = ''; // Retrocompatibilidad
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();
@@ -147,6 +158,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   get inputClasses(): string {
+    // Clases base
     const baseClasses = [
       'block',
       'w-full',
@@ -159,14 +171,14 @@ export class InputComponent implements ControlValueAccessor {
       'placeholder:text-text-muted',
     ];
 
-    // Size classes
+    // Clases por tamaño
     const sizeClasses = {
       sm: ['px-3', 'py-1.5', 'text-sm'],
       md: ['px-4', 'py-2', 'text-base'],
       lg: ['px-4', 'py-3', 'text-lg'],
     };
 
-    // State classes based on control state
+    // Clases por estado (validación)
     let stateClasses: string[];
     if (this.control?.invalid && this.control?.touched) {
       stateClasses = [
@@ -195,7 +207,7 @@ export class InputComponent implements ControlValueAccessor {
       ];
     }
 
-    // Padding adjustments for icons
+    // Padding ajustado para íconos
     const iconPadding = [];
     if (this.prefixIcon) {
       iconPadding.push('pl-10');
@@ -204,6 +216,7 @@ export class InputComponent implements ControlValueAccessor {
       iconPadding.push('pr-10');
     }
 
+    // Combinar todas las clases
     const classes = [
       ...baseClasses,
       ...sizeClasses[this.size],
@@ -211,6 +224,10 @@ export class InputComponent implements ControlValueAccessor {
       ...iconPadding,
     ];
 
+    // ✅ Agregar clases personalizadas (soporta customInputClass y customClasses)
+    if (this.customInputClass) {
+      classes.push(this.customInputClass);
+    }
     if (this.customClasses) {
       classes.push(this.customClasses);
     }
@@ -230,6 +247,9 @@ export class InputComponent implements ControlValueAccessor {
     if (errors['email']) {
       return 'Debe ser un email válido.';
     }
+    if (errors['maxlength']) {
+      return `No puede superar ${errors['maxlength'].requiredLength} caracteres.`;
+    }
     if (errors['minLength']) {
       return `La contraseña debe tener al menos ${errors['minLength'].requiredLength} caracteres.`;
     }
@@ -243,12 +263,15 @@ export class InputComponent implements ControlValueAccessor {
       return 'El formato es inválido.';
     }
 
-    // Fallback for other errors
+    // Fallback para otros errores
     return 'El valor es inválido.';
   }
 
   onInput(event: Event): void {
     const target = event.target as HTMLInputElement;
+    if (this.type === 'tel') {
+      target.value = target.value.replace(/[^0-9+ ]/g, '');
+    }
     this.value = target.value;
     this.onChange(this.value);
     this.inputChange.emit(this.value);

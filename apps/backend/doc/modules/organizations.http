@@ -1,73 +1,99 @@
 # 🏢 ORGANIZATIONS MODULE
-# Panel administrativo de organizaciones con estadísticas
+# Self-management module for organizations (Organization domain)
 
-@baseUrl = http://localhost:3000/api
+@baseUrl = http://localhost:3000/api/organizations
 @authToken = Bearer YOUR_JWT_TOKEN_HERE
 
 ###
 
 # =================================================================
-# 🏢 ORGANIZATION MANAGEMENT
+# 🏢 ORGANIZATION SELF-MANAGEMENT
+# Domain: /organizations (Organization self-management)
+# Scope: Solo para autogestion de la propia organización del usuario
 # =================================================================
 
-### Get All Organizations (Admin Only)
-GET {{baseUrl}}/organizations
-Content-Type: application/json
-Authorization: {{authToken}}
-
-### Get Organization by ID
-GET {{baseUrl}}/organizations/1
-Content-Type: application/json
-Authorization: {{authToken}}
-
-### Get Organization by Slug
-GET {{baseUrl}}/organizations/slug/my-corporation
-Content-Type: application/json
-Authorization: {{authToken}}
-
-### 🚨 ORGANIZATION STATS - Key FASE2 Feature
-GET {{baseUrl}}/organizations/1/stats
+### Get Organization Profile
+# Obtiene el perfil de la organización del usuario autenticado
+# Usa RequestContextService para obtener automaticamente el organization_id del contexto
+GET {{baseUrl}}/profile
 Content-Type: application/json
 Authorization: {{authToken}}
 
 # Returns: {
-#   metrics: {
-#     active_users: number,
-#     active_stores: number,
-#     recent_orders: number,
-#     total_revenue: number,
-#     growth_trends: [...]
-#   },
-#   store_activity: [...],
-#   recent_audit: [...]
+#   id: number,
+#   name: string,
+#   email: string,
+#   slug: string,
+#   addresses: [...],
+#   onboarding: {...},
+#   created_at: string,
+#   updated_at: string
 # }
 
-### Create Organization (Super Admin)
-POST {{baseUrl}}/organizations
+### Update Organization Profile
+# Actualiza los datos de la propia organización del usuario
+# Solo puede modificar su propia organización basada en el contexto
+PATCH {{baseUrl}}/profile
 Content-Type: application/json
 Authorization: {{authToken}}
 
 {
-  "name": "New Corporation",
-  "email": "info@newcorp.com",
-  "tax_id": "987654321",
-  "legal_name": "New Corporation Ltd",
+  "name": "Updated Organization Name",
+  "email": "updated@organization.com",
+  "legal_name": "Organization Legal Name Ltd",
   "phone": "+1234567890",
-  "website": "https://newcorp.com",
-  "state": "active"
+  "website": "https://updated-organization.com",
+  "description": "Updated description for the organization"
 }
 
-### Update Organization
-PATCH {{baseUrl}}/organizations/1
+### Get Organization Dashboard
+# Obtiene estadísticas del dashboard de la organización del usuario
+# Incluye métricas consolidadas con filtrado opcional por store
+GET {{baseUrl}}/dashboard
 Content-Type: application/json
 Authorization: {{authToken}}
 
-{
-  "name": "Updated Corporation Name",
-  "website": "https://updatedcorp.com"
-}
-
-### Delete Organization (Super Admin)
-DELETE {{baseUrl}}/organizations/1
+### Get Organization Dashboard (con filtro de store)
+# Dashboard con estadísticas filtradas por una store específica
+GET {{baseUrl}}/dashboard?store_id=123
 Content-Type: application/json
 Authorization: {{authToken}}
+
+# Returns: {
+#   organization_id: number,
+#   store_filter: number | undefined,
+#   stats: {
+#     total_stores: {
+#       value: number,
+#       sub_value: number,
+#       sub_label: "new this month"
+#     },
+#     active_users: {
+#       value: number,
+#       sub_value: null,
+#       sub_label: "active users"
+#     },
+#     monthly_orders: {
+#       value: number,
+#       sub_value: number,
+#       sub_label: "orders today"
+#     },
+#     revenue: {
+#       value: number,
+#       sub_value: number,
+#       sub_label: "vs last month"
+#     }
+#   }
+# }
+
+# =================================================================
+# 🔍 TESTING NOTES
+# =================================================================
+
+# Security Context:
+# - Todos los endpoints usan automaticamente el organization_id del RequestContextService
+# - No es necesario pasar organization_id - se obtiene del token/contexto del usuario
+# - Una organización solo puede acceder a sus propios datos
+
+# Superadmin endpoints están en: /superadmin/organizations
+# Store management endpoints están en: /stores

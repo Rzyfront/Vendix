@@ -14,9 +14,13 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Total Roles</p>
-            <p class="text-2xl font-bold mt-1 text-text-primary">{{ stats.total_roles }}</p>
+            <p class="text-2xl font-bold mt-1 text-text-primary">
+              {{ stats.total_roles }}
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10">
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
+          >
             <app-icon name="users" [size]="24" class="text-primary"></app-icon>
           </div>
         </div>
@@ -27,10 +31,18 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">System Roles</p>
-            <p class="text-2xl font-bold mt-1 text-purple-600">{{ stats.system_roles }}</p>
+            <p class="text-2xl font-bold mt-1 text-purple-600">
+              {{ stats.system_roles }}
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100">
-            <app-icon name="shield" [size]="24" class="text-purple-600"></app-icon>
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100"
+          >
+            <app-icon
+              name="shield"
+              [size]="24"
+              class="text-purple-600"
+            ></app-icon>
           </div>
         </div>
       </div>
@@ -40,10 +52,18 @@ import { IconComponent } from '../../../../../shared/components';
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-text-secondary">Custom Roles</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">{{ stats.custom_roles }}</p>
+            <p class="text-2xl font-bold mt-1 text-green-600">
+              {{ stats.custom_roles }}
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100">
-            <app-icon name="settings" [size]="24" class="text-green-600"></app-icon>
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
+          >
+            <app-icon
+              name="settings"
+              [size]="24"
+              class="text-green-600"
+            ></app-icon>
           </div>
         </div>
       </div>
@@ -52,27 +72,35 @@ import { IconComponent } from '../../../../../shared/components';
       <div class="bg-surface rounded-card shadow-card border border-border p-4">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm font-medium text-text-secondary">Total Permissions</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">{{ stats.total_permissions }}</p>
+            <p class="text-sm font-medium text-text-secondary">
+              Total Permissions
+            </p>
+            <p class="text-2xl font-bold mt-1 text-yellow-600">
+              {{ stats.total_permissions }}
+            </p>
           </div>
-          <div class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100">
+          <div
+            class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100"
+          >
             <app-icon name="key" [size]="24" class="text-yellow-600"></app-icon>
           </div>
         </div>
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class RoleStatsComponent {
   @Input() stats: RoleStats = {
     total_roles: 0,
     system_roles: 0,
     custom_roles: 0,
-    total_permissions: 0
+    total_permissions: 0,
   };
 }

@@ -6,9 +6,12 @@ import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import {
   ModalComponent,
   InputComponent,
-  ButtonComponent
+  ButtonComponent,
 } from '../../../../../shared/components/index';
-import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.interface';
+import {
+  StoreSettings,
+  StoreSettingsUpdateDto,
+} from '../interfaces/store.interface';
 
 @Component({
   selector: 'app-store-settings-modal',
@@ -19,24 +22,31 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      title="Store Settings"
-      subtitle="Configure store preferences and notifications"
+      title="Configuración de Tienda"
+      subtitle="Configurar preferencias y notificaciones de la tienda"
       (openChange)="onModalChange($event)"
     >
       <form [formGroup]="settingsForm" class="space-y-6">
         <!-- General Settings -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">General Settings</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            General Settings
+          </h3>
+
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="space-y-2">
-              <label for="theme" class="block text-sm font-medium text-text-primary">
+              <label
+                for="theme"
+                class="block text-sm font-medium text-text-primary"
+              >
                 Theme
               </label>
               <select
@@ -51,7 +61,10 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
             </div>
 
             <div class="space-y-2">
-              <label for="language" class="block text-sm font-medium text-text-primary">
+              <label
+                for="language"
+                class="block text-sm font-medium text-text-primary"
+              >
                 Language
               </label>
               <select
@@ -84,16 +97,22 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
 
         <!-- Notification Settings -->
         <div class="space-y-4">
-          <h3 class="text-lg font-semibold text-text-primary border-b border-border pb-2">Notifications</h3>
-          
+          <h3
+            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+          >
+            Notifications
+          </h3>
+
           <div class="space-y-3">
             <label class="flex items-center space-x-3">
               <input
                 type="checkbox"
                 formControlName="notifications"
                 class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
+              />
+              <span class="text-sm font-medium text-text-primary"
+                >Enable Notifications</span
               >
-              <span class="text-sm font-medium text-text-primary">Enable Notifications</span>
             </label>
 
             <label class="flex items-center space-x-3">
@@ -101,8 +120,10 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
                 type="checkbox"
                 formControlName="email_notifications"
                 class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
+              />
+              <span class="text-sm font-medium text-text-primary"
+                >Email Notifications</span
               >
-              <span class="text-sm font-medium text-text-primary">Email Notifications</span>
             </label>
 
             <label class="flex items-center space-x-3">
@@ -110,8 +131,10 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
                 type="checkbox"
                 formControlName="sms_notifications"
                 class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
+              />
+              <span class="text-sm font-medium text-text-primary"
+                >SMS Notifications</span
               >
-              <span class="text-sm font-medium text-text-primary">SMS Notifications</span>
             </label>
 
             <label class="flex items-center space-x-3">
@@ -119,8 +142,10 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
                 type="checkbox"
                 formControlName="inventory_alerts"
                 class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
+              />
+              <span class="text-sm font-medium text-text-primary"
+                >Inventory Alerts</span
               >
-              <span class="text-sm font-medium text-text-primary">Inventory Alerts</span>
             </label>
           </div>
         </div>
@@ -131,10 +156,7 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
           <span class="text-red-500">*</span> Required fields
         </div>
         <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-          >
+          <app-button variant="outline" (clicked)="onCancel()">
             Cancel
           </app-button>
           <app-button
@@ -148,7 +170,7 @@ import { StoreSettings, StoreSettingsUpdateDto } from '../interfaces/store.inter
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class StoreSettingsModalComponent {
   @Input() isOpen = false;
@@ -174,7 +196,7 @@ export class StoreSettingsModalComponent {
       email_notifications: [true],
       sms_notifications: [false],
       inventory_alerts: [true],
-      low_stock_threshold: [10]
+      low_stock_threshold: [10],
     });
   }
 
@@ -189,13 +211,28 @@ export class StoreSettingsModalComponent {
 
     this.settingsForm.patchValue({
       theme: this.settings.theme || '',
-      notifications: this.settings.notifications !== undefined ? this.settings.notifications : true,
+      notifications:
+        this.settings.notifications !== undefined
+          ? this.settings.notifications
+          : true,
       language: this.settings.language || '',
       currency_format: this.settings.currency_format || '',
-      email_notifications: this.settings.email_notifications !== undefined ? this.settings.email_notifications : true,
-      sms_notifications: this.settings.sms_notifications !== undefined ? this.settings.sms_notifications : false,
-      inventory_alerts: this.settings.inventory_alerts !== undefined ? this.settings.inventory_alerts : true,
-      low_stock_threshold: this.settings.low_stock_threshold !== undefined ? this.settings.low_stock_threshold : 10
+      email_notifications:
+        this.settings.email_notifications !== undefined
+          ? this.settings.email_notifications
+          : true,
+      sms_notifications:
+        this.settings.sms_notifications !== undefined
+          ? this.settings.sms_notifications
+          : false,
+      inventory_alerts:
+        this.settings.inventory_alerts !== undefined
+          ? this.settings.inventory_alerts
+          : true,
+      low_stock_threshold:
+        this.settings.low_stock_threshold !== undefined
+          ? this.settings.low_stock_threshold
+          : 10,
     });
   }
 
@@ -209,7 +246,7 @@ export class StoreSettingsModalComponent {
   onSubmit(): void {
     if (this.settingsForm.invalid) {
       // Mark all fields as touched to trigger validation messages
-      Object.keys(this.settingsForm.controls).forEach(key => {
+      Object.keys(this.settingsForm.controls).forEach((key) => {
         this.settingsForm.get(key)?.markAsTouched();
       });
       return;
@@ -225,8 +262,8 @@ export class StoreSettingsModalComponent {
         email_notifications: formData.email_notifications,
         sms_notifications: formData.sms_notifications,
         inventory_alerts: formData.inventory_alerts,
-        low_stock_threshold: formData.low_stock_threshold
-      }
+        low_stock_threshold: formData.low_stock_threshold,
+      },
     };
 
     this.submit.emit(settingsData);
@@ -245,7 +282,7 @@ export class StoreSettingsModalComponent {
       email_notifications: true,
       sms_notifications: false,
       inventory_alerts: true,
-      low_stock_threshold: 10
+      low_stock_threshold: 10,
     });
   }
 }

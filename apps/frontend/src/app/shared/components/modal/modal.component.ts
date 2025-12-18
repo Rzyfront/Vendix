@@ -19,7 +19,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
     <!-- Modal backdrop -->
     <div
       *ngIf="isOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center p-4"
+      class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       (click)="onBackdropClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
@@ -158,7 +158,7 @@ export class ModalComponent implements OnInit, OnDestroy {
       sm: ['max-w-sm'],
       md: ['max-w-2xl'],
       lg: ['max-w-7xl', 'w-full', 'h-full', 'max-h-[90vh]'],
-      xl: ['max-w-[90vw]', 'w-full', 'h-full', 'max-h-[90vh]'],
+      xl: ['max-w-[98vw]', 'w-full', 'h-full', 'max-h-[90vh]'],
     };
 
     const classes = [...baseClasses, ...sizeClasses[this.size]];

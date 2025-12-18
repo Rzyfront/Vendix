@@ -1,0 +1,37 @@
+meta {
+  name: Get Organization Dashboard
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/organization/organizations/dashboard
+  body: none
+  auth: inherit
+}
+
+params:query {
+  period: 6m
+}
+
+tests {
+  test("Get dashboard successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('obtenido exitosamente');
+  });
+
+  test("Dashboard data is present", function() {
+    expect(res.body).to.have.property('data');
+    const dashboard = res.body.data;
+    expect(dashboard).to.be.an('object');
+    expect(dashboard).to.have.property('period');
+    expect(dashboard).to.have.property('data');
+  });
+
+  test("Dashboard period matches query", function() {
+    expect(res.body.data.period).to.equal('6m');
+  });
+}

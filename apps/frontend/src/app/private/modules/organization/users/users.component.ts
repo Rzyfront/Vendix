@@ -9,9 +9,8 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
-import { UserStatsService } from './services/user-stats.service';
+
 import {
-  UserStatsComponent,
   UserCreateModalComponent,
   UserEditModalComponent,
   UserEmptyStateComponent,
@@ -23,11 +22,12 @@ import {
   TableComponent,
   TableColumn,
   TableAction,
-  InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
   DialogService,
   ToastService,
+  StatsComponent,
+  ButtonComponent,
+  IconComponent,
+  InputsearchComponent,
 } from '../../../../shared/components/index';
 import {
   FormsModule,
@@ -36,6 +36,15 @@ import {
   FormGroup,
 } from '@angular/forms';
 
+interface StatItem {
+  title: string;
+  value: number;
+  smallText: string;
+  iconName: string;
+  iconBgColor: string;
+  iconColor: string;
+}
+
 @Component({
   selector: 'app-users',
   standalone: true,
@@ -43,15 +52,15 @@ import {
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    UserStatsComponent,
     UserCreateModalComponent,
     UserEditModalComponent,
     UserEmptyStateComponent,
     UserCardComponent,
     TableComponent,
-    InputsearchComponent,
-    IconComponent,
     ButtonComponent,
+    IconComponent,
+    InputsearchComponent,
+    StatsComponent,
   ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
@@ -59,6 +68,7 @@ import {
 export class UsersComponent implements OnInit, OnDestroy {
   users: User[] = [];
   userStats: UserStats | null = null;
+  statsItems: StatItem[] = [];
   isLoading = false;
   currentUser: User | null = null;
   showCreateModal = false;
@@ -74,14 +84,16 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true },
-    { key: 'last_name', label: 'Apellido', sortable: true },
-    { key: 'username', label: 'Usuario', sortable: true },
-    { key: 'email', label: 'Email', sortable: true },
+    { key: 'first_name', label: 'Nombre', sortable: true, width: '120px' },
+    { key: 'last_name', label: 'Apellido', sortable: true, width: '120px' },
+    { key: 'username', label: 'Usuario', sortable: true, width: '140px' },
+    { key: 'email', label: 'Email', sortable: true, width: '180px' },
     {
       key: 'state',
       label: 'Estado',
       sortable: true,
+      width: '100px',
+      align: 'center',
       badge: true,
       badgeConfig: {
         type: 'status',
@@ -93,18 +105,21 @@ export class UsersComponent implements OnInit, OnDestroy {
       key: 'app',
       label: 'Aplicación',
       sortable: false,
+      width: '120px',
       defaultValue: 'N/A',
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
+      width: '140px',
       transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
     },
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
+      width: '140px',
       transform: (value: string) => this.formatDate(value),
     },
   ];
@@ -114,7 +129,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'primary',
+      variant: 'success',
     },
     {
       label: 'Eliminar',
@@ -147,7 +162,6 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   constructor(
     private usersService: UsersService,
-    private userStatsService: UserStatsService,
     private fb: FormBuilder,
     private dialogService: DialogService,
     private toastService: ToastService,
@@ -245,8 +259,112 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUserStats(): void {
-    // Calculate stats from current users list
-    this.userStats = this.userStatsService.calculateStats(this.users);
+    const filters = this.filterForm.value;
+    // Pass current filters to stats if needed, or empty for global
+    // Typically stats on dashboard are global or filtered?
+    // The backend endpoint accepts filters.
+    // Let's pass the same filters as the list for consistency, or maybe just global?
+    // Given the UI is "Stats Cards", usually they reflect the current filter context ONLY IF explicitly desired.
+    // However, usually "Total Users" card should show TOTAL users, not "Total Users matching search 'bob'".
+    // But "Active Users" card matching search 'bob' might be weird.
+    // Standard pattern: Dashboard stats are often global or time-range filtered.
+    // Let's pass empty object for global stats as per typical requirement, or pass current filters if user wants "filtered stats".
+    // The prompt says "que los stats funcionen". Local calculation *was* doing filtered stats (on the current page!! which was wrong).
+    // Let's default to global stats for now as that's safer for "Total Users".
+
+    this.usersService.getUsersStats().subscribe({
+      next: (stats) => {
+        this.userStats = stats;
+        this.updateStatsItems();
+      },
+      error: (err) => console.error('Error loading user stats', err)
+    });
+  }
+
+  private updateStatsItems(): void {
+    const s = this.userStats || {
+      total_usuarios: 0,
+      activos: 0,
+      pendientes: 0,
+      con_2fa: 0,
+      inactivos: 0,
+      suspendidos: 0,
+      email_verificado: 0,
+      archivados: 0,
+    };
+    const total = s.total_usuarios || 0;
+
+    this.statsItems = [
+      {
+        title: 'Total Usuarios',
+        value: total,
+        smallText: 'en la organización',
+        iconName: 'users',
+        iconBgColor: 'bg-primary/10',
+        iconColor: 'text-primary',
+      },
+      {
+        title: 'Activos',
+        value: s.activos || 0,
+        smallText: `${this.calculatePercentage(s.activos || 0, total)}% del total`,
+        iconName: 'check-circle',
+        iconBgColor: 'bg-green-100',
+        iconColor: 'text-green-600',
+      },
+      {
+        title: 'Pendientes',
+        value: s.pendientes || 0,
+        smallText: `${this.calculatePercentage(s.pendientes || 0, total)}% del total`,
+        iconName: 'clock',
+        iconBgColor: 'bg-yellow-100',
+        iconColor: 'text-yellow-600',
+      },
+      {
+        title: 'Con 2FA',
+        value: s.con_2fa || 0,
+        smallText: `${this.calculatePercentage(s.con_2fa || 0, total)}% del total`,
+        iconName: 'shield',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600',
+      },
+      {
+        title: 'Inactivos',
+        value: s.inactivos || 0,
+        smallText: `${this.calculatePercentage(s.inactivos || 0, total)}% del total`,
+        iconName: 'user-x',
+        iconBgColor: 'bg-gray-100',
+        iconColor: 'text-gray-600',
+      },
+      {
+        title: 'Suspendidos',
+        value: s.suspendidos || 0,
+        smallText: `${this.calculatePercentage(s.suspendidos || 0, total)}% del total`,
+        iconName: 'alert-triangle',
+        iconBgColor: 'bg-red-100',
+        iconColor: 'text-red-600',
+      },
+      {
+        title: 'Email Verificado',
+        value: s.email_verificado || 0,
+        smallText: `${this.calculatePercentage(s.email_verificado || 0, total)}% del total`,
+        iconName: 'mail-check',
+        iconBgColor: 'bg-emerald-100',
+        iconColor: 'text-emerald-600',
+      },
+      {
+        title: 'Archivados',
+        value: s.archivados || 0,
+        smallText: `${this.calculatePercentage(s.archivados || 0, total)}% del total`,
+        iconName: 'archive',
+        iconBgColor: 'bg-red-100',
+        iconColor: 'text-red-600',
+      },
+    ];
+  }
+
+  private calculatePercentage(part: number, total: number): number {
+    if (total === 0) return 0;
+    return Math.round((part / total) * 100);
   }
 
   onSearchChange(searchTerm: string): void {

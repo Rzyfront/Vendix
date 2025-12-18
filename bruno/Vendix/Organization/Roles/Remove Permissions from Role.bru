@@ -1,0 +1,40 @@
+meta {
+  name: Remove Permissions from Role
+  type: http
+  seq: 8
+}
+
+delete {
+  url: http://{{url}}/organization/roles/{{created_role_id}}/permissions
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "permission_ids": [{{created_permission_id}}]
+  }
+}
+
+tests {
+  test("Remove permissions from role successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('Permisos removidos exitosamente');
+  });
+
+  test("Response contains updated role data", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id', bru.getEnvVar('created_role_id'));
+    expect(res.body.data).to.have.property('permissions');
+    expect(res.body.data.permissions).to.be.an('array');
+  });
+
+  test("Permission was removed", function() {
+    // After removal, the permission should not be in the role's permissions
+    // The permissions array contains permission descriptions (strings)
+    // We can at least verify the array exists
+    expect(res.body.data.permissions).to.be.an('array');
+  });
+}

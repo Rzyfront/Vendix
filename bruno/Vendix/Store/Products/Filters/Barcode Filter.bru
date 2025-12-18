@@ -1,0 +1,24 @@
+meta {
+  name: Barcode Filter
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/store/products?barcode=ABC123456
+  body: none
+  auth: inherit
+}
+
+params:query {
+  barcode: ABC123456
+}
+
+vars:pre-request {
+  token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjIsIm9yZ2FuaXphdGlvbl9pZCI6Miwic3RvcmVfaWQiOjMsImlhdCI6MTc2NDg2ODc5OCwiZXhwIjoxNzY0ODcyMzk4fQ.0FN_BlLTbizsm3kpaaXzj07mKXOIp-Fm6I8XklgMFsQ
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

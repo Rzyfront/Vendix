@@ -1,0 +1,49 @@
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+  <!-- Total de Órdenes -->
+  <app-stats
+    title="Total de Órdenes"
+    [value]="formatNumber(stats.total_orders)"
+    [smallText]="
+      getGrowthPercentage(stats.ordersGrowthRate || 0) + ' vs mes anterior'
+    "
+    iconName="shopping-cart"
+    iconBgColor="bg-primary/10"
+    iconColor="text-primary"
+  ></app-stats>
+
+  <!-- Órdenes Pendientes -->
+  <app-stats
+    title="Órdenes Pendientes"
+    [value]="formatNumber(stats.pending_orders)"
+    [smallText]="
+      getGrowthPercentage(stats.pendingGrowthRate || 0) + ' vs mes anterior'
+    "
+    iconName="clock"
+    iconBgColor="bg-yellow-100"
+    iconColor="text-yellow-600"
+  ></app-stats>
+
+  <!-- Órdenes Completadas -->
+  <app-stats
+    title="Órdenes Completadas"
+    [value]="formatNumber(stats.completed_orders)"
+    [smallText]="
+      getGrowthPercentage(stats.completedGrowthRate || 0) + ' vs mes anterior'
+    "
+    iconName="check-circle"
+    iconBgColor="bg-green-100"
+    iconColor="text-green-600"
+  ></app-stats>
+
+  <!-- Ingreso Total -->
+  <app-stats
+    title="Ingreso Total"
+    [value]="formatCurrency(stats.total_revenue)"
+    [smallText]="
+      getGrowthPercentage(stats.revenueGrowthRate || 0) + ' vs mes anterior'
+    "
+    iconName="dollar-sign"
+    iconBgColor="bg-emerald-100"
+    iconColor="text-emerald-600"
+  ></app-stats>
+</div>

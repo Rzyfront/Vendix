@@ -1,7 +1,19 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import * as pg from 'pg';
 import * as bcrypt from 'bcryptjs';
 
-const prisma = new PrismaClient();
+// Create PostgreSQL connection pool
+const connectionString =
+  process.env.DATABASE_URL ||
+  'postgresql://username:password@localhost:5432/vendix_db?schema=public';
+const pool = new pg.Pool({ connectionString });
+
+// Create adapter
+const adapter = new PrismaPg(pool);
+
+// Initialize Prisma client with adapter
+const prisma = new PrismaClient({ adapter });
 
 // Usaremos any para flexibilidad en el seed
 
@@ -99,8 +111,8 @@ async function main() {
       method: 'POST',
     },
     {
-      name: 'auth.sessions',
-      description: 'Ver sesiones',
+      name: 'auth:sessions',
+      description: 'Sesiones activas',
       path: '/api/auth/sessions',
       method: 'GET',
     },
@@ -111,649 +123,837 @@ async function main() {
       method: 'DELETE',
     },
     {
-      name: 'auth.onboarding.status',
-      description: 'Ver estado onboarding',
-      path: '/api/auth/onboarding/status',
+      name: 'organization:onboarding:read',
+      description: 'Ver estado de onboarding',
+      path: '/api/organization/onboarding/status',
       method: 'GET',
     },
     {
-      name: 'auth.onboarding.create.organization',
+      name: 'organization:onboarding:update',
+      description: 'Actualizar/Completar onboarding',
+      path: '/api/organization/onboarding/complete',
+      method: 'POST',
+    },
+
+    // Audit
+    {
+      name: 'organization:audit:read',
+      description: 'Leer logs de auditoría',
+      path: '/api/superadmin/admin/audit',
+      method: 'GET',
+    },
+
+    // Domains
+    {
+      name: 'organization:domains:create',
+      description: 'Crear dominios',
+      path: '/api/organization/domains',
+      method: 'POST',
+    },
+    {
+      name: 'organization:domains:read',
+      description: 'Leer dominios',
+      path: '/api/organization/domains',
+      method: 'GET',
+    },
+    {
+      name: 'organization:domains:update',
+      description: 'Actualizar dominios',
+      path: '/api/organization/domains',
+      method: 'PUT',
+    },
+    {
+      name: 'organization:domains:delete',
+      description: 'Eliminar dominios',
+      path: '/api/organization/domains',
+      method: 'DELETE',
+    },
+    {
+      name: 'organization:domains:verify',
+      description: 'Verificar dominios',
+      path: '/api/organization/domains/verify',
+      method: 'POST',
+    },
+    {
+      name: 'organization:onboarding:create:organization',
       description: 'Crear organización en onboarding',
-      path: '/api/auth/onboarding/create-organization',
+      path: '/api/organization/onboarding/organization/create', // Assuming wizard path or similar? The controller has organization/:id/complete etc. Let's check wizard again. 
+      method: 'POST',
+    },
+    // Wait, let's map carefully.
+    // OnboardingController has:
+    // GET organization/onboarding/status
+    // GET organization/onboarding/organization/:organizationId/status
+    // POST organization/onboarding/organization/:organizationId/complete
+    // PUT organization/onboarding/organization/:organizationId/reset
+    // GET organization/onboarding/store/:storeId/status
+    // POST organization/onboarding/store/:storeId/complete
+    // POT organization/onboarding/store/:storeId/reset
+
+    // OnboardingWizardController has:
+    // GET organization/onboarding-wizard/status
+    // POST organization/onboarding-wizard/verify-email-status
+    // POST organization/onboarding-wizard/select-app-type
+    // POST organization/onboarding-wizard/setup-user
+    // POST organization/onboarding-wizard/setup-organization
+    // POST organization/onboarding-wizard/setup-store
+    // POST organization/onboarding-wizard/setup-app-config
+    // POST organization/onboarding-wizard/complete
+
+    // The seed entries auth.onboarding.* correspond roughly to the Wizard steps.
+    // auth.onboarding.status -> Wizard status
+    // auth.onboarding.create.organization -> Wizard setup-organization?
+    // auth.onboarding.setup.organization -> Wizard setup-organization?
+    // auth.onboarding.create.store -> Wizard setup-store?
+    // auth.onboarding.complete -> Wizard complete?
+
+    // I will rename generally to organization:onboarding:wizard:* to be safe and clearer.
+    {
+      name: 'organization:onboarding:wizard:status',
+      description: 'Ver estado onboarding wizard',
+      path: '/api/organization/onboarding-wizard/status',
+      method: 'GET',
+    },
+    {
+      name: 'organization:onboarding:wizard:setup:organization',
+      description: 'Configurar organización en wizard',
+      path: '/api/organization/onboarding-wizard/setup-organization',
       method: 'POST',
     },
     {
-      name: 'auth.onboarding.setup.organization',
-      description: 'Configurar organización en onboarding',
-      path: '/api/auth/onboarding/setup-organization/:organizationId',
+      name: 'organization:onboarding:wizard:setup:store',
+      description: 'Configurar tienda en wizard',
+      path: '/api/organization/onboarding-wizard/setup-store',
       method: 'POST',
     },
     {
-      name: 'auth.onboarding.create.store',
-      description: 'Crear tienda en onboarding',
-      path: '/api/auth/onboarding/create-store/:organizationId',
+      name: 'organization:onboarding:wizard:complete',
+      description: 'Completar onboarding wizard',
+      path: '/api/organization/onboarding-wizard/complete',
       method: 'POST',
     },
     {
-      name: 'auth.onboarding.setup.store',
-      description: 'Configurar tienda en onboarding',
-      path: '/api/auth/onboarding/setup-store/:storeId',
+      name: 'organization:onboarding:wizard:setup:user',
+      description: 'Configurar usuario en wizard',
+      path: '/api/organization/onboarding-wizard/setup-user',
       method: 'POST',
     },
     {
-      name: 'auth.onboarding.complete',
-      description: 'Completar onboarding',
-      path: '/api/auth/onboarding/complete',
+      name: 'organization:onboarding:wizard:select-app-type',
+      description: 'Seleccionar tipo de app en wizard',
+      path: '/api/organization/onboarding-wizard/select-app-type',
       method: 'POST',
     },
 
     // Usuarios
     {
-      name: 'users.create',
+      name: 'organization:users:create',
       description: 'Crear usuario',
-      path: '/api/users',
+      path: '/api/organization/users',
       method: 'POST',
     },
     {
-      name: 'users.read',
+      name: 'organization:users:read',
       description: 'Leer usuarios',
-      path: '/api/users',
+      path: '/api/organization/users',
       method: 'GET',
     },
     {
-      name: 'users.stats',
+      name: 'organization:users:stats',
       description: 'Estadísticas de usuarios',
-      path: '/api/users/stats',
+      path: '/api/organization/users/stats',
       method: 'GET',
     },
     {
-      name: 'users.read.one',
+      name: 'organization:users:read:one',
       description: 'Leer usuario específico',
-      path: '/api/users/:id',
+      path: '/api/organization/users/:id',
       method: 'GET',
     },
     {
-      name: 'users.update',
+      name: 'organization:users:update',
       description: 'Actualizar usuario',
-      path: '/api/users/:id',
+      path: '/api/organization/users/:id',
       method: 'PATCH',
     },
     {
-      name: 'users.delete',
+      name: 'organization:users:delete',
       description: 'Eliminar usuario',
-      path: '/api/users/:id',
+      path: '/api/organization/users/:id',
       method: 'DELETE',
     },
     {
-      name: 'users.archive',
+      name: 'organization:users:archive',
       description: 'Archivar usuario',
-      path: '/api/users/:id/archive',
+      path: '/api/organization/users/:id/archive',
       method: 'POST',
     },
     {
-      name: 'users.reactivate',
+      name: 'organization:users:reactivate',
       description: 'Reactivar usuario',
-      path: '/api/users/:id/reactivate',
+      path: '/api/organization/users/:id/reactivate',
+      method: 'POST',
+    },
+    {
+      name: 'organization:users:verify-email',
+      description: 'Verificar email de usuario',
+      path: '/api/organization/users/:id/verify-email',
+      method: 'POST',
+    },
+    {
+      name: 'organization:users:reset-password',
+      description: 'Restablecer contraseña de usuario',
+      path: '/api/organization/users/:id/reset-password',
       method: 'POST',
     },
 
     // Organizaciones
     {
-      name: 'organizations.create',
+      name: 'organization:organizations:create',
       description: 'Crear organización',
-      path: '/api/organizations',
+      path: '/api/organization/organizations',
       method: 'POST',
     },
     {
-      name: 'organizations.read',
+      name: 'organization:organizations:read',
       description: 'Leer organizaciones',
-      path: '/api/organizations',
+      path: '/api/organization/organizations',
       method: 'GET',
     },
     {
-      name: 'organizations.read.one',
+      name: 'organization:organizations:read:one',
       description: 'Leer organización específica',
-      path: '/api/organizations/:id',
+      path: '/api/organization/organizations/:id',
       method: 'GET',
     },
     {
-      name: 'organizations.read.slug',
+      name: 'organization:organizations:read:slug',
       description: 'Leer organización por slug',
-      path: '/api/organizations/slug/:slug',
+      path: '/api/organization/organizations/slug/:slug',
       method: 'GET',
     },
     {
-      name: 'organizations.update',
+      name: 'organization:organizations:update',
       description: 'Actualizar organización',
-      path: '/api/organizations/:id',
+      path: '/api/organization/organizations/:id',
       method: 'PATCH',
     },
     {
-      name: 'organizations.delete',
+      name: 'organization:organizations:delete',
       description: 'Eliminar organización',
-      path: '/api/organizations/:id',
+      path: '/api/organization/organizations/:id',
       method: 'DELETE',
     },
     {
-      name: 'organizations.stats',
+      name: 'organization:organizations:stats',
       description: 'Estadísticas de organización',
-      path: '/api/organizations/:id/stats',
+      path: '/api/organization/organizations/:id/stats',
       method: 'GET',
     },
 
     // Tiendas
     {
-      name: 'stores.create',
+      name: 'organization:stores:create',
       description: 'Crear tienda',
-      path: '/api/stores',
+      path: '/api/organization/stores',
       method: 'POST',
     },
     {
-      name: 'stores.read',
+      name: 'organization:stores:read',
       description: 'Leer tiendas',
-      path: '/api/stores',
+      path: '/api/organization/stores',
       method: 'GET',
     },
     {
-      name: 'stores.read.one',
+      name: 'organization:stores:read:one',
       description: 'Leer tienda específica',
-      path: '/api/stores/:id',
+      path: '/api/organization/stores/:id',
       method: 'GET',
     },
     {
-      name: 'stores.update',
+      name: 'organization:stores:update',
       description: 'Actualizar tienda',
-      path: '/api/stores/:id',
+      path: '/api/organization/stores/:id',
       method: 'PATCH',
     },
     {
-      name: 'stores.delete',
+      name: 'organization:stores:delete',
       description: 'Eliminar tienda',
-      path: '/api/stores/:id',
+      path: '/api/organization/stores/:id',
       method: 'DELETE',
     },
     {
-      name: 'stores.settings.update',
+      name: 'organization:stores:settings:update',
       description: 'Actualizar configuración de tienda',
-      path: '/api/stores/:id/settings',
+      path: '/api/organization/stores/:id/settings',
       method: 'PATCH',
     },
     {
-      name: 'stores.stats',
+      name: 'organization:stores:stats',
       description: 'Estadísticas de tienda',
-      path: '/api/stores/:id/stats',
+      path: '/api/organization/stores/:id/stats',
       method: 'GET',
+    },
+
+    // Clientes (Tienda)
+    {
+      name: 'store:customers:create',
+      description: 'Crear cliente en tienda',
+      path: '/api/store/customers',
+      method: 'POST',
+    },
+    {
+      name: 'store:customers:read',
+      description: 'Leer clientes de tienda',
+      path: '/api/store/customers',
+      method: 'GET',
+    },
+    {
+      name: 'store:customers:update',
+      description: 'Actualizar cliente en tienda',
+      path: '/api/store/customers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:customers:delete',
+      description: 'Eliminar cliente de tienda',
+      path: '/api/store/customers/:id',
+      method: 'DELETE',
     },
 
     // Productos
     {
-      name: 'products.create',
+      name: 'store:products:create',
       description: 'Crear producto',
-      path: '/api/products',
+      path: '/api/store/products',
       method: 'POST',
     },
     {
-      name: 'products.read',
+      name: 'store:products:bulk:upload',
+      description: 'Carga masiva de productos',
+      path: '/api/store/products/bulk/upload/csv',
+      method: 'POST',
+    },
+    {
+      name: 'store:products:bulk:template',
+      description: 'Descargar plantilla de carga masiva',
+      path: '/api/store/products/bulk/template/download',
+      method: 'GET',
+    },
+    {
+      name: 'store:products:read',
       description: 'Leer productos',
-      path: '/api/products',
+      path: '/api/store/products',
       method: 'GET',
     },
     {
-      name: 'products.read.one',
+      name: 'store:products:read:one',
       description: 'Leer producto específico',
-      path: '/api/products/:id',
+      path: '/api/store/products/:id',
       method: 'GET',
     },
     {
-      name: 'products.read.store',
+      name: 'store:products:read:store',
       description: 'Leer productos de tienda',
-      path: '/api/products/store/:storeId',
+      path: '/api/store/products/store/:storeId',
       method: 'GET',
     },
     {
-      name: 'products.read.slug',
+      name: 'store:products:read:slug',
       description: 'Leer producto por slug',
-      path: '/api/products/slug/:slug/store/:storeId',
+      path: '/api/store/products/slug/:slug/store/:storeId',
       method: 'GET',
     },
     {
-      name: 'products.update',
+      name: 'store:products:update',
       description: 'Actualizar producto',
-      path: '/api/products/:id',
+      path: '/api/store/products/:id',
       method: 'PATCH',
     },
     {
-      name: 'products.deactivate',
+      name: 'store:products:deactivate',
       description: 'Desactivar producto',
-      path: '/api/products/:id/deactivate',
+      path: '/api/store/products/:id/deactivate',
       method: 'PATCH',
     },
     {
-      name: 'products.admin_delete',
+      name: 'store:products:admin_delete',
       description: 'Eliminar producto (admin)',
-      path: '/api/products/:id',
+      path: '/api/store/products/:id',
       method: 'DELETE',
     },
     {
-      name: 'products.variants.create',
+      name: 'store:products:variants:create',
       description: 'Crear variante de producto',
-      path: '/api/products/:id/variants',
+      path: '/api/store/products/:id/variants',
       method: 'POST',
     },
     {
-      name: 'products.variants.update',
+      name: 'store:products:variants:update',
       description: 'Actualizar variante de producto',
-      path: '/api/products/variants/:variantId',
+      path: '/api/store/products/variants/:variantId',
       method: 'PATCH',
     },
     {
-      name: 'products.variants.delete',
+      name: 'store:products:variants:delete',
       description: 'Eliminar variante de producto',
-      path: '/api/products/variants/:variantId',
+      path: '/api/store/products/variants/:variantId',
       method: 'DELETE',
     },
     {
-      name: 'products.images.add',
+      name: 'store:products:images:add',
       description: 'Agregar imagen a producto',
-      path: '/api/products/:id/images',
+      path: '/api/store/products/:id/images',
       method: 'POST',
     },
     {
-      name: 'products.images.remove',
+      name: 'store:products:images:remove',
       description: 'Eliminar imagen de producto',
-      path: '/api/products/images/:imageId',
+      path: '/api/store/products/images/:imageId',
       method: 'DELETE',
     },
 
     // Órdenes
     {
-      name: 'orders.create',
+      name: 'store:orders:create',
       description: 'Crear orden',
-      path: '/api/orders',
+      path: '/api/store/orders',
       method: 'POST',
     },
     {
-      name: 'orders.read',
+      name: 'store:orders:read',
       description: 'Leer órdenes',
-      path: '/api/orders',
+      path: '/api/store/orders',
       method: 'GET',
     },
     {
-      name: 'orders.read.one',
+      name: 'store:orders:read:one',
       description: 'Leer orden específica',
-      path: '/api/orders/:id',
+      path: '/api/store/orders/:id',
       method: 'GET',
     },
     {
-      name: 'orders.update',
+      name: 'store:orders:update',
       description: 'Actualizar orden',
-      path: '/api/orders/:id',
+      path: '/api/store/orders/:id',
       method: 'PATCH',
     },
     {
-      name: 'orders.delete',
+      name: 'store:orders:delete',
       description: 'Eliminar orden',
-      path: '/api/orders/:id',
+      path: '/api/store/orders/:id',
       method: 'DELETE',
     },
 
     // Categorías
     {
-      name: 'categories.create',
+      name: 'store:categories:create',
       description: 'Crear categoría',
-      path: '/api/categories',
+      path: '/api/store/categories',
       method: 'POST',
     },
     {
-      name: 'categories.read',
+      name: 'store:categories:read',
       description: 'Leer categorías',
-      path: '/api/categories',
+      path: '/api/store/categories',
       method: 'GET',
     },
     {
-      name: 'categories.read.one',
+      name: 'store:categories:read:one',
       description: 'Leer categoría específica',
-      path: '/api/categories/:id',
+      path: '/api/store/categories/:id',
       method: 'GET',
     },
     {
-      name: 'categories.update',
+      name: 'store:categories:update',
       description: 'Actualizar categoría',
-      path: '/api/categories/:id',
+      path: '/api/store/categories/:id',
       method: 'PATCH',
     },
     {
-      name: 'categories.delete',
+      name: 'store:categories:delete',
       description: 'Eliminar categoría',
-      path: '/api/categories/:id',
+      path: '/api/store/categories/:id',
       method: 'DELETE',
     },
 
     // Marcas
     {
-      name: 'brands.create',
+      name: 'store:brands:create',
       description: 'Crear marca',
-      path: '/api/brands',
+      path: '/api/store/brands',
       method: 'POST',
     },
     {
-      name: 'brands.read',
+      name: 'store:brands:read',
       description: 'Leer marcas',
-      path: '/api/brands',
+      path: '/api/store/brands',
       method: 'GET',
     },
     {
-      name: 'brands.read.store',
+      name: 'store:brands:read:store',
       description: 'Leer marcas de tienda',
-      path: '/api/brands/store/:storeId',
+      path: '/api/store/brands/store/:storeId',
       method: 'GET',
     },
     {
-      name: 'brands.read.one',
+      name: 'store:brands:read:one',
       description: 'Leer marca específica',
-      path: '/api/brands/:id',
+      path: '/api/store/brands/:id',
       method: 'GET',
     },
     {
-      name: 'brands.read.slug',
+      name: 'store:brands:read:slug',
       description: 'Leer marca por slug',
-      path: '/api/brands/slug/:slug/store/:storeId',
+      path: '/api/store/brands/slug/:slug/store/:storeId',
       method: 'GET',
     },
     {
-      name: 'brands.update',
+      name: 'store:brands:update',
       description: 'Actualizar marca',
-      path: '/api/brands/:id',
+      path: '/api/store/brands/:id',
       method: 'PATCH',
     },
     {
-      name: 'brands.activate',
+      name: 'store:brands:activate',
       description: 'Activar marca',
-      path: '/api/brands/:id/activate',
+      path: '/api/store/brands/:id/activate',
       method: 'PATCH',
     },
     {
-      name: 'brands.deactivate',
+      name: 'store:brands:deactivate',
       description: 'Desactivar marca',
-      path: '/api/brands/:id/deactivate',
+      path: '/api/store/brands/:id/deactivate',
       method: 'PATCH',
     },
     {
-      name: 'brands.admin_delete',
+      name: 'store:brands:admin_delete',
       description: 'Eliminar marca (admin)',
-      path: '/api/brands/:id',
+      path: '/api/store/brands/:id',
+      method: 'DELETE',
+    },
+
+    // Proveedores
+    {
+      name: 'store:suppliers:create',
+      description: 'Crear proveedor',
+      path: '/api/store/inventory/suppliers',
+      method: 'POST',
+    },
+    {
+      name: 'store:suppliers:read',
+      description: 'Leer proveedores',
+      path: '/api/store/inventory/suppliers',
+      method: 'GET',
+    },
+    {
+      name: 'store:suppliers:update',
+      description: 'Actualizar proveedor',
+      path: '/api/store/inventory/suppliers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:suppliers:delete',
+      description: 'Eliminar proveedor',
+      path: '/api/store/inventory/suppliers/:id',
+      method: 'DELETE',
+    },
+
+    // Direcciones (Tienda)
+    {
+      name: 'store:addresses:create',
+      description: 'Crear dirección de tienda',
+      path: '/api/store/addresses',
+      method: 'POST',
+    },
+    {
+      name: 'store:addresses:read',
+      description: 'Leer direcciones de tienda',
+      path: '/api/store/addresses',
+      method: 'GET',
+    },
+    {
+      name: 'store:addresses:update',
+      description: 'Actualizar dirección de tienda',
+      path: '/api/store/addresses/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:addresses:delete',
+      description: 'Eliminar dirección de tienda',
+      path: '/api/store/addresses/:id',
       method: 'DELETE',
     },
 
     // Direcciones
     {
-      name: 'addresses.create',
+      name: 'organization:addresses:create',
       description: 'Crear dirección',
-      path: '/api/addresses',
+      path: '/api/organization/addresses',
       method: 'POST',
     },
     {
-      name: 'addresses.read',
+      name: 'organization:addresses:read',
       description: 'Leer direcciones',
-      path: '/api/addresses',
+      path: '/api/organization/addresses',
       method: 'GET',
     },
     {
-      name: 'addresses.read.store',
+      name: 'organization:addresses:read:store',
       description: 'Leer direcciones de tienda',
-      path: '/api/addresses/store/:storeId',
+      path: '/api/organization/addresses/store/:storeId',
       method: 'GET',
     },
     {
-      name: 'addresses.read.one',
+      name: 'organization:addresses:read:one',
       description: 'Leer dirección específica',
-      path: '/api/addresses/:id',
+      path: '/api/organization/addresses/:id',
       method: 'GET',
     },
     {
-      name: 'addresses.update',
+      name: 'organization:addresses:update',
       description: 'Actualizar dirección',
-      path: '/api/addresses/:id',
+      path: '/api/organization/addresses/:id',
       method: 'PATCH',
     },
     {
-      name: 'addresses.delete',
+      name: 'organization:addresses:delete',
       description: 'Eliminar dirección',
-      path: '/api/addresses/:id',
+      path: '/api/organization/addresses/:id',
       method: 'DELETE',
     },
 
     // Roles
     {
-      name: 'roles.create',
+      name: 'organization:roles:create',
       description: 'Crear rol',
-      path: '/api/roles',
+      path: '/api/organization/roles',
       method: 'POST',
     },
     {
-      name: 'roles.read',
+      name: 'organization:roles:read',
       description: 'Leer roles',
-      path: '/api/roles',
+      path: '/api/organization/roles',
       method: 'GET',
     },
     {
-      name: 'roles.stats',
+      name: 'organization:roles:stats',
       description: 'Estadísticas de roles',
-      path: '/api/roles/stats',
+      path: '/api/organization/roles/stats',
       method: 'GET',
     },
     {
-      name: 'roles.read.one',
+      name: 'organization:roles:read:one',
       description: 'Leer rol específico',
-      path: '/api/roles/:id',
+      path: '/api/organization/roles/:id',
       method: 'GET',
     },
     {
-      name: 'roles.update',
+      name: 'organization:roles:update',
       description: 'Actualizar rol',
-      path: '/api/roles/:id',
+      path: '/api/organization/roles/:id',
       method: 'PATCH',
     },
     {
-      name: 'roles.delete',
+      name: 'organization:roles:delete',
       description: 'Eliminar rol',
-      path: '/api/roles/:id',
+      path: '/api/organization/roles/:id',
       method: 'DELETE',
     },
     {
-      name: 'roles.permissions.read',
+      name: 'organization:roles:permissions:read',
       description: 'Leer permisos de rol',
-      path: '/api/roles/:id/permissions',
+      path: '/api/organization/roles/:id/permissions',
       method: 'GET',
     },
     {
-      name: 'roles.permissions.assign',
+      name: 'organization:roles:permissions:assign',
       description: 'Asignar permisos a rol',
-      path: '/api/roles/:id/permissions',
+      path: '/api/organization/roles/:id/permissions',
       method: 'POST',
     },
     {
-      name: 'roles.permissions.remove',
+      name: 'organization:roles:permissions:remove',
       description: 'Remover permisos de rol',
-      path: '/api/roles/:id/permissions',
+      path: '/api/organization/roles/:id/permissions',
       method: 'DELETE',
     },
     {
-      name: 'roles.assign.user',
+      name: 'organization:roles:assign:user',
       description: 'Asignar rol a usuario',
-      path: '/api/roles/assign-to-user',
+      path: '/api/organization/roles/assign-to-user',
       method: 'POST',
     },
     {
-      name: 'roles.remove.user',
+      name: 'organization:roles:remove:user',
       description: 'Remover rol de usuario',
-      path: '/api/roles/remove-from-user',
+      path: '/api/organization/roles/remove-from-user',
       method: 'POST',
     },
     {
-      name: 'roles.user.permissions',
+      name: 'organization:roles:user:permissions',
       description: 'Ver permisos de usuario',
-      path: '/api/roles/user/:userId/permissions',
+      path: '/api/organization/roles/user/:userId/permissions',
       method: 'GET',
     },
     {
-      name: 'roles.user.roles',
+      name: 'organization:roles:user:roles',
       description: 'Ver roles de usuario',
-      path: '/api/roles/user/:userId/roles',
+      path: '/api/organization/roles/user/:userId/roles',
       method: 'GET',
     },
 
     // Permisos
     {
-      name: 'permissions.create',
+      name: 'organization:permissions:create',
       description: 'Crear permiso',
-      path: '/api/permissions',
+      path: '/api/superadmin/permissions',
       method: 'POST',
     },
     {
-      name: 'permissions.read',
+      name: 'organization:permissions:read',
       description: 'Leer permisos',
-      path: '/api/permissions',
+      path: '/api/superadmin/permissions',
       method: 'GET',
     },
     {
-      name: 'permissions.read.one',
+      name: 'organization:permissions:read:one',
       description: 'Leer permiso específico',
-      path: '/api/permissions/:id',
+      path: '/api/superadmin/permissions/:id',
       method: 'GET',
     },
     {
-      name: 'permissions.update',
+      name: 'organization:permissions:update',
       description: 'Actualizar permiso',
-      path: '/api/permissions/:id',
+      path: '/api/superadmin/permissions/:id',
       method: 'PATCH',
     },
     {
-      name: 'permissions.delete',
+      name: 'organization:permissions:delete',
       description: 'Eliminar permiso',
-      path: '/api/permissions/:id',
+      path: '/api/superadmin/permissions/:id',
       method: 'DELETE',
     },
     {
-      name: 'permissions.search.name',
+      name: 'organization:permissions:search:name',
       description: 'Buscar permiso por nombre',
-      path: '/api/permissions/search/by-name/:name',
+      path: '/api/superadmin/permissions/search/by-name/:name',
       method: 'GET',
     },
     {
-      name: 'permissions.search.path',
+      name: 'organization:permissions:search:path',
       description: 'Buscar permiso por ruta y método',
-      path: '/api/permissions/search/by-path-method',
+      path: '/api/superadmin/permissions/search/by-path-method',
       method: 'GET',
     },
 
-    // Dominios
+    // Dominios (Super Admin)
     {
       name: 'domains.create',
       description: 'Crear configuración de dominio',
-      path: '/api/domains',
+      path: '/api/superadmin/domains',
       method: 'POST',
     },
     {
       name: 'domains.read',
       description: 'Leer configuraciones de dominio',
-      path: '/api/domains',
+      path: '/api/superadmin/domains',
       method: 'GET',
     },
     {
       name: 'domains.read.hostname',
       description: 'Leer configuración por hostname',
-      path: '/api/domains/hostname/:hostname',
+      path: '/api/superadmin/domains/hostname/:hostname',
       method: 'GET',
     },
     {
       name: 'domains.read.one',
       description: 'Leer configuración por ID',
-      path: '/api/domains/:id',
+      path: '/api/superadmin/domains/:id',
       method: 'GET',
     },
     {
       name: 'domains.update',
       description: 'Actualizar configuración de dominio',
-      path: '/api/domains/hostname/:hostname',
+      path: '/api/superadmin/domains/hostname/:hostname',
       method: 'PUT',
     },
     {
       name: 'domains.delete',
       description: 'Eliminar configuración de dominio',
-      path: '/api/domains/hostname/:hostname',
+      path: '/api/superadmin/domains/hostname/:hostname',
       method: 'DELETE',
     },
     {
       name: 'domains.duplicate',
       description: 'Duplicar configuración de dominio',
-      path: '/api/domains/hostname/:hostname/duplicate',
+      path: '/api/superadmin/domains/hostname/:hostname/duplicate',
       method: 'POST',
     },
     {
       name: 'domains.read.organization',
       description: 'Leer configuraciones por organización',
-      path: '/api/domains/organization/:organizationId',
+      path: '/api/superadmin/domains/organization/:organizationId',
       method: 'GET',
     },
     {
       name: 'domains.read.store',
       description: 'Leer configuraciones por tienda',
-      path: '/api/domains/store/:storeId',
+      path: '/api/superadmin/domains/store/:storeId',
       method: 'GET',
     },
     {
       name: 'domains.validate',
       description: 'Validar hostname',
-      path: '/api/domains/validate-hostname',
+      path: '/api/superadmin/domains/validate-hostname',
       method: 'POST',
     },
     {
       name: 'domains.verify',
       description: 'Verificar configuración DNS',
-      path: '/api/domains/hostname/:hostname/verify',
+      path: '/api/superadmin/domains/hostname/:hostname/verify',
       method: 'POST',
     },
     {
       name: 'domains.resolve',
       description: 'Resolver configuración de dominio (público)',
-      path: '/api/domains/resolve/:hostname',
+      path: '/api/public/domains/resolve/:hostname',
       method: 'GET',
     },
     {
       name: 'domains.check',
       description: 'Verificar disponibilidad de hostname (público)',
-      path: '/api/domains/check/:hostname',
+      path: '/api/public/domains/check/:hostname',
       method: 'GET',
     },
 
     // Impuestos
     {
-      name: 'taxes.create',
+      name: 'store:taxes:create',
       description: 'Crear categoría de impuesto',
       path: '/api/taxes',
       method: 'POST',
     },
     {
-      name: 'taxes.read',
+      name: 'store:taxes:read',
       description: 'Leer categorías de impuestos',
       path: '/api/taxes',
       method: 'GET',
     },
     {
-      name: 'taxes.read.one',
+      name: 'store:taxes:read:one',
       description: 'Leer categoría de impuesto específica',
       path: '/api/taxes/:id',
       method: 'GET',
     },
     {
-      name: 'taxes.update',
+      name: 'store:taxes:update',
       description: 'Actualizar categoría de impuesto',
       path: '/api/taxes/:id',
       method: 'PATCH',
     },
     {
-      name: 'taxes.delete',
+      name: 'store:taxes:delete',
       description: 'Eliminar categoría de impuesto',
       path: '/api/taxes/:id',
       method: 'DELETE',
@@ -876,6 +1076,164 @@ async function main() {
       path: '/api/test',
       method: 'GET',
     },
+    // Login Attempts
+    {
+      name: 'organization:login_attempts:read',
+      description: 'Leer intentos de login',
+      path: '/organization/login-attempts',
+      method: 'GET',
+    },
+    // Payment Policies
+    {
+      name: 'organization:payment_policies:read',
+      description: 'Leer políticas de pago',
+      path: '/organization/payment-policies',
+      method: 'GET',
+    },
+    {
+      name: 'organization:payment_policies:update',
+      description: 'Actualizar políticas de pago',
+      path: '/organization/payment-policies',
+      method: 'PUT',
+    },
+    // User Sessions
+    {
+      name: 'organization:user_sessions:read',
+      description: 'Leer sesiones de usuario',
+      path: '/organization/sessions',
+      method: 'GET',
+    },
+    {
+      name: 'organization:user_sessions:delete',
+      description: 'Eliminar sesiones de usuario',
+      path: '/organization/sessions',
+      method: 'DELETE',
+    },
+    // Inventario
+    {
+      name: 'store:inventory:adjustments:create',
+      description: 'Crear ajuste de inventario',
+      path: '/api/inventory/adjustments',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:adjustments:read',
+      description: 'Leer ajustes de inventario',
+      path: '/api/inventory/adjustments',
+      method: 'GET',
+    },
+    {
+      name: 'store:inventory:adjustments:approve',
+      description: 'Aprobar ajuste de inventario',
+      path: '/api/inventory/adjustments/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:adjustments:delete',
+      description: 'Eliminar ajuste de inventario',
+      path: '/api/inventory/adjustments/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:inventory:transactions:create',
+      description: 'Crear transacción de inventario',
+      path: '/api/inventory/transactions',
+      method: 'POST',
+    },
+    {
+      name: 'store:inventory:transactions:read',
+      description: 'Leer transacciones de inventario',
+      path: '/api/inventory/transactions',
+      method: 'GET',
+    },
+    // Suppliers
+    {
+      name: 'store:suppliers:create',
+      description: 'Crear proveedor',
+      path: '/api/store/inventory/suppliers',
+      method: 'POST',
+    },
+    {
+      name: 'store:suppliers:read',
+      description: 'Leer proveedores',
+      path: '/api/store/inventory/suppliers',
+      method: 'GET',
+    },
+    {
+      name: 'store:suppliers:update',
+      description: 'Actualizar proveedor',
+      path: '/api/store/inventory/suppliers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:suppliers:delete',
+      description: 'Eliminar proveedor',
+      path: '/api/store/inventory/suppliers/:id',
+      method: 'DELETE',
+    },
+    // Store Addresses
+    {
+      name: 'store:addresses:create',
+      description: 'Crear dirección de tienda',
+      path: '/api/store/addresses',
+      method: 'POST',
+    },
+    {
+      name: 'store:addresses:read',
+      description: 'Leer direcciones de tienda',
+      path: '/api/store/addresses',
+      method: 'GET',
+    },
+    {
+      name: 'store:addresses:update',
+      description: 'Actualizar dirección de tienda',
+      path: '/api/store/addresses/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:addresses:delete',
+      description: 'Eliminar dirección de tienda',
+      path: '/api/store/addresses/:id',
+      method: 'DELETE',
+    },
+    // Store Management
+    {
+      name: 'store:stores:create',
+      description: 'Crear tienda (Store Level)',
+      path: '/api/store/stores',
+      method: 'POST',
+    },
+    {
+      name: 'store:stores:read',
+      description: 'Leer tienda (Store Level)',
+      path: '/api/store/stores',
+      method: 'GET',
+    },
+    {
+      name: 'store:stores:update',
+      description: 'Actualizar tienda (Store Level)',
+      path: '/api/store/stores/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:stores:delete',
+      description: 'Eliminar tienda (Store Level)',
+      path: '/api/store/stores/:id',
+      method: 'DELETE',
+    },
+    // Organization Settings
+    {
+      name: 'organization:settings:read',
+      description: 'Leer configuración de organización',
+      path: '/organization/settings',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:update',
+      description: 'Actualizar configuración de organización',
+      path: '/organization/settings',
+      method: 'PUT',
+    },
   ];
 
   for (const permission of permissions) {
@@ -891,6 +1249,20 @@ async function main() {
     });
   }
 
+  // Marcar permisos críticos como permisos del sistema
+  await prisma.permissions.updateMany({
+    where: {
+      OR: [
+        { name: { contains: 'super_admin' } },
+        { name: { startsWith: 'system.' } },
+        { name: { startsWith: 'security.' } },
+        { name: { startsWith: 'rate.limiting.' } },
+      ],
+    },
+    // @ts-ignore is_system_permission exists in model
+    data: { is_system_permission: true },
+  });
+
   // 2. Crear roles
   console.log('👥 Creando roles...');
   const superAdminRole = await prisma.roles.upsert({
@@ -900,6 +1272,8 @@ async function main() {
       name: 'super_admin',
       description: 'Super Administrador del sistema',
       is_system_role: true,
+      // @ts-ignore
+      organization_id: null,
     },
   });
   const ownerRole = await prisma.roles.upsert({
@@ -957,6 +1331,13 @@ async function main() {
     },
   });
 
+  // Asignar organization_id = null a roles del sistema (por si acaso)
+  await prisma.roles.updateMany({
+    where: { is_system_role: true },
+    // @ts-ignore organization_id exists in model
+    data: { organization_id: null },
+  });
+
   // 3. Asignar permisos a roles
   console.log('🔗 Asignando permisos a roles...');
   const allPermissions = await prisma.permissions.findMany();
@@ -999,25 +1380,20 @@ async function main() {
   // Asignar permisos al admin (gestión operativa)
   const adminPermissions = allPermissions.filter(
     (p) =>
-      p.name.includes('users.') ||
-      p.name.includes('stores.') ||
-      p.name.includes('products.') ||
-      p.name.includes('categories.') ||
-      p.name.includes('brands.') ||
-      p.name.includes('inventory.') ||
-      p.name.includes('orders.') ||
-      p.name.includes('payments.') ||
-      p.name.includes('addresses.') ||
-      p.name.includes('taxes.') ||
-      p.name.includes('domains.') ||
-      p.name.includes('audit.') ||
-      p.name.includes('email.') ||
-      (!p.name.includes('super_admin') &&
-        !p.name.includes('roles.') &&
-        !p.name.includes('permissions.') &&
-        !p.name.includes('organizations.delete') &&
-        !p.name.includes('security.') &&
-        !p.name.includes('rate.limiting.')),
+      // Permitir acceso a todos los dominios de negocio
+      (p.name.startsWith('organization:') ||
+        p.name.startsWith('store:') ||
+        p.name.startsWith('audit.') ||
+        p.name.startsWith('email.') ||
+        p.name.startsWith('domains.')) &&
+      // Exclusiones de seguridad
+      !p.name.includes('super_admin') &&
+      !p.name.startsWith('system.') &&
+      !p.name.startsWith('security.') &&
+      !p.name.startsWith('rate.limiting.') &&
+      !p.name.includes('users.impersonate') &&
+      // Excluir eliminación de la organización (reservado para Owner)
+      !p.name.includes('organization:organizations:delete'),
   );
 
   for (const permission of adminPermissions) {
@@ -1036,57 +1412,32 @@ async function main() {
   // Asignar permisos al manager (gestión completa de tienda)
   const managerPermissions = allPermissions.filter(
     (p) =>
-      // Users management (limitado a su tienda)
-      p.name.includes('users.create') ||
-      p.name.includes('users.read') ||
-      p.name.includes('users.update') ||
-      p.name.includes('users.delete') ||
-      p.name.includes('users.search') ||
-      p.name.includes('users.stats') ||
-      // Stores management (solo lectura y configuración)
-      p.name.includes('stores.read') ||
-      p.name.includes('stores.update') ||
-      p.name.includes('stores.search') ||
-      p.name.includes('stores.stats') ||
-      p.name.includes('stores.settings') ||
-      // Products management (completo)
-      p.name.includes('products.') ||
-      // Categories management (completo)
-      p.name.includes('categories.') ||
-      // Brands management (completo)
-      p.name.includes('brands.') ||
-      // Orders management (completo)
-      p.name.includes('orders.') ||
-      // Inventory management (completo)
-      p.name.includes('inventory.') ||
-      // Payments management (completo)
-      p.name.includes('payments.') ||
-      // Addresses management
-      p.name.includes('addresses.') ||
-      // Taxes management (lectura)
-      p.name.includes('taxes.read') ||
-      // Audit logs (lectura)
+      // Acceso completo a todo el dominio store
+      p.name.startsWith('store:') ||
+      // Gestión limitada de usuarios (solo lectura para contexto)
+      p.name.includes('organization:users:read') ||
+      p.name.includes('organization:users:search') ||
+      // Configuración básica de tienda y organización
+      p.name.includes('organization:stores:read') ||
+      p.name.includes('organization:stores:settings') ||
+      // Contexto organizacional necesario
+      p.name.includes('organization:addresses:read') ||
+      // Utilidades y seguridad básica
       p.name.includes('audit.logs') ||
-      // Email management (limitado)
-      p.name.includes('email.create') ||
       p.name.includes('email.read') ||
       p.name.includes('email.send') ||
-      // Auth management (básico)
       p.name.includes('auth.login') ||
       p.name.includes('auth.logout') ||
       p.name.includes('auth.profile') ||
-      // Health checks
       p.name.includes('health.check') ||
-      // Excluir permisos críticos que no debe tener
+      // Exclusiones explícitas de roles superiores
       (!p.name.includes('super_admin') &&
-        !p.name.includes('system.') &&
-        !p.name.includes('organizations.delete') &&
-        !p.name.includes('domains.delete') &&
-        !p.name.includes('roles.') &&
-        !p.name.includes('permissions.') &&
+        !p.name.includes('organization:roles:') &&
+        !p.name.includes('organization:permissions:') &&
+        !p.name.includes('organization:organizations:') && // Nada de org management
+        !p.name.includes('organization:domains:') &&
         !p.name.includes('security.') &&
-        !p.name.includes('rate.limiting.') &&
-        !p.name.includes('users.impersonate')),
+        !p.name.includes('rate.limiting.')),
   );
 
   for (const permission of managerPermissions) {
@@ -1105,16 +1456,18 @@ async function main() {
   // Asignar permisos básicos al supervisor
   const supervisorPermissions = allPermissions.filter(
     (p) =>
-      p.name.includes('orders.') ||
-      p.name.includes('payments.read') ||
-      p.name.includes('inventory.read') ||
-      p.name.includes('products.read') ||
-      p.name.includes('categories.read') ||
-      p.name.includes('brands.read') ||
-      p.name.includes('users.read') ||
-      p.name.includes('stores.read') ||
-      p.name.includes('addresses.read') ||
-      p.name.includes('taxes.read'),
+      p.name.includes('store:orders:') ||
+      p.name.includes('store:payments:read') ||
+      (p.name.startsWith('store:inventory:') && p.name.includes(':read')) ||
+      p.name.includes('store:products:read') ||
+      p.name.includes('store:categories:read') ||
+      p.name.includes('store:brands:read') ||
+      p.name.includes('store:suppliers:read') ||
+      p.name.includes('organization:users:read') ||
+      p.name.includes('organization:stores:read') ||
+      p.name.includes('organization:addresses:read') ||
+      p.name.includes('store:addresses:read') ||
+      p.name.includes('store:taxes:read'),
   );
 
   for (const permission of supervisorPermissions) {
@@ -1133,14 +1486,16 @@ async function main() {
   // Asignar permisos mínimos al employee
   const employeePermissions = allPermissions.filter(
     (p) =>
-      p.name.includes('orders.create') ||
-      p.name.includes('orders.read') ||
-      p.name.includes('payments.process') ||
-      p.name.includes('products.read') ||
-      p.name.includes('categories.read') ||
-      p.name.includes('brands.read') ||
-      p.name.includes('addresses.read') ||
-      p.name.includes('taxes.read'),
+      p.name.includes('store:orders:create') ||
+      p.name.includes('store:orders:read') ||
+      p.name.includes('store:payments:process') ||
+      p.name.includes('store:products:read') ||
+      p.name.includes('store:categories:read') ||
+      p.name.includes('store:brands:read') ||
+      p.name.includes('store:customers:read') ||
+      p.name.includes('organization:addresses:read') ||
+      p.name.includes('store:addresses:read') ||
+      p.name.includes('store:taxes:read'),
   );
 
   for (const permission of employeePermissions) {
@@ -1171,21 +1526,21 @@ async function main() {
       p.name.includes('auth.sessions') ||
       p.name.includes('auth.revoke.session') ||
       p.name.includes('auth.logout') ||
-      p.name.includes('products.read') ||
-      p.name.includes('products.read.store') ||
-      p.name.includes('products.read.slug') ||
-      p.name.includes('categories.read') ||
-      p.name.includes('brands.read') ||
-      p.name.includes('brands.read.store') ||
-      p.name.includes('brands.read.slug') ||
-      p.name.includes('orders.create') ||
-      p.name.includes('orders.read') ||
-      p.name.includes('orders.read.one') ||
-      p.name.includes('addresses.create') ||
-      p.name.includes('addresses.read') ||
-      p.name.includes('addresses.read.one') ||
-      p.name.includes('addresses.update') ||
-      p.name.includes('addresses.delete') ||
+      p.name.includes('store:products:read') ||
+      p.name.includes('store:products:read:store') ||
+      p.name.includes('store:products:read:slug') ||
+      p.name.includes('store:categories:read') ||
+      p.name.includes('store:brands:read') ||
+      p.name.includes('store:brands:read:store') ||
+      p.name.includes('store:brands:read:slug') ||
+      p.name.includes('store:orders:create') ||
+      p.name.includes('store:orders:read') ||
+      p.name.includes('store:orders:read:one') ||
+      p.name.includes('organization:addresses:create') ||
+      p.name.includes('organization:addresses:read') ||
+      p.name.includes('organization:addresses:read:one') ||
+      p.name.includes('organization:addresses:update') ||
+      p.name.includes('organization:addresses:delete') ||
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||
       p.name.includes('system.health'),
@@ -1202,6 +1557,177 @@ async function main() {
       update: {},
       create: { role_id: customerRole.id, permission_id: permission.id },
     });
+  }
+
+  // 3.5. Crear métodos de pago del sistema
+  console.log('💳 Creando métodos de pago del sistema...');
+
+  const systemMethods: any[] = [
+    {
+      name: 'cash',
+      display_name: 'Efectivo',
+      description: 'Pago en efectivo en punto de venta',
+      type: 'cash',
+      provider: 'internal',
+      is_active: true,
+      requires_config: false,
+      supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
+      min_amount: 0,
+    },
+    {
+      name: 'stripe_card',
+      display_name: 'Tarjeta de Crédito/Débito (Stripe)',
+      description: 'Pagos con tarjeta procesados por Stripe',
+      type: 'card',
+      provider: 'stripe',
+      logo_url: 'https://cdn.vendix.com/logos/stripe.png',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['publishable_key', 'secret_key'],
+        properties: {
+          publishable_key: {
+            type: 'string',
+            description: 'Stripe Publishable Key',
+          },
+          secret_key: {
+            type: 'string',
+            description: 'Stripe Secret Key',
+          },
+          webhook_secret: {
+            type: 'string',
+            description: 'Stripe Webhook Secret',
+          },
+        },
+      },
+      supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
+      processing_fee_type: 'percentage',
+      processing_fee_value: 2.9,
+    },
+    {
+      name: 'paypal',
+      display_name: 'PayPal',
+      description: 'Pagos a través de PayPal',
+      type: 'paypal',
+      provider: 'paypal',
+      logo_url: 'https://cdn.vendix.com/logos/paypal.png',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['client_id', 'client_secret'],
+        properties: {
+          client_id: {
+            type: 'string',
+            description: 'PayPal Client ID',
+          },
+          client_secret: {
+            type: 'string',
+            description: 'PayPal Client Secret',
+          },
+          mode: {
+            type: 'string',
+            enum: ['sandbox', 'live'],
+            description: 'PayPal Environment Mode',
+          },
+        },
+      },
+      supported_currencies: ['USD', 'EUR', 'COP'],
+      processing_fee_type: 'percentage',
+      processing_fee_value: 3.4,
+    },
+    {
+      name: 'bank_transfer',
+      display_name: 'Transferencia Bancaria',
+      description: 'Pago mediante transferencia bancaria',
+      type: 'bank_transfer',
+      provider: 'internal',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['bank_name', 'account_number'],
+        properties: {
+          bank_name: {
+            type: 'string',
+            description: 'Nombre del banco',
+          },
+          account_number: {
+            type: 'string',
+            description: 'Número de cuenta',
+          },
+          account_holder: {
+            type: 'string',
+            description: 'Titular de la cuenta',
+          },
+          swift_code: {
+            type: 'string',
+            description: 'Código SWIFT/BIC',
+          },
+          clabe: {
+            type: 'string',
+            description: 'CLABE interbancaria (México)',
+          },
+        },
+      },
+      supported_currencies: ['USD', 'MXN', 'COP'],
+    },
+    {
+      name: 'payment_vouchers',
+      display_name: 'Vouchers de Pago',
+      description: 'Vouchers o cupones de pago prepagados',
+      type: 'voucher',
+      provider: 'internal',
+      is_active: true,
+      requires_config: true,
+      config_schema: {
+        type: 'object',
+        required: ['allow_validation'],
+        properties: {
+          allow_validation: {
+            type: 'boolean',
+            description: 'Permitir validación de vouchers',
+          },
+          require_verification: {
+            type: 'boolean',
+            description: 'Requerir verificación de vouchers',
+          },
+          voucher_prefix: {
+            type: 'string',
+            description: 'Prefijo para códigos de voucher',
+          },
+          min_amount: {
+            type: 'number',
+            description: 'Monto mínimo del voucher',
+          },
+          max_amount: {
+            type: 'number',
+            description: 'Monto máximo del voucher',
+          },
+        },
+      },
+      supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
+      processing_fee_type: 'fixed',
+      processing_fee_value: 0,
+    },
+  ];
+
+  for (const method of systemMethods) {
+    const existing = await prisma.system_payment_methods.findUnique({
+      where: { name: method.name },
+    });
+
+    if (existing) {
+      console.log(`  ✓ System payment method '${method.name}' already exists`);
+      continue;
+    }
+
+    await prisma.system_payment_methods.create({
+      data: method,
+    });
+
+    console.log(`  ✓ Created system payment method: ${method.display_name}`);
   }
 
   // 4. Crear múltiples organizaciones

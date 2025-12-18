@@ -280,7 +280,8 @@
 }
 
 // Responsive design
-@media (max-width: 40em) {  /* 640px */
+@media (max-width: 40em) {
+  /* 640px */
   .inputsearch-wrapper {
     &.inputsearch-wrapper-lg {
       height: 2.75rem; // Reducir tamaño en móvil

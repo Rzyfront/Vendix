@@ -30,7 +30,7 @@ import { takeUntil } from 'rxjs/operators';
         #sidebarRef
         [menuItems]="menuItems"
         [title]="(organizationName$ | async) || organizationName"
-        subtitle="Organization Admin"
+        subtitle="Administrador de Organización"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"
@@ -41,7 +41,9 @@ import { takeUntil } from 'rxjs/operators';
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
-        [style.margin-left]="!sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'"
+        [style.margin-left]="
+          !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
+        "
       >
         <!-- Header (Fixed) -->
         <app-header
@@ -150,200 +152,49 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   breadcrumb = {
     parent: { label: 'Panel Administrativo', url: '/admin' },
-    current: { label: 'Dashboard' },
+    current: { label: 'Panel Principal' },
   };
 
   user = {
-    name: 'Admin User',
-    role: 'Organization Admin',
-    initials: 'AU',
+    name: 'Usuario Administrador',
+    role: 'Administrador de Organización',
+    initials: 'UA',
   };
 
   menuItems: MenuItem[] = [
     {
-      label: 'Dashboard',
+      label: 'Panel Principal',
       icon: 'home',
       route: '/admin/dashboard',
     },
     {
-      label: 'Stores',
+      label: 'Tiendas',
       icon: 'store',
-      route: '/admin/stores-management',
+      route: '/admin/stores',
     },
     {
-      label: 'Users',
+      label: 'Usuarios',
       icon: 'users',
-      children: [
-        {
-          label: 'Global Users',
-          icon: 'user',
-          route: '/admin/users/global-users',
-        },
-        {
-          label: 'Roles & Permissions',
-          icon: 'shield',
-          route: '/admin/users/roles-permissions',
-        },
-        {
-          label: 'Store Assignments',
-          icon: 'building',
-          route: '/admin/users/store-assignments',
-        },
-        {
-          label: 'Access Audit',
-          icon: 'eye',
-          route: '/admin/users/access-audit',
-        },
-      ],
+      route: '/admin/users',
     },
     {
-      label: 'Financial',
-      icon: 'dollar-sign',
-      children: [
-        {
-          label: 'Reports',
-          icon: 'file-text',
-          route: '/admin/financial/reports',
-        },
-        {
-          label: 'Billing & Subscriptions',
-          icon: 'credit-card',
-          route: '/admin/financial/billing',
-        },
-        {
-          label: 'Cost Analysis',
-          icon: 'bar-chart',
-          route: '/admin/financial/cost-analysis',
-        },
-        {
-          label: 'Cash Flow',
-          icon: 'trending-up',
-          route: '/admin/financial/cash-flow',
-        },
-      ],
-    },
-    {
-      label: 'Analytics & BI',
-      icon: 'chart-line',
-      children: [
-        {
-          label: 'Predictive Analysis',
-          icon: 'bar-chart',
-          route: '/admin/analytics/predictive',
-        },
-        {
-          label: 'Cross-Store Analysis',
-          icon: 'store',
-          route: '/admin/analytics/cross-store',
-        },
-      ],
-    },
-    {
-      label: 'Inventory',
-      icon: 'warehouse',
-      children: [
-        {
-          label: 'Stock Management',
-          icon: 'package',
-          route: '/admin/inventory/stock',
-        },
-        {
-          label: 'Stock Transfers',
-          icon: 'refresh-ccw',
-          route: '/admin/inventory/transfers',
-        },
-        {
-          label: 'Suppliers',
-          icon: 'truck',
-          route: '/admin/inventory/suppliers',
-        },
-        {
-          label: 'Demand Forecast',
-          icon: 'trending-up',
-          route: '/admin/inventory/demand-forecast',
-        },
-      ],
-    },
-    {
-      label: 'Operations',
-      icon: 'truck',
-      children: [
-        {
-          label: 'Shipping Management',
-          icon: 'truck',
-          route: '/admin/operations/shipping',
-        },
-        {
-          label: 'Procurement',
-          icon: 'cart',
-          route: '/admin/operations/procurement',
-        },
-        {
-          label: 'Returns Management',
-          icon: 'rotate-ccw',
-          route: '/admin/operations/returns',
-        },
-        {
-          label: 'Route Optimization',
-          icon: 'globe-2',
-          route: '/admin/operations/route-optimization',
-        },
-      ],
-    },
-    {
-      label: 'Audit & Compliance',
+      label: 'Auditoría y Cumplimiento',
       icon: 'shield',
-      children: [
-        {
-          label: 'Audit Logs',
-          icon: 'file-text',
-          route: '/admin/audit/logs',
-        },
-        {
-          label: 'Compliance Reports',
-          icon: 'file-check',
-          route: '/admin/audit/compliance',
-        },
-        {
-          label: 'Legal Documents',
-          icon: 'file-text',
-          route: '/admin/audit/legal-docs',
-        },
-        {
-          label: 'Backup & Recovery',
-          icon: 'backup',
-          route: '/admin/audit/backup',
-        },
-      ],
+      route: '/admin/audit/logs'
     },
     {
-      label: 'Configuration',
+      label: 'Configuración',
       icon: 'settings',
       children: [
         {
-          label: 'Application Settings',
+          label: 'Configuración de Aplicación',
           icon: 'sliders',
           route: '/admin/config/application',
         },
         {
-          label: 'Policies',
-          icon: 'file-text',
-          route: '/admin/config/policies',
-        },
-        {
-          label: 'Integrations',
-          icon: 'link-2',
-          route: '/admin/config/integrations',
-        },
-        {
-          label: 'Taxes',
+          label: 'Metodos de pago',
           icon: 'credit-card',
-          route: '/admin/config/taxes',
-        },
-        {
-          label: 'Domains',
-          icon: 'globe-2',
-          route: '/admin/config/domains',
+          route: '/admin/config/payments-methods',
         },
       ],
     },

@@ -1,0 +1,32 @@
+meta {
+  name: Create Address - Invalid Data
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{url}}/organization/addresses
+  body: json
+}
+
+body:json {
+  {
+    "address_line_1": "",
+    "city": "",
+    "state": "",
+    "postal_code": "invalid",
+    "country": ""
+  }
+}
+
+tests {
+  test("Request fails with validation errors", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+    expect(res.body).to.have.property('message');
+  });
+
+  test("Error message indicates validation issues", function() {
+    expect(res.body.message).to.include('validation');
+  });
+}

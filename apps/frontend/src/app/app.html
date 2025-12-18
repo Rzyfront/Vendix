@@ -4,8 +4,10 @@
 <div *ngIf="isLoading$ | async" class="min-h-screen flex items-center justify-center bg-background">
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
-      <app-spinner size="lg" text="Loading Application..." [center]="true"></app-spinner>
-      <p class="text-text-secondary mt-4">Please wait while we prepare your application</p>
+      <app-spinner size="lg" text="Cargando Aplicación..." [center]="true"></app-spinner>
+      <p class="text-text-secondary mt-4">
+        Por favor espere mientras preparamos su solicitud
+      </p>
     </div>
   </app-card>
 </div>
@@ -15,7 +17,9 @@
   <app-card class="w-full max-w-md mx-4">
     <div class="text-center py-8">
       <div class="text-6xl mb-4">⚠️</div>
-      <h2 class="text-xl font-semibold text-text-primary mb-2">Application Error</h2>
+      <h2 class="text-xl font-semibold text-text-primary mb-2">
+        Error de Aplicación
+      </h2>
       <p class="text-text-secondary mb-6">{{ error }}</p>
     </div>
   </app-card>
@@ -29,3 +33,4 @@
 
 <!-- Toasts (global) -->
 <app-toast-container></app-toast-container>
+<app-global-user-modals></app-global-user-modals>

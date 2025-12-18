@@ -1,0 +1,53 @@
+meta {
+  name: Update Organization Profile
+  type: http
+  seq: 2
+}
+
+patch {
+  url: http://{{url}}/organization/organizations/profile
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Updated Organization Name",
+    "email": "updated@example.com",
+    "phone": "+1234567890",
+    "website": "https://updated.example.com"
+  }
+}
+
+vars:post-response {
+  updated_org_name: res.body.data.name
+  updated_org_email: res.body.data.email
+}
+
+tests {
+  test("Update profile successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('actualizado exitosamente');
+  });
+
+  test("Updated data is reflected", function() {
+    expect(res.body).to.have.property('data');
+    const profile = res.body.data;
+    expect(profile).to.have.property('name', 'Updated Organization Name');
+    expect(profile).to.have.property('email', 'updated@example.com');
+    expect(profile).to.have.property('phone', '+1234567890');
+    expect(profile).to.have.property('website', 'https://updated.example.com');
+  });
+
+  test("Variables extracted correctly", function() {
+    expect(bru.getEnvVar('updated_org_name')).to.equal('Updated Organization Name');
+    expect(bru.getEnvVar('updated_org_email')).to.equal('updated@example.com');
+  });
+
+  test("Profile has metadata", function() {
+    expect(res.body.data).to.have.property('updated_at');
+  });
+}

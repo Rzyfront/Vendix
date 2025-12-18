@@ -1,0 +1,19 @@
+meta {
+  name: Terminate Session
+  type: http
+  seq: 2
+}
+
+delete {
+  url: http://{{url}}/organization/sessions/1
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Terminate session successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+  });
+}

@@ -5,8 +5,10 @@ export type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'outline'
+  | 'outline-danger'
   | 'ghost'
-  | 'danger';
+  | 'danger'
+  | 'success';
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
 @Component({
@@ -132,6 +134,14 @@ export class ButtonComponent {
         'hover:text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-primary)]/50',
       ],
+      'outline-danger': [
+        'border-2',
+        'border-[var(--color-destructive)]',
+        'text-[var(--color-destructive)]',
+        'hover:bg-[var(--color-destructive)]',
+        'hover:text-[var(--color-text-on-primary)]',
+        'focus:ring-[var(--color-destructive)]/50',
+      ],
       ghost: [
         'text-[var(--color-text-primary)]',
         'hover:bg-[var(--color-background)]',
@@ -142,6 +152,12 @@ export class ButtonComponent {
         'hover:bg-[var(--color-destructive)]',
         'text-[var(--color-text-on-primary)]',
         'focus:ring-[var(--color-destructive)]/50',
+      ],
+      success: [
+        'bg-green-600',
+        'hover:bg-green-700',
+        'text-white',
+        'focus:ring-green-500/50',
       ],
     };
 

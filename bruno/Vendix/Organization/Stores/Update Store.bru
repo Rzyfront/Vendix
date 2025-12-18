@@ -1,0 +1,60 @@
+meta {
+  name: Update Store
+  type: http
+  seq: 4
+}
+
+patch {
+  url: http://{{url}}/organization/stores/5
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "name": "Updated Test Store",
+    "slug": "updated-test-store",
+    "store_code": "UPD001",
+    "logo_url": "https://example.com/updated-logo.png",
+    "color_primary": "#0066CC",
+    "color_secondary": "#FF9900",
+    "timezone": "America/Los_Angeles",
+    "store_type": "online",
+    "is_active": true,
+    "manager_user_id": 57
+  }
+}
+
+tests {
+  test("Update store successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('actualizada exitosamente');
+  });
+  
+  test("Store data was updated correctly", function() {
+    expect(res.body).to.have.property('data');
+    const store = res.body.data;
+    expect(store.name).to.equal('Updated Test Store');
+    expect(store.slug).to.equal('updated-test-store');
+    expect(store.store_code).to.equal('UPD001');
+    expect(store.logo_url).to.equal('https://example.com/updated-logo.png');
+    expect(store.color_primary).to.equal('#0066CC');
+    expect(store.color_secondary).to.equal('#FF9900');
+    expect(store.timezone).to.equal('America/Los_Angeles');
+    expect(store.store_type).to.equal('online');
+    expect(store.is_active).to.equal(true);
+  });
+  
+  test("Updated store ID matches", function() {
+    expect(res.body.data.id).to.equal(parseInt(bru.getEnvVar('created_store_id')));
+  });
+  
+  test("Updated timestamp is present", function() {
+    expect(res.body.data).to.have.property('updated_at');
+    const updatedAt = new Date(res.body.data.updated_at);
+    expect(updatedAt).to.be.a('date');
+  });
+}

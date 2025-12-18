@@ -1,0 +1,41 @@
+meta {
+  name: Delete Store
+  type: http
+  seq: 9
+}
+
+delete {
+  url: http://{{url}}/organization/stores/3
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Delete store successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success');
+    expect(res.body.success).to.be.true;
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('eliminada exitosamente');
+  });
+  
+  test("Delete response structure is correct", function() {
+    expect(res.body).to.not.have.property('data');
+    // Las respuestas de eliminación exitosas no suelen incluir data
+  });
+  
+  test("Store ID was used in request", function() {
+    expect(bru.getEnvVar('created_store_id')).to.be.a('number');
+    expect(parseInt(bru.getEnvVar('created_store_id'))).to.be.greaterThan(0);
+  });
+  
+  test("Response has proper message formatting", function() {
+    expect(res.body.message).to.be.a('string');
+    expect(res.body.message.length).to.be.greaterThan(0);
+  });
+  
+  test("Success flag is properly set", function() {
+    expect(res.body.success).to.be.true;
+    expect(typeof res.body.success).to.equal('boolean');
+  });
+}

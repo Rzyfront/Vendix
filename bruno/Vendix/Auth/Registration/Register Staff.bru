@@ -1,0 +1,22 @@
+meta {
+  name: Register Staff
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/auth/register-staff
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "staff@example.com",
+    "password": "Password123!",
+    "first_name": "Staff",
+    "last_name": "User",
+    "role_id": 2,
+    "organization_id": 1
+  }
+}

@@ -1,4 +1,10 @@
-import { Component, OnInit, OnDestroy, ElementRef, Renderer2 } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  ElementRef,
+  Renderer2,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
@@ -13,7 +19,7 @@ import { IconComponent } from '../../../shared/components/icon/icon.component';
   standalone: true,
   imports: [CommonModule, RouterModule, HeroCarouselComponent, IconComponent],
   templateUrl: './vendix-landing.component.html',
-  styleUrls: ['./vendix-landing.component.scss']
+  styleUrls: ['./vendix-landing.component.scss'],
 })
 export class VendixLandingComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
@@ -34,7 +40,7 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
     private tenantFacade: TenantFacade,
     private http: HttpClient,
     private el: ElementRef,
-    private renderer: Renderer2
+    private renderer: Renderer2,
   ) {}
 
   ngOnInit(): void {
@@ -43,9 +49,9 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       branding: {
         name: 'Vendix',
         logo: {
-          url: 'assets/images/logo.png'
-        }
-      }
+          url: 'assets/images/logo.png',
+        },
+      },
     };
 
     // Always use default content for landing page
@@ -53,19 +59,20 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
     console.log('Planes initialized:', this.plans);
 
     // Subscribe to tenant configuration (includes branding and domain config)
-    this.tenantFacade.tenantConfig$.pipe(takeUntil(this.destroy$)).subscribe(tenantConfig => {
-      if (tenantConfig) {
-        this.tenantConfig = tenantConfig;
-        console.log('Tenant config updated:', tenantConfig);
-      }
-    });
+    this.tenantFacade.tenantConfig$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((tenantConfig) => {
+        if (tenantConfig) {
+          this.tenantConfig = tenantConfig;
+          console.log('Tenant config updated:', tenantConfig);
+        }
+      });
   }
 
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
   }
-
 
   getBackgroundGradient(): string {
     // This will now use the CSS variables if they are set, otherwise it will use the defaults from :root
@@ -86,9 +93,10 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
   private initializeDefaultContent(): void {
     this.hero = {
       title: 'El Futuro del Comercio Inteligente',
-      subtitle: 'Transforma tu negocio con IA integrada, ventas omnicanal y automatización total.',
+      subtitle:
+        'Transforma tu negocio con IA integrada, ventas omnicanal y automatización total.',
       cta_primary: 'Comenzar Transformación',
-      cta_secondary: 'Ver Demo en Vivo'
+      cta_secondary: 'Ver Demo en Vivo',
     };
 
     this.plans = [
@@ -105,10 +113,10 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
           'Facturación electrónica',
           'Soporte por email',
           '2 usuarios',
-          'API básica'
+          'API básica',
         ],
         highlighted: false,
-        cta_text: 'Comenzar Gratis'
+        cta_text: 'Comenzar Gratis',
       },
       {
         name: 'Plan Pro',
@@ -125,10 +133,10 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
           'Hasta 10 usuarios',
           'API completa',
           'Integraciones principales',
-          'Soporte prioritario'
+          'Soporte prioritario',
         ],
         highlighted: true,
-        cta_text: 'Probar 14 días gratis'
+        cta_text: 'Probar 14 días gratis',
       },
       {
         name: 'Plan Ultra',
@@ -146,59 +154,68 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
           'Soporte 24/7',
           'Consultoría IA incluida',
           'SLA garantizado',
-          'Personalización a medida'
+          'Personalización a medida',
         ],
         highlighted: false,
-        cta_text: 'Contactar Expertos'
-      }
+        cta_text: 'Contactar Expertos',
+      },
     ];
 
     this.features = [
       {
         icon: '🤖',
         title: 'IA Predictiva',
-        description: 'Inteligencia artificial que anticipa demanda, optimiza precios y personaliza experiencias de compra.'
+        description:
+          'Inteligencia artificial que anticipa demanda, optimiza precios y personaliza experiencias de compra.',
       },
       {
         icon: '🏪',
         title: 'POS Inteligente',
-        description: 'Sistema de punto de venta con reconocimiento de productos, análisis de comportamiento y pagos sin contacto.'
+        description:
+          'Sistema de punto de venta con reconocimiento de productos, análisis de comportamiento y pagos sin contacto.',
       },
       {
         icon: '📦',
         title: 'Inventario Automatizado',
-        description: 'Gestión predictiva con reposición automática, optimización de stock y alertas inteligentes.'
+        description:
+          'Gestión predictiva con reposición automática, optimización de stock y alertas inteligentes.',
       },
       {
         icon: '🛒',
         title: 'E-commerce Híbrido',
-        description: 'Ventas online con click-and-collect, experiencia omnicanal y sincronización en tiempo real.'
+        description:
+          'Ventas online con click-and-collect, experiencia omnicanal y sincronización en tiempo real.',
       },
       {
         icon: '📊',
         title: 'Analytics en Vivo',
-        description: 'Dashboard con métricas en tiempo real, predicciones de ventas y insights accionables con IA.'
+        description:
+          'Dashboard con métricas en tiempo real, predicciones de ventas y insights accionables con IA.',
       },
       {
         icon: '🎯',
         title: 'Marketing Inteligente',
-        description: 'Segmentación automática, campañas personalizadas y recomendaciones basadas en comportamiento.'
+        description:
+          'Segmentación automática, campañas personalizadas y recomendaciones basadas en comportamiento.',
       },
       {
         icon: '🔄',
         title: 'Automatización Total',
-        description: 'Flujos de trabajo inteligentes, notificaciones automáticas y procesos sin intervención manual.'
+        description:
+          'Flujos de trabajo inteligentes, notificaciones automáticas y procesos sin intervención manual.',
       },
       {
         icon: '🌐',
         title: 'Multi-tenant Avanzado',
-        description: 'Gestión de múltiples organizaciones con configuración independiente y seguridad por capas.'
+        description:
+          'Gestión de múltiples organizaciones con configuración independiente y seguridad por capas.',
       },
       {
         icon: '💬',
         title: 'Chatbots IA',
-        description: 'Asistentes virtuales 24/7 para atención al cliente, ventas y soporte técnico personalizado.'
-      }
+        description:
+          'Asistentes virtuales 24/7 para atención al cliente, ventas y soporte técnico personalizado.',
+      },
     ];
 
     this.footer = {
@@ -206,10 +223,15 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       description: 'La plataforma todo-en-uno para modernizar tu negocio',
       links: {
         product: ['POS', 'E-commerce', 'Inventario', 'Reportes'],
-        support: ['Centro de Ayuda', 'Documentación', 'Contacto', 'Estado del Sistema'],
-        company: ['Acerca de', 'Blog', 'Carreras', 'Prensa']
+        support: [
+          'Centro de Ayuda',
+          'Documentación',
+          'Contacto',
+          'Estado del Sistema',
+        ],
+        company: ['Acerca de', 'Blog', 'Carreras', 'Prensa'],
       },
-      copyright: '© 2025 Vendix. Todos los derechos reservados.'
+      copyright: '© 2025 Vendix. Todos los derechos reservados.',
     };
   }
 

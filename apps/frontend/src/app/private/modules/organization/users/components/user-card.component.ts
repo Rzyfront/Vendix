@@ -11,11 +11,15 @@ import { User, UserState } from '../interfaces/user.interface';
   standalone: true,
   imports: [CommonModule, IconComponent, ButtonComponent],
   template: `
-    <div class="bg-surface rounded-card shadow-card border border-border p-6 hover:shadow-lg transition-shadow">
+    <div
+      class="bg-surface rounded-card shadow-card border border-border p-6 hover:shadow-lg transition-shadow"
+    >
       <!-- User Header -->
       <div class="flex items-start justify-between mb-4">
         <div class="flex items-center space-x-3">
-          <div class="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
+          <div
+            class="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center"
+          >
             <app-icon name="user" [size]="24" class="text-primary"></app-icon>
           </div>
           <div>
@@ -38,18 +42,32 @@ import { User, UserState } from '../interfaces/user.interface';
       <!-- User Info -->
       <div class="space-y-2 mb-4">
         <div class="flex items-center text-sm">
-          <app-icon name="mail" [size]="16" class="text-text-secondary mr-2"></app-icon>
+          <app-icon
+            name="mail"
+            [size]="16"
+            class="text-text-secondary mr-2"
+          ></app-icon>
           <span class="text-text-primary">{{ user.email }}</span>
         </div>
 
         <div class="flex items-center text-sm">
-          <app-icon name="shield" [size]="16" class="text-text-secondary mr-2"></app-icon>
+          <app-icon
+            name="shield"
+            [size]="16"
+            class="text-text-secondary mr-2"
+          ></app-icon>
           <span class="text-text-primary">{{ user.app || 'N/A' }}</span>
         </div>
 
         <div class="flex items-center text-sm">
-          <app-icon name="calendar" [size]="16" class="text-text-secondary mr-2"></app-icon>
-          <span class="text-text-primary">Creado: {{ formatDate(user.created_at) }}</span>
+          <app-icon
+            name="calendar"
+            [size]="16"
+            class="text-text-secondary mr-2"
+          ></app-icon>
+          <span class="text-text-primary"
+            >Creado: {{ formatDate(user.created_at) }}</span
+          >
         </div>
       </div>
 
@@ -59,7 +77,9 @@ import { User, UserState } from '../interfaces/user.interface';
           <app-icon
             name="check-circle"
             [size]="16"
-            [ngClass]="user.email_verified ? 'text-green-500' : 'text-yellow-500'"
+            [ngClass]="
+              user.email_verified ? 'text-green-500' : 'text-yellow-500'
+            "
             class="mr-1"
           ></app-icon>
           <span class="text-text-secondary">Email</span>
@@ -69,7 +89,9 @@ import { User, UserState } from '../interfaces/user.interface';
           <app-icon
             name="shield"
             [size]="16"
-            [ngClass]="user.two_factor_enabled ? 'text-green-500' : 'text-gray-400'"
+            [ngClass]="
+              user.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
+            "
             class="mr-1"
           ></app-icon>
           <span class="text-text-secondary">2FA</span>
@@ -77,7 +99,9 @@ import { User, UserState } from '../interfaces/user.interface';
       </div>
 
       <!-- Actions -->
-      <div class="flex items-center justify-between pt-4 border-t border-border">
+      <div
+        class="flex items-center justify-between pt-4 border-t border-border"
+      >
         <div class="flex items-center space-x-2">
           <app-button
             variant="outline"
@@ -92,8 +116,16 @@ import { User, UserState } from '../interfaces/user.interface';
             variant="outline"
             size="sm"
             (clicked)="toggleStatus.emit(user)"
-            [ngClass]="user.state === UserState.ACTIVE ? 'text-yellow-600' : 'text-green-600'"
-            [title]="user.state === UserState.ACTIVE ? 'Archivar usuario' : 'Reactivar usuario'"
+            [ngClass]="
+              user.state === UserState.ACTIVE
+                ? 'text-yellow-600'
+                : 'text-green-600'
+            "
+            [title]="
+              user.state === UserState.ACTIVE
+                ? 'Archivar usuario'
+                : 'Reactivar usuario'
+            "
           >
             <app-icon name="archive" [size]="16"></app-icon>
           </app-button>
@@ -109,17 +141,17 @@ import { User, UserState } from '../interfaces/user.interface';
           </app-button>
         </div>
 
-        <div class="text-xs text-text-secondary">
-          ID: {{ user.id }}
-        </div>
+        <div class="text-xs text-text-secondary">ID: {{ user.id }}</div>
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class UserCardComponent {
   @Input() user!: User;
