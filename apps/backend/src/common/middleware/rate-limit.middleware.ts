@@ -90,8 +90,8 @@ export class RefreshRateLimitMiddleware implements NestMiddleware {
       res.status(429).json({
         statusCode: 429,
         message:
-          'Too many refresh attempts from this IP, please try again later.',
-        error: 'Too Many Refresh Attempts',
+          'Demasiados intentos de actualización de sesión desde tu dirección. Por favor, espera unos minutos antes de intentar nuevamente.',
+        error: 'Demasiados Intentos de Actualización',
         retryAfter: Math.ceil((record.resetTime - now) / 1000),
       });
     }
