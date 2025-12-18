@@ -64,11 +64,11 @@ export class DomainsController {
   @Permissions('organization:domains:create')
   @HttpCode(HttpStatus.CREATED)
   async createDomainSetting(
-    @Body() createDomainSettingDto: CreateDomainSettingDto,
+    @Body() create_domain_setting_dto: CreateDomainSettingDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.createDomainSetting(
-      createDomainSettingDto,
+      create_domain_setting_dto,
     );
     return this.responseService.created(
       result,
@@ -84,60 +84,60 @@ export class DomainsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
   async getAllDomainSettings(
-    @Query('organizationId') organizationId: string,
-    @Query('storeId') storeId: string,
+    @Query('organizationId') organization_id: string,
+    @Query('storeId') store_id: string,
     @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Req() req?: AuthenticatedRequest,
   ): Promise<PaginatedResponse<DomainSettingResponse>> {
     const filters: any = {};
-    const userRole = req?.user?.user_roles?.[0]?.roles?.name; // Simple check, ideally use helper
-    const isSuperAdmin = userRole === UserRole.SUPER_ADMIN;
+    const user_role = req?.user?.user_roles?.[0]?.roles?.name; // Simple check, ideally use helper
+    const is_super_admin = user_role === UserRole.SUPER_ADMIN;
 
-    if (isSuperAdmin) {
-      if (organizationId) {
-        const orgId = parseInt(organizationId, 10);
-        if (!isNaN(orgId)) filters.organization_id = orgId;
+    if (is_super_admin) {
+      if (organization_id) {
+        const org_id = parseInt(organization_id, 10);
+        if (!isNaN(org_id)) filters.organization_id = org_id;
       }
     } else {
       // Auto-scope for non-super-admins
       filters.organization_id = req?.user?.organization_id;
     }
 
-    if (storeId) {
-      const sId = parseInt(storeId, 10);
-      if (isNaN(sId)) {
+    if (store_id) {
+      const s_id = parseInt(store_id, 10);
+      if (isNaN(s_id)) {
         throw new BadRequestException('Invalid storeId parameter');
       }
-      filters.store_id = sId;
+      filters.store_id = s_id;
     }
 
     if (search) filters.search = search;
     if (limit) {
-      const lmt = parseInt(limit, 10);
-      if (isNaN(lmt) || lmt <= 0) {
+      const val = parseInt(limit, 10);
+      if (isNaN(val) || val <= 0) {
         throw new BadRequestException('Invalid limit parameter');
       }
-      filters.limit = lmt;
+      filters.limit = val;
     }
     if (offset) {
-      const off = parseInt(offset, 10);
-      if (isNaN(off) || off < 0) {
+      const val = parseInt(offset, 10);
+      if (isNaN(val) || val < 0) {
         throw new BadRequestException('Invalid offset parameter');
       }
-      filters.offset = off;
+      filters.offset = val;
     }
 
     const result = await this.domainsService.getAllDomainSettings(filters);
     const page = Math.floor((filters.offset || 0) / (filters.limit || 10)) + 1;
-    const limitValue = filters.limit || 10;
+    const limit_value = filters.limit || 10;
 
     return this.responseService.paginated(
       result.data,
       result.total,
       page,
-      limitValue,
+      limit_value,
       'Domain settings retrieved successfully',
     );
   }
@@ -182,11 +182,11 @@ export class DomainsController {
   async getDomainSettingById(
     @Param('id') id: string,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
-    const domainId = parseInt(id, 10);
-    if (isNaN(domainId)) {
+    const domain_id = parseInt(id, 10);
+    if (isNaN(domain_id)) {
       throw new BadRequestException('Invalid domain ID');
     }
-    const result = await this.domainsService.getDomainSettingById(domainId);
+    const result = await this.domainsService.getDomainSettingById(domain_id);
     return this.responseService.success(
       result,
       'Domain setting retrieved successfully',
@@ -201,11 +201,11 @@ export class DomainsController {
   @Permissions('organization:domains:update')
   async updateDomainSetting(
     @Param('hostname') hostname: string,
-    @Body() updateDomainSettingDto: UpdateDomainSettingDto,
+    @Body() update_domain_setting_dto: UpdateDomainSettingDto,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.updateDomainSetting(
       hostname,
-      updateDomainSettingDto,
+      update_domain_setting_dto,
     );
     return this.responseService.updated(
       result,
@@ -235,11 +235,11 @@ export class DomainsController {
   @Permissions('organization:domains:create')
   async duplicateDomainSetting(
     @Param('hostname') hostname: string,
-    @Body() duplicateData: DuplicateDomainDto,
+    @Body() duplicate_data: DuplicateDomainDto,
   ): Promise<SuccessResponse<DomainSettingResponse>> {
     const result = await this.domainsService.duplicateDomainSetting(
       hostname,
-      duplicateData.new_hostname,
+      duplicate_data.new_hostname,
     );
     return this.responseService.created(
       result,
@@ -254,14 +254,14 @@ export class DomainsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
   async getDomainSettingsByOrganization(
-    @Param('organizationId') organizationId: string,
+    @Param('organizationId') organization_id: string,
   ): Promise<SuccessResponse<DomainSettingResponse[]>> {
-    const orgId = parseInt(organizationId, 10);
-    if (isNaN(orgId)) {
+    const org_id = parseInt(organization_id, 10);
+    if (isNaN(org_id)) {
       throw new BadRequestException('Invalid organization ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      organization_id: orgId,
+      organization_id: org_id,
     });
     return this.responseService.success(
       result.data,
@@ -276,14 +276,14 @@ export class DomainsController {
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
   async getDomainSettingsByStore(
-    @Param('storeId') storeId: string,
+    @Param('storeId') store_id: string,
   ): Promise<SuccessResponse<DomainSettingResponse[]>> {
-    const sId = parseInt(storeId, 10);
-    if (isNaN(sId)) {
+    const s_id = parseInt(store_id, 10);
+    if (isNaN(s_id)) {
       throw new BadRequestException('Invalid store ID');
     }
     const result = await this.domainsService.getAllDomainSettings({
-      store_id: sId,
+      store_id: s_id,
     });
     return this.responseService.success(
       result.data,

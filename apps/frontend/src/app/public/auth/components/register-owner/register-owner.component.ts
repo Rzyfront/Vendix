@@ -7,6 +7,7 @@ import {
   FormGroup,
 } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { Store } from '@ngrx/store';
 import { AuthService } from '../../../../core/services/auth.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
@@ -18,6 +19,10 @@ import {
   CardComponent,
   IconComponent,
 } from '../../../../shared/components';
+import { NavigationService } from '../../../../core/services/navigation.service';
+import { AppConfigService } from '../../../../core/services/app-config.service';
+import { ConfigFacade } from '../../../../core/store/config';
+import * as ConfigActions from '../../../../core/store/config/config.actions';
 
 type RegistrationState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -223,6 +228,10 @@ export class RegisterOwnerComponent {
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
   private toast = inject(ToastService);
+  private navigationService = inject(NavigationService);
+  private appConfigService = inject(AppConfigService);
+  private configFacade = inject(ConfigFacade);
+  private store = inject(Store);
 
   registrationState: RegistrationState = 'idle';
   registrationError: RegistrationError | null = null;
@@ -263,11 +272,17 @@ export class RegisterOwnerComponent {
       this.clearError();
 
       this.authService.registerOwner(this.registerForm.value).subscribe({
-        next: (result) => {
+        next: async (result) => {
           if (result.success && result.data) {
             // Restaurar el estado de la aplicación con el nuevo usuario
             const { user, user_settings, access_token, refresh_token } =
               result.data;
+
+            // 🔒 LIMPIEZA ADICIONAL: Asegurar que no haya residuos del environment anterior
+            if (typeof localStorage !== 'undefined') {
+              localStorage.removeItem('vendix_user_environment');
+              localStorage.removeItem('vendix_app_config');
+            }
 
             this.authFacade.restoreAuthState(
               user,
@@ -280,7 +295,61 @@ export class RegisterOwnerComponent {
             // Redirigir al dashboard después del registro exitoso
             this.registrationState = 'success';
             this.toast.success('¡Registro exitoso! Bienvenido a Vendix.');
-            this.router.navigate(['/admin']);
+
+            // 🔄 ESPERAR CONFIRMACIÓN DE AUTENTICACIÓN y navegar correctamente
+            // Esperar a que el estado de autenticación se actualice completamente
+            console.log('🔐 Esperando confirmación de estado de autenticación...');
+
+            // Dar tiempo al store para procesar la acción de restoreAuthState
+            setTimeout(async () => {
+              try {
+                // Verificar que el usuario está autenticado en el store
+                const isAuthenticated = this.authFacade.isLoggedIn();
+
+                if (isAuthenticated) {
+                  console.log('✅ Usuario autenticado correctamente, redirigiendo...');
+
+                  // Obtener el environment del usuario
+                  const userEnvironment = user_settings?.config?.app;
+                  const userRoles = user.roles || [];
+
+                  console.log('🔐 Usuario con environment:', userEnvironment, 'roles:', userRoles);
+
+                  // Forzar la actualización del environment usando el patrón de AuthEffects
+                  const currentConfig = this.configFacade.getCurrentConfig();
+                  if (currentConfig) {
+                    // Crear nueva configuración con el environment del usuario
+                    const newConfig = this.appConfigService.updateEnvironmentForUser(
+                      currentConfig,
+                      userEnvironment?.toUpperCase() as any,
+                    );
+
+                    // Despachar acción para actualizar el store con la nueva configuración
+                    this.store.dispatch(ConfigActions.initializeAppSuccess({ config: newConfig }));
+                  }
+
+                  // Esperar un tick más para que el router se actualice
+                  await new Promise(resolve => setTimeout(resolve, 300));
+
+                  // Navegar según el environment del usuario
+                  if (userEnvironment?.toUpperCase() === 'ORG_ADMIN') {
+                    await this.router.navigateByUrl('/admin/dashboard', { replaceUrl: true });
+                  } else {
+                    // Fallback al dashboard genérico
+                    await this.router.navigateByUrl('/admin', { replaceUrl: true });
+                  }
+                } else {
+                  console.error('❌ Error: Usuario no autenticado después del registro');
+                  this.toast.error('Error al iniciar sesión. Por favor, intenta manualmente.');
+                  // Redirigir al login como fallback
+                  await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
+                }
+              } catch (error) {
+                console.error('❌ Error en navegación post-registro:', error);
+                this.toast.error('Error al redirigir. Por favor, inicia sesión manualmente.');
+                await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
+              }
+            }, 500);
           } else {
             // Manejar error (mostrar mensaje de error)
             if (result.message) {

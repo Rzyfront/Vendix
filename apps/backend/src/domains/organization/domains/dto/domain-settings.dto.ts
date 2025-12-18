@@ -560,13 +560,13 @@ export class VerifyDomainDto {
   })
   @IsOptional()
   @IsString()
-  expectedCname?: string;
+  expected_cname?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  expectedA?: string[];
+  expected_a?: string[];
 
   @ApiPropertyOptional()
   @IsOptional()

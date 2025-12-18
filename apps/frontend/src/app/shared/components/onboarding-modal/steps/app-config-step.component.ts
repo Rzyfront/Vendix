@@ -410,7 +410,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     `,
   ],
   template: `
-    <div class="step-content app-config-step">
+    <div class="step-content app-config-step" [formGroup]="formGroup">
       <div class="app-config-container">
         <!-- Header -->
         <div class="app-config-header">
@@ -548,8 +548,7 @@ import { ButtonComponent, IconComponent } from '../../index';
                 <input
                   type="checkbox"
                   class="toggle-input"
-                  [(ngModel)]="useCustomDomain"
-                  (change)="onCustomDomainToggle()"
+                  formControlName="use_custom_domain"
                 />
                 <span class="toggle-slider"></span>
                 <span class="toggle-text">Quiero usar mi propio dominio</span>
@@ -557,13 +556,13 @@ import { ButtonComponent, IconComponent } from '../../index';
             </div>
 
             <!-- Custom Domain Input -->
-            <div class="custom-domain-section" *ngIf="useCustomDomain">
+            <div class="custom-domain-section" *ngIf="formGroup.get('use_custom_domain').value">
               <div class="form-field">
                 <label class="field-label">Tu dominio personalizado</label>
                 <input
                   type="text"
                   class="field-input"
-                  [(ngModel)]="customDomain"
+                  formControlName="custom_domain"
                   placeholder="tienda.micomercio.com"
                 />
                 <div class="field-hint">
@@ -593,8 +592,6 @@ export class AppConfigStepComponent {
   colorPalette: string[] = [];
 
   // Domain properties
-  useCustomDomain: boolean = false;
-  customDomain: string = '';
   generatedSubdomain: string = 'mi-tienda.vendix.com';
 
   constructor() {
@@ -631,9 +628,6 @@ export class AppConfigStepComponent {
     }
   }
 
-  onCustomDomainToggle(): void {
-    // Logic for custom domain toggle
-  }
 
   private isValidHexColor(color: string): boolean {
     return /^#[0-9A-Fa-f]{6}$/.test(color);

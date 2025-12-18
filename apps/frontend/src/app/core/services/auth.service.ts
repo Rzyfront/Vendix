@@ -171,7 +171,15 @@ export class AuthService {
     this.authFacade.clearAuthState(); // Limpiar estado de NgRx
     this.clearAllAuthData(); // Limpiar LocalStorage completamente
 
-    console.log('🔐 Iniciando registro de owner con estado limpio');
+    // 🔒 DOBLE SEGURIDAD: Establecer bandera para prevenir restauración de environment
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('vendix_logged_out_recently', Date.now().toString());
+      // Forzar limpieza del environment cacheado específicamente para nuevos registros
+      localStorage.removeItem('vendix_user_environment');
+      localStorage.removeItem('vendix_app_config');
+    }
+
+    console.log('🔐 Iniciando registro de owner con estado limpio y sin environment previo');
 
     return this.http
       .post<AuthResponse>(`${this.API_URL}/register-owner`, registerData)

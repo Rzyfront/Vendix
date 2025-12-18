@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
@@ -351,7 +351,7 @@ export class OnboardingWizardService {
       where: { id: userId },
       select: {
         organization_id: true,
-        organizations: { select: { name: true } },
+        organizations: { select: { slug: true, name: true } },
       },
     });
 
@@ -359,44 +359,125 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
-    // Generate subdomain if not provided
-    const subdomain =
-      setupAppConfigDto.subdomain ||
-      (await this.generateUniqueSubdomain(
-        user.organizations?.slug || 'org',
-        setupAppConfigDto.app_type,
-      ));
+    // 1. Handle Automatic Subdomain (ALWAYS created/updated as primary initially)
+    let autoSubdomain: string;
 
-    // Generate color palette
-    const palette = this.generateColorPalette(
-      setupAppConfigDto.primary_color,
-      setupAppConfigDto.secondary_color,
-    );
-
-    // Create domain configuration
-    const domainConfig = await this.prismaService.domain_settings.create({
-      data: {
-        hostname: setupAppConfigDto.use_custom_domain
-          ? setupAppConfigDto.custom_domain
-          : subdomain,
+    // Check if we already have an auto-domain for this org
+    const existingAutoDomain = await this.prismaService.domain_settings.findFirst({
+      where: {
         organization_id: user.organization_id,
-        config: {
-          branding: {
-            primaryColor: setupAppConfigDto.primary_color,
-            secondaryColor: setupAppConfigDto.secondary_color,
-            palette: palette,
-          },
-          app_type: setupAppConfigDto.app_type,
-        },
-        domain_type: 'organization',
-        is_primary: true,
-        ownership: setupAppConfigDto.use_custom_domain
-          ? 'custom'
-          : 'vendix_subdomain',
-        created_at: new Date(),
-        updated_at: new Date(),
+        ownership: 'vendix_subdomain',
       },
     });
+
+    if (existingAutoDomain) {
+      autoSubdomain = existingAutoDomain.hostname;
+
+      // Ensure it is set as primary/active
+      await this.prismaService.domain_settings.update({
+        where: { id: existingAutoDomain.id },
+        data: {
+          is_primary: true,
+          status: 'active',
+          updated_at: new Date(),
+        },
+      });
+    } else {
+      // Generate and create new unique subdomain
+      autoSubdomain = await this.generateUniqueSubdomain(
+        user.organizations?.slug || 'org',
+        setupAppConfigDto.app_type,
+      );
+
+      // Create new domain config
+      const palette = this.generateColorPalette(
+        setupAppConfigDto.primary_color,
+        setupAppConfigDto.secondary_color,
+      );
+
+      await this.prismaService.domain_settings.create({
+        data: {
+          hostname: autoSubdomain,
+          organization_id: user.organization_id,
+          config: {
+            branding: {
+              primaryColor: setupAppConfigDto.primary_color,
+              secondaryColor: setupAppConfigDto.secondary_color,
+              palette: palette,
+            },
+            app_type: setupAppConfigDto.app_type,
+          },
+          domain_type: 'organization',
+          is_primary: true, // Auto domain is primary by default until custom is verified
+          ownership: 'vendix_subdomain',
+          status: 'active',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // 2. Handle Custom Domain (Optional)
+    let customDomainRecord = null;
+    if (setupAppConfigDto.use_custom_domain && setupAppConfigDto.custom_domain) {
+      const customDomain = setupAppConfigDto.custom_domain.toLowerCase().trim();
+
+      // Check for ownership conflict
+      const existingCustom = await this.prismaService.domain_settings.findUnique({
+        where: { hostname: customDomain },
+      });
+
+      if (existingCustom && existingCustom.organization_id !== user.organization_id) {
+        throw new ConflictException(`The domain ${customDomain} is already in use by another organization.`);
+      }
+
+      const palette = this.generateColorPalette(
+        setupAppConfigDto.primary_color,
+        setupAppConfigDto.secondary_color,
+      );
+
+      if (existingCustom) {
+        // Update existing record for this org
+        customDomainRecord = await this.prismaService.domain_settings.update({
+          where: { id: existingCustom.id },
+          data: {
+            config: {
+              branding: {
+                primaryColor: setupAppConfigDto.primary_color,
+                secondaryColor: setupAppConfigDto.secondary_color,
+                palette: palette,
+              },
+              app_type: setupAppConfigDto.app_type,
+            },
+            is_primary: false, // Custom domain starts as non-primary (pending)
+            status: 'pending_dns',
+            updated_at: new Date(),
+          },
+        });
+      } else {
+        // Create new custom domain record
+        customDomainRecord = await this.prismaService.domain_settings.create({
+          data: {
+            hostname: customDomain,
+            organization_id: user.organization_id,
+            config: {
+              branding: {
+                primaryColor: setupAppConfigDto.primary_color,
+                secondaryColor: setupAppConfigDto.secondary_color,
+                palette: palette,
+              },
+              app_type: setupAppConfigDto.app_type,
+            },
+            domain_type: 'organization',
+            is_primary: false,
+            ownership: 'custom_domain', // Using enum value 'custom_domain' not 'custom'
+            status: 'pending_dns',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+      }
+    }
 
     // Update user settings
     const existingSettings = await this.prismaService.user_settings.findUnique({
@@ -429,9 +510,10 @@ export class OnboardingWizardService {
     }
 
     return {
-      domain: domainConfig,
-      subdomain: subdomain,
-      needs_dns_verification: setupAppConfigDto.use_custom_domain,
+      auto_domain: autoSubdomain,
+      custom_domain: customDomainRecord,
+      subdomain: autoSubdomain, // Legacy support
+      needs_dns_verification: !!customDomainRecord,
       panel_ui: panelUI,
     };
   }

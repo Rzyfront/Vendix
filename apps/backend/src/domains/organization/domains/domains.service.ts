@@ -45,9 +45,9 @@ export class DomainsService implements OnModuleInit {
 
   private validateHostnameFormat(hostname: string): void {
     // Basic hostname validation
-    const hostnameRegex =
+    const hostname_regex =
       /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
-    if (!hostnameRegex.test(hostname)) {
+    if (!hostname_regex.test(hostname)) {
       throw new BadRequestException('Invalid hostname format');
     }
 
@@ -222,8 +222,8 @@ export class DomainsService implements OnModuleInit {
       updated_at: domain.updated_at.toISOString(),
       store_name: domain.store_id ? 'Store Name' : undefined, // Would need to join stores table
       store_slug: domain.store_id ? 'store-slug' : undefined,
-      organization_name: domain.organizations?.name,
-      organization_slug: domain.organizations?.slug,
+      organization_name: domain.organization?.name,
+      organization_slug: domain.organization?.slug,
       domain_type: domain.domain_type,
       status: domain.status,
       ssl_status: domain.ssl_status,
@@ -263,14 +263,14 @@ export class DomainsService implements OnModuleInit {
     }
 
     // Infer domain type and ownership
-    const inferredType = this.inferDomainType(
+    const inferred_type = this.inferDomainType(
       data.hostname,
       !!data.store_id,
       data.domain_type,
     );
-    const inferredOwnership = this.inferOwnership(
+    const inferred_ownership = this.inferOwnership(
       data.hostname,
-      inferredType,
+      inferred_type,
       data.ownership,
     );
 
@@ -280,12 +280,12 @@ export class DomainsService implements OnModuleInit {
       await this.clearExistingPrimary(
         data.organization_id,
         data.store_id,
-        inferredType,
+        inferred_type,
       );
     }
 
     // Generate verification token
-    const verificationToken = this.generateVerificationToken();
+    const verification_token = this.generateVerificationToken();
 
     // Create domain setting
     const domainSetting = await this.prisma.domain_settings.create({
@@ -294,12 +294,12 @@ export class DomainsService implements OnModuleInit {
         ...(data.organization_id && { organization_id: data.organization_id }),
         store_id: data.store_id,
         config: data.config as any,
-        domain_type: inferredType as any,
+        domain_type: inferred_type as any,
         status: 'pending_dns' as any,
         ssl_status: 'pending' as any,
         is_primary,
-        ownership: inferredOwnership as any,
-        verification_token: verificationToken,
+        ownership: inferred_ownership as any,
+        verification_token: verification_token,
         updated_at: new Date(),
       },
     });
@@ -328,13 +328,13 @@ export class DomainsService implements OnModuleInit {
       where.ownership = filters.ownership;
     }
 
-    const [domainSettings, total] = await Promise.all([
+    const [domain_settings, total] = await Promise.all([
       this.prisma.domain_settings.findMany({
         where,
         skip,
         take: limit,
         include: {
-          organizations: {
+          organization: {
             select: { id: true, name: true, slug: true },
           },
         },
@@ -344,7 +344,7 @@ export class DomainsService implements OnModuleInit {
     ]);
 
     return {
-      data: domainSettings,
+      data: domain_settings,
       total,
       limit,
       offset: skip,
@@ -354,35 +354,35 @@ export class DomainsService implements OnModuleInit {
   async getDomainSettingByHostname(hostname: string) {
     this.logger.log(`🔍 Getting domain setting by hostname: ${hostname}`);
 
-    const domainSetting = await this.prisma.domain_settings.findUnique({
+    const domain_setting = await this.prisma.domain_settings.findUnique({
       where: { hostname },
       include: {
-        organizations: true,
+        organization: true,
       },
     });
 
-    if (!domainSetting) {
+    if (!domain_setting) {
       throw new NotFoundException(`Domain ${hostname} not found`);
     }
 
-    return domainSetting;
+    return domain_setting;
   }
 
   async getDomainSettingById(id: number) {
     this.logger.log(`🔍 Getting domain setting by ID: ${id}`);
 
-    const domainSetting = await this.prisma.domain_settings.findUnique({
+    const domain_setting = await this.prisma.domain_settings.findUnique({
       where: { id },
       include: {
-        organizations: true,
+        organization: true,
       },
     });
 
-    if (!domainSetting) {
+    if (!domain_setting) {
       throw new NotFoundException(`Domain with ID ${id} not found`);
     }
 
-    return domainSetting;
+    return domain_setting;
   }
 
   async updateDomainSetting(
@@ -391,14 +391,14 @@ export class DomainsService implements OnModuleInit {
   ) {
     this.logger.log(`✏️ Updating domain setting: ${hostname}`);
 
-    const existingRecord = await this.getDomainSettingByHostname(hostname);
+    const existing_record = await this.getDomainSettingByHostname(hostname);
 
     // Handle primary domain changes
-    if (updateData.is_primary && !existingRecord.is_primary) {
+    if (updateData.is_primary && !existing_record.is_primary) {
       await this.clearExistingPrimary(
-        existingRecord.organization_id,
-        existingRecord.store_id,
-        existingRecord.domain_type,
+        existing_record.organization_id,
+        existing_record.store_id,
+        existing_record.domain_type,
       );
     }
 
@@ -475,19 +475,19 @@ export class DomainsService implements OnModuleInit {
     const domain = await this.getDomainSettingByHostname(hostname);
 
     // Basic verification logic
-    const verifiableTypes = ['custom_domain', 'custom_subdomain'];
-    if (!verifiableTypes.includes(domain.ownership)) {
+    const verifiable_types = ['custom_domain', 'custom_subdomain'];
+    if (!verifiable_types.includes(domain.ownership)) {
       throw new BadRequestException('Domain type not verifiable');
     }
 
-    const statusBefore = domain.status;
+    const status_before = domain.status;
 
     // Simulate verification checks
-    const checksToRun = body.checks || ['cname'];
+    const checks_to_run = body.checks || ['cname'];
 
     const results: any = {};
 
-    if (checksToRun.includes('cname')) {
+    if (checks_to_run.includes('cname')) {
       try {
         const records = await dns.resolveCname(hostname);
         results.cname = { valid: records.length > 0 };
@@ -496,14 +496,14 @@ export class DomainsService implements OnModuleInit {
       }
     }
 
-    const allValid = Object.values(results).every((check: any) => check.valid);
+    const all_valid = Object.values(results).every((check: any) => check.valid);
 
-    let statusAfter = statusBefore;
-    let sslStatus = domain.ssl_status;
+    let status_after = status_before;
+    let ssl_status = domain.ssl_status;
 
-    if (allValid) {
-      statusAfter = 'active';
-      sslStatus = 'issued';
+    if (all_valid) {
+      status_after = 'active';
+      ssl_status = 'issued';
       await this.prisma.domain_settings.update({
         where: { hostname },
         data: {
@@ -516,10 +516,10 @@ export class DomainsService implements OnModuleInit {
 
     return {
       hostname,
-      status_before: statusBefore,
-      status_after: statusAfter,
-      ssl_status: sslStatus,
-      verified: allValid,
+      status_before: status_before,
+      status_after: status_after,
+      ssl_status: ssl_status,
+      verified: all_valid,
       checks: results,
       timestamp: new Date().toISOString(),
     };

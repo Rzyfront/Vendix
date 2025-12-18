@@ -807,16 +807,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        console.error('Error setting up user:', error);
-        this.toastService.error(
-          error?.error?.message || 'Error al configurar tu perfil',
-          'Error',
-        );
-        this.cdr.markForCheck();
-      },
+      error: (error) => this.handleOnboardingError(error, 'Error al configurar tu perfil'),
     });
   }
 
@@ -848,16 +839,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        console.error('Error setting up store:', error);
-        this.toastService.error(
-          error?.error?.message || 'Error al configurar la tienda',
-          'Error',
-        );
-        this.cdr.markForCheck();
-      },
+      error: (error) => this.handleOnboardingError(error, 'Error al configurar la tienda'),
     });
   }
 
@@ -889,16 +871,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        console.error('Error setting up organization:', error);
-        this.toastService.error(
-          error?.error?.message || 'Error al configurar la organización',
-          'Error',
-        );
-        this.cdr.markForCheck();
-      },
+      error: (error) => this.handleOnboardingError(error, 'Error al configurar la organización'),
     });
   }
 
@@ -919,6 +892,11 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
     const appConfigData = this.appConfigForm.value;
 
+    // Sanitize payload: if not using custom domain, ensure it's empty
+    if (!appConfigData.use_custom_domain) {
+      appConfigData.custom_domain = '';
+    }
+
     this.wizardService.setupAppConfig(appConfigData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
@@ -930,16 +908,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
-        console.error('Error setting up app config:', error);
-        this.toastService.error(
-          error?.error?.message || 'Error al guardar la configuración',
-          'Error',
-        );
-        this.cdr.markForCheck();
-      },
+      error: (error) => this.handleOnboardingError(error, 'Error al guardar la configuración'),
     });
   }
 
@@ -1029,30 +998,71 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           'Error',
         );
       }
-    } catch (error: any) {
-      console.error('Error completing wizard:', error);
-      const errorMsg =
-        error?.error?.message ||
-        error?.message ||
-        'Error al completar la configuración';
-      this.toastService.error(errorMsg, 'Error');
 
-      if (error?.error?.error && typeof error.error.error === 'string') {
-        const missingStepsMatch =
-          error.error.error.match(/Missing steps: (.+)/);
-        if (missingStepsMatch) {
-          this.toastService.warning(
-            `Faltan algunos pasos: ${missingStepsMatch[1]}`,
-            'Atención',
-            5000,
-          );
-        }
-      }
+    } catch (error: any) {
+      this.handleOnboardingError(error, 'Error al completar la configuración');
     } finally {
       this.isSubmitting = false;
       this.isProcessing = false;
       this.cdr.markForCheck();
     }
+  }
+
+  /**
+   * Centralized error handler for onboarding operations
+   * Translates technical errors (especially missing steps) into friendly Spanish messages
+   */
+  private handleOnboardingError(error: any, defaultMessage: string): void {
+    console.error('Onboarding Error:', error);
+    this.isSubmitting = false;
+    this.isProcessing = false;
+
+    // Check for "Missing steps" error specifically
+    const errorMessage = error?.error?.message || error?.message || '';
+
+    if (errorMessage.includes('Missing steps') || errorMessage.includes('missing steps')) {
+      // Extract the missing steps list
+      const match = errorMessage.match(/steps: (.+)/i);
+      if (match && match[1]) {
+        const rawSteps = match[1].split(',').map((s: string) => s.trim());
+        const friendlySteps = rawSteps.map((step: string) => {
+          switch (step) {
+            case 'email_verification': return 'Verificación de Correo';
+            case 'app_type_selection': return 'Selección de Tipo de Negocio';
+            case 'organization_setup': return 'Configuración de Organización';
+            case 'store_setup': return 'Configuración de Tienda';
+            case 'app_configuration': return 'Configuración de Aplicación';
+            default: return step;
+          }
+        });
+
+        this.toastService.warning(
+          `No se puede completar el proceso. Pasos pendientes: ${friendlySteps.join(', ')}`,
+          'Pasos Incompletos',
+          6000
+        );
+        return;
+      }
+    }
+
+    // Handle generic errors with translation if possible
+    let displayMessage = defaultMessage;
+
+    if (error?.error?.message) {
+      // Translate common backend errors if needed, or display as is if readable
+      displayMessage = error.error.message;
+
+      // Simple translation map for common auth/validation errors
+      if (displayMessage.includes('Unique constraint failed')) {
+        if (displayMessage.includes('hostname')) displayMessage = 'Este dominio ya está en uso. Por favor elige otro.';
+        else if (displayMessage.includes('email')) displayMessage = 'Este correo electrónico ya está registrado.';
+        else if (displayMessage.includes('slug')) displayMessage = 'El identificador generado ya existe, intenta con otro nombre.';
+        else displayMessage = 'Ya existe un registro con esta información.';
+      }
+    }
+
+    this.toastService.error(displayMessage, 'Error');
+    this.cdr.markForCheck();
   }
 
   close(): void {
