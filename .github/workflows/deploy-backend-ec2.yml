@@ -53,6 +53,11 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
         EC2_INSTANCE_ID: i-0289ed0e0e3816f8a
         SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        JWT_SECRET: ${{ secrets.JWT_SECRET }}
+        CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
       run: |
         echo "🚀 Deploying to EC2 instance: $EC2_INSTANCE_ID"
 
@@ -64,39 +69,7 @@ jobs:
         echo "$SSH_KEY" > /tmp/vendix-key.pem
         chmod 400 /tmp/vendix-key.pem
 
-        # Create deployment script
-        cat > /tmp/deploy.sh << 'EOF'
-        #!/bin/bash
-        set -e
-
-        echo "📦 Pulling latest Docker image..."
-        sudo docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-        echo "🛑 Stopping current container..."
-        sudo docker stop vendix-backend || true
-        sudo docker rm vendix-backend || true
-
-        echo "🚀 Starting new container..."
-        sudo docker run -d \
-          --name vendix-backend \
-          --restart unless-stopped \
-          -p 3000:3000 \
-          -e DATABASE_URL="$DATABASE_URL" \
-          -e NODE_ENV="$NODE_ENV" \
-          -e JWT_SECRET="$JWT_SECRET" \
-          -e CORS_ORIGIN="$CORS_ORIGIN" \
-          $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-        echo "🧹 Cleaning up old images..."
-        sudo docker image prune -f
-
-        echo "✅ Deployment completed!"
-        EOF
-
-        # Make deployment script executable
-        chmod +x /tmp/deploy.sh
-
-        # Wait for EC2 instance to be ready and copy deployment script
+        # Wait for EC2 instance to be ready
         echo "⏳ Waiting for EC2 instance to be ready..."
         for i in {1..30}; do
           if ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP "echo 'EC2 is ready'" 2>/dev/null; then
@@ -107,9 +80,39 @@ jobs:
           sleep 10
         done
 
-        # Copy and run deployment script
-        scp -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem /tmp/deploy.sh ec2-user@$EC2_PUBLIC_IP:/tmp/
-        ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP "ECR_REGISTRY=$ECR_REGISTRY ECR_REPOSITORY=$ECR_REPOSITORY IMAGE_TAG=$IMAGE_TAG DATABASE_URL='$DATABASE_URL' NODE_ENV='$NODE_ENV' JWT_SECRET='$JWT_SECRET' CORS_ORIGIN='$CORS_ORIGIN' sudo bash /tmp/deploy.sh"
+        # Deploy on EC2
+        ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP << ENDSSH
+          set -e
+          echo "🔐 Logging into ECR..."
+          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          aws configure set region us-east-1
+          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
+
+          echo "📦 Pulling latest Docker image..."
+          sudo docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+          echo "🛑 Stopping current container..."
+          sudo docker stop vendix-backend || true
+          sudo docker rm vendix-backend || true
+
+          echo "🚀 Starting new container..."
+          sudo docker run -d \\
+            --name vendix-backend \\
+            --restart unless-stopped \\
+            -p 3000:3000 \\
+            -e DATABASE_URL="$DATABASE_URL" \\
+            -e NODE_ENV="production" \\
+            -e JWT_SECRET="$JWT_SECRET" \\
+            -e CORS_ORIGIN="$CORS_ORIGIN" \\
+            -e BASE_DOMAIN="vendix.online" \\
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+          echo "🧹 Cleaning up old images..."
+          sudo docker image prune -f
+
+          echo "✅ Deployment completed!"
+        ENDSSH
 
         echo "🎉 Backend deployment to EC2 completed successfully!"
         echo "🌐 Backend URL: http://$EC2_PUBLIC_IP:3000"
