@@ -55,9 +55,6 @@ jobs:
         SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        JWT_SECRET: ${{ secrets.JWT_SECRET }}
-        CORS_ORIGIN: ${{ secrets.CORS_ORIGIN }}
       run: |
         echo "🚀 Deploying to EC2 instance: $EC2_INSTANCE_ID"
 
@@ -101,11 +98,7 @@ jobs:
             --name vendix-backend \\
             --restart unless-stopped \\
             -p 3000:3000 \\
-            -e DATABASE_URL="$DATABASE_URL" \\
-            -e NODE_ENV="production" \\
-            -e JWT_SECRET="$JWT_SECRET" \\
-            -e CORS_ORIGIN="$CORS_ORIGIN" \\
-            -e BASE_DOMAIN="vendix.online" \\
+            --env-file /opt/vendix/.env \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
           echo "🧹 Cleaning up old images..."
