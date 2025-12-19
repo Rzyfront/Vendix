@@ -51,7 +51,7 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: vendix-backend
         IMAGE_TAG: ${{ github.sha }}
-        EC2_INSTANCE_ID: i-0289ed0e0e3816f8a
+        EC2_INSTANCE_ID: i-088e863265209355a
         SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
