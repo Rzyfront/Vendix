@@ -71,7 +71,7 @@ export class CreateCategoryDto {
 }
 
 // Update Category DTO
-export class UpdateCategoryDto extends PartialType(CreateCategoryDto) {}
+export class UpdateCategoryDto extends PartialType(CreateCategoryDto) { }
 
 // Category Query DTO - simplified to match schema
 export class CategoryQueryDto {

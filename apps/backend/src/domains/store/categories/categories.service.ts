@@ -158,7 +158,6 @@ export class CategoriesService {
       where: { id },
       data: {
         state: 'archived',
-        updated_at: new Date(),
       },
     });
   }
