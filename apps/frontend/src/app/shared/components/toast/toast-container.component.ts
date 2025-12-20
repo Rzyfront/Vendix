@@ -8,7 +8,7 @@ import { ToastService } from './toast.service';
   imports: [CommonModule],
   template: `
     <div
-      class="fixed top-4 right-4 z-[9999] flex flex-col gap-3 w-80 max-w-[90vw]"
+      class="fixed top-4 right-4 z-[10000] flex flex-col gap-3 w-80 max-w-[90vw]"
     >
       <div
         *ngFor="let t of toasts()"

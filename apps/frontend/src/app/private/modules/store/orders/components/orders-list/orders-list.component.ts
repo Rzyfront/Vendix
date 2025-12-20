@@ -62,17 +62,19 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
 
   // Table configuration
   columns: TableColumn[] = [
-    { key: 'order_number', label: 'Order ID', sortable: true },
+    { key: 'order_number', label: 'Order ID', sortable: true, priority: 1 },
     {
       key: 'customer_name',
       label: 'Customer',
       sortable: true,
+      priority: 2,
     },
     {
       key: 'state',
       label: 'Status',
       sortable: true,
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -93,12 +95,14 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
       key: 'grand_total',
       label: 'Total',
       sortable: true,
+      priority: 1,
       transform: (value: any) => `$${(value || 0).toFixed(2)}`,
     },
     {
       key: 'created_at',
       label: 'Date',
       sortable: true,
+      priority: 3,
       transform: (value: any) => {
         if (!value) return 'N/A';
         const date = new Date(value);
@@ -108,16 +112,16 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   ];
 
   actions: TableAction[] = [
-    
+
     {
       label: 'Edit',
-      icon : 'edit',
+      icon: 'edit',
       action: (order: Order) => this.editOrder(order.id.toString()),
       variant: 'ghost',
     },
     {
       label: 'Pay',
-      icon : 'credit-card',
+      icon: 'credit-card',
       action: (order: Order) => this.deleteOrder(order.id.toString()),
       variant: 'danger',
     },
@@ -131,7 +135,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
     private dialogService: DialogService,
     private toastService: ToastService,
     private router: Router
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadOrders();
@@ -159,9 +163,9 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
         next: (response: any) => {
           // Unwrap ResponseService wrapper if present
           const paginatedData = response.data || response;
-          
+
           const rawOrders = paginatedData.data || paginatedData || [];
-          
+
           // Normalize numeric strings to numbers
           const normalizedOrders = rawOrders.map((order: any) => ({
             ...order,
@@ -189,7 +193,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                     ...order,
                     customer_name: order.customer_id ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() || 'N/A' : 'N/A'
                   }));
-                  
+
                   this.loading = false;
                   this.ordersLoaded.emit({
                     orders: this.orders,
@@ -199,7 +203,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                 },
                 error: (error) => {
                   console.error('Error loading customers:', error);
-                  this.orders = normalizedOrders.map((order:any) => ({ ...order, customer_name: 'N/A' }));
+                  this.orders = normalizedOrders.map((order: any) => ({ ...order, customer_name: 'N/A' }));
                   this.loading = false;
                   this.ordersLoaded.emit({
                     orders: this.orders,
@@ -209,7 +213,7 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                 }
               });
           } else {
-            this.orders = normalizedOrders.map((order:any) => ({ ...order, customer_name: 'N/A' }));
+            this.orders = normalizedOrders.map((order: any) => ({ ...order, customer_name: 'N/A' }));
             this.loading = false;
             this.ordersLoaded.emit({
               orders: this.orders,

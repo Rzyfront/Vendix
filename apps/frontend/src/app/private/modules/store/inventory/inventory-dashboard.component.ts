@@ -162,12 +162,13 @@ export class InventoryDashboardComponent implements OnInit {
 
   // Table Columns
   order_columns: TableColumn[] = [
-    { key: 'order_number', label: 'No. Orden', width: '100px' },
-    { key: 'supplier.name', label: 'Proveedor', defaultValue: '-' },
+    { key: 'order_number', label: 'No. Orden', width: '100px', priority: 1 },
+    { key: 'supplier.name', label: 'Proveedor', defaultValue: '-', priority: 2 },
     {
       key: 'status',
       label: 'Estado',
       badge: true,
+      priority: 1,
       badgeConfig: { type: 'status' },
       transform: (v: string) => this.getStatusLabel(v),
     },
@@ -175,17 +176,19 @@ export class InventoryDashboardComponent implements OnInit {
       key: 'total_amount',
       label: 'Total',
       align: 'right',
+      priority: 1,
       transform: (v: number) => this.formatCurrency(v),
     },
   ];
 
   supplier_columns: TableColumn[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'contact_person', label: 'Contacto', defaultValue: '-' },
+    { key: 'name', label: 'Nombre', priority: 1 },
+    { key: 'contact_person', label: 'Contacto', defaultValue: '-', priority: 2 },
     {
       key: 'is_active',
       label: 'Estado',
       badge: true,
+      priority: 1,
       badgeConfig: { type: 'status' },
       transform: (v: boolean) => (v ? 'Activo' : 'Inactivo'),
     },

@@ -17,6 +17,7 @@ import {
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 
 @Component({
   selector: 'app-pos-cart',
@@ -25,203 +26,194 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border overflow-hidden"
     >
-      <!-- Cart Header -->
-      <div class="px-6 py-4 border-b border-border">
-        <div
-          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-        >
-          <div class="flex-1 min-w-0">
-            <h2 class="text-lg font-semibold text-text-primary">
-              Carrito de Compras ({{
-                (cartState$ | async)?.items?.length || 0
-              }})
+      <!-- Cart Header & Summary Section (Fixed at top) -->
+      <div class="flex-none bg-surface border-b border-border shadow-sm">
+        <!-- Header Row -->
+        <div class="px-5 py-3 border-b border-border/50">
+          <div class="flex justify-between items-center gap-4">
+            <h2 class="text-base font-bold text-text-primary flex items-center gap-2">
+              <app-icon name="shopping-cart" [size]="18" class="text-primary"></app-icon>
+              Carrito ({{ (cartState$ | async)?.items?.length || 0 }})
             </h2>
+            <app-button
+              *ngIf="((cartState$ | async)?.items?.length ?? 0) > 0"
+              variant="outline"
+              size="sm"
+              (clicked)="clearCart()"
+              [loading]="(loading$ | async) ?? false"
+              class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
+            >
+              <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+              Vaciar
+            </app-button>
+          </div>
+        </div>
+
+        <!-- Totals Row (High Contrast) -->
+        <div class="px-5 py-4 bg-muted/20">
+          <div class="space-y-1.5 mb-4">
+            <div class="flex justify-between text-xs text-text-secondary">
+              <span>Subtotal</span>
+              <span class="font-medium">{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
+            </div>
+            <div class="flex justify-between text-xs text-text-secondary">
+              <span>IVA (21%)</span>
+              <span class="font-medium">{{ formatCurrency((summary$ | async)?.taxAmount || 0) }}</span>
+            </div>
+            <div class="pt-2 border-t border-border/50 flex justify-between items-center">
+              <span class="font-bold text-text-primary text-base">Total</span>
+              <span class="font-extrabold text-2xl text-primary tracking-tight">
+                {{ formatCurrency((summary$ | async)?.total || 0) }}
+              </span>
+            </div>
           </div>
 
-          <app-button
-            *ngIf="(cartState$ | async)?.items?.length ?? 0 > 0"
-            variant="outline"
-            size="sm"
-            (clicked)="clearCart()"
-            [loading]="(loading$ | async) ?? false"
-            class="text-destructive hover:text-destructive hover:bg-destructive-light"
-          >
-            <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
-            Vaciar
-          </app-button>
+          <!-- Checkout Actions -->
+          <div class="flex items-center justify-between gap-4">
+            <app-button
+              variant="outline"
+              size="md"
+              (clicked)="saveCart()"
+              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              class="!h-10 text-sm font-medium px-5"
+            >
+              <app-icon name="save" [size]="16" slot="icon"></app-icon>
+              Guardar
+            </app-button>
+            <app-button
+              variant="primary"
+              size="md"
+              (clicked)="proceedToPayment()"
+              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              class="!h-10 text-sm font-bold px-10"
+            >
+              <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
+              Cobrar
+            </app-button>
+          </div>
         </div>
-      </div>
 
-      <!-- Customer Information -->
-      <div
-        *ngIf="(cartState$ | async)?.customer"
-        class="px-6 py-3 bg-primary/5 border-b border-primary/20"
-      >
-        <div class="flex items-center gap-3">
-          <div
-            class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center"
-          >
-            <app-icon name="user" [size]="16" class="text-primary"></app-icon>
+        <!-- Customer Information (Compact) -->
+        <div
+          *ngIf="(cartState$ | async)?.customer"
+          class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
+        >
+          <div class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+            <app-icon name="user" [size]="14"></app-icon>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-xs text-text-secondary font-medium">
-              Cliente asignado
-            </p>
-            <p class="text-sm font-semibold text-text-primary truncate">
+            <p class="text-[11px] text-text-secondary font-medium leading-none mb-0.5">Cliente</p>
+            <p class="text-xs font-bold text-text-primary truncate">
               {{ (cartState$ | async)?.customer?.name }}
             </p>
           </div>
-          <div class="text-right">
-            <p class="text-xs text-text-secondary">DNI</p>
-            <p class="text-sm font-medium text-text-primary">
-              {{ (cartState$ | async)?.customer?.document_number || 'N/A' }}
-            </p>
-          </div>
         </div>
       </div>
 
-      <!-- Cart Content -->
-      <div class="flex-1 overflow-y-auto p-6">
+      <!-- Cart Content (Scrollable Items) -->
+      <div class="flex-1 overflow-y-auto p-4 bg-bg/30">
         <!-- Empty State -->
         <div
           *ngIf="isEmpty$ | async"
-          class="flex flex-col items-center justify-center h-64 text-center"
+          class="flex flex-col items-center justify-center h-full min-h-[200px] text-center opacity-60"
         >
-          <div
-            class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
-          >
-            <app-icon
-              name="shopping-cart"
-              [size]="32"
-              class="text-text-secondary"
-            ></app-icon>
+          <div class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3">
+            <app-icon name="shopping-cart" [size]="24" class="text-muted"></app-icon>
           </div>
-          <h3 class="text-lg font-semibold text-text-primary mb-2">
+          <h3 class="text-sm font-semibold text-text-primary mb-1">
             Tu carrito está vacío
           </h3>
-          <p class="text-sm text-text-secondary">
-            Selecciona productos para comenzar
+          <p class="text-[11px] text-text-secondary">
+            Selecciona productos en el panel izquierdo
           </p>
         </div>
 
         <!-- Cart Items List -->
-        <div *ngIf="!(isEmpty$ | async)" class="space-y-3">
+        <div *ngIf="!(isEmpty$ | async)" class="space-y-2">
           <div
             *ngFor="
               let item of (cartState$ | async)?.items;
               trackBy: trackByItemId
             "
-            class="flex gap-3 p-3 rounded-lg border border-border bg-surface hover:bg-muted/30 transition-colors"
+            class="group flex flex-col gap-2 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
           >
-            <!-- Product Image -->
-            <div
-              class="w-12 h-12 shrink-0 bg-muted rounded-lg overflow-hidden relative"
-            >
+            <!-- Top Row: Info and Remove Button -->
+            <div class="flex items-start gap-3">
+              <!-- Product Image -->
               <div
-                class="absolute inset-0 flex items-center justify-center text-text-secondary"
+                class="w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
               >
-                <app-icon name="image" [size]="16"></app-icon>
-              </div>
-            </div>
-
-            <!-- Item Details -->
-            <div class="flex-1 min-w-0">
-              <h4 class="text-sm font-medium text-text-primary truncate">
-                {{ item.product.name }}
-              </h4>
-              <div class="flex justify-between items-center mt-1">
-                <span class="text-xs text-text-secondary">
-                  {{ formatCurrency(item.unitPrice) }} x {{ item.quantity }}
-                </span>
-                <span class="text-sm font-bold text-text-primary">
-                  {{ formatCurrency(item.totalPrice) }}
-                </span>
-              </div>
-
-              <!-- Quantity Controls -->
-              <div class="flex items-center justify-between mt-2">
                 <div
-                  class="flex items-center bg-surface border border-border rounded-lg h-7"
+                  class="absolute inset-0 flex items-center justify-center text-text-secondary"
                 >
+                  <app-icon name="image" [size]="14"></app-icon>
+                </div>
+              </div>
+
+              <!-- Item Info -->
+              <div class="flex-1 min-w-0">
+                <div class="flex justify-between items-start gap-2">
+                  <h4
+                    class="text-sm font-semibold text-text-primary truncate leading-tight mb-0.5"
+                  >
+                    {{ item.product.name }}
+                  </h4>
                   <button
-                    class="px-2 hover:bg-muted h-full flex items-center text-text-secondary rounded-l-lg transition-colors"
-                    (click)="updateQuantity(item.id, item.quantity - 1)"
-                    [disabled]="(loading$ | async) ?? false"
+                    (click)="removeFromCart(item.id)"
+                    class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    title="Eliminar"
                   >
-                    <app-icon name="minus" [size]="10"></app-icon>
+                    <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
-                  <span
-                    class="w-8 text-center text-xs font-bold text-text-primary"
-                  >
-                    {{ item.quantity }}
+                </div>
+                <div class="flex justify-between items-end">
+                  <span class="text-xs font-medium text-text-secondary">
+                    {{ formatCurrency(item.unitPrice) }}
                   </span>
-                  <button
-                    class="px-2 hover:bg-muted h-full flex items-center text-text-secondary rounded-r-lg transition-colors"
-                    (click)="updateQuantity(item.id, item.quantity + 1)"
-                    [disabled]="
-                      ((loading$ | async) ?? false) ||
-                      item.quantity >= item.product.stock
-                    "
-                  >
-                    <app-icon name="plus" [size]="10"></app-icon>
-                  </button>
+                  <span class="text-sm font-bold text-primary">
+                    {{ formatCurrency(item.totalPrice) }}
+                  </span>
                 </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Summary Footer -->
-      <div
-        class="border-t border-border p-6 shrink-0 bg-muted/30"
-        *ngIf="!(isEmpty$ | async)"
-      >
-        <!-- Totals -->
-        <div class="space-y-2 mb-4">
-          <div class="flex justify-between text-sm text-text-secondary">
-            <span>Subtotal</span>
-            <span>{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
+            <!-- Bottom Row: Quantity Controls -->
+            <div
+              class="flex items-center justify-between pt-2 border-t border-border/50"
+            >
+              <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
+                Cantidad
+              </span>
+              <div
+                class="flex items-center bg-muted/50 border border-border/50 rounded-md h-7 overflow-hidden"
+              >
+                <button
+                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
+                  (click)="updateQuantity(item.id, item.quantity - 1)"
+                  [disabled]="(loading$ | async) ?? false"
+                >
+                  <app-icon name="minus" [size]="12"></app-icon>
+                </button>
+                <span
+                  class="min-w-[28px] text-center text-xs font-bold text-text-primary"
+                >
+                  {{ item.quantity }}
+                </span>
+                <button
+                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
+                  (click)="updateQuantity(item.id, item.quantity + 1)"
+                  [disabled]="
+                    ((loading$ | async) ?? false) ||
+                    item.quantity >= item.product.stock
+                  "
+                >
+                  <app-icon name="plus" [size]="12"></app-icon>
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="flex justify-between text-sm text-text-secondary">
-            <span>IVA (21%)</span>
-            <span>{{
-              formatCurrency((summary$ | async)?.taxAmount || 0)
-            }}</span>
-          </div>
-
-          <div
-            class="pt-2 border-t border-border flex justify-between items-center"
-          >
-            <span class="font-bold text-text-primary text-lg">Total</span>
-            <span class="font-extrabold text-2xl text-primary">
-              {{ formatCurrency((summary$ | async)?.total || 0) }}
-            </span>
-          </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="flex gap-3">
-          <app-button
-            variant="outline"
-            size="md"
-            (clicked)="saveCart()"
-            [disabled]="(loading$ | async) ?? false"
-            class="flex-1"
-          >
-            Guardar
-          </app-button>
-          <app-button
-            variant="primary"
-            size="md"
-            (clicked)="proceedToPayment()"
-            [disabled]="(loading$ | async) ?? false"
-            class="flex-1"
-          >
-            Cobrar
-          </app-button>
         </div>
       </div>
     </div>
@@ -249,6 +241,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
   constructor(
     private cartService: PosCartService,
     private toastService: ToastService,
+    private dialogService: DialogService,
   ) {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
@@ -306,8 +299,16 @@ export class PosCartComponent implements OnInit, OnDestroy {
       });
   }
 
-  clearCart(): void {
-    if (confirm('¿Estás seguro de que quieres vaciar el carrito?')) {
+  async clearCart(): Promise<void> {
+    const confirm = await this.dialogService.confirm({
+      title: 'Vaciar Carrito',
+      message: '¿Estás seguro de que quieres vaciar todos los productos del carrito?',
+      confirmText: 'Vaciar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+
+    if (confirm) {
       this.cartService
         .clearCart()
         .pipe(takeUntil(this.destroy$))

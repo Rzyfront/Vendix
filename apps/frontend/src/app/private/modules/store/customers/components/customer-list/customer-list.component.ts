@@ -115,13 +115,13 @@ export class CustomerListComponent {
   @Output() refresh = new EventEmitter<void>();
 
   columns: TableColumn[] = [
-    { key: 'first_name', label: 'First Name', sortable: true },
-    { key: 'last_name', label: 'Last Name', sortable: true },
-    { key: 'email', label: 'Email', sortable: true },
-    { key: 'phone', label: 'Phone' },
-    { key: 'document_number', label: 'ID Number' },
-    { key: 'total_orders', label: 'Orders', sortable: true },
-    { key: 'created_at', label: 'Joined', sortable: true, transform: (val) => val ? new Date(val).toLocaleDateString() : '-' },
+    { key: 'first_name', label: 'First Name', sortable: true, priority: 1 },
+    { key: 'last_name', label: 'Last Name', sortable: true, priority: 1 },
+    { key: 'email', label: 'Email', sortable: true, priority: 2 },
+    { key: 'phone', label: 'Phone', priority: 3 },
+    { key: 'document_number', label: 'ID Number', priority: 2 },
+    { key: 'total_orders', label: 'Orders', sortable: true, priority: 3 },
+    { key: 'created_at', label: 'Joined', sortable: true, priority: 3, transform: (val) => val ? new Date(val).toLocaleDateString() : '-' },
   ];
 
   actions: TableAction[] = [

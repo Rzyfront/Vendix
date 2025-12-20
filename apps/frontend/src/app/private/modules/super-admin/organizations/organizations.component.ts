@@ -188,11 +188,11 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
-    { key: 'slug', label: 'Vlink', sortable: true, width: '150px' },
-    { key: 'email', label: 'Email', sortable: true, width: '250px' },
-    { key: 'phone', label: 'Teléfono', sortable: true, width: '150px' },
-    { key: 'tax_id', label: 'NIT/CC', sortable: true, width: '120px' },
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
+    { key: 'slug', label: 'Vlink', sortable: true, width: '150px', priority: 3 },
+    { key: 'email', label: 'Email', sortable: true, width: '250px', priority: 2 },
+    { key: 'phone', label: 'Teléfono', sortable: true, width: '150px', priority: 3 },
+    { key: 'tax_id', label: 'NIT/CC', sortable: true, width: '120px', priority: 3 },
     {
       key: 'state',
       label: 'Estado',
@@ -200,6 +200,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       width: '100px',
       align: 'center',
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'status',
         size: 'sm',

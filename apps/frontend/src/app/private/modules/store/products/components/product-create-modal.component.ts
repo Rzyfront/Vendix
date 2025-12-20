@@ -1,5 +1,6 @@
-import { Component, Input, EventEmitter, Output, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, Input, EventEmitter, Output, OnChanges, SimpleChanges, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import {
   FormBuilder,
   FormGroup,
@@ -16,12 +17,10 @@ import {
   SelectorOption,
 } from '../../../../../shared/components';
 import {
-  CreateProductDto,
-  CreateProductImageDto,
-  ProductCategory,
-  Brand,
   Product,
   ProductState,
+  ProductCategory,
+  Brand,
 } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
@@ -45,11 +44,12 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ProductCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
-  @Input() product: Product | null = null; // Product data for edit mode
+  @Input() product: Product | null = null;
   @Output() openChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<any>();
   @Output() cancel = new EventEmitter<void>();
@@ -59,7 +59,6 @@ export class ProductCreateModalComponent implements OnChanges {
   }
 
   productForm: FormGroup;
-  imageUrls: string[] = [];
   categoryOptions: SelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
 
@@ -73,6 +72,7 @@ export class ProductCreateModalComponent implements OnChanges {
     private categoriesService: CategoriesService,
     private brandsService: BrandsService,
     private toastService: ToastService,
+    private router: Router
   ) {
     this.productForm = this.createForm();
     this.loadCategoriesAndBrands();
@@ -88,7 +88,6 @@ export class ProductCreateModalComponent implements OnChanges {
     }
 
     if (changes['isOpen'] && this.isOpen) {
-      // Setup logic when opened (e.g. reload options)
       if (!this.product) {
         this.resetForm();
       }
@@ -105,15 +104,13 @@ export class ProductCreateModalComponent implements OnChanges {
           Validators.maxLength(255),
         ],
       ],
-      slug: ['', [Validators.maxLength(255)]],
       description: [''],
-      base_price: [0, [Validators.required, Validators.min(0)]],
-      sku: ['', [Validators.maxLength(100)]],
-      stock_quantity: [0, [Validators.min(0)]],
-      category_id: [null],
-      brand_id: [null],
+      base_price: [null, [Validators.required, Validators.min(0)]],
+      stock_quantity: [0, [Validators.required, Validators.min(0)]],
+      sku: [''],
+      category_id: [null, Validators.required],
+      brand_id: [null, Validators.required],
       state: [ProductState.ACTIVE],
-      newImageUrl: [''],
     });
   }
 
@@ -123,7 +120,11 @@ export class ProductCreateModalComponent implements OnChanges {
       stock_quantity: 0,
       state: ProductState.ACTIVE
     });
-    this.imageUrls = [];
+  }
+
+  goToAdvancedCreation(): void {
+    this.router.navigate(['/admin/products/create']);
+    this.onCancel();
   }
 
   private loadCategoriesAndBrands(): void {
@@ -137,32 +138,14 @@ export class ProductCreateModalComponent implements OnChanges {
 
     this.productForm.patchValue({
       name: this.product.name,
-      slug: this.product.slug,
-      description: this.product.description || '',
       base_price: this.product.base_price,
-      sku: this.product.sku || '',
       stock_quantity: this.product.stock_quantity || 0,
-      category_id: this.product.category_id || null,
+      // Try to get category from new structure or legacy if exists
+      category_id: (this.product as any).category_ids?.[0] || (this.product.categories?.[0]?.id) || null,
       brand_id: this.product.brand_id || null,
       state: this.product.state || ProductState.ACTIVE,
     });
-
-    // Load existing images
-    if (this.product.images && this.product.images.length > 0) {
-      // Sort images so main image is first
-      const sortedImages = [...this.product.images].sort((a, b) => {
-        if (a.is_main && !b.is_main) return -1;
-        if (!a.is_main && b.is_main) return 1;
-        return 0;
-      });
-
-      this.imageUrls = sortedImages.map((img) => img.image_url);
-    } else {
-      this.imageUrls = [];
-    }
   }
-
-  // ... (Loader methods unchanged) ...
 
   private loadCategories(): void {
     this.categoriesService.getCategories().subscribe({
@@ -213,105 +196,30 @@ export class ProductCreateModalComponent implements OnChanges {
     this.cancel.emit();
   }
 
-  triggerFileUpload(): void {
-    const fileInput = document.querySelector('.file-input') as HTMLInputElement;
-    fileInput?.click();
-  }
-
-  addImageUrl(): void {
-    const urlControl = this.productForm.get('newImageUrl');
-    const url = urlControl?.value?.trim();
-
-    if (url && this.isValidUrl(url)) {
-      this.imageUrls.push(url);
-      urlControl?.setValue('');
-      this.toastService.success('Image added successfully');
-    } else {
-      this.toastService.error('Please enter a valid image URL');
-    }
-  }
-
-  onFileSelect(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-
-    if (files) {
-      Array.from(files).forEach((file) => {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const result = e.target?.result as string;
-            this.imageUrls.push(result);
-          };
-          reader.readAsDataURL(file);
-        }
-      });
-      input.value = '';
-    }
-  }
-
-  removeImage(index: number): void {
-    this.imageUrls.splice(index, 1);
-  }
-
-  onImageError(event: Event): void {
-    const img = event.target as HTMLImageElement;
-    img.src =
-      'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjI0IiBoZWlnaHQ9IjI0IiBmaWxsPSIjRjRNEY2Ii8+CjxwYXRoIGQ9Ik0xMiA2VjEwTDEwIDhMMTIgNlpNMTIgNlYxMEwxNCA4TDEyIDZaIiBmaWxsPSIjOUNBM0FGIi8+Cjwvc3ZnPgo=';
-  }
-
-  private isValidUrl(string: string): boolean {
-    try {
-      new URL(string);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   onSubmit() {
     if (this.productForm.invalid || this.isSubmitting) {
-      this.markFormGroupTouched(this.productForm);
+      this.productForm.markAllAsTouched();
       return;
     }
 
-    const formValue = this.productForm.value;
-    const images: CreateProductImageDto[] = this.imageUrls.map(
-      (url, index) => ({
-        image_url: url,
-        is_main: index === 0,
-      }),
-    );
-
-    // Prepare DTO using Partial<CreateProductDto> or just an object we emit
-    // Note: Parent needs to handle casting to Create or Update DTO
-    const productData = {
-      name: formValue.name,
-      slug: formValue.slug || undefined,
-      description: formValue.description || undefined,
-      base_price: Number(formValue.base_price),
-      sku: formValue.sku || undefined,
-      stock_quantity:
-        formValue.stock_quantity > 0
-          ? Number(formValue.stock_quantity)
-          : undefined,
-      category_id: formValue.category_id ? Number(formValue.category_id) : null,
-      brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
-      state: formValue.state || ProductState.ACTIVE,
-      images: images.length > 0 ? images : undefined,
+    // Construct simplified DTO
+    const val = this.productForm.value;
+    const dto: any = {
+      name: val.name,
+      base_price: val.base_price,
+      stock_quantity: val.stock_quantity,
+      // Map single category to array for backend compat
+      category_ids: val.category_id ? [Number(val.category_id)] : [],
+      brand_id: val.brand_id,
+      state: val.state
     };
 
-    this.submit.emit(productData);
+    // Remove legacy field if it exists in val but not needed in DTO
+    // delete dto.category_id;
+
+    this.submit.emit(dto);
   }
 
-  private markFormGroupTouched(formGroup: FormGroup): void {
-    Object.values(formGroup.controls).forEach((control) => {
-      control.markAsTouched();
-      if (control instanceof FormGroup) {
-        this.markFormGroupTouched(control);
-      }
-    });
-  }
 
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);

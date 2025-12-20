@@ -19,6 +19,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize, take } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { InputComponent } from '../input/input.component';
+import { ToastService } from '../toast/toast.service';
 import {
   CountryService,
   Country,
@@ -135,6 +136,7 @@ import {
           <h4 class="text-lg font-medium text-gray-900 mb-4 border-b pb-2">
             Dirección
           </h4>
+
           <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
             <div *ngIf="hasAddress; else noAddress" class="space-y-4">
               <!-- Calle Principal -->
@@ -334,17 +336,32 @@ import {
                 [error]="getError('phone')"
               ></app-input>
 
-              <app-input
-                label="Tipo Documento"
-                formControlName="document_type"
-                placeholder="CC, NIT, etc."
-              ></app-input>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"
+                  >Tipo de Documento</label
+                >
+                <select class="modal-input" formControlName="document_type">
+                  <option value="">Selecciona tipo de documento</option>
+                  <option
+                    *ngFor="let type of documentTypes"
+                    [value]="type.value"
+                  >
+                    {{ type.label }}
+                  </option>
+                </select>
+              </div>
 
-              <app-input
-                label="Número Documento"
-                formControlName="document_number"
-                placeholder="12345678"
-              ></app-input>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1"
+                  >Número de Documento</label
+                >
+                <input
+                  class="modal-input"
+                  type="text"
+                  formControlName="document_number"
+                  placeholder="12345678"
+                />
+              </div>
             </div>
           </div>
 
@@ -401,14 +418,7 @@ import {
                   <label class="block text-sm font-medium text-gray-700 mb-1"
                     >Departamento</label
                   >
-                  <select
-                    class="modal-input"
-                    formControlName="state_province"
-                    [disabled]="
-                      profileForm.get('address')?.get('country_code')?.value !==
-                      'CO'
-                    "
-                  >
+                  <select class="modal-input" formControlName="state_province">
                     <option value="">Selecciona un departamento</option>
                     <option *ngFor="let dep of departments" [value]="dep.id">
                       {{ dep.name }}
@@ -434,13 +444,7 @@ import {
                   <label class="block text-sm font-medium text-gray-700 mb-1"
                     >Ciudad</label
                   >
-                  <select
-                    class="modal-input"
-                    formControlName="city"
-                    [disabled]="
-                      !profileForm.get('address')?.get('state_province')?.value
-                    "
-                  >
+                  <select class="modal-input" formControlName="city">
                     <option value="">Selecciona una ciudad</option>
                     <option *ngFor="let city of cities" [value]="city.id">
                       {{ city.name }}
@@ -521,35 +525,22 @@ import {
         display: block;
         width: 100%;
         padding: 0.5rem 1rem;
-        border: 1px solid var(--color-border);
-        border-radius: 0.125rem;
-        transition:
-          border-color 0.2s ease,
-          box-shadow 0.2s ease;
-        font-size: var(--fs-sm);
-        line-height: 1.25rem;
+        border: 2px solid #e5e7eb;
+        border-radius: 0.5rem;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+        background: white;
+        box-sizing: border-box;
+        line-height: 1.5;
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
       }
 
       .modal-input:focus {
         outline: none;
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 3px var(--color-ring);
-      }
-
-      .modal-input:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        background-color: #f9fafb;
-      }
-
-      .modal-input::placeholder {
-        color: var(--color-text-muted);
-      }
-
-      .modal-input:focus {
-        outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--color-text-primary);
+        box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.1);
       }
 
       .modal-input:disabled {
@@ -572,6 +563,7 @@ export class ProfileModalComponent implements OnInit {
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
   private countryService = inject(CountryService);
+  private toastService = inject(ToastService);
 
   profileForm: FormGroup;
   passwordForm: FormGroup;
@@ -579,6 +571,7 @@ export class ProfileModalComponent implements OnInit {
   loading = false;
   saving = false;
   savingPassword = false;
+  isInitialLoad = true; // Flag to track initial profile load
 
   isEditing = false;
   showPasswordSection = false;
@@ -590,6 +583,15 @@ export class ProfileModalComponent implements OnInit {
   countries: Country[] = [];
   departments: Department[] = [];
   cities: City[] = [];
+
+  // Document types for Colombia
+  documentTypes = [
+    { value: 'cc', label: 'Cédula de Ciudadanía' },
+    { value: 'ce', label: 'Cédula de Extranjería' },
+    { value: 'ti', label: 'Tarjeta de Identidad' },
+    { value: 'nit', label: 'NIT' },
+    { value: 'pas', label: 'Pasaporte' },
+  ];
 
   constructor() {
     this.profileForm = this.fb.group({
@@ -627,6 +629,9 @@ export class ProfileModalComponent implements OnInit {
       }
     });
 
+    // Load fresh profile data to ensure we have latest information including addresses
+    this.loadProfile();
+
     // Load countries for the selects
     this.countries = this.countryService.getCountries();
 
@@ -640,11 +645,17 @@ export class ProfileModalComponent implements OnInit {
       countryControl.valueChanges.subscribe((code: string) => {
         if (code === 'CO') {
           this.loadDepartments();
+          depControl.enable(); // ✅ Enable department control
+          if (depControl.value) {
+            cityControl.enable(); // ✅ Enable city control if department selected
+          }
         } else {
           this.departments = [];
           this.cities = [];
           depControl.setValue('');
           cityControl.setValue('');
+          depControl.disable(); // ✅ Disable department control
+          cityControl.disable(); // ✅ Disable city control
         }
       });
 
@@ -652,11 +663,26 @@ export class ProfileModalComponent implements OnInit {
       depControl.valueChanges.subscribe((depId: number) => {
         if (depId) {
           this.loadCities(depId);
+          cityControl.enable(); // ✅ Enable city control
         } else {
           this.cities = [];
           cityControl.setValue('');
+          cityControl.disable(); // ✅ Disable city control
         }
       });
+
+      // Set initial disabled state
+      if (countryControl.value === 'CO') {
+        depControl.enable();
+        if (depControl.value) {
+          cityControl.enable();
+        } else {
+          cityControl.disable();
+        }
+      } else {
+        depControl.disable();
+        cityControl.disable();
+      }
 
       // If Colombia is already selected, load departments
       if (countryControl.value === 'CO') {
@@ -679,7 +705,7 @@ export class ProfileModalComponent implements OnInit {
     this.showPasswordSection = false;
   }
 
-  enableEditMode() {
+  async enableEditMode() {
     this.isEditing = true;
     // Ensure form is populated with current data
     if (this.userInfo) {
@@ -692,27 +718,42 @@ export class ProfileModalComponent implements OnInit {
         document_number: this.userInfo.document_number,
       });
     }
+
     if (this.addressInfo) {
       // For editing, we need to convert names to IDs
-      const countryCode = this.addressInfo.country;
+      const countryCode = this.addressInfo?.country;
+
       let stateProvinceId = '';
       let cityId = '';
 
       if (countryCode === 'CO') {
-        // Find IDs corresponding to saved names
-        const department = this.departments.find(
-          (d) => d.name === this.addressInfo.state,
-        );
-        if (department) {
-          stateProvinceId = department.id.toString();
+        // Load departments first, then map names to IDs
+        try {
+          await this.loadDepartments();
 
-          // Once we have the department, find the city
-          const city = this.cities.find(
-            (c) => c.name === this.addressInfo.city,
+          // Now find IDs corresponding to saved names
+          const department = this.departments.find(
+            (d) => d.name === this.addressInfo?.state,
           );
-          if (city) {
-            cityId = city.id.toString();
+
+          if (department) {
+            stateProvinceId = department.id.toString();
+
+            // Load cities for this department
+            await this.loadCities(department.id);
+
+            // Once we have the cities, find the city
+            const city = this.cities.find(
+              (c) => c.name === this.addressInfo.city,
+            );
+
+            if (city) {
+              cityId = city.id.toString();
+            }
           }
+        } catch (error) {
+          console.error('Error loading location data:', error);
+          // Continue without pre-filling location data
         }
       }
 
@@ -726,11 +767,6 @@ export class ProfileModalComponent implements OnInit {
           postal_code: this.addressInfo.postal_code,
         },
       });
-
-      // Load departments if country is Colombia
-      if (this.addressInfo.country === 'CO') {
-        this.loadDepartments();
-      }
     }
   }
 
@@ -740,24 +776,85 @@ export class ProfileModalComponent implements OnInit {
   }
 
   loadProfile() {
+    // Prevent concurrent loads
+    if (this.loading) {
+      return;
+    }
+
     this.loading = true;
     this.authService
       .getProfile()
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(
+        finalize(() => {
+          this.loading = false;
+          this.isInitialLoad = false; // Mark initial load as complete
+        }),
+      )
       .subscribe({
         next: (response) => {
-          this.updateLocalUserInfo(response.user);
+          const userData = response.data || response.user || response;
+          this.updateLocalUserInfo(userData);
         },
         error: (err) => {
-          console.error('Error loading profile', err);
+          console.error('Error loading profile:', err);
+
+          // Durante carga inicial, no mostrar toasts para evitar molestar al usuario al cargar la página
+          if (this.isInitialLoad) {
+            // Solo loggear el error, no mostrar toast
+            return;
+          }
+
+          // Para cargas posteriores (cuando el usuario interactúa), sí mostrar toasts
+          if (
+            err.message?.includes('Token refresh failed') ||
+            err.message?.includes('logged out') ||
+            !this.authService.getToken()
+          ) {
+            this.toastService.warning(
+              'Tu sesión ha expirado. Inicia sesión nuevamente.',
+            );
+            return;
+          }
+
+          this.toastService.error(
+            'No se pudieron cargar tus datos. Actualiza la página para intentarlo nuevamente.',
+          );
         },
       });
   }
 
   updateLocalUserInfo(user: any) {
+    if (!user) {
+      return;
+    }
+
     this.userInfo = user;
-    this.addressInfo = user.address;
-    this.hasAddress = !!user.address;
+
+    // Handle addresses array - take primary address or first one
+    if (
+      user.addresses &&
+      Array.isArray(user.addresses) &&
+      user.addresses.length > 0
+    ) {
+      // Find primary address first, otherwise take the first one
+      const primaryAddress =
+        user.addresses.find((addr: any) => addr.is_primary) ||
+        user.addresses[0];
+
+      // Map backend field names to frontend expected names
+      this.addressInfo = {
+        address_line_1: primaryAddress.address_line1,
+        address_line_2: primaryAddress.address_line2,
+        city: primaryAddress.city,
+        state: primaryAddress.state_province,
+        country: primaryAddress.country_code,
+        postal_code: primaryAddress.postal_code,
+      };
+      this.hasAddress = true;
+    } else {
+      this.addressInfo = null;
+      this.hasAddress = false;
+    }
   }
 
   onSubmit() {
@@ -791,21 +888,50 @@ export class ProfileModalComponent implements OnInit {
 
     const payload = {
       ...formValue,
-      address: addressData,
+      address: {
+        address_line_1: addressData.address_line_1,
+        address_line_2: addressData.address_line_2,
+        country: addressData.country_code,
+        state: addressData.state_province,
+        city: addressData.city,
+        postal_code: addressData.postal_code,
+      },
     };
 
     this.authService
       .updateProfile(payload)
       .pipe(finalize(() => (this.saving = false)))
       .subscribe({
-        next: () => {
+        next: (response) => {
           this.isEditing = false;
           this.loadProfile();
-          alert('Perfil actualizado exitosamente');
+          this.toastService.success('¡Perfil guardado correctamente!');
         },
         error: (err) => {
-          console.error('Error updating profile', err);
-          alert('Error al actualizar perfil');
+          // Detectar cuando el AuthInterceptor hizo logout automático por token expirado
+          if (
+            err.message?.includes('Token refresh failed') ||
+            err.message?.includes('logged out') ||
+            !this.authService.getToken()
+          ) {
+            this.toastService.warning(
+              'Tu sesión ha expirado. Inicia sesión nuevamente.',
+            );
+            return;
+          }
+
+          // Mostrar mensaje más específico al usuario
+          if (err.error?.message) {
+            this.toastService.error(err.error.message);
+          } else if (err.error?.errors) {
+            this.toastService.error(
+              'Algunos campos tienen información incorrecta. Revisa y corrige los datos marcados.',
+            );
+          } else {
+            this.toastService.error(
+              'No se pudo guardar el perfil. Verifica tu conexión a internet e intenta nuevamente.',
+            );
+          }
         },
       });
   }
@@ -823,11 +949,11 @@ export class ProfileModalComponent implements OnInit {
         next: () => {
           this.showPasswordSection = false;
           this.passwordForm.reset();
-          alert('Contraseña actualizada exitosamente');
+          this.toastService.success('Contraseña actualizada exitosamente');
         },
         error: (err) => {
           console.error('Error updating password', err);
-          alert(
+          this.toastService.error(
             'Error al actualizar contraseña. Verifica tu contraseña actual.',
           );
         },
@@ -845,7 +971,7 @@ export class ProfileModalComponent implements OnInit {
     const control = this.profileForm.get(controlName);
     if (control?.touched && control?.errors) {
       if (control.errors['required']) return 'Este campo es requerido';
-    
+
       if (control.errors['minlength']) return 'Mínimo 2 caracteres';
     }
     return '';
@@ -855,7 +981,6 @@ export class ProfileModalComponent implements OnInit {
     const control = this.profileForm.get(`address.${controlName}`);
     if (control?.touched && control?.errors) {
       if (control.errors['required']) return 'Este campo es requerido';
-     
     }
     return '';
   }

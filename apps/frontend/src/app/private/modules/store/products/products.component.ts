@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
+import { Router } from '@angular/router'; // Import Router
 
 // Services
 import { ProductsService } from './services/products.service';
@@ -89,17 +90,17 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
         (create)="openCreateModal()"
-        (edit)="openEditModal($event)"
+        (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
-        (duplicate)="duplicateProduct($event)"
+
         (bulkUpload)="openBulkUploadModal()"
       ></app-product-list>
 
       <!-- Modals -->
       <app-product-create-modal
-        [isOpen]="isCreateModalOpen || isEditModalOpen"
-        [product]="selectedProduct || null"
-        [isSubmitting]="isCreatingProduct || isUpdatingProduct"
+        [isOpen]="isCreateModalOpen"
+        [product]="null"
+        [isSubmitting]="isCreatingProduct"
         (openChange)="!$event ? onModalClose() : null"
         (cancel)="onModalClose()"
         (submit)="onSaveProduct($event)"
@@ -138,11 +139,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
 
     // Modal State
     isCreateModalOpen = false;
-    isEditModalOpen = false;
     isBulkUploadModalOpen = false;
     isCreatingProduct = false;
-    isUpdatingProduct = false;
-    selectedProduct: Product | null = null;
 
     private subscriptions: Subscription[] = [];
 
@@ -152,7 +150,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
         private brandsService: BrandsService,
         private toastService: ToastService,
         private dialogService: DialogService,
-        private tenantFacade: TenantFacade
+        private tenantFacade: TenantFacade,
+        private router: Router // Inject Router
     ) { }
 
     ngOnInit(): void {
@@ -226,27 +225,18 @@ export class ProductsComponent implements OnInit, OnDestroy {
     }
 
     openCreateModal(): void {
-        this.selectedProduct = null;
         this.isCreateModalOpen = true;
     }
 
-    openEditModal(product: Product): void {
-        this.selectedProduct = product;
-        this.isEditModalOpen = true;
+    navigateToEditPage(product: Product): void {
+        this.router.navigate(['/admin/products/edit', product.id]);
     }
 
     onModalClose(): void {
         this.isCreateModalOpen = false;
-        this.isEditModalOpen = false;
-        this.selectedProduct = null;
     }
-
     onSaveProduct(data: any): void {
-        if (this.selectedProduct) {
-            this.updateProduct(this.selectedProduct.id, data);
-        } else {
-            this.createProduct(data);
-        }
+        this.createProduct(data);
     }
 
     createProduct(data: CreateProductDto): void {
@@ -262,24 +252,6 @@ export class ProductsComponent implements OnInit, OnDestroy {
             error: () => {
                 this.toastService.error('Error creating product');
                 this.isCreatingProduct = false;
-            }
-        });
-        this.subscriptions.push(sub);
-    }
-
-    updateProduct(id: number, data: UpdateProductDto): void {
-        this.isUpdatingProduct = true;
-        const sub = this.productsService.updateProduct(id, data).subscribe({
-            next: () => {
-                this.toastService.success('Product updated successfully');
-                this.isUpdatingProduct = false;
-                this.onModalClose();
-                this.loadProducts();
-                this.loadStats();
-            },
-            error: () => {
-                this.toastService.error('Error updating product');
-                this.isUpdatingProduct = false;
             }
         });
         this.subscriptions.push(sub);
@@ -306,19 +278,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
         });
     }
 
-    duplicateProduct(product: Product): void {
-        const duplicateData: CreateProductDto = {
-            name: `${product.name} (Copy)`,
-            slug: `${product.slug}-copy`,
-            description: product.description,
-            base_price: product.base_price,
-            sku: product.sku ? `${product.sku}-COPY` : undefined,
-            stock_quantity: product.stock_quantity,
-            category_id: product.category_id,
-            brand_id: product.brand_id,
-        };
-        this.createProduct(duplicateData);
-    }
+
 
     // Bulk Upload
     openBulkUploadModal(): void {

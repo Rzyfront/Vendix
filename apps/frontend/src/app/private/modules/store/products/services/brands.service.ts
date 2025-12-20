@@ -17,7 +17,7 @@ import { Brand } from '../interfaces';
 export class BrandsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   getBrands(storeId?: number): Observable<Brand[]> {
     const params = storeId
@@ -33,20 +33,29 @@ export class BrandsService {
 
   getBrandById(id: number): Observable<Brand> {
     return this.http
-      .get<Brand>(`${this.apiUrl}/store/brands/${id}`)
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   createBrand(brand: Partial<Brand>): Observable<Brand> {
     return this.http
-      .post<Brand>(`${this.apiUrl}/store/brands`, brand)
-      .pipe(catchError(this.handleError));
+      .post<ApiResponse<Brand>>(`${this.apiUrl}/store/brands`, brand)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   updateBrand(id: number, brand: Partial<Brand>): Observable<Brand> {
     return this.http
-      .patch<Brand>(`${this.apiUrl}/store/brands/${id}`, brand)
-      .pipe(catchError(this.handleError));
+      .patch<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`, brand)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   deleteBrand(id: number): Observable<void> {

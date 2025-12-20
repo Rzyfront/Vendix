@@ -71,42 +71,46 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true, mobilePriority: 1 },
-    { key: 'last_name', label: 'Apellido', sortable: true, mobilePriority: 1 },
-    { key: 'username', label: 'Usuario', sortable: true, mobilePriority: 2 },
-    { key: 'email', label: 'Email', sortable: true, mobilePriority: 2 },
+    { key: 'first_name', label: 'Nombre', sortable: true, priority: 1 },
+    { key: 'last_name', label: 'Apellido', sortable: true, priority: 3 },
+    { key: 'username', label: 'Usuario', sortable: true, priority: 3 },
+    { key: 'email', label: 'Email', sortable: true, priority: 2 },
     {
       key: 'state',
       label: 'Estado',
       sortable: true,
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'status',
         size: 'sm',
       },
       transform: (value: UserState) => this.getStateDisplay(value).text,
-      mobilePriority: 1,
+
     },
     {
       key: 'organizations.name',
       label: 'Organización',
       sortable: false,
       defaultValue: 'N/A',
-      mobilePriority: 3,
+      priority: 2,
+
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
+      priority: 3,
       transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
-      mobilePriority: 3,
+
     },
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
+      priority: 3,
       transform: (value: string) => this.formatDate(value),
-      mobilePriority: 3,
+
     },
   ];
 

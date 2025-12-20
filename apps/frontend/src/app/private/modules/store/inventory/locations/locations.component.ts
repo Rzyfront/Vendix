@@ -203,12 +203,13 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
     // Table Configuration
     table_columns: TableColumn[] = [
-        { key: 'code', label: 'Código', sortable: true, width: '120px' },
-        { key: 'name', label: 'Nombre', sortable: true },
+        { key: 'code', label: 'Código', sortable: true, width: '120px', priority: 3 },
+        { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
         {
             key: 'type',
             label: 'Tipo',
             sortable: true,
+            priority: 2,
             transform: (value: string) => {
                 const types: any = {
                     'warehouse': 'Almacén',
@@ -222,6 +223,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
         {
             key: 'is_active',
             label: 'Estado',
+            priority: 1,
             transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
             badge: true,
             badgeConfig: {

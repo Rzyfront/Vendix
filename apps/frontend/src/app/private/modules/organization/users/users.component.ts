@@ -84,10 +84,10 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true, width: '120px' },
-    { key: 'last_name', label: 'Apellido', sortable: true, width: '120px' },
-    { key: 'username', label: 'Usuario', sortable: true, width: '140px' },
-    { key: 'email', label: 'Email', sortable: true, width: '180px' },
+    { key: 'first_name', label: 'Nombre', sortable: true, width: '120px', priority: 1 },
+    { key: 'last_name', label: 'Apellido', sortable: true, width: '120px', priority: 1 },
+    { key: 'username', label: 'Usuario', sortable: true, width: '140px', priority: 2 },
+    { key: 'email', label: 'Email', sortable: true, width: '180px', priority: 2 },
     {
       key: 'state',
       label: 'Estado',
@@ -95,6 +95,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       width: '100px',
       align: 'center',
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'status',
         size: 'sm',
@@ -107,12 +108,14 @@ export class UsersComponent implements OnInit, OnDestroy {
       sortable: false,
       width: '120px',
       defaultValue: 'N/A',
+      priority: 3,
     },
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
       width: '140px',
+      priority: 3,
       transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
     },
     {
@@ -120,6 +123,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Fecha Creación',
       sortable: true,
       width: '140px',
+      priority: 3,
       transform: (value: string) => this.formatDate(value),
     },
   ];

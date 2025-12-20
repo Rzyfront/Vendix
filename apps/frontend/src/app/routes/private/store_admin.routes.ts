@@ -43,6 +43,20 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.ProductsComponent),
           },
           {
+            path: 'create',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/pages/product-create-page/product-create-page.component'
+              ).then((c) => c.ProductCreatePageComponent),
+          },
+          {
+            path: 'edit/:id',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/products/pages/product-create-page/product-create-page.component'
+              ).then((c) => c.ProductCreatePageComponent),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import(

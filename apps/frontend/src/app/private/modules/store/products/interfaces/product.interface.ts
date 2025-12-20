@@ -7,7 +7,7 @@ export enum ProductState {
 export interface Product {
   id: number;
   store_id: number;
-  category_id?: number;
+  // category_id removed
   brand_id?: number;
   name: string;
   slug: string;
@@ -25,6 +25,7 @@ export interface Product {
   variants?: ProductVariant[];
   images?: ProductImage[];
   categories?: ProductCategory[];
+  product_categories?: { categories: ProductCategory }[];
   tax_assignments?: ProductTaxAssignment[];
 }
 
@@ -99,7 +100,6 @@ export interface CreateProductDto {
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;
-  category_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -116,7 +116,6 @@ export interface UpdateProductDto {
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;
-  category_id?: number;
   brand_id?: number;
   category_ids?: number[];
   tax_category_ids?: number[];

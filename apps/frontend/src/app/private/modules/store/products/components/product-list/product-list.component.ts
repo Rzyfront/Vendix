@@ -55,7 +55,6 @@ export class ProductListComponent {
   @Output() create = new EventEmitter<void>();
   @Output() edit = new EventEmitter<Product>();
   @Output() delete = new EventEmitter<Product>();
-  @Output() duplicate = new EventEmitter<Product>();
   @Output() bulkUpload = new EventEmitter<void>();
   @Output() sort = new EventEmitter<{ column: string; direction: 'asc' | 'desc' | null }>();
 
@@ -68,25 +67,27 @@ export class ProductListComponent {
   tableColumns: TableColumn[] = [
     {
       key: 'images',
-      label: 'Image',
+      label: '', // Empty label for symmetry
       sortable: false,
-      width: '80px',
+      width: '50px',
       align: 'center',
+      priority: 1,
+      type: 'image',
       transform: (value: any[]) => {
-        if (!value || value.length === 0)
-          return '/assets/placeholder-product.png';
+        if (!value || value.length === 0) return '';
         const mainImage = value.find((img: any) => img.is_main);
         return mainImage ? mainImage.image_url : value[0].image_url;
       },
     },
-    { key: 'name', label: 'Name', sortable: true, width: '250px' },
-    { key: 'sku', label: 'SKU', sortable: true, width: '120px' },
+    { key: 'name', label: 'Name', sortable: true, width: '250px', priority: 1 },
+    { key: 'sku', label: 'SKU', sortable: true, width: '120px', priority: 2 },
     {
       key: 'base_price',
       label: 'Price',
       sortable: true,
       width: '100px',
       align: 'right',
+      priority: 1,
       transform: (value: number) => this.formatCurrency(value),
     },
     {
@@ -95,6 +96,7 @@ export class ProductListComponent {
       sortable: true,
       width: '80px',
       align: 'center',
+      priority: 1,
       transform: (value: number) => value?.toString() || '0',
     },
     {
@@ -103,6 +105,7 @@ export class ProductListComponent {
       sortable: true,
       width: '100px',
       align: 'center',
+      priority: 1,
       badge: true,
       badgeConfig: {
         type: 'custom',
@@ -115,20 +118,7 @@ export class ProductListComponent {
       },
       transform: (value: ProductState) => this.formatProductState(value),
     },
-    {
-      key: 'category.name',
-      label: 'Category',
-      sortable: true,
-      width: '150px',
-      defaultValue: 'N/A',
-    },
-    {
-      key: 'brand.name',
-      label: 'Brand',
-      sortable: true,
-      width: '150px',
-      defaultValue: 'N/A',
-    },
+
   ];
 
   tableActions: TableAction[] = [
@@ -137,12 +127,6 @@ export class ProductListComponent {
       icon: 'edit',
       action: (product: Product) => this.edit.emit(product),
       variant: 'primary',
-    },
-    {
-      label: 'Duplicate',
-      icon: 'copy',
-      action: (product: Product) => this.duplicate.emit(product),
-      variant: 'secondary',
     },
     {
       label: 'Eliminar',
