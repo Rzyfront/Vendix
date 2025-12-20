@@ -3263,7 +3263,13 @@ async function main() {
         base_price: product.base_price,
         slug: product.name.toLowerCase().replace(/\s+/g, '-'),
         store_id: product.store_id,
-        category_id: product.category_id,
+        product_categories: product.category_id
+          ? {
+            create: {
+              category_id: product.category_id,
+            },
+          }
+          : undefined,
         brand_id: product.brand_id,
       },
     });
