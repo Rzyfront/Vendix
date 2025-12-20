@@ -207,6 +207,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       label: 'Fecha',
       sortable: true,
       width: '120px',
+      priority: 3,
       transform: (value: string) => new Date(value).toLocaleDateString('es-CO'),
     },
     {
@@ -214,32 +215,38 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       label: 'Producto',
       sortable: true,
       defaultValue: '-',
+      priority: 1,
     },
     {
       key: 'location.name',
       label: 'Ubicación',
       defaultValue: '-',
+      priority: 2,
     },
     {
       key: 'adjustment_type',
       label: 'Tipo',
+      priority: 2,
       transform: (value: AdjustmentType) => this.getTypeLabel(value),
     },
     {
       key: 'quantity_change',
       label: 'Cambio',
       align: 'right',
+      priority: 1,
       transform: (value: number) => (value > 0 ? `+${value}` : `${value}`),
     },
     {
       key: 'quantity_before',
       label: 'Antes',
       align: 'right',
+      priority: 3,
     },
     {
       key: 'quantity_after',
       label: 'Después',
       align: 'right',
+      priority: 3,
     },
   ];
 

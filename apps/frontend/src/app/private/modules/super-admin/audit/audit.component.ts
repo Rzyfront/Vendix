@@ -68,6 +68,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       key: 'users',
       label: 'Usuario',
       sortable: true,
+      priority: 1,
       transform: (value: any) =>
         value ? `${value.first_name} ${value.last_name}` : 'N/A',
     },
@@ -77,6 +78,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       label: 'Acción',
       sortable: true,
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -96,6 +98,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       key: 'resource',
       label: 'Recurso',
       sortable: true,
+      priority: 2,
       transform: (value: AuditResource) => this.getResourceDisplay(value),
     },
 
@@ -103,6 +106,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       key: 'users',
       label: 'Organización',
       sortable: true,
+      priority: 2,
       transform: (value: any) =>
         value?.organization_id ? `Org ${value.organization_id}` : 'N/A',
     },
@@ -110,18 +114,21 @@ export class AuditComponent implements OnInit, OnDestroy {
       key: 'stores',
       label: 'Tienda',
       sortable: true,
+      priority: 2,
       transform: (value: any) => value?.name || 'N/A',
     },
     {
       key: 'ip_address',
       label: 'IP',
       sortable: true,
+      priority: 3,
       transform: (value: string) => value || 'N/A',
     },
     {
       key: 'created_at',
       label: 'Fecha',
       sortable: true,
+      priority: 3,
       transform: (value: string) => this.formatDate(value),
     },
   ];

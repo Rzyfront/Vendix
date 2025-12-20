@@ -4,7 +4,9 @@ import {
   Input,
   Output,
   OnInit,
+  OnChanges,
   OnDestroy,
+  inject,
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
@@ -16,114 +18,148 @@ import {
   ToastService,
 } from '../../../../../shared/components';
 import { PosPaymentService } from '../services/pos-payment.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 @Component({
   selector: 'app-pos-order-confirmation',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, IconComponent],
+  imports: [
+    CommonModule,
+    ButtonComponent,
+    ModalComponent,
+    IconComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen"
-      [size]="'lg'"
+      [size]="'md'"
       (closed)="onModalClosed()"
       [showCloseButton]="false"
     >
-      <div class="confirmation-header">
-        <div class="success-icon">
-          <app-icon name="check-circle" [size]="32"></app-icon>
+      <div slot="header" class="text-center py-2">
+        <div
+          class="w-16 h-16 rounded-full bg-success/10 flex items-center justify-center text-success mx-auto mb-4"
+        >
+          <app-icon name="check-circle" [size]="40"></app-icon>
         </div>
-        <h2>¡Venta Completada!</h2>
-        <p>Orden #{{ orderNumber }} procesada exitosamente</p>
+        <h2 class="text-2xl font-bold text-text-primary">¡Venta Completada!</h2>
+        <p class="text-text-secondary">
+          Orden #{{ orderNumber }} procesada exitosamente
+        </p>
       </div>
 
-      <div class="confirmation-content">
-        <div class="receipt">
-          <div class="store-info">
-            <h3>Vendix POS</h3>
-            <p>Sistema de Punto de Venta</p>
-          </div>
+      <!-- Ticket Visual Representation -->
+      <div class="max-w-md mx-auto print:max-w-none">
+        <div
+          class="bg-surface border border-dashed border-border rounded-xl p-6 shadow-sm relative overflow-hidden receipt-container"
+        >
+          <!-- Decorative edges -->
+          <div class="absolute top-0 left-0 right-0 h-1 bg-primary/20"></div>
 
-          <div class="order-info">
-            <p><strong>Fecha:</strong> {{ currentDate }}</p>
-            <p><strong>Cajero:</strong> {{ cashierName }}</p>
-            <p *ngIf="customerName">
-              <strong>Cliente:</strong> {{ customerName }}
+          <div class="text-center border-b border-border pb-6 mb-6">
+            <h3 class="text-xl font-bold text-text-primary tracking-tight">
+              Vendix POS
+            </h3>
+            <p class="text-sm text-text-secondary font-medium">
+              Sistema de Punto de Venta
             </p>
           </div>
 
-          <div class="items-list">
-            <div class="items-header">
+          <div class="space-y-3 mb-6 text-sm">
+            <div class="flex justify-between">
+              <span class="text-text-secondary">Fecha:</span>
+              <span class="font-medium text-text-primary">{{ currentDate }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-secondary">Cajero:</span>
+              <span class="font-medium text-text-primary">{{ cashierName }}</span>
+            </div>
+            <div *ngIf="customerName" class="flex justify-between">
+              <span class="text-text-secondary">Cliente:</span>
+              <span class="font-medium text-text-primary">{{ customerName }}</span>
+            </div>
+          </div>
+
+          <!-- Items Table -->
+          <div class="space-y-4 mb-6">
+            <div
+              class="flex justify-between text-xs font-bold text-text-secondary uppercase tracking-wider pb-2 border-b border-border"
+            >
               <span>Producto</span>
               <span>Total</span>
             </div>
-            <div *ngFor="let item of orderItems" class="item-row">
-              <span>{{ item.quantity }}x {{ item.name }}</span>
-              <span
-                >$<span>{{ item.totalPrice }}</span></span
-              >
+            <div class="space-y-3">
+              <div *ngFor="let item of orderItems" class="flex justify-between text-sm">
+                <div class="flex flex-col">
+                  <span class="font-medium text-text-primary">{{ item.name }}</span>
+                  <span class="text-xs text-text-secondary">{{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}</span>
+                </div>
+                <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
+              </div>
             </div>
           </div>
 
-          <div class="order-summary">
-            <div class="summary-row">
+          <!-- Summary -->
+          <div class="pt-4 border-t border-border space-y-2.5">
+            <div class="flex justify-between text-sm text-text-secondary">
               <span>Subtotal:</span>
-              <span
-                >$<span>{{ orderSubtotal }}</span></span
-              >
+              <span>{{ formatCurrency(orderSubtotal) }}</span>
             </div>
-            <div *ngIf="hasDiscount()" class="summary-row discount">
+            <div *ngIf="hasDiscount()" class="flex justify-between text-sm text-destructive font-medium">
               <span>Descuento:</span>
-              <span
-                >-$<span>{{ orderDiscount }}</span></span
-              >
+              <span>-{{ formatCurrency(orderDiscount) }}</span>
             </div>
-            <div class="summary-row">
+            <div class="flex justify-between text-sm text-text-secondary">
               <span>Impuesto:</span>
-              <span
-                >$<span>{{ orderTax }}</span></span
-              >
+              <span>{{ formatCurrency(orderTax) }}</span>
             </div>
-            <div class="summary-row total">
-              <span>Total:</span>
-              <span
-                >$<span>{{ orderTotal }}</span></span
-              >
+            <div
+              class="flex justify-between items-center pt-3 mt-2 border-t-2 border-double border-border"
+            >
+              <span class="text-lg font-bold text-text-primary">Total:</span>
+              <span class="text-2xl font-extrabold text-primary">{{ formatCurrency(orderTotal) }}</span>
             </div>
           </div>
 
-          <div *ngIf="paymentInfo" class="payment-info">
-            <div class="payment-row">
-              <span>{{ paymentInfo.method }}:</span>
-              <span
-                >$<span>{{ paymentInfo.amount }}</span></span
-              >
+          <!-- Payment Info -->
+          <div *ngIf="paymentInfo" class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
+            <div class="flex justify-between items-center text-sm">
+              <div class="flex items-center gap-2">
+                <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
+                <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+              </div>
+              <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="confirmation-actions">
-        <app-button
-          variant="outline"
-          (clicked)="printReceipt()"
-          [loading]="printing"
-        >
-          <app-icon name="printer" [size]="16" slot="icon"></app-icon>
-          Imprimir Ticket
-        </app-button>
+      <div slot="footer" class="flex flex-wrap items-center justify-between gap-3 w-full">
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="printReceipt()"
+            [loading]="printing"
+          >
+            <app-icon name="printer" [size]="18" slot="icon"></app-icon>
+            Imprimir Ticket
+          </app-button>
 
-        <app-button
-          variant="primary"
-          (clicked)="emailReceipt()"
-          [disabled]="!customerEmail"
-          [loading]="emailing"
-        >
-          <app-icon name="mail" [size]="16" slot="icon"></app-icon>
-          Enviar por Email
-        </app-button>
+          <app-button
+            variant="outline"
+            size="md"
+            (clicked)="emailReceipt()"
+            [disabled]="!customerEmail"
+            [loading]="emailing"
+          >
+            <app-icon name="mail" [size]="18" slot="icon"></app-icon>
+            Email
+          </app-button>
+        </div>
 
-        <app-button variant="primary" (clicked)="startNewSale()">
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+        <app-button variant="primary" size="md" (clicked)="startNewSale()" class="shadow-sm">
+          <app-icon name="plus" [size]="18" slot="icon"></app-icon>
           Nueva Venta
         </app-button>
       </div>
@@ -135,152 +171,78 @@ import { PosPaymentService } from '../services/pos-payment.service';
         display: block;
       }
 
-      .confirmation-header {
-        text-align: center;
-        padding: 24px;
-        border-bottom: 1px solid var(--color-border);
+      .receipt-container {
+        /* Pseudo-paper texture */
+        background-image: radial-gradient(var(--color-border) 0.5px, transparent 0.5px);
+        background-size: 20px 20px;
+        background-color: var(--color-surface);
       }
 
-      .success-icon {
-        width: 64px;
-        height: 64px;
-        margin: 0 auto 16px;
-        border-radius: 50%;
-        background: var(--color-success-light);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--color-success);
-      }
-
-      .confirmation-header h2 {
-        font-size: 24px;
-        font-weight: bold;
-        color: var(--color-text-primary);
-        margin: 0 0 8px 0;
-      }
-
-      .confirmation-header p {
-        color: var(--color-text-secondary);
-        margin: 0;
-      }
-
-      .confirmation-content {
-        padding: 24px;
-      }
-
-      .receipt {
-        max-width: 448px;
-        margin: 0 auto;
-        background: white;
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        padding: 24px;
-        font-size: 14px;
-      }
-
-      .store-info {
-        text-align: center;
-        margin-bottom: 24px;
-        padding-bottom: 16px;
-        border-bottom: 1px solid var(--color-border);
-      }
-
-      .store-info h3 {
-        font-weight: bold;
-        font-size: 18px;
-        color: var(--color-text-primary);
-        margin: 0 0 4px 0;
-      }
-
-      .store-info p {
-        color: var(--color-text-secondary);
-        margin: 0;
-      }
-
-      .order-info {
-        margin-bottom: 16px;
-      }
-
-      .order-info p {
-        margin: 4px 0;
-      }
-
-      .items-list {
-        margin-bottom: 16px;
-      }
-
-      .items-header {
-        display: flex;
-        justify-content: space-between;
-        font-weight: bold;
-        padding-bottom: 8px;
-        border-bottom: 1px solid var(--color-border);
-      }
-
-      .item-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 4px 0;
-      }
-
-      .order-summary {
-        border-top: 1px solid var(--color-border);
-        padding-top: 16px;
-        margin-bottom: 16px;
-      }
-
-      .summary-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 4px 0;
-      }
-
-      .summary-row.discount {
-        color: var(--color-danger);
-      }
-
-      .summary-row.total {
-        font-weight: bold;
-        font-size: 16px;
-        border-top: 1px solid var(--color-border);
-        padding-top: 8px;
-        margin-top: 8px;
-      }
-
-      .payment-info {
-        border-top: 1px solid var(--color-border);
-        padding-top: 16px;
-      }
-
-      .payment-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 4px 0;
-      }
-
-      .confirmation-actions {
-        display: flex;
-        gap: 12px;
-        padding: 24px;
-        border-top: 1px solid var(--color-border);
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      @media (max-width: 768px) {
-        .confirmation-actions {
-          flex-direction: column;
+      @media print {
+        /* Hide everything by default */
+        body * {
+          visibility: hidden !important;
+        }
+        
+        /* Show only the ticket */
+        .receipt-container, .receipt-container * {
+          visibility: visible !important;
+          color: #000 !important;
+          background: none !important;
+          box-shadow: none !important;
+          font-family: 'Courier New', Courier, monospace !important;
+          text-shadow: none !important;
         }
 
-        .confirmation-actions app-button {
-          width: 100%;
+        .receipt-container {
+          position: fixed !important;
+          left: 0 !important;
+          top: 0 !important;
+          width: 300px !important; /* Standard POS width approx */
+          margin: 0 !important;
+          padding: 10px !important;
+          border: none !important;
+        }
+
+        /* Simplify layout for print */
+        .receipt-container .border-t, 
+        .receipt-container .border-b,
+        .receipt-container .border-t-2 {
+          border-color: #000 !important;
+          border-style: dashed !important;
+          border-width: 1px 0 0 0 !important;
+        }
+
+        .receipt-container [class*="text-primary"],
+        .receipt-container [class*="text-text-secondary"] {
+          color: #000 !important;
+        }
+
+        .receipt-container [class*="bg-muted"] {
+          background: none !important;
+          border-top: 1px dashed #000 !important;
+        }
+        
+        .receipt-container .text-2xl,
+        .receipt-container .text-lg {
+          font-size: 14pt !important;
+          font-weight: bold !important;
+        }
+
+        /* Hide icons for print */
+        app-icon {
+          display: none !important;
+        }
+
+        @page {
+          margin: 0;
+          size: auto;
         }
       }
     `,
   ],
 })
-export class PosOrderConfirmationComponent implements OnInit, OnDestroy {
+export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestroy {
   @Input() isOpen = false;
   @Input() orderData: any = null;
   @Output() closed = new EventEmitter<void>();
@@ -289,30 +251,28 @@ export class PosOrderConfirmationComponent implements OnInit, OnDestroy {
   printing = false;
   emailing = false;
 
-  // Mock data for now
-  orderNumber = '0001';
-  currentDate = new Date().toLocaleString();
-  cashierName = 'Juan Pérez';
-  customerName = 'María García';
-  customerEmail = 'maria@example.com';
-  orderItems = [
-    { quantity: 2, name: 'Producto A', totalPrice: '20.00' },
-    { quantity: 1, name: 'Producto B', totalPrice: '15.00' },
-  ];
-  orderSubtotal = '35.00';
-  orderDiscount = '5.00';
-  orderTax = '3.00';
-  orderTotal = '33.00';
-  paymentInfo = { method: 'Efectivo', amount: '33.00' };
+  orderNumber = '';
+  currentDate = '';
+  cashierName = '';
+  customerName = '';
+  customerEmail = '';
+  orderItems: any[] = [];
+  orderSubtotal = 0;
+  orderDiscount = 0;
+  orderTax = 0;
+  orderTotal = 0;
+  paymentInfo: any = null;
 
   private destroy$ = new Subject<void>();
-
-  constructor(
-    private paymentService: PosPaymentService,
-    private toastService: ToastService,
-  ) {}
+  private authFacade = inject(AuthFacade);
+  private toastService = inject(ToastService);
 
   ngOnInit(): void {
+    const user = this.authFacade.getCurrentUser();
+    this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
+  }
+
+  ngOnChanges(): void {
     if (this.orderData) {
       this.loadOrderData();
     }
@@ -324,8 +284,37 @@ export class PosOrderConfirmationComponent implements OnInit, OnDestroy {
   }
 
   private loadOrderData(): void {
-    // Load order data from input
-    // For now using mock data
+    this.orderNumber = this.orderData.order_number || this.orderData.number || 'N/A';
+    this.currentDate = this.orderData.created_at
+      ? new Date(this.orderData.created_at).toLocaleString('es-AR')
+      : new Date().toLocaleString('es-AR');
+
+    this.customerName = this.orderData.customer_name || '';
+    this.customerEmail = this.orderData.customer_email || '';
+
+    this.orderItems = (this.orderData.items || []).map((item: any) => ({
+      name: item.product_name || item.name || 'Producto',
+      quantity: item.quantity,
+      unitPrice: Number(item.unit_price || item.unitPrice || 0),
+      totalPrice: Number(item.total_price || item.totalPrice || 0),
+    }));
+
+    this.orderSubtotal = Number(this.orderData.subtotal || 0);
+    this.orderDiscount = Number(this.orderData.discount_amount || this.orderData.discount || 0);
+    this.orderTax = Number(this.orderData.tax_amount || this.orderData.tax || 0);
+    this.orderTotal = Number(this.orderData.total_amount || this.orderData.total || 0);
+
+    if (this.orderData.payment) {
+      this.paymentInfo = {
+        method: this.orderData.payment.payment_method || this.orderData.payment.method || 'Pago',
+        amount: Number(this.orderData.payment.amount || this.orderTotal),
+      };
+    } else if (this.orderData.isCreditSale) {
+      this.paymentInfo = {
+        method: 'Venta a Crédito',
+        amount: this.orderTotal,
+      };
+    }
   }
 
   onModalClosed(): void {
@@ -334,11 +323,13 @@ export class PosOrderConfirmationComponent implements OnInit, OnDestroy {
 
   printReceipt(): void {
     this.printing = true;
+    // Basic browser print for now, ideally this would use a thermal printer service
+    window.print();
 
     setTimeout(() => {
       this.printing = false;
-      this.toastService.success('Ticket impreso correctamente');
-    }, 2000);
+      this.toastService.success('Ticket enviado a impresión');
+    }, 500);
   }
 
   emailReceipt(): void {
@@ -357,10 +348,16 @@ export class PosOrderConfirmationComponent implements OnInit, OnDestroy {
 
   startNewSale(): void {
     this.newSale.emit();
-    this.onModalClosed();
   }
 
   hasDiscount(): boolean {
-    return Number(this.orderDiscount) > 0;
+    return this.orderDiscount > 0;
+  }
+
+  formatCurrency(amount: any): string {
+    return new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+    }).format(Number(amount));
   }
 }

@@ -14,7 +14,7 @@ import {
 
 @Injectable()
 export class StorePaymentMethodsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(private prisma: StorePrismaService) { }
 
   /**
    * Get available payment methods for a store to enable
@@ -114,6 +114,21 @@ export class StorePaymentMethodsService {
     });
 
     if (existing) {
+      if (existing.state !== 'enabled') {
+        return base_client.store_payment_methods.update({
+          where: { id: existing.id },
+          data: {
+            state: 'enabled',
+            // Update config if provided, otherwise keep existing
+            ...(enable_dto.display_name && { display_name: enable_dto.display_name }),
+            ...(enable_dto.custom_config && { custom_config: enable_dto.custom_config }),
+          },
+          include: {
+            system_payment_method: true,
+          },
+        });
+      }
+
       throw new BadRequestException(
         'This payment method is already enabled for this store',
       );
@@ -135,7 +150,7 @@ export class StorePaymentMethodsService {
       data: {
         store_id: store_id,
         system_payment_method_id: system_payment_method_id,
-        display_name: enable_dto.display_name,
+        display_name: enable_dto.display_name || system_method.display_name,
         custom_config: enable_dto.custom_config || system_method.default_config,
         state: 'enabled',
         display_order: enable_dto.display_order || 0,
@@ -176,6 +191,33 @@ export class StorePaymentMethodsService {
     return this.prisma.store_payment_methods.update({
       where: { id: store_payment_method_id },
       data: update_dto,
+      include: {
+        system_payment_method: true,
+      },
+    });
+  }
+
+  /**
+   * Re-enable a disabled store payment method
+   */
+  async reEnableForStore(store_payment_method_id: number) {
+    const method = await this.prisma.store_payment_methods.findFirst({
+      where: {
+        id: store_payment_method_id,
+      },
+    });
+
+    if (!method) {
+      throw new NotFoundException('Payment method not found for this store');
+    }
+
+    if (method.state === 'enabled') {
+      throw new BadRequestException('Payment method is already enabled');
+    }
+
+    return this.prisma.store_payment_methods.update({
+      where: { id: store_payment_method_id },
+      data: { state: 'enabled' },
       include: {
         system_payment_method: true,
       },

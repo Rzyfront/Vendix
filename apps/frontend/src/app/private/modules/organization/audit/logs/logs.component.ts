@@ -62,21 +62,24 @@ export class LogsComponent implements OnInit, OnDestroy {
 
   // Table Configuration
   tableColumns: TableColumn[] = [
-    { key: 'action', label: 'Acción', transform: (val: string) => val.replace('_', ' ') },
-    { key: 'resource', label: 'Recurso', transform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1) },
+    { key: 'action', label: 'Acción', transform: (val: string) => val.replace('_', ' '), priority: 1 },
+    { key: 'resource', label: 'Recurso', transform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1), priority: 2 },
     {
       key: 'users',
       label: 'Usuario',
-      transform: (u: any) => u ? `${u.first_name} ${u.last_name}` : 'Sistema'
+      transform: (u: any) => u ? `${u.first_name} ${u.last_name}` : 'Sistema',
+      priority: 1
     },
     {
       key: 'created_at',
       label: 'Fecha',
+      priority: 2,
       transform: (val: string) => new Date(val).toLocaleString()
     },
     {
       key: 'resource_id',
       label: 'ID Recurso',
+      priority: 3,
       transform: (val: any) => val ? `ID: ${val}` : '-'
     }
   ];

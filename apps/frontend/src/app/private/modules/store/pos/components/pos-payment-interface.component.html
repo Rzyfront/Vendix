@@ -1,325 +1,257 @@
-<app-modal
-  [isOpen]="isOpen"
-  [size]="'lg'"
-  (closed)="onModalClosed()"
-  [showCloseButton]="true"
-  [title]="'Procesar Pago'"
-  [subtitle]="'Selecciona un método de pago para completar la venta'"
->
-  <!-- Resumen del Pedido -->
-  <div class="mb-6 animate-slide-in">
-    <app-card [shadow]="'md'" [customClasses]="'payment-summary-enhanced'">
-      <div class="p-6">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="space-y-3">
-            <div class="flex justify-between items-center">
-              <span
-                class="text-sm font-medium text-[var(--color-text-secondary)]"
-                >Subtotal</span
-              >
-              <span
-                class="text-sm font-semibold text-[var(--color-text-primary)]"
-              >
-                ${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}
-              </span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span
-                class="text-sm font-medium text-[var(--color-text-secondary)]"
-                >Impuestos</span
-              >
-              <span
-                class="text-sm font-semibold text-[var(--color-text-primary)]"
-              >
-                ${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}
-              </span>
+<app-modal [isOpen]="isOpen" [size]="'lg'" (closed)="onModalClosed()" [showCloseButton]="true" [title]="'Procesar Pago'"
+  [subtitle]="'Selecciona un método de pago para completar la venta'">
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+    <!-- Resumen del Pedido (Columna Izquierda) -->
+    <div class="lg:col-span-1 h-full block"> <!-- Ensure block display to fixing width issues if flex parent -->
+      <app-card [shadow]="'md'" [customClasses]="'payment-summary-enhanced h-full flex flex-col'">
+        <div class="p-5 flex-1 flex flex-col justify-between">
+          <div class="space-y-4">
+            <h4 class="section-header-enhanced text-lg mb-4">Resumen</h4>
+
+            <!-- List items with better spacing -->
+            <div class="space-y-3">
+              <!-- Product List Scrolleable -->
+              <div
+                class="max-h-40 overflow-y-auto pr-2 custom-scrollbar border-b border-[var(--color-border)] pb-3 mb-3">
+                <div *ngFor="let item of cartState?.items" class="flex justify-between items-start text-sm py-1">
+                  <span class="text-[var(--color-text-primary)] font-medium leading-tight">
+                    {{ item.product.name }}
+                  </span>
+                  <span class="text-[var(--color-text-secondary)] font-semibold whitespace-nowrap ml-3">
+                    x {{ item.quantity }}
+                  </span>
+                </div>
+                <div *ngIf="!cartState?.items?.length"
+                  class="text-xs text-center text-[var(--color-text-muted)] py-4 italic">
+                  El carrito está vacío
+                </div>
+              </div>
+
+              <!-- Summary Statistics -->
+              <div class="flex justify-between items-center text-[var(--color-text-secondary)]">
+                <span class="text-xs font-medium uppercase tracking-wider">Productos en Carrito</span>
+                <span class="text-sm font-bold text-[var(--color-text-primary)]">
+                  {{ cartState?.summary?.itemCount || 0 }}
+                </span>
+              </div>
+
+              <div class="flex justify-between items-center text-[var(--color-text-secondary)]">
+                <span class="text-xs font-medium uppercase tracking-wider">Cantidad Total</span>
+                <span class="text-sm font-bold text-[var(--color-text-primary)]">
+                  {{ cartState?.summary?.totalItems || 0 }}
+                </span>
+              </div>
+
+              <div class="pt-2"></div> <!-- Spacer -->
+
+              <div class="flex justify-between items-center text-[var(--color-text-secondary)]">
+                <span class="text-sm font-medium">Subtotal</span>
+                <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  ${{ cartState?.summary?.subtotal || 0 | number: "1.2-2" }}
+                </span>
+              </div>
+
+              <div class="flex justify-between items-center text-[var(--color-text-secondary)]">
+                <span class="text-sm font-medium">Impuestos</span>
+                <span class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  ${{ cartState?.summary?.taxAmount || 0 | number: "1.2-2" }}
+                </span>
+              </div>
+
+              <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="flex justify-between items-center">
+                <span class="text-sm font-medium text-[var(--color-text-secondary)]">Descuento</span>
+                <span class="text-sm font-semibold text-[var(--color-error)]">
+                  -${{ cartState?.summary?.discountAmount | number: "1.2-2" }}
+                </span>
+              </div>
             </div>
           </div>
-          <div class="space-y-3">
-            <div
-              *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0"
-              class="flex justify-between items-center"
-            >
-              <span
-                class="text-sm font-medium text-[var(--color-text-secondary)]"
-                >Descuento</span
-              >
-              <span class="text-sm font-semibold text-[var(--color-error)]">
-                -${{ cartState?.summary?.discountAmount | number: "1.2-2" }}
-              </span>
-            </div>
-            <div
-              class="flex justify-between items-center pt-3 border-t border-[var(--color-border)]"
-            >
-              <span class="text-base font-bold text-[var(--color-text-primary)]"
-                >Total</span
-              >
-              <span class="text-xl font-bold text-[var(--color-primary)]">
+
+          <!-- Total at bottom -->
+          <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-[var(--color-text-secondary)]">Total a Pagar</span>
+              <span class="text-3xl font-bold text-[var(--color-primary)]">
                 ${{ cartState?.summary?.total || 0 | number: "1.2-2" }}
               </span>
             </div>
           </div>
         </div>
-      </div>
-    </app-card>
-  </div>
-
-  <!-- Opciones de Pago -->
-  <div class="mb-6 animate-slide-in" style="animation-delay: 0.1s">
-    <h3 class="section-header-enhanced text-xl mb-6 flex items-center gap-3">
-      <app-icon
-        name="credit-card"
-        [size]="24"
-        color="var(--color-primary)"
-      ></app-icon>
-      Opciones de Venta
-    </h3>
-
-    <!-- Option Credit Sale (Removed hardcoded, should be dynamic if needed) -->
-    <!--
-    <div class="mb-6" *ngIf="false">
-       ...
+      </app-card>
     </div>
-    -->
 
-    <!-- Métodos de Pago -->
-    <div>
-      <h4 class="section-header-enhanced text-lg mb-4">Pagos Inmediatos</h4>
-      <div class="grid grid-cols-2 gap-4">
-        <div
-          *ngFor="let method of paymentMethods; let i = index"
-          (click)="selectPaymentMethod(method)"
-          [class]="getPaymentMethodClasses(method)"
-          class="payment-method-card cursor-pointer p-5 text-center"
-          role="button"
-          tabindex="0"
-          (keydown.enter)="selectPaymentMethod(method)"
-          (keydown.space)="selectPaymentMethod(method)"
-          [attr.aria-label]="'Seleccionar método de pago ' + method.name"
-          [attr.aria-pressed]="paymentState.selectedMethod?.id === method.id"
-          style="animation-delay: {{ 0.2 + i * 0.05 }}s"
-        >
-          <div class="flex flex-col items-center">
-            <app-icon
-              [name]="method.icon"
-              [size]="36"
-              [color]="
-                paymentState.selectedMethod?.id === method.id
-                  ? 'var(--color-primary)'
-                  : 'var(--color-text-secondary)'
-              "
-              class="mb-3"
-            ></app-icon>
-            <span
-              class="text-sm font-semibold text-[var(--color-text-primary)]"
-            >
-              {{ method.name }}
-            </span>
+    <!-- Opciones y Proceso de Pago (Columna Derecha - 2 columnas) -->
+    <div class="lg:col-span-2 flex flex-col gap-6">
+
+      <!-- Selección de Método de Pago -->
+      <div class="animate-slide-in" style="animation-delay: 0.1s">
+        <h3 class="flex items-center gap-2 mb-3 text-lg font-semibold text-[var(--color-text-primary)]">
+          <app-icon name="credit-card" [size]="20" class="text-[var(--color-primary)]"></app-icon>
+          Método de Pago
+        </h3>
+
+        <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div *ngFor="let method of paymentMethods; let i = index" (click)="selectPaymentMethod(method)"
+            [class]="getPaymentMethodClasses(method)"
+            class="payment-method-card cursor-pointer p-4 text-center transition-all duration-200" role="button"
+            tabindex="0" (keydown.enter)="selectPaymentMethod(method)" (keydown.space)="selectPaymentMethod(method)"
+            [attr.aria-label]="'Seleccionar método de pago ' + method.name"
+            [attr.aria-pressed]="paymentState.selectedMethod?.id === method.id"
+            style="animation-delay: {{ 0.1 + i * 0.05 }}s">
+            <div class="flex flex-col items-center gap-2">
+              <app-icon [name]="method.icon" [size]="28" [color]="
+                  paymentState.selectedMethod?.id === method.id
+                    ? 'var(--color-primary)'
+                    : 'var(--color-text-secondary)'
+                "></app-icon>
+              <span class="text-xs font-semibold leading-tight text-[var(--color-text-primary)]">
+                {{ method.name }}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Formulario de Detalles de Pago -->
-  <div
-    *ngIf="paymentState.selectedMethod"
-    class="mb-6 animate-slide-in"
-    style="animation-delay: 0.3s"
-  >
-    <app-card [shadow]="'md'" ] [customClasses]="'payment-details-enhanced'">
-      <div class="p-6">
-        <h4 class="section-header-enhanced text-lg mb-6">
-          Detalles de Pago - {{ paymentState.selectedMethod.name }}
-        </h4>
-
-        <!-- Pago en Efectivo -->
-        <div
-          *ngIf="paymentState.selectedMethod.type === 'cash'"
-          class="space-y-6"
-        >
-          <div>
-            <label
-              class="block text-base font-semibold text-[var(--color-text-primary)] mb-3"
-              for="cashReceived"
-            >
-              Monto Recibido
-            </label>
-            <div class="enhanced-cash-input p-1 flex items-center">
-              <span
-                class="pl-4 pr-2 text-lg font-semibold text-[var(--color-text-secondary)]"
-              >
-                $
-              </span>
-              <input
-                id="cashReceived"
-                type="number"
-                [formControl]="cashReceivedControl"
-                class="flex-1 py-3 px-2 text-lg font-semibold text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)]"
-                placeholder="0.00"
-                step="0.01"
-                (input)="calculateChange()"
-                [attr.aria-label]="'Monto recibido en efectivo'"
-              />
-            </div>
-          </div>
-
-          <!-- Botones de Montos Rápidos -->
-          <div>
-            <label
-              class="block text-sm font-medium text-[var(--color-text-secondary)] mb-3"
-            >
-              Montos Rápidos
-            </label>
-            <div class="grid grid-cols-4 gap-3">
-              <button
-                *ngFor="let amount of quickCashAmounts"
-                type="button"
-                (click)="setCashAmount(amount)"
-                class="quick-amount-btn py-3 text-base font-medium"
-                [attr.aria-label]="'Establecer monto $' + amount"
-              >
-                ${{ amount }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Visualización de Cambio -->
+        <ng-template #noPaymentMethods>
           <div
-            *ngIf="paymentState.change > 0"
-            class="change-display-enhanced"
-            role="status"
-            [attr.aria-live]="'polite'"
-          >
-            <div class="flex justify-between items-center">
-              <div class="flex items-center gap-2">
-                <app-icon
-                  name="coins"
-                  [size]="20"
-                  color="var(--color-success)"
-                ></app-icon>
-                <span
-                  class="text-base font-semibold text-[var(--color-success)]"
-                  >Cambio</span
-                >
-              </div>
-              <span
-                class="text-xl font-bold text-[var(--color-success)] pulse-success"
-              >
-                ${{ paymentState.change | number: "1.2-2" }}
-              </span>
-            </div>
+            class="flex flex-col items-center justify-center p-6 bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-lg text-center">
+            <app-icon name="credit-card-off" [size]="32" color="var(--color-text-secondary)" class="mb-2"></app-icon>
+            <p class="text-sm text-[var(--color-text-secondary)]">No hay métodos de pago configurados.</p>
+            <button class="text-sm text-[var(--color-primary)] font-medium hover:underline mt-2"
+              (click)="navigateToSettings()">
+              Configurar ahora
+            </button>
           </div>
+        </ng-template>
+      </div>
+
+      <!-- Área de Detalles de Pago (Variable según selección) -->
+      <div class="flex-1 min-h-[250px] relative">
+        <!-- Placeholder cuando no hay selección -->
+        <div *ngIf="!paymentState.selectedMethod"
+          class="absolute inset-0 flex flex-col items-center justify-center text-[var(--color-text-muted)] animate-fade-in border-2 border-dashed border-[var(--color-border)] rounded-lg">
+          <app-icon name="arrow-up-circle" [size]="48" class="mb-3 opacity-50"></app-icon>
+          <p class="text-base font-medium">Selecciona un método para continuar</p>
         </div>
 
-        <!-- Pago con Tarjeta/Transferencia/Billetera Digital -->
-        <div
-          *ngIf="paymentState.selectedMethod.requiresReference"
-          class="space-y-4"
-        >
-          <app-input
-            [formControl]="referenceControl"
-            [label]="paymentState.selectedMethod.referenceLabel || 'Referencia'"
-            [placeholder]="
-              paymentState.selectedMethod.referenceLabel ||
-              'Ingresa la referencia'
-            "
-            [size]="'lg'"
-            [error]="getReferenceError()"
-            [attr.aria-required]="'true'"
-          >
-          </app-input>
+        <!-- Detalles del Método Seleccionado -->
+        <div *ngIf="paymentState.selectedMethod" class="animate-slide-in h-full" style="animation-delay: 0.2s">
+          <app-card [shadow]="'none'"
+            [customClasses]="'border border-[var(--color-border)] bg-[var(--color-surface)] h-full'">
+            <div class="p-5 h-full flex flex-col">
+              <h4
+                class="text-base font-semibold text-[var(--color-text-primary)] mb-4 pb-2 border-b border-[var(--color-border)]">
+                {{ paymentState.selectedMethod.name }}
+              </h4>
+
+              <!-- Contenido Específico: Efectivo -->
+              <div *ngIf="paymentState.selectedMethod.type === 'cash'" class="flex-1 flex flex-col gap-4">
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <!-- Input Monto -->
+                  <div>
+                    <label
+                      class="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Recibido</label>
+                    <div class="enhanced-cash-input p-1 flex items-center bg-[var(--color-background)]">
+                      <span class="pl-3 pr-2 text-lg font-semibold text-[var(--color-text-secondary)]">$</span>
+                      <input id="cashReceived" type="number" [formControl]="cashReceivedControl"
+                        class="flex-1 py-2 px-1 text-xl font-bold text-[var(--color-text-primary)] bg-transparent placeholder-[var(--color-text-muted)] focus:outline-none"
+                        placeholder="0.00" step="0.01" (input)="calculateChange()" />
+                    </div>
+                  </div>
+
+                  <!-- Cambio -->
+                  <div>
+                    <label
+                      class="block text-xs font-semibold text-[var(--color-text-secondary)] uppercase mb-2">Cambio</label>
+                    <div
+                      class="p-3 bg-[var(--color-success-light)]/20 border border-[var(--color-success)]/30 rounded-md h-[50px] flex items-center justify-between">
+                      <span class="text-lg font-bold text-[var(--color-success)]">${{ paymentState.change | number:
+                        "1.2-2" }}</span>
+                      <app-icon name="coins" [size]="18" class="text-[var(--color-success)]"></app-icon>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Teclado y Montos Rápidos -->
+                <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                  <!-- Montos Rápidos (Ahora Dinámicos) -->
+                  <div class="grid grid-cols-1 gap-2 content-start">
+                    <button type="button" (click)="setHalfAmount()"
+                      class="quick-amount-btn py-3 px-3 text-sm font-semibold border-2 border-[var(--color-primary-light)]/30 hover:bg-[var(--color-primary-light)]/10 flex items-center justify-between">
+                      <span>Pago Parcial</span>
+                      <span class="text-[var(--color-primary)]">1/2</span>
+                    </button>
+                    <button type="button" (click)="setFullAmount()"
+                      class="quick-amount-btn py-3 px-3 text-sm font-semibold border-2 border-[var(--color-primary)]/30 hover:bg-[var(--color-primary-light)]/10 flex items-center justify-between">
+                      <span>Pago Total</span>
+                      <app-icon name="check-circle" [size]="16" class="text-[var(--color-primary)]"></app-icon>
+                    </button>
+                  </div>
+
+                  <!-- Numpad Compacto con Backspace -->
+                  <div class="grid grid-cols-3 gap-2">
+                    <button *ngFor="let num of [7, 8, 9, 4, 5, 6, 1, 2, 3]" type="button" (click)="appendNumber(num)"
+                      class="keypad-btn py-2 text-lg hover:bg-[var(--color-surface-hover)]">
+                      {{ num }}
+                    </button>
+                    <button type="button" (click)="clearCashAmount()"
+                      class="keypad-btn py-2 text-lg text-[var(--color-error)] border-[var(--color-error)]/30 hover:bg-[var(--color-error-light)]">C</button>
+                    <button type="button" (click)="appendNumber(0)"
+                      class="keypad-btn py-2 text-lg hover:bg-[var(--color-surface-hover)]">0</button>
+                    <button type="button" (click)="backspace()"
+                      class="keypad-btn py-2 text-lg flex items-center justify-center hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]">
+                      <app-icon name="arrow-left" [size]="20"></app-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Contenido Específico: Referencia (Tarjeta/Otros) -->
+              <div *ngIf="paymentState.selectedMethod.requiresReference"
+                class="flex-1 flex flex-col justify-center max-w-md mx-auto w-full">
+                <div class="text-center mb-6">
+                  <div
+                    class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[var(--color-primary-light)]/20 text-[var(--color-primary)] mb-4">
+                    <app-icon [name]="paymentState.selectedMethod.icon" [size]="32"></app-icon>
+                  </div>
+                  <p class="text-sm text-[var(--color-text-secondary)]">Ingresa el número de referencia o autorización
+                    del comprobante.</p>
+                </div>
+
+                <app-input [formControl]="referenceControl"
+                  [label]="paymentState.selectedMethod.referenceLabel || 'Referencia'"
+                  [placeholder]="paymentState.selectedMethod.referenceLabel || 'Ingresa la referencia'" [size]="'lg'"
+                  [error]="getReferenceError()" [attr.aria-required]="'true'">
+                </app-input>
+              </div>
+
+            </div>
+          </app-card>
         </div>
       </div>
-    </app-card>
+    </div>
   </div>
 
-  <!-- Teclado Numérico -->
-  <div
-    *ngIf="paymentState.selectedMethod?.type === 'cash'"
-    class="mb-6 animate-slide-in"
-    style="animation-delay: 0.4s"
-  >
-    <app-card [shadow]="'md'" [customClasses]="'payment-details-enhanced'">
-      <div class="p-6">
-        <h4 class="section-header-enhanced text-lg mb-4">Teclado Numérico</h4>
-        <div class="grid grid-cols-3 gap-3">
-          <button
-            *ngFor="let num of [7, 8, 9, 4, 5, 6, 1, 2, 3]"
-            type="button"
-            (click)="appendNumber(num)"
-            class="keypad-btn"
-            [attr.aria-label]="'Agregar número ' + num"
-          >
-            {{ num }}
-          </button>
-          <button
-            type="button"
-            (click)="appendNumber(0)"
-            class="keypad-btn col-span-2"
-            [attr.aria-label]="'Agregar cero'"
-          >
-            0
-          </button>
-          <button
-            type="button"
-            (click)="clearCashAmount()"
-            class="keypad-btn bg-[var(--color-error)] text-white border-[var(--color-error)] hover:bg-[var(--color-error)]/90 focus:ring-[var(--color-error)]/50"
-            [attr.aria-label]="'Limpiar monto'"
-          >
-            C
-          </button>
-        </div>
-      </div>
-    </app-card>
-  </div>
-
-  <!-- Botones de Acción -->
-  <div slot="footer" class="flex justify-between items-center gap-4">
-    <app-button
-      variant="outline"
-      size="lg"
-      (clicked)="onModalClosed()"
-      [disabled]="paymentState.isProcessing"
-      [customClasses]="'font-medium'"
-      [attr.aria-label]="'Cancelar y cerrar modal de pago'"
-    >
-      <app-icon name="x" [size]="18" slot="icon"></app-icon>
+  <!-- Footer con Botones -->
+  <div slot="footer" class="flex justify-between items-center w-full gap-4 pt-2">
+    <app-button variant="outline-danger" size="md" (clicked)="onModalClosed()" [disabled]="paymentState.isProcessing"
+      [attr.aria-label]="'Cancelar y cerrar'">
       Cancelar
     </app-button>
 
     <div class="flex gap-3">
-      <app-button
-        variant="secondary"
-        size="lg"
-        (clicked)="saveAsDraft()"
-        [disabled]="paymentState.isProcessing"
-        [customClasses]="'font-medium'"
-        [attr.aria-label]="'Guardar orden como borrador'"
-      >
-        <app-icon name="save" [size]="18" slot="icon"></app-icon>
+      <app-button variant="outline" size="md" (clicked)="saveAsDraft()" [disabled]="paymentState.isProcessing"
+        [attr.aria-label]="'Guardar orden como borrador'">
+        <app-icon name="save" [size]="18" slot="icon" class="mr-2"></app-icon>
         Guardar Borrador
       </app-button>
 
-      <app-button
-        variant="primary"
-        size="lg"
-        (clicked)="processPayment()"
-        [loading]="paymentState.isProcessing"
-        [disabled]="!canProcessPayment()"
-        [customClasses]="'font-semibold'"
-        [attr.aria-label]="
-          paymentState.selectedMethod?.type === 'cash'
-            ? 'Procesar cobro en efectivo'
-            : 'Procesar pago con ' + (paymentState.selectedMethod?.name || '')
-        "
-      >
-        <app-icon name="check" [size]="18" slot="icon"></app-icon>
-        {{
-          paymentState.selectedMethod?.type === "cash"
-            ? "Cobrar"
-            : "Procesar Pago"
-        }}
+      <app-button variant="primary" size="md" (clicked)="processPayment()" [loading]="paymentState.isProcessing"
+        [disabled]="!canProcessPayment()" [customClasses]="'min-w-[150px] font-semibold'"
+        [attr.aria-label]="'Procesar pago'">
+        <app-icon name="check" [size]="18" slot="icon" class="mr-2"></app-icon>
+        {{ paymentState.selectedMethod?.type === "cash" ? "Cobrar" : "Confirmar Pago" }}
       </app-button>
     </div>
   </div>

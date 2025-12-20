@@ -82,13 +82,14 @@ export class RolesComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true },
-    { key: 'description', label: 'Descripción', sortable: true },
+    { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
+    { key: 'description', label: 'Descripción', sortable: true, priority: 2 },
     {
       key: 'is_system_role',
       label: 'Tipo',
       sortable: true,
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -104,11 +105,13 @@ export class RolesComponent implements OnInit, OnDestroy {
       label: 'Usuarios',
       sortable: true,
       defaultValue: '0',
+      priority: 3,
     },
     {
       key: 'permissions',
       label: 'Permisos',
       sortable: true,
+      priority: 3,
       transform: (permissions: string[]) => {
         if (!permissions || permissions.length === 0) {
           return 'Sin permisos';
@@ -122,6 +125,7 @@ export class RolesComponent implements OnInit, OnDestroy {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
+      priority: 3,
       transform: (value: string) => this.formatDate(value),
     },
   ];
@@ -450,20 +454,20 @@ export class RolesComponent implements OnInit, OnDestroy {
         // Execute all operations
         operations.length === 1
           ? operations[0].subscribe({
-              next: () => this.handlePermissionsUpdateSuccess(),
-              error: (error) => this.handlePermissionsUpdateError(error),
-            })
+            next: () => this.handlePermissionsUpdateSuccess(),
+            error: (error) => this.handlePermissionsUpdateError(error),
+          })
           : operations.length === 2
             ? // Execute both operations in parallel
-              operations.forEach((op) =>
-                op.subscribe({
-                  next: () => {
-                    // Wait for both operations to complete
-                    // This is a simplified approach, in production you might want more sophisticated handling
-                  },
-                  error: (error) => this.handlePermissionsUpdateError(error),
-                }),
-              )
+            operations.forEach((op) =>
+              op.subscribe({
+                next: () => {
+                  // Wait for both operations to complete
+                  // This is a simplified approach, in production you might want more sophisticated handling
+                },
+                error: (error) => this.handlePermissionsUpdateError(error),
+              }),
+            )
             : null;
 
         // For simplicity, we'll wait a bit and then complete

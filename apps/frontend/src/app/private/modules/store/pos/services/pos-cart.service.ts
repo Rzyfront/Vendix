@@ -32,7 +32,7 @@ export class PosCartService {
   // Tax configuration (can be made configurable)
   private readonly TAX_RATE = 0.21; // 21% IVA
 
-  constructor() {}
+  constructor() { }
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -291,7 +291,7 @@ export class PosCartService {
         addedAt: new Date(),
         notes: request.notes,
       };
-      updatedItems = [...currentState.items, newItem];
+      updatedItems = [newItem, ...currentState.items];
     }
 
     return {

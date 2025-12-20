@@ -245,20 +245,22 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, width: '200px' },
-    { key: 'slug', label: 'Slug', sortable: true, width: '150px' },
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
+    { key: 'slug', label: 'Slug', sortable: true, width: '150px', priority: 3 },
     {
       key: 'organizations.name',
       label: 'Organización',
       sortable: true,
       width: '180px',
       defaultValue: 'N/A',
+      priority: 2,
     },
     {
       key: 'addresses',
       label: 'Dirección',
       sortable: false,
       width: '200px',
+      priority: 3,
       transform: (value: any[]) => {
         if (!value || value.length === 0) return 'N/A';
         const primaryAddress = value.find((addr: any) => addr.is_primary);
@@ -275,6 +277,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       width: '120px',
       align: 'center',
       badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -295,6 +298,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       width: '100px',
       align: 'center',
       defaultValue: '0',
+      priority: 3,
     },
     {
       key: 'is_active',
@@ -303,6 +307,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       width: '100px',
       align: 'center',
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'status',
         size: 'sm',

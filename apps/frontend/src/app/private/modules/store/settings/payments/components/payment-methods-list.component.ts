@@ -46,6 +46,7 @@ export class PaymentMethodsListComponent {
       key: 'system_payment_method.display_name',
       label: 'Payment Method',
       sortable: true,
+      priority: 1,
       transform: (value: any) => {
         return value;
       },
@@ -54,6 +55,7 @@ export class PaymentMethodsListComponent {
       key: 'system_payment_method.type',
       label: 'Type',
       sortable: true,
+      priority: 3,
       transform: (value: string) => {
         return `
           <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
@@ -66,6 +68,7 @@ export class PaymentMethodsListComponent {
       key: 'state',
       label: 'Status',
       sortable: true,
+      priority: 1,
       transform: (value: string) => {
         const color = this.getStateColor(value);
         const label = this.getStateLabel(value);
@@ -80,6 +83,7 @@ export class PaymentMethodsListComponent {
       key: 'display_order',
       label: 'Order',
       sortable: true,
+      priority: 3,
       transform: (value: number) => {
         return `<span class="text-sm text-gray-900">#${value + 1}</span>`;
       },
@@ -88,6 +92,7 @@ export class PaymentMethodsListComponent {
       key: 'created_at',
       label: 'Added Date',
       sortable: true,
+      priority: 3,
       transform: (value: string) => {
         return `<span class="text-sm text-gray-900">${new Date(value).toLocaleDateString()}</span>`;
       },

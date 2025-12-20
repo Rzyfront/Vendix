@@ -151,10 +151,22 @@ export type InputSize = 'sm' | 'md' | 'lg';
       </p>
     </div>
   `,
+  styles: [`
+    /* Hide number input spinners */
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+  `],
 })
 export class InputComponent implements ControlValueAccessor {
   @Input() label?: string;
-  @Input() placeholder?: string;
+  @Input() placeholder = '';
   @Input() type: InputType = 'text';
   @Input() size: InputSize = 'md';
   @Input() disabled = false;

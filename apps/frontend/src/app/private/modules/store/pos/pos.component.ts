@@ -210,6 +210,8 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
         [cartState]="cartState"
         (closed)="onPaymentModalClosed()"
         (paymentCompleted)="onPaymentCompleted($event)"
+        (requestCustomer)="onOpenCustomerModal()"
+        (requestRegisterConfig)="onOpenRegisterConfigModal()"
       ></app-pos-payment-interface>
 
       <app-pos-order-confirmation
@@ -431,60 +433,47 @@ export class PosComponent implements OnInit, OnDestroy {
   onPaymentCompleted(paymentData: any): void {
     if (!this.cartState || this.isEmpty) return;
 
-    this.loading = true;
+    this.loading = false;
     this.showPaymentModal = false;
 
-    const createdBy = 'current_user';
+    if (paymentData.success) {
+      this.currentOrderId = paymentData.order?.id;
+      this.currentOrderNumber = paymentData.order?.order_number;
 
-    if (paymentData.isCreditSale) {
-      // Handle credit sale
-      this.paymentService
-        .processCreditSale(this.cartState, createdBy)
-        .pipe(takeUntil(this.destroy$))
-        .subscribe({
-          next: (result: any) => {
-            this.loading = false;
-            this.currentOrderId = result.order?.id;
-            this.currentOrderNumber = result.order?.order_number;
-            this.completedOrder = {
-              ...result.order,
-              isCreditSale: true,
-            };
-            this.showOrderConfirmation = true;
-            this.toastService.success(
-              'Venta a crédito procesada correctamente',
-            );
-            this.onClearCart();
-          },
-          error: (error: any) => {
-            this.loading = false;
-            this.toastService.error(
-              error.message || 'Error al procesar la venta a crédito',
-            );
-          },
-        });
-    } else {
-      // Process sale with payment using orquestrator
-      this.paymentService
-        .processSaleWithPayment(this.cartState, paymentData, createdBy)
-        .pipe(takeUntil(this.destroy$))
-        .subscribe({
-          next: (result: any) => {
-            this.loading = false;
-            this.currentOrderId = result.order?.id;
-            this.currentOrderNumber = result.order?.order_number;
-            this.completedOrder = result.order;
-            this.showOrderConfirmation = true;
-            this.toastService.success('Venta procesada correctamente');
-            this.onClearCart();
-          },
-          error: (error: any) => {
-            this.loading = false;
-            this.toastService.error(
-              error.message || 'Error al procesar la venta',
-            );
-          },
-        });
+      // Enrich completedOrder with cart state data before clearing it
+      this.completedOrder = {
+        ...(paymentData.order || {}),
+        isCreditSale: !!paymentData.isCreditSale,
+        // Ensure we have current cart details for the ticket
+        items:
+          paymentData.order?.items ||
+          this.cartState?.items.map((item) => ({
+            product_id: item.product.id,
+            product_name: item.product.name,
+            quantity: item.quantity,
+            unit_price: item.unitPrice,
+            total_price: item.totalPrice,
+          })),
+        subtotal: paymentData.order?.subtotal || this.cartSummary.subtotal,
+        tax_amount: paymentData.order?.tax_amount || this.cartSummary.taxAmount,
+        discount_amount:
+          paymentData.order?.discount_amount || this.cartSummary.discountAmount,
+        total_amount: paymentData.order?.total_amount || this.cartSummary.total,
+        customer_name: this.selectedCustomer
+          ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
+          : paymentData.order?.customer_name,
+        customer_email:
+          this.selectedCustomer?.email || paymentData.order?.customer_email,
+        payment: paymentData.order?.payment || paymentData.payment,
+      };
+
+      this.showOrderConfirmation = true;
+      const successMessage = paymentData.isCreditSale
+        ? 'Venta a crédito procesada correctamente'
+        : 'Venta procesada correctamente';
+
+      this.toastService.success(successMessage);
+      this.onClearCart();
     }
   }
 

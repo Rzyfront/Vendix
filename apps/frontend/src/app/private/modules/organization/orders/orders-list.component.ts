@@ -204,11 +204,13 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         label: 'Order #',
         sortable: true,
         width: '120px',
+        priority: 1,
       },
       {
         key: 'customer',
         label: 'Customer',
         sortable: true,
+        priority: 1,
         transform: (customer: any) =>
           `${customer.first_name} ${customer.last_name}`,
       },
@@ -216,6 +218,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         key: 'store',
         label: 'Store',
         sortable: true,
+        priority: 2,
         transform: (store: any) => store.name,
       },
       {
@@ -223,6 +226,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         label: 'Date',
         sortable: true,
         width: '120px',
+        priority: 3,
         transform: (date: string) => this.formatDate(date),
       },
       {
@@ -231,6 +235,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         sortable: true,
         align: 'right',
         width: '120px',
+        priority: 1,
         transform: (value: number) => `$${value.toFixed(2)}`,
       },
       {
@@ -239,6 +244,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         sortable: true,
         width: '120px',
         badge: true,
+        priority: 1,
         badgeConfig: {
           type: 'status',
           size: 'sm',
@@ -252,6 +258,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         sortable: true,
         width: '120px',
         badge: true,
+        priority: 2,
         badgeConfig: {
           type: 'status',
           size: 'sm',
@@ -496,7 +503,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.stats.average_order_value =
       this.orders.length > 0
         ? this.orders.reduce((sum, order) => sum + order.total_amount, 0) /
-          this.orders.length
+        this.orders.length
         : 0;
   }
 

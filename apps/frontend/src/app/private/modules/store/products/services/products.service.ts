@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError } from 'rxjs';
+import { Observable, catchError, throwError, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Product,
@@ -14,6 +14,13 @@ import {
   PaginatedResponse,
   ProductStats,
 } from '../interfaces';
+
+interface ApiResponse<T> {
+  success: boolean;
+  data: T;
+  meta?: any;
+  message: string;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -29,24 +36,31 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   getProductById(id: number): Observable<Product> {
     return this.http
-      .get<Product>(`${this.apiUrl}/store/products/${id}`)
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<Product>>(`${this.apiUrl}/store/products/${id}`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   getProductBySlug(slug: string, storeId: number): Observable<Product> {
     return this.http
-      .get<Product>(
+      .get<ApiResponse<Product>>(
         `${this.apiUrl}/store/products/slug/${slug}/store/${storeId}`,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   getProductsByStore(
@@ -55,28 +69,38 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products/store/${storeId}`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products/store/${storeId}`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   createProduct(product: CreateProductDto): Observable<Product> {
     return this.http
-      .post<Product>(`${this.apiUrl}/store/products`, product)
-      .pipe(catchError(this.handleError));
+      .post<ApiResponse<Product>>(`${this.apiUrl}/store/products`, product)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   updateProduct(id: number, product: UpdateProductDto): Observable<Product> {
     return this.http
-      .patch<Product>(`${this.apiUrl}/store/products/${id}`, product)
-      .pipe(catchError(this.handleError));
+      .patch<ApiResponse<Product>>(`${this.apiUrl}/store/products/${id}`, product)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   deactivateProduct(id: number): Observable<Product> {
     return this.http
-      .patch<Product>(`${this.apiUrl}/store/products/${id}/deactivate`, {})
-      .pipe(catchError(this.handleError));
+      .patch<ApiResponse<Product>>(`${this.apiUrl}/store/products/${id}/deactivate`, {})
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   deleteProduct(id: number): Observable<void> {
@@ -89,9 +113,12 @@ export class ProductsService {
   getProductVariants(productId: number): Observable<ProductVariant[]> {
     return this.http
       .get<
-        ProductVariant[]
+        ApiResponse<ProductVariant[]>
       >(`${this.apiUrl}/store/products/${productId}/variants`)
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   createProductVariant(
@@ -99,11 +126,14 @@ export class ProductsService {
     variant: CreateProductVariantDto,
   ): Observable<ProductVariant> {
     return this.http
-      .post<ProductVariant>(
+      .post<ApiResponse<ProductVariant>>(
         `${this.apiUrl}/store/products/${productId}/variants`,
         variant,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   updateProductVariant(
@@ -111,11 +141,14 @@ export class ProductsService {
     variant: Partial<CreateProductVariantDto>,
   ): Observable<ProductVariant> {
     return this.http
-      .patch<ProductVariant>(
+      .patch<ApiResponse<ProductVariant>>(
         `${this.apiUrl}/store/products/variants/${variantId}`,
         variant,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   deleteProductVariant(variantId: number): Observable<void> {
@@ -127,8 +160,11 @@ export class ProductsService {
   // Gestión de Imágenes
   getProductImages(productId: number): Observable<ProductImage[]> {
     return this.http
-      .get<ProductImage[]>(`${this.apiUrl}/store/products/${productId}/images`)
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<ProductImage[]>>(`${this.apiUrl}/store/products/${productId}/images`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   addProductImage(
@@ -136,11 +172,14 @@ export class ProductsService {
     image: CreateProductImageDto,
   ): Observable<ProductImage> {
     return this.http
-      .post<ProductImage>(
+      .post<ApiResponse<ProductImage>>(
         `${this.apiUrl}/store/products/${productId}/images`,
         image,
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   deleteProductImage(imageId: number): Observable<void> {
@@ -151,17 +190,23 @@ export class ProductsService {
 
   setMainImage(productId: number, imageId: number): Observable<ProductImage> {
     return this.http
-      .patch<ProductImage>(
+      .patch<ApiResponse<ProductImage>>(
         `${this.apiUrl}/store/products/${productId}/images/${imageId}/main`,
         {},
       )
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   // Estadísticas
   getProductStats(storeId: number): Observable<ProductStats> {
     const url = `${this.apiUrl}/store/products/stats/store/${storeId}`;
-    return this.http.get<ProductStats>(url).pipe(catchError(this.handleError));
+    return this.http.get<ApiResponse<ProductStats>>(url).pipe(
+      map((response) => response.data),
+      catchError(this.handleError)
+    );
   }
 
   // Búsqueda y filtros avanzados
@@ -171,10 +216,11 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams({ ...query, search });
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products/search`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products/search`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   getProductsByCategory(
@@ -183,10 +229,11 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products/category/${categoryId}`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products/category/${categoryId}`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   getProductsByBrand(
@@ -195,10 +242,11 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams(query);
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products/brand/${brandId}`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products/brand/${brandId}`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   getLowStockProducts(
@@ -207,10 +255,11 @@ export class ProductsService {
   ): Observable<PaginatedResponse<Product>> {
     const params = this.buildParams({ ...query, limit: 100 }); // Límite para bajo stock
     return this.http
-      .get<
-        PaginatedResponse<Product>
-      >(`${this.apiUrl}/store/products/low-stock/${threshold}`, { params })
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<PaginatedResponse<Product>>>(`${this.apiUrl}/store/products/low-stock/${threshold}`, { params })
+      .pipe(
+        map((response: any) => ({ data: response.data, pagination: response.meta } as PaginatedResponse<Product>)),
+        catchError(this.handleError)
+      );
   }
 
   // Carga Masiva
@@ -227,8 +276,11 @@ export class ProductsService {
     formData.append('file', file);
 
     return this.http
-      .post(`${this.apiUrl}/store/products/bulk/upload/csv`, formData)
-      .pipe(catchError(this.handleError));
+      .post<ApiResponse<any>>(`${this.apiUrl}/store/products/bulk/upload/csv`, formData)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   // Utilidades

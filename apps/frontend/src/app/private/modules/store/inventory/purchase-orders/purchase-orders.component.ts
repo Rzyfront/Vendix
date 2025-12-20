@@ -221,34 +221,39 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
 
     // Table Configuration
     table_columns: TableColumn[] = [
-        { key: 'order_number', label: 'No. Orden', sortable: true, width: '120px' },
+        { key: 'order_number', label: 'No. Orden', sortable: true, width: '120px', priority: 1 },
         {
             key: 'supplier.name',
             label: 'Proveedor',
             sortable: true,
             defaultValue: '-',
+            priority: 2,
         },
         {
             key: 'order_date',
             label: 'Fecha',
             sortable: true,
+            priority: 3,
             transform: (value: string) => (value ? new Date(value).toLocaleDateString() : '-'),
         },
         {
             key: 'expected_date',
             label: 'Entrega Esperada',
+            priority: 3,
             transform: (value: string) => (value ? new Date(value).toLocaleDateString() : '-'),
         },
         {
             key: 'total_amount',
             label: 'Total',
             align: 'right',
+            priority: 1,
             transform: (value: number) => this.formatCurrency(value),
         },
         {
             key: 'status',
             label: 'Estado',
             badge: true,
+            priority: 1,
             badgeConfig: {
                 type: 'custom',
                 colorMap: {

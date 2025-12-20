@@ -224,7 +224,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'hostname', label: 'Hostname', sortable: true, width: '250px' },
+    { key: 'hostname', label: 'Hostname', sortable: true, width: '250px', priority: 1 },
     {
       key: 'domain_type',
       label: 'Tipo',
@@ -232,6 +232,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       width: '120px',
       align: 'center',
       badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
@@ -250,6 +251,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       width: '120px',
       align: 'center',
       badge: true,
+      priority: 1,
       badgeConfig: {
         type: 'status',
         size: 'sm',
@@ -262,6 +264,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       sortable: true,
       width: '180px',
       defaultValue: 'N/A',
+      priority: 2,
     },
     {
       key: 'store.name',
@@ -269,12 +272,14 @@ export class DomainsComponent implements OnInit, OnDestroy {
       sortable: true,
       width: '150px',
       defaultValue: 'N/A',
+      priority: 2,
     },
     {
       key: 'created_at',
       label: 'Creado',
       sortable: true,
       width: '120px',
+      priority: 3,
       transform: (value: string) => this.formatDate(value),
     },
   ];

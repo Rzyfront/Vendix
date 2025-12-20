@@ -7,6 +7,7 @@ import {
   ModalComponent,
   ButtonComponent,
   InputComponent,
+  TextareaComponent,
   ToggleComponent,
   SelectorComponent,
 } from '../../../../../../shared/components/index';
@@ -23,6 +24,7 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    TextareaComponent,
     ToggleComponent,
     SelectorComponent,
   ],
@@ -137,15 +139,13 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
           </div>
 
           <!-- Notes -->
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Notas</label>
-            <textarea
-              formControlName="notes"
-              rows="3"
-              class="w-full px-3 py-2 border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="Notas adicionales sobre este proveedor..."
-            ></textarea>
-          </div>
+          <app-textarea
+            label="Notas"
+            formControlName="notes"
+            [rows]="3"
+            placeholder="Notas adicionales sobre este proveedor..."
+            [control]="form.get('notes')"
+          ></app-textarea>
 
           <!-- Active Toggle -->
           <div class="flex items-center gap-3">

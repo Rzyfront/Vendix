@@ -13,6 +13,7 @@ import {
   HttpCode,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
+import { ProductVariantService } from './services/product-variant.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -32,6 +33,7 @@ import { ResponseService } from '@common/responses/response.service';
 export class ProductsController {
   constructor(
     private readonly productsService: ProductsService,
+    private readonly productVariantService: ProductVariantService,
     private readonly responseService: ResponseService,
   ) { }
   @Post()
@@ -204,7 +206,7 @@ export class ProductsController {
   ) {
     try {
       // Pass productId directly to service
-      const result = await this.productsService.createVariant(
+      const result = await this.productVariantService.createVariant(
         productId,
         createVariantDto,
       );
@@ -228,7 +230,7 @@ export class ProductsController {
     @Body() updateVariantDto: UpdateProductVariantDto,
   ) {
     try {
-      const result = await this.productsService.updateVariant(
+      const result = await this.productVariantService.updateVariant(
         variantId,
         updateVariantDto,
       );
@@ -249,7 +251,7 @@ export class ProductsController {
   @Permissions('store:products:delete')
   async removeVariant(@Param('variantId', ParseIntPipe) variantId: number) {
     try {
-      await this.productsService.removeVariant(variantId);
+      await this.productVariantService.removeVariant(variantId);
       return this.responseService.deleted(
         'Variante de producto eliminada exitosamente',
       );

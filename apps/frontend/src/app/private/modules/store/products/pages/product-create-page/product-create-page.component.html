@@ -1,0 +1,278 @@
+<div class="p-6 max-w-7xl mx-auto space-y-6">
+    <!-- Compact Header with Back Button and Actions -->
+    <div class="flex items-center justify-between">
+        <button routerLink="/admin/products" class="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+            <app-icon name="arrow-left" size="20" class="text-gray-500"></app-icon>
+        </button>
+        <div class="flex items-center gap-3">
+            <button (click)="onCancel()"
+                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+                Cancelar
+            </button>
+            <app-button [loading]="isSubmitting" (click)="onSubmit()" variant="primary">
+                {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
+            </app-button>
+        </div>
+    </div>
+
+    <form [formGroup]="productForm" class="space-y-6">
+        <!-- Main Grid: General Info + Images -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Left Column: General Information (2 cols) -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-6">Información General</h2>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Name -->
+                        <div class="md:col-span-2">
+                            <app-input label="Nombre del Producto" formControlName="name"
+                                placeholder="Ej. Camiseta Algodón Premium"
+                                [error]="getErrorMessage('name')"></app-input>
+                        </div>
+
+                        <!-- SKU -->
+                        <div>
+                            <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
+                                [error]="getErrorMessage('sku')"></app-input>
+                        </div>
+
+                        <!-- Slug -->
+                        <div>
+                            <app-input label="Slug (URL)" formControlName="slug" placeholder="camiseta-algodon-premium"
+                                [error]="getErrorMessage('slug')"></app-input>
+                        </div>
+
+                        <!-- Description -->
+                        <div class="md:col-span-2">
+                            <app-textarea label="Descripción" formControlName="description"
+                                placeholder="Describe tu producto..." [rows]="3"
+                                [control]="$any(productForm).get('description')"></app-textarea>
+                        </div>
+
+                        <!-- Price -->
+                        <div>
+                            <app-input label="Precio Base" type="number" formControlName="base_price"
+                                [error]="getErrorMessage('base_price')" prefix="$" placeholder="0.00"></app-input>
+                        </div>
+
+                        <!-- Stock (only if no variants) -->
+                        <div *ngIf="!hasVariants">
+                            <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
+                                [error]="getErrorMessage('stock_quantity')" placeholder="0"></app-input>
+                        </div>
+
+                        <!-- Tax Categories (Multi-select) -->
+                        <div class="md:col-span-2">
+                            <app-multi-selector label="Impuestos" [options]="taxCategoryOptions"
+                                formControlName="tax_category_ids"
+                                placeholder="Seleccionar impuestos..."></app-multi-selector>
+                        </div>
+
+                        <!-- Categories (Multi-select) -->
+                        <div>
+                            <div class="flex gap-2 items-end">
+                                <app-multi-selector class="flex-1" label="Categorías" [options]="categoryOptions"
+                                    formControlName="category_ids"
+                                    placeholder="Seleccionar categorías..."></app-multi-selector>
+                                <button type="button" (click)="isCategoryCreateOpen = true"
+                                    class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg border border-gray-300 bg-white mb-0.5">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Brand -->
+                        <div>
+                            <div class="flex gap-2 items-end">
+                                <app-selector class="flex-1" label="Marca" [options]="brandOptions"
+                                    formControlName="brand_id" placeholder="Seleccionar marca"></app-selector>
+                                <button type="button" (click)="isBrandCreateOpen = true"
+                                    class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg border border-gray-300 bg-white mb-0.5">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- State -->
+                        <div>
+                            <app-selector label="Estado" [options]="stateOptions" formControlName="state"
+                                placeholder="Seleccionar estado"></app-selector>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Images -->
+            <div>
+                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Imágenes</h2>
+
+                    <div class="space-y-4">
+                        <!-- Image URL input -->
+                        <div class="flex gap-2">
+                            <input type="text" class="flex-1 rounded-lg border-gray-300 text-sm"
+                                placeholder="URL de la imagen" formControlName="newImageUrl"
+                                (keyup.enter)="addImageUrl()">
+                            <button type="button" (click)="addImageUrl()"
+                                class="px-3 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 text-gray-600">
+                                <app-icon name="plus" size="18"></app-icon>
+                            </button>
+                        </div>
+
+                        <!-- Image grid -->
+                        <div class="grid grid-cols-2 gap-2">
+                            <div *ngFor="let url of imageUrls; let i = index"
+                                class="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+                                <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
+                                <button type="button" (click)="removeImage(i)"
+                                    class="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <app-icon name="x" size="14"></app-icon>
+                                </button>
+                                <div *ngIf="i === 0"
+                                    class="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs py-1 text-center">
+                                    Principal
+                                </div>
+                            </div>
+
+                            <!-- Upload Placeholder -->
+                            <div (click)="triggerFileUpload()"
+                                class="aspect-square bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+                                <app-icon name="image" size="24" class="text-gray-400 mb-2"></app-icon>
+                                <span class="text-xs text-gray-500">Subir</span>
+                                <input type="file" class="hidden file-input" accept="image/*" multiple
+                                    (change)="onFileSelect($event)">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Variants Section (Full Width) -->
+        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900">Variantes</h2>
+                    <p class="text-sm text-gray-500">
+                        Agrega opciones como tamaño, color o material
+                    </p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" [checked]="hasVariants" (change)="toggleVariants($event)"
+                        class="sr-only peer">
+                    <div
+                        class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                    </div>
+                    <span class="ml-3 text-sm font-medium text-gray-700">
+                        Este producto tiene variantes
+                    </span>
+                </label>
+            </div>
+
+            <!-- Variants UI -->
+            <div *ngIf="hasVariants" class="space-y-6 animate-fadeIn">
+                <!-- Attribute Manager -->
+                <div class="space-y-4">
+                    <div *ngFor="let attr of variantAttributes; let i = index"
+                        class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <div class="flex items-start gap-4">
+                            <div class="w-1/3">
+                                <app-input label="Nombre del Atributo" size="sm" [(ngModel)]="attr.name"
+                                    [ngModelOptions]="{standalone: true}" placeholder="Ej. Talla, Color"
+                                    (inputBlur)="generateVariants()" customWrapperClass="!mt-0"></app-input>
+                            </div>
+
+                            <div class="flex-1">
+                                <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">Valores
+                                    (Enter para agregar)</label>
+                                <div
+                                    class="flex flex-wrap gap-2 px-3 py-1.5 bg-[var(--color-surface)] rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors">
+                                    <span *ngFor="let val of attr.values; let j = index"
+                                        class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs font-medium">
+                                        {{ val }}
+                                        <button type="button" (click)="removeAttributeValue(i, j)"
+                                            class="ml-1 text-primary/70 hover:text-primary">×</button>
+                                    </span>
+                                    <input type="text"
+                                        class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[100px] bg-transparent text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
+                                        placeholder="Agregar valor..."
+                                        (keydown.enter)="$event.preventDefault(); addAttributeValue(i, $event)"
+                                        (blur)="addAttributeValue(i, $event)">
+                                </div>
+                            </div>
+
+                            <button (click)="removeAttribute(i)" class="mt-6 text-red-500 hover:text-red-700">
+                                <app-icon name="trash-2" size="18"></app-icon>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="button" (click)="addAttribute()"
+                        class="flex items-center text-sm text-primary-600 hover:text-primary-700 font-medium">
+                        <app-icon name="plus" size="16" class="mr-1"></app-icon>
+                        Agregar Atributo
+                    </button>
+                </div>
+
+                <!-- Generated Variants Table -->
+                <div *ngIf="generatedVariants.length > 0" class="border border-gray-200 rounded-lg overflow-hidden">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th
+                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Variante</th>
+                                <th
+                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Precio</th>
+                                <th
+                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    Stock</th>
+                                <th
+                                    class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    SKU</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr *ngFor="let variant of generatedVariants; let idx = index">
+                                <td class="px-4 py-3 text-sm text-gray-900 font-medium">
+                                    {{ variant.name }}
+                                    <div class="flex gap-1 mt-1">
+                                        <span *ngFor="let item of variant.attributes | keyvalue"
+                                            class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">
+                                            {{ item.key }}: {{ item.value }}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-2">
+                                    <app-input type="number" size="sm" [(ngModel)]="variant.price"
+                                        [ngModelOptions]="{standalone: true}" placeholder="0.00"
+                                        customWrapperClass="!mt-0"></app-input>
+                                </td>
+                                <td class="px-4 py-2">
+                                    <app-input type="number" size="sm" [(ngModel)]="variant.stock"
+                                        [ngModelOptions]="{standalone: true}" placeholder="0"
+                                        customWrapperClass="!mt-0"></app-input>
+                                </td>
+                                <td class="px-4 py-2">
+                                    <app-input type="text" size="sm" [(ngModel)]="variant.sku"
+                                        [ngModelOptions]="{standalone: true}" placeholder="SKU"
+                                        customWrapperClass="!mt-0"></app-input>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Quick Create Modals -->
+<app-category-quick-create [isOpen]="isCategoryCreateOpen" (openChange)="isCategoryCreateOpen = $event"
+    (created)="onCategoryCreated($event)"></app-category-quick-create>
+
+<app-brand-quick-create [isOpen]="isBrandCreateOpen" (openChange)="isBrandCreateOpen = $event"
+    (created)="onBrandCreated($event)"></app-brand-quick-create>

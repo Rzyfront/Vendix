@@ -16,6 +16,8 @@ export { InputsearchComponent } from './inputsearch/inputsearch.component';
 export { TableComponent } from './table/table.component';
 export { TooltipComponent } from './tooltip/tooltip.component';
 export { SelectorComponent } from './selector/selector.component';
+export { MultiSelectorComponent } from './multi-selector/multi-selector.component';
+export { TextareaComponent } from './textarea/textarea.component';
 export {
   OnboardingModalComponent,
   EmailVerificationStepComponent,
@@ -48,6 +50,10 @@ export type {
   SelectorSize,
   SelectorVariant,
 } from './selector/selector.component';
+export type {
+  MultiSelectorOption,
+  MultiSelectorSize,
+} from './multi-selector/multi-selector.component';
 export type {
   ChartData,
   ChartOptions,

@@ -1,9 +1,24 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { CreateProductVariantDto, UpdateProductVariantDto, ProductState } from '../dto';
+import { RequestContextService } from '@common/context/request-context.service';
+import { Prisma } from '@prisma/client';
+import { LocationsService } from '../../inventory/locations/locations.service';
+import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
 export class ProductVariantService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly inventoryLocationsService: LocationsService,
+    private readonly stockLevelManager: StockLevelManager,
+  ) { }
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
     const variant = await this.prisma.product_variants.findFirst({
@@ -36,5 +51,219 @@ export class ProductVariantService {
     }
 
     return variant;
+  }
+  async createVariant(
+    product_id: number,
+    createVariantDto: CreateProductVariantDto,
+  ) {
+    const context = RequestContextService.getContext();
+    try {
+      // Verify user context for audit
+      const user_id = context?.user_id;
+      if (!user_id && createVariantDto.stock_quantity && createVariantDto.stock_quantity > 0) {
+        throw new ForbiddenException('User context required for stock operations');
+      }
+
+      // Verificar que el producto existe y está activo
+      const product = await this.prisma.products.findFirst({
+        where: {
+          id: product_id,
+          state: ProductState.ACTIVE,
+        },
+      });
+
+      if (!product) {
+        throw new BadRequestException('Producto no encontrado o inactivo');
+      }
+
+      // Verificar que el SKU sea único
+      const existingSku = await this.prisma.product_variants.findUnique({
+        where: { sku: createVariantDto.sku },
+      });
+
+      if (existingSku) {
+        throw new ConflictException('El SKU de la variante ya está en uso');
+      }
+
+      return await this.prisma.$transaction(async (prisma) => {
+        // Crear variante usando scoped client
+        const variant = await prisma.product_variants.create({
+          data: {
+            product_id: product.id,
+            sku: createVariantDto.sku,
+            name: createVariantDto.name,
+            price_override:
+              createVariantDto.price_override || createVariantDto.price,
+            stock_quantity: 0, // Se inicializará via stock_levels
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        // Inicializar stock levels para la variante si se proporciona stock
+        if (
+          createVariantDto.stock_quantity &&
+          createVariantDto.stock_quantity > 0
+        ) {
+          const defaultLocation =
+            await this.inventoryLocationsService.getDefaultLocation(
+              product.store_id,
+            );
+
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: product.id,
+              variant_id: variant.id,
+              location_id: defaultLocation.id,
+              quantity_change: createVariantDto.stock_quantity || 0,
+              movement_type: 'initial',
+              reason: 'Initial stock on variant creation',
+              user_id: user_id!, // Non-null assertion safe because we checked above
+              create_movement: true,
+              validate_availability: false,
+            },
+            prisma,
+          );
+        }
+
+        return variant;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('El SKU de la variante ya existe');
+        }
+      }
+      throw error;
+    }
+  }
+
+  async updateVariant(
+    variantId: number,
+    updateVariantDto: UpdateProductVariantDto,
+  ) {
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+
+    if (!user_id && updateVariantDto.stock_quantity !== undefined) {
+      throw new ForbiddenException('User context required for stock operations');
+    }
+
+    try {
+      const existingVariant = await this.prisma.product_variants.findUnique({
+        where: { id: variantId },
+        include: {
+          products: {
+            select: {
+              id: true,
+              store_id: true,
+            },
+          },
+        },
+      });
+
+      if (!existingVariant) {
+        throw new NotFoundException('Variante no encontrada');
+      }
+
+      if (updateVariantDto.sku) {
+        const existingSku = await this.prisma.product_variants.findFirst({
+          where: {
+            sku: updateVariantDto.sku,
+            NOT: { id: variantId },
+          },
+        });
+
+        if (existingSku) {
+          throw new ConflictException('El SKU ya está en uso');
+        }
+      }
+
+      const { stock_quantity, ...variantData } = updateVariantDto;
+
+      return await this.prisma.$transaction(async (prisma) => {
+        // Actualizar variante
+        const variant = await prisma.product_variants.update({
+          where: { id: variantId },
+          data: {
+            ...variantData,
+            updated_at: new Date(),
+          },
+        });
+
+        // Si cambió el stock, actualizar stock levels
+        if (stock_quantity !== undefined) {
+          const stockDifference =
+            stock_quantity - existingVariant.stock_quantity;
+
+          if (stockDifference !== 0) {
+            const defaultLocation =
+              await this.inventoryLocationsService.getDefaultLocation(
+                existingVariant.products.store_id,
+              );
+
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: existingVariant.product_id,
+                variant_id: variantId,
+                location_id: defaultLocation.id,
+                quantity_change: stockDifference,
+                movement_type: 'adjustment',
+                reason: 'Stock quantity updated from variant edit',
+                user_id: user_id!, // Non-null assertion safe because we checked above
+                create_movement: true,
+                validate_availability: false,
+              },
+              prisma,
+            );
+          }
+        }
+
+        return variant;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('Conflicto de datos únicos');
+        }
+      }
+      throw error;
+    }
+  }
+
+  async removeVariant(variantId: number) {
+    const existingVariant = await this.prisma.product_variants.findUnique({
+      where: { id: variantId },
+    });
+
+    if (!existingVariant) {
+      throw new NotFoundException('Variante no encontrada');
+    }
+
+    return await this.prisma.$transaction(async (prisma) => {
+      // Verificar que no haya stock en ninguna ubicación
+      const stockLevels = await prisma.stock_levels.findMany({
+        where: {
+          product_id: existingVariant.product_id,
+          product_variant_id: variantId,
+        },
+      });
+
+      const hasStock = stockLevels.some(
+        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
+      );
+
+      if (hasStock) {
+        throw new BadRequestException(
+          'Cannot delete variant with existing stock',
+        );
+      }
+
+      // Eliminación lógica: archivar variante (si tuviera estado)
+      // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
+      return await prisma.product_variants.delete({
+        where: { id: variantId },
+      });
+    });
   }
 }

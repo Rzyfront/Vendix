@@ -116,6 +116,17 @@ export class PaymentMethodsService {
       );
   }
 
+  enableStorePaymentMethod(method_id: string): Observable<StorePaymentMethod> {
+    return this.http.patch<any>(
+      `${this.api_base_url}/payment-methods/${method_id}/enable`,
+      {},
+    )
+      .pipe(
+        map((response) => response.data || response),
+        catchError(this.handleError)
+      );
+  }
+
   deletePaymentMethod(method_id: string): Observable<void> {
     return this.http.delete<any>(
       `${this.api_base_url}/payment-methods/${method_id}`,

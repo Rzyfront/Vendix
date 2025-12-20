@@ -408,7 +408,6 @@ model categories {
   state              category_state_enum  @default(active)
   stores             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_categories product_categories[]
-  products           products[]
 
   @@unique([store_id, slug])
 }
@@ -619,7 +618,6 @@ model product_variants {
 model products {
   id                       Int                        @id @default(autoincrement())
   store_id                 Int
-  category_id              Int?
   brand_id                 Int?
   name                     String                     @db.VarChar(255)
   slug                     String                     @db.VarChar(255)
@@ -641,7 +639,6 @@ model products {
   product_tax_assignments  product_tax_assignments[]
   product_variants         product_variants[]
   brands                   brands?                    @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  categories               categories?                @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                   stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   purchase_order_items     purchase_order_items[]
   return_order_items       return_order_items[]

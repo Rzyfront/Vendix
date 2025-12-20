@@ -10,6 +10,7 @@ import {
   IconComponent,
   SelectorComponent,
   SelectorOption,
+  TextareaComponent,
 } from '../../../../../../shared/components/index';
 
 // Interfaces
@@ -30,6 +31,7 @@ import { InventoryService } from '../../services';
     InputComponent,
     IconComponent,
     SelectorComponent,
+    TextareaComponent,
   ],
   template: `
     <app-modal
@@ -163,15 +165,13 @@ import { InventoryService } from '../../services';
           </div>
 
           <!-- Notes -->
-          <div>
-            <label class="block text-sm font-medium text-text-secondary mb-1">Notas</label>
-            <textarea
-              formControlName="notes"
-              rows="2"
-              class="w-full px-3 py-2 border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/50"
-              placeholder="Instrucciones especiales..."
-            ></textarea>
-          </div>
+          <app-textarea
+            label="Notas"
+            formControlName="notes"
+            [rows]="2"
+            placeholder="Instrucciones especiales..."
+            [control]="form.get('notes')"
+          ></app-textarea>
         </div>
 
 

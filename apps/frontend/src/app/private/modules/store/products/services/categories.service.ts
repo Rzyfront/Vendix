@@ -17,7 +17,7 @@ import { ProductCategory } from '../interfaces';
 export class CategoriesService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   getCategories(storeId?: number): Observable<ProductCategory[]> {
     const params = storeId
@@ -35,16 +35,22 @@ export class CategoriesService {
 
   getCategoryById(id: number): Observable<ProductCategory> {
     return this.http
-      .get<ProductCategory>(`${this.apiUrl}/store/categories/${id}`)
-      .pipe(catchError(this.handleError));
+      .get<ApiResponse<ProductCategory>>(`${this.apiUrl}/store/categories/${id}`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   createCategory(
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .post<ProductCategory>(`${this.apiUrl}/store/categories`, category)
-      .pipe(catchError(this.handleError));
+      .post<ApiResponse<ProductCategory>>(`${this.apiUrl}/store/categories`, category)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError)
+      );
   }
 
   updateCategory(
@@ -52,8 +58,14 @@ export class CategoriesService {
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .patch<ProductCategory>(`${this.apiUrl}/store/categories/${id}`, category)
-      .pipe(catchError(this.handleError));
+      .patch<ApiResponse<ProductCategory>>(
+        `${this.apiUrl}/store/categories/${id}`,
+        category,
+      )
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
   }
 
   deleteCategory(id: number): Observable<void> {

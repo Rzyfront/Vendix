@@ -32,9 +32,6 @@ export class CreateProductDto {
   @IsInt()
   store_id?: number;
 
-  @IsOptional()
-  @IsInt()
-  category_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -174,9 +171,6 @@ export class StockByLocationDto {
 }
 
 export class UpdateProductDto {
-  @IsOptional()
-  @IsInt()
-  category_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -393,9 +387,6 @@ export class CreateProductWithVariantsDto {
   @IsInt()
   store_id?: number;
 
-  @IsOptional()
-  @IsInt()
-  category_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -560,9 +551,6 @@ export class CreateVariantWithStockDto {
 }
 
 export class UpdateProductWithVariantsDto {
-  @IsOptional()
-  @IsInt()
-  category_id?: number;
 
   @IsOptional()
   @IsInt()

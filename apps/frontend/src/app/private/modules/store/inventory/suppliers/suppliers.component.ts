@@ -203,14 +203,15 @@ export class SuppliersComponent implements OnInit, OnDestroy {
 
   // Table Configuration
   table_columns: TableColumn[] = [
-    { key: 'code', label: 'Código', sortable: true, width: '100px' },
-    { key: 'name', label: 'Nombre', sortable: true },
-    { key: 'contact_person', label: 'Contacto', defaultValue: '-' },
-    { key: 'email', label: 'Email', defaultValue: '-' },
-    { key: 'phone', label: 'Teléfono', defaultValue: '-' },
+    { key: 'code', label: 'Código', sortable: true, width: '100px', priority: 3 },
+    { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
+    { key: 'contact_person', label: 'Contacto', defaultValue: '-', priority: 2 },
+    { key: 'email', label: 'Email', defaultValue: '-', priority: 2 },
+    { key: 'phone', label: 'Teléfono', defaultValue: '-', priority: 3 },
     {
       key: 'is_active',
       label: 'Estado',
+      priority: 1,
       transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
       badge: true,
       badgeConfig: {

@@ -35,6 +35,34 @@ export class StorePaymentMethodsController {
     private readonly responseService: ResponseService,
   ) { }
 
+  @Patch(':methodId/enable')
+  @ApiOperation({ summary: 'Re-enable payment method for store' })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment method enabled successfully',
+  })
+  @ApiResponse({ status: 403, description: 'Access denied' })
+  @ApiResponse({ status: 404, description: 'Payment method not found' })
+  async reEnable(@Param('methodId') methodId: string) {
+    try {
+      const method_id_num = parseInt(methodId);
+      if (!method_id_num || isNaN(method_id_num)) {
+        return this.responseService.error('Invalid payment method ID', '', 400);
+      }
+
+      const result = await this.storePaymentMethodsService.reEnableForStore(method_id_num);
+      return this.responseService.success(
+        result,
+        'Payment method enabled successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Failed to enable payment method',
+        error,
+      );
+    }
+  }
+
   @Get('available')
   @ApiOperation({ summary: 'Get available payment methods to enable' })
   @ApiResponse({
@@ -192,6 +220,7 @@ export class StorePaymentMethodsController {
       );
     }
   }
+
 
   @Patch(':methodId/disable')
   @ApiOperation({ summary: 'Disable payment method for store' })

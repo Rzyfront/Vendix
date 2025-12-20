@@ -68,7 +68,7 @@ import {
           <div class="flex items-center justify-between px-4 py-3 border-b border-border">
             <div>
               <h3 class="text-lg font-semibold text-text-primary">
-                Métodos de Pago Activados ({{ payment_methods.length }})
+                Métodos de pagos agregados ({{ payment_methods.length }})
               </h3>
               <p class="text-sm text-text-secondary">
                 Métodos configurados para tu tienda
@@ -154,24 +154,27 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   is_loading_available = false;
   is_enabling = false;
 
-  
+
   // Table configuration for enabled payment methods
   enabled_payment_methods_columns: TableColumn[] = [
     {
       key: 'display_name',
       label: 'Método',
-      transform: (value: any) => value || 'Sin nombre'
+      transform: (value: any) => value || 'Sin nombre',
+      priority: 1
     },
     {
       key: 'system_payment_method.provider',
       label: 'Proveedor',
-      defaultValue: '-'
+      defaultValue: '-',
+      priority: 2
     },
     {
       key: 'state',
       label: 'Estado',
       badge: true,
       badgeConfig: { type: 'status' },
+      priority: 1,
       transform: (value: string) => {
         const state_map: Record<string, string> = {
           enabled: 'Activo',
@@ -185,6 +188,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     {
       key: 'system_payment_method.type',
       label: 'Tipo',
+      priority: 3,
       transform: (value: string) => {
         const type_map: Record<string, string> = {
           cash: 'Efectivo',
@@ -201,12 +205,14 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
   available_payment_methods_columns: TableColumn[] = [
     {
       key: 'display_name',
-      label: 'Método'
+      label: 'Método',
+      priority: 1
     },
     {
       key: 'provider',
       label: 'Origen',
       badge: true,
+      priority: 2,
       badgeConfig: {
         type: 'custom',
         colorMap: {
@@ -221,6 +227,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     {
       key: 'type',
       label: 'Tipo',
+      priority: 3,
       transform: (value: string) => {
         const type_map: Record<string, string> = {
           cash: 'Efectivo',
@@ -264,7 +271,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     private payment_methods_service: PaymentMethodsService,
     private toast_service: ToastService,
     private dialog_service: DialogService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadPaymentMethods();
@@ -419,8 +426,24 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           },
         });
     } else {
-      // For now, just show a message since state update is not available in DTO
-      this.toast_service.info('Enable functionality through available actions');
+      this.is_loading = true; // Use global loading since specific row loading isn't implemented
+      this.payment_methods_service
+        .enableStorePaymentMethod(method.id)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: () => {
+            this.toast_service.success('Payment method enabled successfully');
+            this.loadPaymentMethods();
+            this.loadPaymentMethodStats();
+            this.is_loading = false;
+          },
+          error: (error: any) => {
+            this.is_loading = false;
+            this.toast_service.error(
+              'Failed to enable payment method: ' + error.message,
+            );
+          },
+        });
     }
   }
 
