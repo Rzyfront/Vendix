@@ -6,19 +6,28 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class BrandsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private s3Service: S3Service,
+  ) { }
   async create(createBrandDto: CreateBrandDto, user: any) {
     try {
-      return await this.prisma.brands.create({
+      const brand = await this.prisma.brands.create({
         data: {
           name: createBrandDto.name,
           description: createBrandDto.description,
           logo_url: createBrandDto.logo_url,
         },
       });
+
+      return {
+        ...brand,
+        logo_url: await this.s3Service.signUrl(brand.logo_url),
+      };
     } catch (error) {
       if (error.code === 'P2002') {
         throw new ConflictException('Brand name already exists');
@@ -62,8 +71,13 @@ export class BrandsService {
       this.prisma.brands.count({ where }),
     ]);
 
+    const signedBrands = await Promise.all(brands.map(async (brand) => ({
+      ...brand,
+      logo_url: await this.s3Service.signUrl(brand.logo_url),
+    })));
+
     return {
-      data: brands,
+      data: signedBrands,
       meta: {
         total,
         page,
@@ -113,8 +127,13 @@ export class BrandsService {
       this.prisma.brands.count({ where }),
     ]);
 
+    const signedBrands = await Promise.all(brands.map(async (brand) => ({
+      ...brand,
+      logo_url: await this.s3Service.signUrl(brand.logo_url, true),
+    })));
+
     return {
-      data: brands,
+      data: signedBrands,
       meta: {
         total,
         page,
@@ -138,7 +157,10 @@ export class BrandsService {
       throw new NotFoundException('Brand not found');
     }
 
-    return brand;
+    return {
+      ...brand,
+      logo_url: await this.s3Service.signUrl(brand.logo_url),
+    };
   }
 
   async update(id: number, updateBrandDto: UpdateBrandDto, user: any) {
@@ -160,7 +182,7 @@ export class BrandsService {
     }
 
     try {
-      return await this.prisma.brands.update({
+      const updated = await this.prisma.brands.update({
         where: { id },
         data: updateData,
         include: {
@@ -169,6 +191,11 @@ export class BrandsService {
           },
         },
       });
+
+      return {
+        ...updated,
+        logo_url: await this.s3Service.signUrl(updated.logo_url),
+      };
     } catch (error) {
       if (error.code === 'P2002') {
         throw new ConflictException('Brand name already exists');

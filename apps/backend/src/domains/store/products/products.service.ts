@@ -23,6 +23,7 @@ import { InventoryIntegrationService } from '../inventory/shared/services/invent
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class ProductsService {
@@ -33,6 +34,7 @@ export class ProductsService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
+    private readonly s3Service: S3Service,
   ) { }
 
   async create(createProductDto: CreateProductDto) {
@@ -120,10 +122,12 @@ export class ProductsService {
         category_ids,
         tax_category_ids,
         image_urls,
+        images,
         stock_quantity,
         stock_by_location,
         cost_price, // Exclude from productData as it's not in products table
         weight,     // Exclude from productData as it's not in products table
+        variants,
         ...productData
       } = createProductDto;
 
@@ -139,7 +143,6 @@ export class ProductsService {
           },
         });
 
-        // Asignar categorías si se proporcionan
         if (category_ids && category_ids.length > 0) {
           await prisma.product_categories.createMany({
             data: category_ids.map((categoryId) => ({
@@ -147,6 +150,16 @@ export class ProductsService {
               category_id: categoryId,
             })),
           });
+        }
+
+        // Crear variantes si se proporcionan
+        if (variants && variants.length > 0) {
+          for (const variantData of variants) {
+            await this.productVariantService.createVariant(product.id, {
+              ...variantData,
+              stock_quantity: variantData.stock_quantity || 0,
+            }, prisma);
+          }
         }
 
         // Asignar categorías de impuestos si se proporcionan
@@ -187,14 +200,34 @@ export class ProductsService {
           });
         }
 
-        // Crear imágenes si se proporcionan
+        // Manejar imágenes (combinar image_urls legacy con images structured)
+        const finalImages: any[] = [];
+
+        // 1. Procesar image_urls (legacy)
         if (image_urls && image_urls.length > 0) {
+          finalImages.push(...image_urls.map((url, index) => ({
+            product_id: product.id,
+            image_url: url,
+            is_main: index === 0
+          })));
+        }
+
+        // 2. Procesar images (structured with possible base64)
+        if (images && images.length > 0) {
+          const uploadedImages = await this.handleImageUploads(images, slug);
+          finalImages.push(...uploadedImages.map(img => ({
+            ...img,
+            product_id: product.id
+          })));
+        }
+
+        if (finalImages.length > 0) {
+          // Asegurar que solo haya un is_main
+          const mainExists = finalImages.some(img => img.is_main);
+          if (!mainExists) finalImages[0].is_main = true;
+
           await prisma.product_images.createMany({
-            data: image_urls.map((url, index) => ({
-              product_id: product.id,
-              image_url: url,
-              is_main: index === 0, // Primera imagen como principal
-            })),
+            data: finalImages
           });
         }
 
@@ -329,8 +362,15 @@ export class ProductsService {
         );
 
         // Retornar producto con información de stock enriquecida
+        const mainImage = completeProduct.product_images[0];
+        let imageUrl = mainImage?.image_url;
+        if (imageUrl && !imageUrl.startsWith('http')) {
+          imageUrl = await this.s3Service.getPresignedUrl(imageUrl);
+        }
+
         return {
           ...completeProduct,
+          image_url: imageUrl,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
           // Nuevos campos agregados para mayor claridad
@@ -345,7 +385,7 @@ export class ProductsService {
             reorder_point: stock.reorder_point,
           })),
         };
-      });
+      }, { timeout: 30000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -502,7 +542,7 @@ export class ProductsService {
     }
 
     // Calcular stock totals dinámicamente para cada producto
-    const productsWithStock = products.map((product) => {
+    const productsWithStock = await Promise.all(products.map(async (product) => {
       const totalStockAvailable =
         product.stock_levels?.reduce(
           (sum, stock) => sum + stock.quantity_available,
@@ -516,6 +556,7 @@ export class ProductsService {
 
       return {
         ...product,
+        image_url: await this.signProductImage(product, true),
         // Mantener compatibilidad con el campo existente pero basado en stock_levels
         stock_quantity: totalStockAvailable,
         // Nuevos campos agregados para mayor claridad
@@ -530,7 +571,7 @@ export class ProductsService {
             reserved: stock.quantity_reserved,
           })) || [],
       };
-    });
+    }));
 
     return {
       data: productsWithStock,
@@ -619,6 +660,11 @@ export class ProductsService {
             reviews: true,
           },
         },
+        inventory_batches: {
+          include: {
+            inventory_locations: true,
+          },
+        },
       },
     });
 
@@ -636,9 +682,13 @@ export class ProductsService {
       0,
     );
 
+    // Sign all images
+    await this.signProductImages(product);
+
     // Retornar producto con información de stock enriquecida
     return {
       ...product,
+      image_url: await this.signProductImage(product),
       // Mantener compatibilidad con el campo existente pero basado en stock_levels
       stock_quantity: totalStockAvailable,
       // Nuevos campos agregados para mayor claridad
@@ -675,7 +725,12 @@ export class ProductsService {
       throw new NotFoundException('Producto no encontrado');
     }
 
-    return product;
+    await this.signProductImages(product);
+
+    return {
+      ...product,
+      image_url: await this.signProductImage(product),
+    };
   }
 
   async update(id: number, updateProductDto: UpdateProductDto) {
@@ -735,8 +790,10 @@ export class ProductsService {
         category_ids,
         tax_category_ids,
         image_urls,
+        images,
         stock_quantity,
         stock_by_location,
+        variants,
         ...productData
       } = updateProductDto;
 
@@ -783,19 +840,67 @@ export class ProductsService {
         }
 
         // Actualizar imágenes si se proporcionan
-        if (image_urls !== undefined) {
+        if (image_urls !== undefined || images !== undefined) {
           await prisma.product_images.deleteMany({
             where: { product_id: id },
           });
 
-          if (image_urls.length > 0) {
+          const finalImages: any[] = [];
+
+          // 1. Procesar image_urls (legacy)
+          if (image_urls && image_urls.length > 0) {
+            finalImages.push(...image_urls.map((url, index) => ({
+              product_id: id,
+              image_url: url,
+              is_main: index === 0
+            })));
+          }
+
+          // 2. Procesar images (structured with possible base64)
+          if (images && images.length > 0) {
+            const uploadedImages = await this.handleImageUploads(images, product.slug);
+            finalImages.push(...uploadedImages.map(img => ({
+              ...img,
+              product_id: id
+            })));
+          }
+
+          if (finalImages.length > 0) {
+            // Asegurar que solo haya un is_main
+            const mainExists = finalImages.some(img => img.is_main);
+            if (!mainExists) finalImages[0].is_main = true;
+
             await prisma.product_images.createMany({
-              data: image_urls.map((url, index) => ({
-                product_id: id,
-                image_url: url,
-                is_main: index === 0,
-              })),
+              data: finalImages
             });
+          }
+        }
+
+        // Sincronizar variantes si se proporcionan
+        if (variants !== undefined) {
+          for (const variantData of variants) {
+            // Buscar si la variante ya existe por SKU
+            const existingVariant = await prisma.product_variants.findFirst({
+              where: {
+                product_id: id,
+                sku: variantData.sku,
+              },
+            });
+
+            if (existingVariant) {
+              // Actualizar variante existente
+              await this.productVariantService.updateVariant(
+                existingVariant.id,
+                variantData,
+                prisma,
+              );
+            } else {
+              // Crear nueva variante
+              await this.productVariantService.createVariant(id, {
+                ...variantData,
+                stock_quantity: variantData.stock_quantity || 0,
+              }, prisma);
+            }
           }
         }
 
@@ -861,7 +966,7 @@ export class ProductsService {
         }
 
         return product;
-      });
+      }, { timeout: 30000 });
 
       return await this.findOne(result.id);
     } catch (error) {
@@ -959,8 +1064,8 @@ export class ProductsService {
       orderBy: { created_at: 'desc' },
     });
 
-    // Calcular stock totals dinámicamente
-    return products.map((product) => {
+    // Calcular stock totals y firmar imágenes
+    return await Promise.all(products.map(async (product) => {
       const totalStockAvailable = product.stock_levels.reduce(
         (sum, stock) => sum + stock.quantity_available,
         0,
@@ -972,6 +1077,7 @@ export class ProductsService {
 
       return {
         ...product,
+        image_url: await this.signProductImage(product, true),
         // Mantener compatibilidad con el campo existente pero basado en stock_levels
         stock_quantity: totalStockAvailable,
         // Nuevos campos agregados para mayor claridad
@@ -985,7 +1091,7 @@ export class ProductsService {
           reserved: stock.quantity_reserved,
         })),
       };
-    });
+    }));
   }
 
   // Gestión de variantes
@@ -1130,5 +1236,47 @@ export class ProductsService {
     createVariantDto: CreateProductVariantDto,
   ) {
     return this.productVariantService.createVariant(productId, createVariantDto);
+  }
+
+  private async handleImageUploads(images: ProductImageDto[], productSlug: string): Promise<any[]> {
+    const processedImages: any[] = [];
+    for (const [index, image] of images.entries()) {
+      let imageUrl = image.image_url;
+      if (imageUrl.startsWith('data:image')) {
+        const result = await this.s3Service.uploadBase64(
+          imageUrl,
+          `products/${productSlug}-${Date.now()}-${index}`
+        );
+        imageUrl = result.key;
+      }
+      processedImages.push({
+        image_url: imageUrl,
+        is_main: image.is_main || false,
+        alt_text: image.alt_text,
+        sort_order: image.sort_order || index,
+      });
+    }
+    return processedImages;
+  }
+
+  private async signProductImage(product: any, useThumbnail = false): Promise<string | undefined> {
+    const mainImage = product.product_images?.find(img => img.is_main) || product.product_images?.[0];
+    return this.s3Service.signUrl(mainImage?.image_url, useThumbnail);
+  }
+
+  private async signProductImages(product: any): Promise<void> {
+    if (product.product_images) {
+      for (const img of product.product_images) {
+        img.image_url = await this.s3Service.signUrl(img.image_url);
+      }
+    }
+
+    if (product.product_variants) {
+      for (const variant of product.product_variants) {
+        if (variant.product_images) {
+          variant.product_images.image_url = await this.s3Service.signUrl(variant.product_images.image_url);
+        }
+      }
+    }
   }
 }

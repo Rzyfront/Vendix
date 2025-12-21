@@ -55,6 +55,7 @@ export class ProductVariantService {
   async createVariant(
     product_id: number,
     createVariantDto: CreateProductVariantDto,
+    tx?: Prisma.TransactionClient,
   ) {
     const context = RequestContextService.getContext();
     try {
@@ -65,7 +66,8 @@ export class ProductVariantService {
       }
 
       // Verificar que el producto existe y está activo
-      const product = await this.prisma.products.findFirst({
+      const prisma = tx || this.prisma;
+      const product = await prisma.products.findFirst({
         where: {
           id: product_id,
           state: ProductState.ACTIVE,
@@ -77,7 +79,7 @@ export class ProductVariantService {
       }
 
       // Verificar que el SKU sea único
-      const existingSku = await this.prisma.product_variants.findUnique({
+      const existingSku = await prisma.product_variants.findUnique({
         where: { sku: createVariantDto.sku },
       });
 
@@ -85,48 +87,12 @@ export class ProductVariantService {
         throw new ConflictException('El SKU de la variante ya está en uso');
       }
 
-      return await this.prisma.$transaction(async (prisma) => {
-        // Crear variante usando scoped client
-        const variant = await prisma.product_variants.create({
-          data: {
-            product_id: product.id,
-            sku: createVariantDto.sku,
-            name: createVariantDto.name,
-            price_override:
-              createVariantDto.price_override || createVariantDto.price,
-            stock_quantity: 0, // Se inicializará via stock_levels
-            created_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
+      if (tx) {
+        return this.executeCreateVariant(tx, product, createVariantDto, user_id);
+      }
 
-        // Inicializar stock levels para la variante si se proporciona stock
-        if (
-          createVariantDto.stock_quantity &&
-          createVariantDto.stock_quantity > 0
-        ) {
-          const defaultLocation =
-            await this.inventoryLocationsService.getDefaultLocation(
-              product.store_id,
-            );
-
-          await this.stockLevelManager.updateStock(
-            {
-              product_id: product.id,
-              variant_id: variant.id,
-              location_id: defaultLocation.id,
-              quantity_change: createVariantDto.stock_quantity || 0,
-              movement_type: 'initial',
-              reason: 'Initial stock on variant creation',
-              user_id: user_id!, // Non-null assertion safe because we checked above
-              create_movement: true,
-              validate_availability: false,
-            },
-            prisma,
-          );
-        }
-
-        return variant;
+      return await this.prisma.$transaction(async (p) => {
+        return this.executeCreateVariant(p, product, createVariantDto, user_id);
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -138,9 +104,60 @@ export class ProductVariantService {
     }
   }
 
+  private async executeCreateVariant(
+    prisma: Prisma.TransactionClient,
+    product: any,
+    createVariantDto: CreateProductVariantDto,
+    user_id?: number,
+  ) {
+    // Crear variante usando scoped client
+    const variant = await prisma.product_variants.create({
+      data: {
+        product_id: product.id,
+        sku: createVariantDto.sku,
+        name: createVariantDto.name,
+        attributes: createVariantDto.attributes,
+        price_override:
+          createVariantDto.price_override || createVariantDto.price,
+        stock_quantity: 0, // Se inicializará via stock_levels
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // Inicializar stock levels para la variante si se proporciona stock
+    if (
+      createVariantDto.stock_quantity &&
+      createVariantDto.stock_quantity > 0
+    ) {
+      const defaultLocation =
+        await this.inventoryLocationsService.getDefaultLocation(
+          product.store_id,
+        );
+
+      await this.stockLevelManager.updateStock(
+        {
+          product_id: product.id,
+          variant_id: variant.id,
+          location_id: defaultLocation.id,
+          quantity_change: createVariantDto.stock_quantity || 0,
+          movement_type: 'initial',
+          reason: 'Initial stock on variant creation',
+          user_id: user_id!, // Non-null assertion safe because we checked above
+          create_movement: true,
+          validate_availability: false,
+        },
+        prisma,
+      );
+    }
+
+    return variant;
+  }
+
   async updateVariant(
     variantId: number,
     updateVariantDto: UpdateProductVariantDto,
+    tx?: Prisma.TransactionClient,
   ) {
     const context = RequestContextService.getContext();
     const user_id = context?.user_id;
@@ -150,7 +167,8 @@ export class ProductVariantService {
     }
 
     try {
-      const existingVariant = await this.prisma.product_variants.findUnique({
+      const prisma = tx || this.prisma;
+      const existingVariant = await prisma.product_variants.findUnique({
         where: { id: variantId },
         include: {
           products: {
@@ -167,7 +185,7 @@ export class ProductVariantService {
       }
 
       if (updateVariantDto.sku) {
-        const existingSku = await this.prisma.product_variants.findFirst({
+        const existingSku = await prisma.product_variants.findFirst({
           where: {
             sku: updateVariantDto.sku,
             NOT: { id: variantId },
@@ -179,47 +197,12 @@ export class ProductVariantService {
         }
       }
 
-      const { stock_quantity, ...variantData } = updateVariantDto;
+      if (tx) {
+        return this.executeUpdateVariant(tx, variantId, updateVariantDto, existingVariant, user_id);
+      }
 
-      return await this.prisma.$transaction(async (prisma) => {
-        // Actualizar variante
-        const variant = await prisma.product_variants.update({
-          where: { id: variantId },
-          data: {
-            ...variantData,
-            updated_at: new Date(),
-          },
-        });
-
-        // Si cambió el stock, actualizar stock levels
-        if (stock_quantity !== undefined) {
-          const stockDifference =
-            stock_quantity - existingVariant.stock_quantity;
-
-          if (stockDifference !== 0) {
-            const defaultLocation =
-              await this.inventoryLocationsService.getDefaultLocation(
-                existingVariant.products.store_id,
-              );
-
-            await this.stockLevelManager.updateStock(
-              {
-                product_id: existingVariant.product_id,
-                variant_id: variantId,
-                location_id: defaultLocation.id,
-                quantity_change: stockDifference,
-                movement_type: 'adjustment',
-                reason: 'Stock quantity updated from variant edit',
-                user_id: user_id!, // Non-null assertion safe because we checked above
-                create_movement: true,
-                validate_availability: false,
-              },
-              prisma,
-            );
-          }
-        }
-
-        return variant;
+      return await this.prisma.$transaction(async (p) => {
+        return this.executeUpdateVariant(p, variantId, updateVariantDto, existingVariant, user_id);
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -229,6 +212,56 @@ export class ProductVariantService {
       }
       throw error;
     }
+  }
+
+  private async executeUpdateVariant(
+    prisma: Prisma.TransactionClient,
+    variantId: number,
+    updateVariantDto: UpdateProductVariantDto,
+    existingVariant: any,
+    user_id?: number,
+  ) {
+    const { stock_quantity, attributes, ...variantData } = updateVariantDto;
+
+    // Actualizar variante
+    const variant = await prisma.product_variants.update({
+      where: { id: variantId },
+      data: {
+        ...variantData,
+        attributes: attributes !== undefined ? attributes : undefined,
+        updated_at: new Date(),
+      },
+    });
+
+    // Si cambió el stock, actualizar stock levels
+    if (stock_quantity !== undefined) {
+      const stockDifference =
+        stock_quantity - existingVariant.stock_quantity;
+
+      if (stockDifference !== 0) {
+        const defaultLocation =
+          await this.inventoryLocationsService.getDefaultLocation(
+            existingVariant.products.store_id,
+          );
+
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: existingVariant.product_id,
+            variant_id: variantId,
+            location_id: defaultLocation.id,
+            quantity_change: stockDifference,
+            movement_type: 'adjustment',
+            reason: 'Stock quantity updated from variant edit',
+            user_id: user_id!, // Non-null assertion safe because we checked above
+            create_movement: true,
+            validate_availability: false,
+          },
+          prisma,
+        );
+      }
+    }
+
+    return variant;
   }
 
   async removeVariant(variantId: number) {

@@ -151,6 +151,22 @@ export class CreateProductDto {
   @ValidateNested({ each: true })
   @Type(() => StockByLocationDto)
   stock_by_location?: StockByLocationDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateVariantWithStockDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateVariantWithStockDto)
+  variants?: CreateVariantWithStockDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
 }
 
 // DTO para especificar stock por ubicación
@@ -233,6 +249,18 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => StockByLocationDto)
   stock_by_location?: StockByLocationDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateVariantWithStockDto)
+  variants?: CreateVariantWithStockDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ProductImageDto)
+  images?: ProductImageDto[];
 }
 
 export class ProductQueryDto {
@@ -344,6 +372,15 @@ export class UpdateProductVariantDto {
   sku?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  name?: string;
+
+  @IsOptional()
+  @IsObject()
+  attributes?: Record<string, any>;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })
@@ -362,7 +399,6 @@ export class UpdateProductVariantDto {
 
 export class ProductImageDto {
   @IsString()
-  @IsUrl()
   image_url: string;
 
   @IsOptional()

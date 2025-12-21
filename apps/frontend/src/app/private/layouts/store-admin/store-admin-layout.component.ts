@@ -38,7 +38,7 @@ import { takeUntil } from 'rxjs/operators';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile"
         [style.margin-left]="
           !sidebarRef?.isMobile ? (sidebarCollapsed ? '4rem' : '15rem') : '0'
@@ -54,10 +54,10 @@ import { takeUntil } from 'rxjs/operators';
 
         <!-- Page Content -->
         <main
-          class="flex-1 overflow-y-auto px-4 py-2 transition-all duration-300 ease-in-out"
+          class="flex-1 overflow-y-auto overflow-x-hidden px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
-          <div class="w-full h-full">
+          <div class="w-full">
             <router-outlet></router-outlet>
           </div>
         </main>

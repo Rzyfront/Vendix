@@ -9,10 +9,14 @@ import {
   CreateSystemPaymentMethodDto,
   UpdateSystemPaymentMethodDto,
 } from '../dto';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class SystemPaymentMethodsService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private s3Service: S3Service,
+  ) { }
 
   /**
    * Get all system payment methods
@@ -25,10 +29,15 @@ export class SystemPaymentMethodsService {
       where.is_active = true;
     }
 
-    return this.prisma.system_payment_methods.findMany({
+    const methods = await this.prisma.system_payment_methods.findMany({
       where,
       orderBy: { name: 'asc' },
     });
+
+    return Promise.all(methods.map(async (method) => ({
+      ...method,
+      logo_url: await this.s3Service.signUrl(method.logo_url),
+    })));
   }
 
   /**
@@ -54,7 +63,10 @@ export class SystemPaymentMethodsService {
       throw new NotFoundException('System payment method not found');
     }
 
-    return method;
+    return {
+      ...method,
+      logo_url: await this.s3Service.signUrl(method.logo_url),
+    };
   }
 
   /**

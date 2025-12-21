@@ -15,10 +15,14 @@ import {
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class StoresService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private s3Service: S3Service,
+  ) { }
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -61,6 +65,11 @@ export class StoresService {
       },
     });
 
+    const signedStore = {
+      ...store,
+      logo_url: await this.s3Service.signUrl(store.logo_url),
+    };
+
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
       await this.prisma.store_settings.create({
@@ -71,7 +80,7 @@ export class StoresService {
       });
 
       // Refetch to include settings
-      return this.prisma.stores.findUnique({
+      const refetched = await this.prisma.stores.findUnique({
         where: { id: store.id },
         include: {
           organizations: { select: { id: true, name: true, slug: true } },
@@ -82,9 +91,14 @@ export class StoresService {
           },
         },
       });
+
+      return {
+        ...refetched,
+        logo_url: await this.s3Service.signUrl(refetched?.logo_url),
+      };
     }
 
-    return store;
+    return signedStore;
   }
 
   async findAll(query: StoreQueryDto) {
@@ -123,8 +137,13 @@ export class StoresService {
       this.prisma.stores.count({ where }),
     ]);
 
+    const signedStores = await Promise.all(stores.map(async (store) => ({
+      ...store,
+      logo_url: await this.s3Service.signUrl(store.logo_url, true),
+    })));
+
     return {
-      data: stores,
+      data: signedStores,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -151,7 +170,10 @@ export class StoresService {
     if (!store) {
       throw new NotFoundException('Store not found');
     }
-    return store;
+    return {
+      ...store,
+      logo_url: await this.s3Service.signUrl(store.logo_url),
+    };
   }
 
   async update(id: number, updateStoreDto: UpdateStoreDto) {
@@ -169,11 +191,16 @@ export class StoresService {
       });
     }
 
-    return this.prisma.stores.update({
+    const updated = await this.prisma.stores.update({
       where: { id },
       data: { ...storeData, updated_at: new Date() },
       include: { organizations: true, addresses: true, store_settings: true },
     });
+
+    return {
+      ...updated,
+      logo_url: await this.s3Service.signUrl(updated.logo_url),
+    };
   }
 
   async remove(id: number) {
