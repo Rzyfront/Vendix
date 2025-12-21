@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, ActivatedRoute, Router } from '@angular/router';
+import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
     FormBuilder,
     FormGroup,
@@ -19,6 +19,7 @@ import {
     MultiSelectorComponent,
     MultiSelectorOption,
     TextareaComponent,
+    ModalComponent,
 } from '../../../../../../shared/components';
 import {
     CreateProductDto,
@@ -61,6 +62,7 @@ interface GeneratedVariant {
         SelectorComponent,
         MultiSelectorComponent,
         TextareaComponent,
+        ModalComponent,
         CategoryQuickCreateComponent,
         BrandQuickCreateComponent,
     ],
@@ -74,6 +76,8 @@ export class ProductCreatePageComponent implements OnInit {
     product: Product | null = null;
 
     imageUrls: string[] = [];
+    activeImageIndex = 0;
+    isStockDetailsOpen = false;
     categoryOptions: MultiSelectorOption[] = [];
     brandOptions: SelectorOption[] = [];
     taxCategoryOptions: MultiSelectorOption[] = [];
@@ -113,7 +117,7 @@ export class ProductCreatePageComponent implements OnInit {
         this.loadCategoriesAndBrands();
 
         // Check for ID in route to determine edit mode
-        this.route.params.subscribe(params => {
+        this.route.params.subscribe((params: Params) => {
             if (params['id']) {
                 this.productId = +params['id'];
                 this.isEditMode = true;
@@ -134,15 +138,67 @@ export class ProductCreatePageComponent implements OnInit {
             brand_id: [null],
             tax_category_ids: [[] as number[]],
             state: [ProductState.ACTIVE],
-            newImageUrl: [''],
         });
     }
 
     private loadProduct(id: number): void {
-        // Implement load logic
-        // TODO: Need a getProduct(id) method in service that returns full details
-        // For now assuming list loaded it, but best to fetch fresh
-        // this.productsService.getProduct(id).subscribe(...)
+        this.productsService.getProductById(id).subscribe({
+            next: (product: Product) => {
+                this.product = product;
+                this.patchForm(product);
+            },
+            error: (error: any) => {
+                console.error('Error loading product:', error);
+                this.toastService.error('Error al cargar el producto');
+                this.router.navigate(['/admin/products']);
+            }
+        });
+    }
+
+    private patchForm(product: Product): void {
+        // Extract category IDs from product_categories
+        const categoryIds = (product.product_categories || [])
+            .map((pc: any) => pc.category_id)
+            .filter(id => id !== undefined);
+
+        // Extract tax category IDs
+        const taxCategoryIds = (product.product_tax_assignments || [])
+            .map((ta: any) => ta.tax_category_id)
+            .filter(id => id !== undefined);
+
+        this.productForm.patchValue({
+            name: product.name,
+            slug: product.slug,
+            description: product.description,
+            base_price: product.base_price,
+            sku: product.sku,
+            stock_quantity: product.stock_quantity,
+            category_ids: categoryIds,
+            brand_id: product.brand_id,
+            tax_category_ids: taxCategoryIds,
+            state: product.state,
+        });
+
+        // Load images
+        if (product.product_images && product.product_images.length > 0) {
+            this.imageUrls = product.product_images.map((img: any) => img.image_url);
+        }
+
+        // Load variants if present
+        if (product.product_variants && product.product_variants.length > 0) {
+            this.hasVariants = true;
+            this.generatedVariants = product.product_variants.map((v: any) => ({
+                sku: v.sku,
+                name: v.name || `${product.name} - ${v.sku}`,
+                price: v.price_override !== undefined ? Number(v.price_override) : Number(product.base_price),
+                stock: v.stock_quantity,
+                attributes: v.attributes || {}
+            }));
+
+            // Try to reconstruct variantAttributes from variants if possible
+            // This is a bit complex without stored attribute definitions
+            // For now, we just show the generated variants list
+        }
     }
 
     private loadCategoriesAndBrands(): void {
@@ -319,32 +375,60 @@ export class ProductCreatePageComponent implements OnInit {
         this.isBrandCreateOpen = false;
     }
 
+    get totalStockOnHand(): number {
+        return (this.product?.stock_levels || []).reduce((sum, sl: any) => sum + (sl.quantity_on_hand || 0), 0);
+    }
+
+    get totalStockAvailable(): number {
+        return (this.product?.stock_levels || []).reduce((sum, sl: any) => sum + (sl.quantity_available || 0), 0);
+    }
+
+    get totalStockReserved(): number {
+        return (this.product?.stock_levels || []).reduce((sum, sl: any) => sum + (sl.quantity_reserved || 0), 0);
+    }
+
+    get lowStockCount(): number {
+        return (this.product?.stock_levels || []).filter((sl: any) => (sl.quantity_available || 0) <= (sl.reorder_point || 0)).length;
+    }
+
+    get warehouseCount(): number {
+        return new Set((this.product?.stock_levels || []).map((sl: any) => sl.location_id)).size;
+    }
+
+    isExpired(date: Date | string): boolean {
+        if (!date) return false;
+        const expiryDate = new Date(date);
+        const today = new Date();
+        return expiryDate < today;
+    }
+
     triggerFileUpload(): void {
         const fileInput = document.querySelector('.file-input') as HTMLInputElement;
         fileInput?.click();
-    }
-
-    addImageUrl(): void {
-        const urlControl = this.productForm.get('newImageUrl');
-        const url = urlControl?.value?.trim();
-
-        if (url && this.isValidUrl(url)) {
-            this.imageUrls.push(url);
-            urlControl?.setValue('');
-            this.toastService.success('Image added successfully');
-        }
     }
 
     onFileSelect(event: Event): void {
         const input = event.target as HTMLInputElement;
         const files = input.files;
         if (files) {
-            Array.from(files).forEach((file) => {
+            const filesArray = Array.from(files);
+            const remainingSlots = 5 - this.imageUrls.length;
+
+            if (remainingSlots <= 0) {
+                this.toastService.warning('Límite de 5 imágenes alcanzado');
+                input.value = '';
+                return;
+            }
+
+            filesArray.slice(0, remainingSlots).forEach((file) => {
                 if (file.type.startsWith('image/')) {
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const result = e.target?.result as string;
                         this.imageUrls.push(result);
+                        if (this.imageUrls.length === 1) {
+                            this.activeImageIndex = 0;
+                        }
                     };
                     reader.readAsDataURL(file);
                 }
@@ -355,6 +439,23 @@ export class ProductCreatePageComponent implements OnInit {
 
     removeImage(index: number): void {
         this.imageUrls.splice(index, 1);
+        if (this.activeImageIndex >= this.imageUrls.length) {
+            this.activeImageIndex = Math.max(0, this.imageUrls.length - 1);
+        }
+    }
+
+    setActiveImage(index: number): void {
+        this.activeImageIndex = index;
+    }
+
+    nextImage(): void {
+        if (this.imageUrls.length === 0) return;
+        this.activeImageIndex = (this.activeImageIndex + 1) % this.imageUrls.length;
+    }
+
+    prevImage(): void {
+        if (this.imageUrls.length === 0) return;
+        this.activeImageIndex = (this.activeImageIndex - 1 + this.imageUrls.length) % this.imageUrls.length;
     }
 
     onImageError(event: Event): void {

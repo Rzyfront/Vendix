@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './domains/organization/users/users.module';
 import { TestModule } from './test/test.module';
 import { DomainsModule } from './domains/domains.module';
+import { StorageModule } from './storage.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
@@ -24,6 +25,7 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     UsersModule,
     TestModule,
     DomainsModule, // ✅ Módulo de dominios (público y privado)
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [

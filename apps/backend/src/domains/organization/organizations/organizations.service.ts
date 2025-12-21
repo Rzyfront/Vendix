@@ -3,10 +3,14 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateOrganizationDto, OrganizationDashboardDto } from './dto';
 import { Prisma } from '@prisma/client';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private prisma: OrganizationPrismaService) {}
+  constructor(
+    private prisma: OrganizationPrismaService,
+    private s3Service: S3Service,
+  ) { }
 
   async getProfile() {
     // Obtener organization_id del contexto del usuario
@@ -27,7 +31,10 @@ export class OrganizationsService {
       throw new NotFoundException('Organization not found');
     }
 
-    return organization;
+    return {
+      ...organization,
+      logo_url: await this.s3Service.signUrl(organization.logo_url),
+    };
   }
 
   async updateProfile(updateOrganizationDto: UpdateOrganizationDto) {
@@ -38,13 +45,18 @@ export class OrganizationsService {
       throw new NotFoundException('Organization context not found');
     }
 
-    return this.prisma.organizations.update({
+    const updated = await this.prisma.organizations.update({
       where: { id: context.organization_id },
       data: { ...updateOrganizationDto, updated_at: new Date() },
       include: {
         addresses: { where: { is_primary: true } },
       },
     });
+
+    return {
+      ...updated,
+      logo_url: await this.s3Service.signUrl(updated.logo_url),
+    };
   }
 
   async getDashboard(query: OrganizationDashboardDto) {

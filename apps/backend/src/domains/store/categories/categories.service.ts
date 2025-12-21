@@ -16,12 +16,14 @@ import {
   AssignProductToCategoryDto,
 } from './dto';
 import slugify from 'slugify';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class CategoriesService {
   constructor(
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
+    private s3Service: S3Service,
   ) { }
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
@@ -46,10 +48,15 @@ export class CategoriesService {
       state: 'active',
     };
 
-    return this.prisma.categories.create({
+    const category = await this.prisma.categories.create({
       data: categoryData,
       include: { stores: true },
     });
+
+    return {
+      ...category,
+      image_url: await this.s3Service.signUrl(category.image_url),
+    };
   }
 
   async findAll(query: CategoryQueryDto) {
@@ -88,8 +95,13 @@ export class CategoriesService {
       this.prisma.categories.count({ where }),
     ]);
 
+    const signedCategories = await Promise.all(categories.map(async (category) => ({
+      ...category,
+      image_url: await this.s3Service.signUrl(category.image_url, true),
+    })));
+
     return {
-      data: categories,
+      data: signedCategories,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -103,7 +115,11 @@ export class CategoriesService {
       include: { stores: true },
     });
     if (!category) throw new NotFoundException('Category not found');
-    return category;
+
+    return {
+      ...category,
+      image_url: await this.s3Service.signUrl(category.image_url),
+    };
   }
 
   async update(id: number, updateCategoryDto: UpdateCategoryDto, user: any) {
@@ -135,11 +151,16 @@ export class CategoriesService {
     //   updateData.store_id = updateCategoryDto.store_id;
     // }
 
-    return this.prisma.categories.update({
+    const updated = await this.prisma.categories.update({
       where: { id },
       data: updateData,
       include: { stores: true },
     });
+
+    return {
+      ...updated,
+      image_url: await this.s3Service.signUrl(updated.image_url),
+    };
   }
 
   async remove(id: number, user: any) {

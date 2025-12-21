@@ -22,6 +22,7 @@ model users {
   updated_at                DateTime?                   @default(now()) @db.Timestamp(6)
   first_name                String                      @db.VarChar(100)
   last_name                 String                      @db.VarChar(100)
+  avatar_url                String?                     @db.Text
   organization_id           Int
   phone                     String?                     @db.VarChar(50)
   document_number           String?                     @db.VarChar(50)
@@ -230,6 +231,7 @@ model organizations {
   phone                         String?                        @db.VarChar(50)
   website                       String?                        @db.VarChar(255)
   description                   String?
+  logo_url                      String?                        @db.Text
   state                         organization_state_enum        @default(draft)
   created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
@@ -299,6 +301,7 @@ model stores {
   created_at            DateTime?               @default(now()) @db.Timestamp(6)
   updated_at            DateTime?               @default(now()) @db.Timestamp(6)
   is_active             Boolean                 @default(true)
+  logo_url              String?                 @db.Text
   manager_user_id       Int?
   organization_id       Int
   store_code            String?                 @unique @db.VarChar(20)
@@ -593,8 +596,10 @@ model product_variants {
   id                       Int                        @id @default(autoincrement())
   product_id               Int
   sku                      String                     @unique @db.VarChar(100)
+  name                     String?                    @db.VarChar(255)
   price_override           Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
+  attributes               Json?
   image_id                 Int?
   created_at               DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime?                  @default(now()) @db.Timestamp(6)

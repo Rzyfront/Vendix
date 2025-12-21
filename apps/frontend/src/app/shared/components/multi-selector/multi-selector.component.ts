@@ -59,9 +59,10 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
           type="button"
           [disabled]="disabled"
           (click)="toggleDropdown()"
-          class="w-full min-h-[42px] px-3 py-2 text-left border rounded-lg bg-[var(--color-surface)] transition-colors
+          class="w-full min-h-[42px] px-3 py-2 text-left border bg-[var(--color-surface)] transition-colors
                  focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
                  disabled:opacity-50 disabled:cursor-not-allowed"
+          style="border-radius: var(--radius-sm);"
           [class.border-border]="!errorText"
           [class.border-destructive]="errorText"
         >
@@ -69,8 +70,9 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             <!-- Selected chips -->
             <span
               *ngFor="let value of selectedValues"
-              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium
+              class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium
                      bg-primary-50 text-primary-600 border border-primary-200"
+              style="border-radius: var(--radius-sm);"
             >
               {{ getOptionLabel(value) }}
               <button
@@ -100,7 +102,8 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
         <!-- Dropdown -->
         <div
           *ngIf="isOpen"
-          class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border rounded-lg shadow-lg max-h-60 overflow-auto"
+          class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
+          style="border-radius: var(--radius-sm);"
         >
           <!-- Search input -->
           <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
@@ -108,9 +111,10 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
               type="text"
               [(ngModel)]="searchTerm"
               (input)="onSearch()"
-              class="w-full px-3 py-1.5 text-sm border border-border rounded-md
+              class="w-full px-3 py-1.5 text-sm border border-border
                      focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary
                      bg-[var(--color-surface)] text-[var(--color-text-primary)]"
+              style="border-radius: var(--radius-sm);"
               placeholder="Buscar..."
             />
           </div>
@@ -129,10 +133,11 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             >
               <!-- Checkbox indicator -->
               <div
-                class="w-4 h-4 rounded border flex items-center justify-center transition-colors shadow-sm"
+                class="w-4 h-4 border flex items-center justify-center transition-colors shadow-sm"
                 [class.border-primary-600]="isSelected(option.value)"
                 [class.bg-primary-600]="isSelected(option.value)"
                 [class.border-gray-300]="!isSelected(option.value)"
+                style="border-radius: var(--radius-sm);"
               >
                 <app-icon
                   *ngIf="isSelected(option.value)"

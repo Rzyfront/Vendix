@@ -18,6 +18,7 @@ import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AuditService, AuditAction, AuditResource } from '../../superadmin/audit/audit.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class UsersService {
@@ -25,6 +26,7 @@ export class UsersService {
     private prisma: OrganizationPrismaService,
     private emailService: EmailService,
     private auditService: AuditService,
+    private s3Service: S3Service,
   ) { }
 
   async create(createUserDto: CreateUserDto) {
@@ -212,14 +214,19 @@ export class UsersService {
           email_verified: true,
           two_factor_enabled: true,
           organization_id: true,
-
+          avatar_url: true,
         },
       }),
       this.prisma.users.count({ where }),
     ]);
 
+    const signedUsers = await Promise.all(users.map(async (user) => ({
+      ...user,
+      avatar_url: await this.s3Service.signUrl(user.avatar_url, true),
+    })));
+
     return {
-      data: users,
+      data: signedUsers,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -243,7 +250,10 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('User not found');
     }
-    return user;
+    return {
+      ...user,
+      avatar_url: await this.s3Service.signUrl(user.avatar_url),
+    };
   }
 
   async findUserSettings(id: number) {
@@ -258,7 +268,10 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    return user;
+    return {
+      ...user,
+      avatar_url: await this.s3Service.signUrl(user.avatar_url),
+    };
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {

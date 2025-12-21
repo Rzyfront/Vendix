@@ -4,6 +4,7 @@ import { SuperadminDomainModule } from './superadmin/superadmin.module';
 import { OrganizationDomainModule } from './organization/organization.module';
 import { StoreDomainModule } from './store/store.module';
 import { PublicDomainModule } from './public/public.module';
+import { UploadModule } from './upload/upload.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { PublicDomainModule } from './public/public.module';
     OrganizationDomainModule,
     StoreDomainModule,
     PublicDomainModule,
+    UploadModule,
   ],
 })
-export class DomainsModule {}
+export class DomainsModule { }

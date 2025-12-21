@@ -1,27 +1,51 @@
-<div class="p-6 max-w-7xl mx-auto space-y-6">
-    <!-- Compact Header with Back Button and Actions -->
-    <div class="flex items-center justify-between">
-        <button routerLink="/admin/products" class="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-            <app-icon name="arrow-left" size="20" class="text-gray-500"></app-icon>
-        </button>
-        <div class="flex items-center gap-3">
-            <button (click)="onCancel()"
-                class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
+<!-- Top Action Bar / Header -->
+<div class="sticky top-0 z-30 -mx-4 bg-white border-b border-gray-200 shadow-sm rounded-b-xl mb-6">
+    <div
+        class="max-w-[1600px] mx-auto px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div class="flex items-center gap-4">
+            <app-button variant="ghost" routerLink="/admin/products"
+                customClasses="!p-0 !w-10 !h-10 !rounded-xl border border-transparent hover:border-gray-200">
+                <app-icon name="arrow-left" size="20" class="text-gray-500"></app-icon>
+            </app-button>
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center border border-primary-100 shadow-sm">
+                    <app-icon [name]="isEditMode ? 'package' : 'plus-circle'" size="24"
+                        class="text-primary-600"></app-icon>
+                </div>
+                <div class="flex flex-col">
+                    <h1 class="text-xl font-bold text-gray-900 leading-tight">
+                        {{ isEditMode ? 'Editar Producto' : 'Nuevo Producto' }}
+                    </h1>
+                    <p class="text-sm text-gray-500 font-medium">
+                        {{ isEditMode ? 'Gestiona la información, imagenes, variantes e inventario' : 'Registra un nuevo
+                        producto en tu catálogo digital' }}
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-3 w-full sm:w-auto">
+            <app-button variant="outline" (clicked)="onCancel()"
+                customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
                 Cancelar
-            </button>
-            <app-button [loading]="isSubmitting" (click)="onSubmit()" variant="primary">
-                {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
+            </app-button>
+            <app-button [loading]="isSubmitting" (clicked)="onSubmit()" variant="primary"
+                customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
+                <span class="px-2">{{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}</span>
             </app-button>
         </div>
     </div>
+</div>
+
+<div class="p-6 space-y-6 max-w-[1600px] mx-auto">
 
     <form [formGroup]="productForm" class="space-y-6">
         <!-- Main Grid: General Info + Images -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
             <!-- Left Column: General Information (2 cols) -->
-            <div class="lg:col-span-2">
-                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+            <div class="lg:col-span-2 flex flex-col h-full">
+                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex-1">
                     <h2 class="text-lg font-semibold text-gray-900 mb-6">Información General</h2>
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -77,7 +101,8 @@
                                     formControlName="category_ids"
                                     placeholder="Seleccionar categorías..."></app-multi-selector>
                                 <button type="button" (click)="isCategoryCreateOpen = true"
-                                    class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg border border-gray-300 bg-white mb-0.5">
+                                    class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+                                    style="border-radius: var(--radius-sm);">
                                     <app-icon name="plus" size="20"></app-icon>
                                 </button>
                             </div>
@@ -89,7 +114,8 @@
                                 <app-selector class="flex-1" label="Marca" [options]="brandOptions"
                                     formControlName="brand_id" placeholder="Seleccionar marca"></app-selector>
                                 <button type="button" (click)="isBrandCreateOpen = true"
-                                    class="p-2 text-gray-500 hover:bg-gray-100 rounded-lg border border-gray-300 bg-white mb-0.5">
+                                    class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+                                    style="border-radius: var(--radius-sm);">
                                     <app-icon name="plus" size="20"></app-icon>
                                 </button>
                             </div>
@@ -104,46 +130,158 @@
                 </div>
             </div>
 
-            <!-- Right Column: Images -->
-            <div>
-                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">Imágenes</h2>
+            <!-- Right Column: Images & Stock -->
+            <div class="flex flex-col gap-6 h-full">
+                <!-- Images Section -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:flex-1 lg:flex lg:flex-col">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4 flex-none">Imágenes del Producto</h2>
 
-                    <div class="space-y-4">
-                        <!-- Image URL input -->
-                        <div class="flex gap-2">
-                            <input type="text" class="flex-1 rounded-lg border-gray-300 text-sm"
-                                placeholder="URL de la imagen" formControlName="newImageUrl"
-                                (keyup.enter)="addImageUrl()">
-                            <button type="button" (click)="addImageUrl()"
-                                class="px-3 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 text-gray-600">
-                                <app-icon name="plus" size="18"></app-icon>
-                            </button>
+                    <div class="space-y-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between">
+                        <!-- Main Preview / Carousel Area -->
+                        <div
+                            class="relative aspect-video w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
+                            <ng-container *ngIf="imageUrls.length > 0; else emptyState">
+                                <img [src]="imageUrls[activeImageIndex]"
+                                    class="w-full h-full object-contain p-4 bg-white" (error)="onImageError($event)">
+
+                                <!-- Carousel Controls (Floating) -->
+                                <button *ngIf="imageUrls.length > 1" type="button" (click)="prevImage()"
+                                    class="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10">
+                                    <app-icon name="chevron-left" size="20"></app-icon>
+                                </button>
+                                <button *ngIf="imageUrls.length > 1" type="button" (click)="nextImage()"
+                                    class="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10">
+                                    <app-icon name="chevron-right" size="20"></app-icon>
+                                </button>
+
+                                <!-- Status Badges -->
+                                <div class="absolute top-3 left-3 flex flex-col gap-2">
+                                    <div *ngIf="activeImageIndex === 0"
+                                        class="px-2 py-1 bg-primary-600/90 text-white text-[10px] font-bold uppercase rounded-md tracking-wider shadow-sm backdrop-blur-sm">
+                                        Principal
+                                    </div>
+                                </div>
+
+                                <!-- Hover Actions -->
+                                <div class="absolute top-3 right-3 flex gap-2">
+                                    <button type="button" (click)="removeImage(activeImageIndex)"
+                                        class="p-2 bg-red-500/90 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-sm hover:bg-red-600 transform hover:scale-110">
+                                        <app-icon name="trash-2" size="16"></app-icon>
+                                    </button>
+                                </div>
+
+                                <!-- Pagination Indicator -->
+                                <div
+                                    class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 items-center px-3 py-1 bg-black/40 text-white text-[11px] rounded-full backdrop-blur-sm font-medium">
+                                    {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
+                                </div>
+                            </ng-container>
+
+                            <ng-template #emptyState>
+                                <div
+                                    class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/50">
+                                    <div
+                                        class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
+                                        <app-icon name="image" size="32" class="opacity-20 text-gray-400"></app-icon>
+                                    </div>
+                                    <p class="text-sm font-semibold text-gray-600">Sin imágenes aún</p>
+                                    <p class="text-xs mt-1 text-gray-500">Agrega hasta 5 fotos para cautivar a tus
+                                        clientes</p>
+                                </div>
+                            </ng-template>
                         </div>
 
-                        <!-- Image grid -->
-                        <div class="grid grid-cols-2 gap-2">
-                            <div *ngFor="let url of imageUrls; let i = index"
-                                class="relative group aspect-square bg-gray-100 rounded-lg overflow-hidden border border-gray-200">
+                        <!-- Thumbnails Area -->
+                        <div class="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+                            <div *ngFor="let url of imageUrls; let i = index" (click)="setActiveImage(i)"
+                                [class.ring-2]="activeImageIndex === i" [class.ring-primary]="activeImageIndex === i"
+                                class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300">
                                 <img [src]="url" class="w-full h-full object-cover" (error)="onImageError($event)">
-                                <button type="button" (click)="removeImage(i)"
-                                    class="absolute top-1 right-1 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <app-icon name="x" size="14"></app-icon>
-                                </button>
-                                <div *ngIf="i === 0"
-                                    class="absolute bottom-0 inset-x-0 bg-black/50 text-white text-xs py-1 text-center">
-                                    Principal
+                                <div *ngIf="i === 0" class="absolute top-0 left-0 w-3 h-3 bg-primary-500 rounded-br-md">
                                 </div>
                             </div>
 
-                            <!-- Upload Placeholder -->
+                            <!-- Small Plus Button (only if < 5) -->
+                            <div *ngIf="imageUrls.length < 5 && imageUrls.length > 0" (click)="triggerFileUpload()"
+                                class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all group">
+                                <app-icon name="plus" size="20"
+                                    class="text-gray-400 group-hover:text-primary-500 transition-colors"></app-icon>
+                            </div>
+                        </div>
+
+                        <!-- Drag & Drop Indicative Box -->
+                        <div *ngIf="imageUrls.length < 5" class="group mt-4 relative">
                             <div (click)="triggerFileUpload()"
-                                class="aspect-square bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
-                                <app-icon name="image" size="24" class="text-gray-400 mb-2"></app-icon>
-                                <span class="text-xs text-gray-500">Subir</span>
+                                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md">
+                                <div
+                                    class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform">
+                                    <app-icon name="upload-cloud" size="24" class="text-primary-500"></app-icon>
+                                </div>
+                                <p class="text-[13px] font-semibold text-gray-700">Subir imágenes</p>
                                 <input type="file" class="hidden file-input" accept="image/*" multiple
                                     (change)="onFileSelect($event)">
                             </div>
+                        </div>
+
+                        <!-- Info message if list is full -->
+                        <div *ngIf="imageUrls.length >= 5"
+                            class="p-3 bg-amber-50 rounded-lg border border-amber-100 flex items-start gap-3">
+                            <app-icon name="info" size="18" class="text-amber-500 mt-0.5"></app-icon>
+                            <p class="text-xs text-amber-700 leading-relaxed">
+                                Has alcanzado el límite máximo de 5 imágenes.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stock Section -->
+                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:flex-1 lg:flex lg:flex-col">
+                    <div class="flex items-center justify-between mb-4 flex-none">
+                        <h2 class="text-lg font-semibold text-gray-900">Inventario / Stock</h2>
+                        <button *ngIf="isEditMode" type="button" (click)="isStockDetailsOpen = true"
+                            class="text-xs font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                            <app-icon name="list" size="14"></app-icon>
+                            Ver detalle
+                        </button>
+                    </div>
+
+                    <div class="lg:flex-1 lg:flex lg:flex-col lg:justify-center">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <span
+                                    class="block text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Total
+                                    Físico</span>
+                                <span class="text-xl font-bold text-gray-800">{{ totalStockOnHand }}</span>
+                            </div>
+                            <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <span
+                                    class="block text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Disponible</span>
+                                <span class="text-xl font-bold text-primary-600">{{ totalStockAvailable }}</span>
+                            </div>
+                            <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <span
+                                    class="block text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Stock
+                                    Bajo</span>
+                                <span class="text-xl font-bold" [class.text-red-500]="lowStockCount > 0"
+                                    [class.text-gray-400]="lowStockCount === 0">
+                                    {{ lowStockCount }} bodegas
+                                </span>
+                            </div>
+                            <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                                <span
+                                    class="block text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Bodegas</span>
+                                <span class="text-xl font-bold text-gray-800">{{ warehouseCount }}</span>
+                            </div>
+                        </div>
+
+                        <div
+                            class="mt-4 p-3 bg-blue-50/50 rounded-lg border border-blue-100 flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <app-icon name="package" size="18" class="text-blue-500"></app-icon>
+                                <span class="text-xs text-blue-700 font-medium font-medium">Reservado para
+                                    órdenes</span>
+                            </div>
+                            <span class="text-sm font-bold text-blue-800">{{ totalStockReserved }}</span>
                         </div>
                     </div>
                 </div>
@@ -276,3 +414,128 @@
 
 <app-brand-quick-create [isOpen]="isBrandCreateOpen" (openChange)="isBrandCreateOpen = $event"
     (created)="onBrandCreated($event)"></app-brand-quick-create>
+
+<!-- Stock Details Modal -->
+<app-modal [isOpen]="isStockDetailsOpen" (closed)="isStockDetailsOpen = false" [title]="'Detalle de Inventario'"
+    size="lg">
+    <div class="space-y-6">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Total en Sistema</p>
+                <p class="text-2xl font-bold text-gray-900">{{ totalStockOnHand }}</p>
+            </div>
+            <div class="p-4 bg-green-50 rounded-xl border border-green-100">
+                <p class="text-[10px] text-green-600 uppercase font-bold tracking-wider mb-1">Total Disponible</p>
+                <p class="text-2xl font-bold text-green-700">{{ totalStockAvailable }}</p>
+            </div>
+            <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                <p class="text-[10px] text-blue-600 uppercase font-bold tracking-wider mb-1">Total Reservado</p>
+                <p class="text-2xl font-bold text-blue-700">{{ totalStockReserved }}</p>
+            </div>
+        </div>
+
+        <!-- Inventory by Location Table -->
+        <div>
+            <h3 class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <app-icon name="building-2" size="16" class="text-gray-400"></app-icon>
+                Existencias por Bodega
+            </h3>
+            <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th
+                                class="px-4 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Bodega</th>
+                            <th
+                                class="px-4 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Físico</th>
+                            <th
+                                class="px-4 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Reservado</th>
+                            <th
+                                class="px-4 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Disponible</th>
+                            <th
+                                class="px-4 py-3 text-right text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Próx. Reorden</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200" *ngIf="product?.stock_levels">
+                        <tr *ngFor="let sl of product!.stock_levels"
+                            [class.bg-red-50/30]="sl.quantity_available <= (sl.reorder_point || 0)">
+                            <td class="px-4 py-3">
+                                <span class="text-sm font-semibold text-gray-900">{{ sl.inventory_locations.name
+                                    }}</span>
+                                <span class="block text-[10px] text-gray-500 uppercase">{{ sl.inventory_locations.type
+                                    }}</span>
+                            </td>
+                            <td class="px-4 py-3 text-center text-sm text-gray-700 font-medium">{{ sl.quantity_on_hand
+                                }}</td>
+                            <td class="px-4 py-3 text-center text-sm text-blue-600 font-medium">{{ sl.quantity_reserved
+                                }}</td>
+                            <td class="px-4 py-3 text-center">
+                                <span class="px-2 py-1 rounded-md text-xs font-bold"
+                                    [class.bg-green-100]="sl.quantity_available > (sl.reorder_point || 0)"
+                                    [class.text-green-700]="sl.quantity_available > (sl.reorder_point || 0)"
+                                    [class.bg-red-100]="sl.quantity_available <= (sl.reorder_point || 0)"
+                                    [class.text-red-700]="sl.quantity_available <= (sl.reorder_point || 0)">
+                                    {{ sl.quantity_available }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-right text-sm text-gray-500">{{ sl.reorder_point || '-' }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Batches Table -->
+        <div *ngIf="product?.inventory_batches && product!.inventory_batches!.length > 0">
+            <h3 class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                <app-icon name="barcode" size="16" class="text-gray-400"></app-icon>
+                Lotes y Vencimientos
+            </h3>
+            <div class="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th
+                                class="px-4 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Lote #</th>
+                            <th
+                                class="px-4 py-3 text-left text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Bodega</th>
+                            <th
+                                class="px-4 py-3 text-center text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Remanente</th>
+                            <th
+                                class="px-4 py-3 text-right text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                Vencimiento</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        <tr *ngFor="let batch of product?.inventory_batches">
+                            <td class="px-4 py-3 text-sm font-bold text-gray-900 underline decoration-primary/30">{{
+                                batch.batch_number }}</td>
+                            <td class="px-4 py-3 text-sm text-gray-600">{{ batch.inventory_locations.name }}</td>
+                            <td class="px-4 py-3 text-center text-sm font-semibold text-primary-700 bg-primary-50/30">{{
+                                batch.quantity_remaining }}</td>
+                            <td class="px-4 py-3 text-right">
+                                <span class="text-sm font-medium"
+                                    [class.text-red-600]="batch.expiry_date && isExpired(batch.expiry_date)">
+                                    {{ batch.expiry_date ? (batch.expiry_date | date:'dd/MM/yyyy') : 'N/A' }}
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex justify-end pt-6 mt-6 border-t border-gray-100">
+        <app-button variant="primary" (clicked)="isStockDetailsOpen = false">Cerrar</app-button>
+    </div>
+</app-modal>

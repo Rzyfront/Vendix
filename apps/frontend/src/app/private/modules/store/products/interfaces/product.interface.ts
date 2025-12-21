@@ -25,8 +25,51 @@ export interface Product {
   variants?: ProductVariant[];
   images?: ProductImage[];
   categories?: ProductCategory[];
-  product_categories?: { categories: ProductCategory }[];
+  product_categories?: ProductSubCategory[]; // Updated
+  product_tax_assignments?: ProductTaxAssignment[]; // Updated
+  product_images?: ProductImage[]; // Added
+  product_variants?: ProductVariant[]; // Added
   tax_assignments?: ProductTaxAssignment[];
+  stock_levels?: StockLevel[];
+  inventory_batches?: InventoryBatch[];
+  total_stock_available?: number;
+  total_stock_reserved?: number;
+}
+
+export interface StockLevel {
+  id: number;
+  product_id: number;
+  location_id: number;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  reorder_point?: number;
+  max_stock?: number;
+  inventory_locations: {
+    id: number;
+    name: string;
+    type: string;
+  };
+}
+
+export interface InventoryBatch {
+  id: number;
+  product_id: number;
+  location_id: number;
+  batch_number: string;
+  quantity_initial: number;
+  quantity_remaining: number;
+  expiry_date?: Date;
+  status: string;
+  inventory_locations: {
+    id: number;
+    name: string;
+  };
+}
+
+export interface ProductSubCategory {
+  category_id: number;
+  categories: ProductCategory;
 }
 
 export interface ProductVariant {
