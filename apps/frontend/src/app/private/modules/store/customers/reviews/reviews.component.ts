@@ -8,8 +8,12 @@ import { CommonModule } from '@angular/common';
   template: `
     <div class="p-6">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Customer Reviews</h1>
-        <p class="text-gray-600">Manage customer reviews and ratings</p>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">
+          Reseñas de Clientes
+        </h1>
+        <p class="text-gray-600">
+          Gestiona reseñas y calificaciones de clientes
+        </p>
       </div>
 
       <div class="bg-white rounded-lg shadow-sm border p-8">
@@ -32,11 +36,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Reviews Management
+            Gestión de Reseñas
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Customer reviews management is under development. You will be able
-            to manage customer feedback and ratings here.
+            La gestión de reseñas de clientes está en desarrollo. Podrás
+            gestionar comentarios y calificaciones de clientes aquí.
           </p>
         </div>
       </div>

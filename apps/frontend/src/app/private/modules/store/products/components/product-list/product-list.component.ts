@@ -56,7 +56,10 @@ export class ProductListComponent {
   @Output() edit = new EventEmitter<Product>();
   @Output() delete = new EventEmitter<Product>();
   @Output() bulkUpload = new EventEmitter<void>();
-  @Output() sort = new EventEmitter<{ column: string; direction: 'asc' | 'desc' | null }>();
+  @Output() sort = new EventEmitter<{
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }>();
 
   searchTerm = '';
   selectedState = '';
@@ -79,11 +82,17 @@ export class ProductListComponent {
         return mainImage ? mainImage.image_url : value[0].image_url;
       },
     },
-    { key: 'name', label: 'Name', sortable: true, width: '250px', priority: 1 },
+    {
+      key: 'name',
+      label: 'Nombre',
+      sortable: true,
+      width: '250px',
+      priority: 1,
+    },
     { key: 'sku', label: 'SKU', sortable: true, width: '120px', priority: 2 },
     {
       key: 'base_price',
-      label: 'Price',
+      label: 'Precio',
       sortable: true,
       width: '100px',
       align: 'right',
@@ -101,7 +110,7 @@ export class ProductListComponent {
     },
     {
       key: 'state',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '100px',
       align: 'center',
@@ -118,7 +127,6 @@ export class ProductListComponent {
       },
       transform: (value: ProductState) => this.formatProductState(value),
     },
-
   ];
 
   tableActions: TableAction[] = [
@@ -172,13 +180,15 @@ export class ProductListComponent {
   }
 
   getEmptyStateTitle(): string {
-    return this.hasFilters ? 'No products match your filters' : 'No products found';
+    return this.hasFilters
+      ? 'Ningún producto coincide con sus filtros'
+      : 'No se encontraron productos';
   }
 
   getEmptyStateDescription(): string {
     return this.hasFilters
-      ? 'Try adjusting your search terms or filters'
-      : 'Get started by creating your first product.';
+      ? 'Intente ajustar sus términos de búsqueda o filtros'
+      : 'Comience creando su primer producto.';
   }
 
   get hasFilters(): boolean {

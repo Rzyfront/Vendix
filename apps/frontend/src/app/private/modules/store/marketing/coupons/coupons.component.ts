@@ -9,9 +9,9 @@ import { CommonModule } from '@angular/common';
     <div class="p-6">
       <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900 mb-2">
-          Coupons & Discounts
+          Cupones y Descuentos
         </h1>
-        <p class="text-gray-600">Create and manage discount coupons</p>
+        <p class="text-gray-600">Crea y gestiona cupones de descuento</p>
       </div>
 
       <div class="bg-white rounded-lg shadow-sm border p-8">
@@ -34,11 +34,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Coupons Management
+            Gestión de Cupones
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Coupon management is under development. You will be able to create
-            and manage discount coupons here.
+            La gestión de cupones está en desarrollo. Podrás crear
+            y gestionar cupones de descuento aquí.
           </p>
         </div>
       </div>

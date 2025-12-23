@@ -36,11 +36,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Marketing Module
+            Módulo de Mercadotecnia
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            This module is under development. You will be able to manage
-            promotions and marketing campaigns here.
+            Este módulo está en desarrollo. Podrás gestionar
+            promociones y campañas de marketing aquí.
           </p>
         </div>
       </div>

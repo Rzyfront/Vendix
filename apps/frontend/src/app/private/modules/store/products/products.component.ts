@@ -13,13 +13,13 @@ import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 
 // Models
 import {
-    Product,
-    CreateProductDto,
-    UpdateProductDto,
-    ProductQueryDto,
-    ProductStats,
-    ProductCategory,
-    Brand,
+  Product,
+  CreateProductDto,
+  UpdateProductDto,
+  ProductQueryDto,
+  ProductStats,
+  ProductCategory,
+  Brand,
 } from './interfaces';
 
 // Components
@@ -29,50 +29,50 @@ import { BulkUploadModalComponent } from './components/bulk-upload-modal/bulk-up
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 
 @Component({
-    selector: 'app-products',
-    standalone: true,
-    imports: [
-        CommonModule,
-        ProductListComponent,
-        ProductCreateModalComponent,
-        BulkUploadModalComponent,
-        StatsComponent,
-    ],
-    providers: [ProductsService],
-    template: `
+  selector: 'app-products',
+  standalone: true,
+  imports: [
+    CommonModule,
+    ProductListComponent,
+    ProductCreateModalComponent,
+    BulkUploadModalComponent,
+    StatsComponent,
+  ],
+  providers: [ProductsService],
+  template: `
     <div class="p-6">
       <!-- Stats Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <app-stats
-          title="Total Products"
+          title="Productos Totales"
           [value]="stats.total_products"
           [smallText]="getGrowthPercentage(5.2) + ' vs last month'"
           iconName="package"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
-        
+
         <app-stats
-          title="Active Products"
+          title="Productos Activos"
           [value]="stats.active_products"
           [smallText]="getGrowthPercentage(2.1) + ' vs last month'"
           iconName="check-circle"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
-        
+
         <app-stats
-          title="Low Stock"
+          title="Stock Bajo"
           [value]="stats.low_stock_products"
           [smallText]="stats.out_of_stock_products + ' out of stock'"
           iconName="alert-triangle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
-        
+
         <app-stats
-          title="Total Value"
-          [value]="((stats.total_value || 0) | currency) || '$0.00'"
+          title="Valor Total"
+          [value]="(stats.total_value || 0 | currency) || '$0.00'"
           [smallText]="'+12% vs last month'"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -92,7 +92,6 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (create)="openCreateModal()"
         (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
-
         (bulkUpload)="openBulkUploadModal()"
       ></app-product-list>
 
@@ -115,189 +114,193 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   `,
 })
 export class ProductsComponent implements OnInit, OnDestroy {
-    products: Product[] = [];
-    categories: ProductCategory[] = [];
-    brands: Brand[] = [];
-    isLoading = false;
+  products: Product[] = [];
+  categories: ProductCategory[] = [];
+  brands: Brand[] = [];
+  isLoading = false;
 
-    // Stats
-    stats: ProductStats = {
-        total_products: 0,
-        active_products: 0,
-        inactive_products: 0,
-        archived_products: 0,
-        low_stock_products: 0,
-        out_of_stock_products: 0,
-        total_value: 0,
-        categories_count: 0,
-        brands_count: 0,
+  // Stats
+  stats: ProductStats = {
+    total_products: 0,
+    active_products: 0,
+    inactive_products: 0,
+    archived_products: 0,
+    low_stock_products: 0,
+    out_of_stock_products: 0,
+    total_value: 0,
+    categories_count: 0,
+    brands_count: 0,
+  };
+
+  // Queries
+  searchTerm = '';
+  currentFilters: Partial<ProductQueryDto> = {};
+
+  // Modal State
+  isCreateModalOpen = false;
+  isBulkUploadModalOpen = false;
+  isCreatingProduct = false;
+
+  private subscriptions: Subscription[] = [];
+
+  constructor(
+    private productsService: ProductsService,
+    private categoriesService: CategoriesService,
+    private brandsService: BrandsService,
+    private toastService: ToastService,
+    private dialogService: DialogService,
+    private tenantFacade: TenantFacade,
+    private router: Router, // Inject Router
+  ) {}
+
+  ngOnInit(): void {
+    this.loadProducts();
+    this.loadStats();
+    this.loadCategories();
+    this.loadBrands();
+  }
+
+  ngOnDestroy(): void {
+    this.subscriptions.forEach((sub) => sub.unsubscribe());
+  }
+
+  loadProducts(): void {
+    this.isLoading = true;
+    const query: ProductQueryDto = {
+      ...(this.searchTerm && { search: this.searchTerm }),
+      ...this.currentFilters,
     };
 
-    // Queries
-    searchTerm = '';
-    currentFilters: Partial<ProductQueryDto> = {};
+    const sub = this.productsService.getProducts(query).subscribe({
+      next: (response: any) => {
+        if (response.data) {
+          this.products = response.data;
+        } else {
+          this.products = [];
+        }
+        this.isLoading = false;
+      },
+      error: (error: any) => {
+        console.error('Error loading products:', error);
+        this.isLoading = false;
+      },
+    });
+    this.subscriptions.push(sub);
+  }
 
-    // Modal State
-    isCreateModalOpen = false;
-    isBulkUploadModalOpen = false;
-    isCreatingProduct = false;
+  loadStats(): void {
+    const currentStore = this.tenantFacade.getCurrentStore();
+    if (!currentStore || !currentStore.id) return;
 
-    private subscriptions: Subscription[] = [];
+    const storeId = parseInt(currentStore.id, 10);
+    if (isNaN(storeId)) return;
 
-    constructor(
-        private productsService: ProductsService,
-        private categoriesService: CategoriesService,
-        private brandsService: BrandsService,
-        private toastService: ToastService,
-        private dialogService: DialogService,
-        private tenantFacade: TenantFacade,
-        private router: Router // Inject Router
-    ) { }
+    const sub = this.productsService.getProductStats(storeId).subscribe({
+      next: (response: any) => {
+        if (response) this.stats = response;
+      },
+      error: console.error,
+    });
+    this.subscriptions.push(sub);
+  }
 
-    ngOnInit(): void {
+  loadCategories(): void {
+    this.categoriesService
+      .getCategories()
+      .subscribe((cats) => (this.categories = cats));
+  }
+
+  loadBrands(): void {
+    this.brandsService
+      .getBrands()
+      .subscribe((brands) => (this.brands = brands));
+  }
+
+  // Event Handlers
+  onSearch(term: string): void {
+    this.searchTerm = term;
+    this.loadProducts();
+  }
+
+  onFilter(filters: Partial<ProductQueryDto>): void {
+    this.currentFilters = filters;
+    this.loadProducts();
+  }
+
+  openCreateModal(): void {
+    this.isCreateModalOpen = true;
+  }
+
+  navigateToEditPage(product: Product): void {
+    this.router.navigate(['/admin/products/edit', product.id]);
+  }
+
+  onModalClose(): void {
+    this.isCreateModalOpen = false;
+  }
+  onSaveProduct(data: any): void {
+    this.createProduct(data);
+  }
+
+  createProduct(data: CreateProductDto): void {
+    this.isCreatingProduct = true;
+    const sub = this.productsService.createProduct(data).subscribe({
+      next: () => {
+        this.toastService.success('Producto creado exitosamente');
+        this.isCreatingProduct = false;
+        this.onModalClose();
         this.loadProducts();
         this.loadStats();
-        this.loadCategories();
-        this.loadBrands();
-    }
+      },
+      error: () => {
+        this.toastService.error('Error al crear producto');
+        this.isCreatingProduct = false;
+      },
+    });
+    this.subscriptions.push(sub);
+  }
 
-    ngOnDestroy(): void {
-        this.subscriptions.forEach((sub) => sub.unsubscribe());
-    }
-
-    loadProducts(): void {
-        this.isLoading = true;
-        const query: ProductQueryDto = {
-            ...(this.searchTerm && { search: this.searchTerm }),
-            ...this.currentFilters,
-        };
-
-        const sub = this.productsService.getProducts(query).subscribe({
-            next: (response: any) => {
-                if (response.data) {
-                    this.products = response.data;
-                } else {
-                    this.products = [];
-                }
-                this.isLoading = false;
-            },
-            error: (error: any) => {
-                console.error('Error loading products:', error);
-                this.isLoading = false;
-            },
-        });
-        this.subscriptions.push(sub);
-    }
-
-    loadStats(): void {
-        const currentStore = this.tenantFacade.getCurrentStore();
-        if (!currentStore || !currentStore.id) return;
-
-        const storeId = parseInt(currentStore.id, 10);
-        if (isNaN(storeId)) return;
-
-        const sub = this.productsService.getProductStats(storeId).subscribe({
-            next: (response: any) => {
-                if (response) this.stats = response;
-            },
-            error: (console.error),
-        });
-        this.subscriptions.push(sub);
-    }
-
-    loadCategories(): void {
-        this.categoriesService.getCategories().subscribe(cats => this.categories = cats);
-    }
-
-    loadBrands(): void {
-        this.brandsService.getBrands().subscribe(brands => this.brands = brands);
-    }
-
-    // Event Handlers
-    onSearch(term: string): void {
-        this.searchTerm = term;
-        this.loadProducts();
-    }
-
-    onFilter(filters: Partial<ProductQueryDto>): void {
-        this.currentFilters = filters;
-        this.loadProducts();
-    }
-
-    openCreateModal(): void {
-        this.isCreateModalOpen = true;
-    }
-
-    navigateToEditPage(product: Product): void {
-        this.router.navigate(['/admin/products/edit', product.id]);
-    }
-
-    onModalClose(): void {
-        this.isCreateModalOpen = false;
-    }
-    onSaveProduct(data: any): void {
-        this.createProduct(data);
-    }
-
-    createProduct(data: CreateProductDto): void {
-        this.isCreatingProduct = true;
-        const sub = this.productsService.createProduct(data).subscribe({
+  deleteProduct(product: Product): void {
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Producto',
+        message: `¿Está seguro de que desea eliminar "${product.name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.productsService.deleteProduct(product.id).subscribe({
             next: () => {
-                this.toastService.success('Product created successfully');
-                this.isCreatingProduct = false;
-                this.onModalClose();
-                this.loadProducts();
-                this.loadStats();
+              this.toastService.success('Producto eliminado exitosamente');
+              this.loadProducts();
+              this.loadStats();
             },
-            error: () => {
-                this.toastService.error('Error creating product');
-                this.isCreatingProduct = false;
-            }
-        });
-        this.subscriptions.push(sub);
-    }
+            error: () => this.toastService.error('Error al eliminar producto'),
+          });
+        }
+      });
+  }
 
-    deleteProduct(product: Product): void {
-        this.dialogService.confirm({
-            title: 'Eliminar Producto',
-            message: `¿Está seguro de que desea eliminar "${product.name}"? Esta acción no se puede deshacer.`,
-            confirmText: 'Eliminar',
-            cancelText: 'Cancelar',
-            confirmVariant: 'danger',
-        }).then((confirmed) => {
-            if (confirmed) {
-                this.productsService.deleteProduct(product.id).subscribe({
-                    next: () => {
-                        this.toastService.success('Product deleted successfully');
-                        this.loadProducts();
-                        this.loadStats();
-                    },
-                    error: () => this.toastService.error('Error deleting product')
-                });
-            }
-        });
-    }
+  // Bulk Upload
+  openBulkUploadModal(): void {
+    this.isBulkUploadModalOpen = true;
+  }
 
+  onBulkUploadClose(): void {
+    this.isBulkUploadModalOpen = false;
+  }
 
+  onBulkUploadComplete(): void {
+    this.isBulkUploadModalOpen = false;
+    this.loadProducts();
+    this.loadStats();
+    this.toastService.success('Carga masiva completada');
+  }
 
-    // Bulk Upload
-    openBulkUploadModal(): void {
-        this.isBulkUploadModalOpen = true;
-    }
-
-    onBulkUploadClose(): void {
-        this.isBulkUploadModalOpen = false;
-    }
-
-    onBulkUploadComplete(): void {
-        this.isBulkUploadModalOpen = false;
-        this.loadProducts();
-        this.loadStats();
-        this.toastService.success('Carga masiva completada');
-    }
-
-    // Helpers
-    getGrowthPercentage(val: number): string {
-        return val > 0 ? `+${val}%` : `${val}%`;
-    }
+  // Helpers
+  getGrowthPercentage(val: number): string {
+    return val > 0 ? `+${val}%` : `${val}%`;
+  }
 }
