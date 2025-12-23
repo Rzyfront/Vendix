@@ -270,7 +270,7 @@ export class RegisterOwnerComponent {
     if (this.registerForm.valid) {
       this.isLoading = true;
       this.clearError();
-
+    
       this.authService.registerOwner(this.registerForm.value).subscribe({
         next: async (result) => {
           if (result.success && result.data) {
@@ -298,8 +298,7 @@ export class RegisterOwnerComponent {
 
             // 🔄 ESPERAR CONFIRMACIÓN DE AUTENTICACIÓN y navegar correctamente
             // Esperar a que el estado de autenticación se actualice completamente
-            console.log('🔐 Esperando confirmación de estado de autenticación...');
-
+            
             // Dar tiempo al store para procesar la acción de restoreAuthState
             setTimeout(async () => {
               try {
@@ -307,13 +306,11 @@ export class RegisterOwnerComponent {
                 const isAuthenticated = this.authFacade.isLoggedIn();
 
                 if (isAuthenticated) {
-                  console.log('✅ Usuario autenticado correctamente, redirigiendo...');
-
+                  
                   // Obtener el environment del usuario
                   const userEnvironment = user_settings?.config?.app;
                   const userRoles = user.roles || [];
-
-                  console.log('🔐 Usuario con environment:', userEnvironment, 'roles:', userRoles);
+                  
 
                   // Forzar la actualización del environment usando el patrón de AuthEffects
                   const currentConfig = this.configFacade.getCurrentConfig();
@@ -339,13 +336,11 @@ export class RegisterOwnerComponent {
                     await this.router.navigateByUrl('/admin', { replaceUrl: true });
                   }
                 } else {
-                  console.error('❌ Error: Usuario no autenticado después del registro');
                   this.toast.error('Error al iniciar sesión. Por favor, intenta manualmente.');
                   // Redirigir al login como fallback
                   await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
                 }
               } catch (error) {
-                console.error('❌ Error en navegación post-registro:', error);
                 this.toast.error('Error al redirigir. Por favor, inicia sesión manualmente.');
                 await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
               }
