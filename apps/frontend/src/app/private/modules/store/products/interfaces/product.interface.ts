@@ -4,6 +4,13 @@ export enum ProductState {
   ARCHIVED = 'archived',
 }
 
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
+}
+
 export interface Product {
   id: number;
   store_id: number;
@@ -186,6 +193,13 @@ export interface StockByLocationDto {
   notes?: string;
 }
 
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
+}
+
 // Query DTOs
 export interface ProductQueryDto {
   page?: number;
@@ -288,6 +302,30 @@ export interface VariantAttributeValue {
   attribute_id: number;
   attribute_name: string;
   value: string | number | boolean;
+}
+
+// UI interfaces for selectors and filters
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
+}
+
+// UI interfaces for selectors (following orders pattern)
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
+}
+
+// UI interfaces - Para selectores y filtros
+export interface FilterOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+  icon?: string;
 }
 
 // DTO para creación/actualización combinada
