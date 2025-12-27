@@ -55,9 +55,8 @@ export type {
   MultiSelectorSize,
 } from './multi-selector/multi-selector.component';
 export type {
-  ChartData,
-  ChartOptions,
   ExtendedChartType,
   ChartTheme,
+  EChartsOption,
 } from './chart';
 export { CHART_THEMES } from './chart';

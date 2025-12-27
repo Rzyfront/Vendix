@@ -33,7 +33,7 @@ export class OrganizationsService {
 
     return {
       ...organization,
-      logo_url: await this.s3Service.signUrl(organization.logo_url),
+      logo_url: await this.s3Service.signUrl((organization as any).logo_url),
     };
   }
 
@@ -55,7 +55,7 @@ export class OrganizationsService {
 
     return {
       ...updated,
-      logo_url: await this.s3Service.signUrl(updated.logo_url),
+      logo_url: await this.s3Service.signUrl((updated as any).logo_url),
     };
   }
 

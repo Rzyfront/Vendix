@@ -68,10 +68,60 @@ export const storeAdminRoutes: Routes = [
       // Inventory Routes
       {
         path: 'inventory',
-        loadChildren: () =>
-          import('../../private/modules/store/inventory/inventory.routes').then(
-            (m) => m.INVENTORY_ROUTES
+        loadComponent: () =>
+          import('../../private/modules/store/inventory/inventory.component').then(
+            (c) => c.InventoryComponent
           ),
+        children: [
+          {
+            path: '',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/inventory-dashboard.component').then(
+                (c) => c.InventoryDashboardComponent
+              ),
+          },
+          // Punto de Compra (POP) - Creating purchase orders
+          {
+            path: 'pop',
+            loadComponent: () => {
+              console.log('Attempting to load PopComponent for /pop');
+              return import('../../private/modules/store/inventory/pop/pop.component').then(
+                (c) => c.PopComponent
+              );
+            },
+          },
+          {
+            path: 'pop/:id',
+            loadComponent: () => {
+              console.log('Attempting to load PopComponent for /pop/:id');
+              return import('../../private/modules/store/inventory/pop/pop.component').then(
+                (c) => c.PopComponent
+              );
+            },
+          },
+          {
+            path: 'suppliers',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/suppliers/suppliers.component').then(
+                (c) => c.SuppliersComponent
+              ),
+          },
+          /* Orders removed (moved to Orders module) */
+          {
+            path: 'locations',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/locations/locations.component').then(
+                (c) => c.LocationsComponent
+              ),
+          },
+          {
+            path: 'adjustments',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/operations/stock-adjustments.component').then(
+                (c) => c.StockAdjustmentsComponent
+              ),
+          },
+        ],
       },
       // Orders Routes
       {
@@ -80,21 +130,21 @@ export const storeAdminRoutes: Routes = [
           {
             path: '',
             pathMatch: 'full',
-            redirectTo: 'dashboard',
+            redirectTo: 'sales',
           },
           {
-            path: 'dashboard',
-            loadComponent: () =>
-              import('../../private/modules/store/orders/orders').then(
-                (c) => c.OrdersComponent,
-              ),
-          },
-          {
-            path: 'list',
+            path: 'sales',
             loadComponent: () =>
               import(
                 '../../private/modules/store/orders/components/orders-list'
               ).then((c) => c.OrdersListComponent),
+          },
+          {
+            path: 'purchase-orders',
+            loadComponent: () =>
+              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
+                (c) => c.PurchaseOrdersComponent
+              ),
           },
           {
             path: ':id',

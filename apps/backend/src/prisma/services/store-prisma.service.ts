@@ -42,6 +42,8 @@ export class StorePrismaService extends BasePrismaService {
       'updateMany',
       'delete',
       'deleteMany',
+      'create',
+      'createMany',
     ];
 
     const all_scoped_models = [
@@ -70,7 +72,7 @@ export class StorePrismaService extends BasePrismaService {
       extensions[model] = {};
       for (const operation of operations) {
         extensions[model][operation] = ({ args, query }: any) => {
-          return this.applyStoreScoping(model, args, query);
+          return this.applyStoreScoping(model, operation, args, query);
         };
       }
     }
@@ -78,7 +80,7 @@ export class StorePrismaService extends BasePrismaService {
     return extensions;
   }
 
-  private applyStoreScoping(model: string, args: any, query: any) {
+  private applyStoreScoping(model: string, operation: string, args: any, query: any) {
     const context = RequestContextService.getContext();
 
     if (!context) {
@@ -88,6 +90,37 @@ export class StorePrismaService extends BasePrismaService {
     }
 
     const scoped_args = { ...args };
+
+    // Handle Create Operations
+    if (operation === 'create' || operation === 'createMany') {
+      if (this.store_scoped_models.includes(model)) {
+        if (!context.store_id) {
+          throw new ForbiddenException('Access denied - store context required for creation');
+        }
+
+        if (operation === 'create') {
+          scoped_args.data = {
+            ...scoped_args.data,
+            store_id: context.store_id
+          };
+        } else if (operation === 'createMany') {
+          if (Array.isArray(scoped_args.data)) {
+            scoped_args.data = scoped_args.data.map((item: any) => ({
+              ...item,
+              store_id: context.store_id
+            }));
+          } else {
+            scoped_args.data = {
+              ...scoped_args.data,
+              store_id: context.store_id
+            };
+          }
+        }
+      }
+      return query(scoped_args);
+    }
+
+    // Handle Read/Update/Delete Operations (Where clause)
     const relational_scopes: Record<string, any> = {
       'stock_levels': { inventory_locations: { store_id: context.store_id } },
       'inventory_batches': { inventory_locations: { store_id: context.store_id } },
@@ -116,18 +149,9 @@ export class StorePrismaService extends BasePrismaService {
       }
       security_filter.store_id = context.store_id;
     } else if (relational_scopes[model]) {
-      if (!context.store_id && !relational_scopes[model].sales_orders) { // Exception for sales_order_items
-        // Wait, if sales_orders is org scoped, sales_order_items (relational to sales_orders) 
-        // should be scoped by organization_id via sales_orders?
-        // sales_order_items -> sales_orders (Org Scoped).
-        // So if I am in a store context (store_id only), I might NOT have access to sales_orders?
-        // RequestContext typically has both store_id and organization_id if logged in as store user.
-        // If sales_sales orders are Org level, maybe store users shouldn't see them? 
-        // But let's assume valid access for now and use organization_id for filtering.
+      if (!context.store_id && !relational_scopes[model].sales_orders) {
+        // Logic for relational scopes
       }
-
-      // Merge deep merge? Simple spread won't work for nested where.
-      // Assign validation filter
       Object.assign(security_filter, relational_scopes[model]);
     } else if (org_scoped_models.includes(model)) {
       if (!context.organization_id) {
@@ -349,5 +373,9 @@ export class StorePrismaService extends BasePrismaService {
 
   get domain_settings() {
     return this.scoped_client.domain_settings;
+  }
+
+  override $transaction(arg: any, options?: any) {
+    return this.scoped_client.$transaction(arg, options);
   }
 }

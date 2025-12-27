@@ -119,7 +119,6 @@ export class ProductVariantService {
         attributes: createVariantDto.attributes,
         price_override:
           createVariantDto.price_override || createVariantDto.price,
-        stock_quantity: 0, // Se inicializará via stock_levels
         created_at: new Date(),
         updated_at: new Date(),
       },

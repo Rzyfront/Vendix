@@ -51,6 +51,37 @@ export class PurchaseOrderItemDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiProperty({ description: 'Batch number for lot tracking (optional)' })
+  @IsString()
+  @IsOptional()
+  batch_number?: string;
+
+  @ApiProperty({ description: 'Manufacturing date for lot tracking (optional)' })
+  @IsDateString()
+  @IsOptional()
+  manufacturing_date?: string;
+
+  @ApiProperty({ description: 'Expiration date for lot tracking (optional)' })
+  @IsDateString()
+  @IsOptional()
+  expiration_date?: string;
+
+  // New fields for ad-hoc/new products
+  @ApiProperty({ description: 'Product Name (for new products)' })
+  @IsString()
+  @IsOptional()
+  product_name?: string;
+
+  @ApiProperty({ description: 'Product SKU/Code (for new products)' })
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @ApiProperty({ description: 'Product Description (for new products)' })
+  @IsString()
+  @IsOptional()
+  product_description?: string;
 }
 
 export class CreatePurchaseOrderDto {
@@ -126,6 +157,11 @@ export class CreatePurchaseOrderDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiProperty({ description: 'Internal notes (not visible to supplier)' })
+  @IsString()
+  @IsOptional()
+  internal_notes?: string;
 
   @ApiProperty({ description: 'Created by user ID' })
   @IsNumber()

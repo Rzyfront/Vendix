@@ -117,14 +117,21 @@ export interface PurchaseOrderItem {
     product_id: number;
     product_variant_id?: number;
     quantity: number;
+    quantity_ordered?: number;
     quantity_received?: number;
     unit_price: number;
+    unit_cost?: number;
     discount_percentage?: number;
     tax_rate?: number;
     expected_delivery_date?: string;
     notes?: string;
     // Populated fields
     product?: {
+        id: number;
+        name: string;
+        sku?: string;
+    };
+    products?: {
         id: number;
         name: string;
         sku?: string;
@@ -155,8 +162,10 @@ export interface PurchaseOrder {
     updated_at?: string;
     // Populated fields
     supplier?: Supplier;
+    suppliers?: Supplier;
     location?: InventoryLocation;
     items?: PurchaseOrderItem[];
+    purchase_order_items?: PurchaseOrderItem[];
 }
 
 export interface CreatePurchaseOrderDto {

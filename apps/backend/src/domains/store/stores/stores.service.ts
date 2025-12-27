@@ -67,7 +67,7 @@ export class StoresService {
 
     const signedStore = {
       ...store,
-      logo_url: await this.s3Service.signUrl(store.logo_url),
+      logo_url: await this.s3Service.signUrl((store as any).logo_url),
     };
 
     // Create store settings if provided
@@ -94,7 +94,7 @@ export class StoresService {
 
       return {
         ...refetched,
-        logo_url: await this.s3Service.signUrl(refetched?.logo_url),
+        logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
       };
     }
 
@@ -139,7 +139,7 @@ export class StoresService {
 
     const signedStores = await Promise.all(stores.map(async (store) => ({
       ...store,
-      logo_url: await this.s3Service.signUrl(store.logo_url, true),
+      logo_url: await this.s3Service.signUrl((store as any).logo_url, true),
     })));
 
     return {
@@ -172,7 +172,7 @@ export class StoresService {
     }
     return {
       ...store,
-      logo_url: await this.s3Service.signUrl(store.logo_url),
+      logo_url: await this.s3Service.signUrl((store as any).logo_url),
     };
   }
 
@@ -199,7 +199,7 @@ export class StoresService {
 
     return {
       ...updated,
-      logo_url: await this.s3Service.signUrl(updated.logo_url),
+      logo_url: await this.s3Service.signUrl((updated as any).logo_url),
     };
   }
 
