@@ -30,9 +30,10 @@ export class InventoryService {
     // LOCATIONS
     // ============================================================
 
-    getLocations(): Observable<ApiResponse<InventoryLocation[]>> {
+    getLocations(query: any = {}): Observable<ApiResponse<InventoryLocation[]>> {
+        const params = this.buildParams(query);
         return this.http
-            .get<ApiResponse<InventoryLocation[]>>(`${this.base_url}/locations`)
+            .get<ApiResponse<InventoryLocation[]>>(`${this.base_url}/locations`, { params })
             .pipe(catchError(this.handleError));
     }
 

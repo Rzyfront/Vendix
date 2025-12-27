@@ -1,8 +1,8 @@
 import { NgModule } from '@angular/core';
-import { BaseChartDirective } from 'ng2-charts';
+import { NgxEchartsDirective } from 'ngx-echarts';
 
 @NgModule({
-  imports: [BaseChartDirective],
-  exports: [BaseChartDirective],
+  imports: [NgxEchartsDirective],
+  exports: [NgxEchartsDirective],
 })
-export class ChartModule {}
+export class ChartModule { }

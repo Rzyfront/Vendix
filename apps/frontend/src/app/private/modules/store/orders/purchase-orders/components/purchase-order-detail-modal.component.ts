@@ -10,7 +10,7 @@ import {
 } from '../../../../../../shared/components/index';
 
 // Interfaces
-import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '../../interfaces';
+import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '../../../inventory/interfaces';
 
 @Component({
   selector: 'app-purchase-order-detail-modal',
@@ -35,7 +35,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/10 rounded-lg">
           <div>
             <span class="text-xs text-text-secondary block">Proveedor</span>
-            <span class="font-medium">{{ order.supplier?.name || '-' }}</span>
+            <span class="font-medium">{{ order.suppliers?.name || order.supplier?.name || '-' }}</span>
           </div>
           <div>
             <span class="text-xs text-text-secondary block">Fecha de Orden</span>
@@ -63,25 +63,15 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
                   <th class="px-4 py-2 text-center font-medium text-text-secondary">Recibido</th>
                   <th class="px-4 py-2 text-right font-medium text-text-secondary">Precio</th>
                   <th class="px-4 py-2 text-right font-medium text-text-secondary">Subtotal</th>
-                  <th *ngIf="is_receiving_mode" class="px-4 py-2 text-center font-medium text-text-secondary">Recibir</th>
                 </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let item of order.items; let i = index" class="border-t border-border">
-                  <td class="px-4 py-3">{{ item.product?.name || 'Producto #' + item.product_id }}</td>
-                  <td class="px-4 py-3 text-center">{{ item.quantity }}</td>
+                <tr *ngFor="let item of (order.purchase_order_items || order.items); let i = index" class="border-t border-border">
+                  <td class="px-4 py-3">{{ item.products?.name || item.product?.name || 'Producto #' + item.product_id }}</td>
+                  <td class="px-4 py-3 text-center">{{ item.quantity_ordered || item.quantity }}</td>
                   <td class="px-4 py-3 text-center">{{ item.quantity_received || 0 }}</td>
-                  <td class="px-4 py-3 text-right">{{ formatCurrency(item.unit_price) }}</td>
-                  <td class="px-4 py-3 text-right">{{ formatCurrency(item.quantity * item.unit_price) }}</td>
-                  <td *ngIf="is_receiving_mode" class="px-4 py-3 text-center">
-                    <input
-                      type="number"
-                      [(ngModel)]="receive_quantities[i]"
-                      [max]="item.quantity - (item.quantity_received || 0)"
-                      min="0"
-                      class="w-20 px-2 py-1 border border-border rounded text-center"
-                    />
-                  </td>
+                  <td class="px-4 py-3 text-right">{{ formatCurrency(item.unit_cost || item.unit_price) }}</td>
+                  <td class="px-4 py-3 text-right">{{ formatCurrency((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)) }}</td>
                 </tr>
               </tbody>
             </table>
@@ -131,20 +121,20 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
             Cerrar
           </app-button>
           <app-button
-            *ngIf="canReceive && !is_receiving_mode"
+            *ngIf="canEdit"
+            variant="outline"
+            (clicked)="onEditOrder()"
+          >
+            <app-icon name="edit" [size]="16" class="mr-2"></app-icon>
+            Editar Orden
+          </app-button>
+          <app-button
+            *ngIf="canReceive"
             variant="primary"
             (clicked)="startReceiving()"
           >
             <app-icon name="package" [size]="16" class="mr-2"></app-icon>
-            Recibir Mercancía
-          </app-button>
-          <app-button
-            *ngIf="is_receiving_mode"
-            variant="primary"
-            (clicked)="confirmReceive()"
-          >
-            <app-icon name="check" [size]="16" class="mr-2"></app-icon>
-            Confirmar Recepción
+            Recibir Todo
           </app-button>
         </div>
       </div>
@@ -158,12 +148,18 @@ export class PurchaseOrderDetailModalComponent {
   @Output() close = new EventEmitter<void>();
   @Output() receive = new EventEmitter<{ order_id: number; items: ReceivePurchaseOrderItemDto[] }>();
   @Output() cancel = new EventEmitter<number>();
+  @Output() edit = new EventEmitter<PurchaseOrder>();
 
   is_receiving_mode = false;
   receive_quantities: number[] = [];
 
+  get canEdit(): boolean {
+    return !!this.order && this.order.status === 'draft';
+  }
+
   get canReceive(): boolean {
-    return !!this.order && ['ordered', 'partial'].includes(this.order.status);
+    // Added 'approved' status
+    return !!this.order && ['approved', 'ordered', 'partial'].includes(this.order.status);
   }
 
   get canCancel(): boolean {
@@ -171,33 +167,37 @@ export class PurchaseOrderDetailModalComponent {
   }
 
   startReceiving(): void {
-    if (this.order?.items) {
-      this.receive_quantities = this.order.items.map(
-        (item) => item.quantity - (item.quantity_received || 0)
-      );
-      this.is_receiving_mode = true;
-    }
-  }
-
-  confirmReceive(): void {
-    if (this.order?.items) {
-      const items: ReceivePurchaseOrderItemDto[] = this.order.items
-        .map((item, i) => ({
+    const items = this.order?.purchase_order_items || this.order?.items; // Support both
+    if (items) {
+      // One-click receive: assume receiving all remaining quantities
+      const itemsToReceive: ReceivePurchaseOrderItemDto[] = items
+        .map((item: any) => ({
           id: item.id!,
-          quantity_received: this.receive_quantities[i] || 0,
+          quantity_received: (item.quantity_ordered || item.quantity) - (item.quantity_received || 0)
         }))
         .filter((item) => item.quantity_received > 0);
 
-      if (items.length > 0) {
-        this.receive.emit({ order_id: this.order.id, items });
+      if (itemsToReceive.length > 0) {
+        // Emit immediately without entering edit mode
+        this.receive.emit({ order_id: this.order!.id, items: itemsToReceive });
       }
-      this.is_receiving_mode = false;
     }
+  }
+
+  // Legacy method kept if needed or removed if unused
+  confirmReceive(): void {
+    // Logic moved to startReceiving for quick receive
   }
 
   onCancelOrder(): void {
     if (this.order) {
       this.cancel.emit(this.order.id);
+    }
+  }
+
+  onEditOrder(): void {
+    if (this.order) {
+      this.edit.emit(this.order);
     }
   }
 

@@ -7,10 +7,7 @@ import { CardComponent } from './shared/components/card/card.component';
 import { SpinnerComponent } from './shared/components/spinner/spinner.component';
 import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
 import { GlobalUserModalsComponent } from './shared/components/global-user-modals/global-user-modals.component';
-import { Chart, registerables } from 'chart.js';
-
-// Register Chart.js components globally
-Chart.register(...registerables);
+// Chart.js registration removed (migrated to ECharts)
 
 @Component({
   selector: 'app-root',

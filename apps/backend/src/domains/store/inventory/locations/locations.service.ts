@@ -18,13 +18,12 @@ export class LocationsService {
 
     const { address, ...locationData } = createLocationDto;
 
-    return this.prisma.inventory_locations.create({
-      data: {
-        ...(locationData as any),
-        organization_id: context.organization_id,
-        store_id: createLocationDto.store_id || context.store_id,
-        addresses: address ? {
-          create: {
+    return this.prisma.$transaction(async (tx) => {
+      let newAddress: any = null;
+
+      if (address) {
+        newAddress = await tx.addresses.create({
+          data: {
             address_line1: address.address_line_1,
             address_line2: address.address_line_2,
             city: address.city,
@@ -34,11 +33,20 @@ export class LocationsService {
             organization_id: context.organization_id,
             store_id: createLocationDto.store_id || context.store_id,
           }
-        } : undefined
-      },
-      include: {
-        addresses: true
+        });
       }
+
+      return tx.inventory_locations.create({
+        data: {
+          ...(locationData as any),
+          organization_id: context.organization_id,
+          store_id: createLocationDto.store_id || context.store_id,
+          address_id: newAddress?.id
+        },
+        include: {
+          addresses: true
+        }
+      });
     });
   }
 

@@ -2,11 +2,10 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ChartComponent,
-  ChartData,
-  ChartOptions,
   IconComponent,
   CHART_THEMES,
 } from '../../../../shared/components';
+import { EChartsOption } from 'echarts';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
 import { ActivatedRoute } from '@angular/router';
 import { GlobalFacade } from '../../../../core/store/global.facade';
@@ -226,8 +225,7 @@ import { takeUntil } from 'rxjs/operators';
           </div>
           <div class="p-6">
             <app-chart
-              [data]="revenueChartData"
-              type="area"
+              [options]="revenueChartData"
               size="medium"
               [theme]="CHART_THEMES['corporate']"
               [animated]="true"
@@ -252,8 +250,7 @@ import { takeUntil } from 'rxjs/operators';
           <div class="p-6">
             <div class="relative h-64">
               <app-chart
-                [data]="storeDistributionData"
-                type="doughnut"
+                [options]="storeDistributionData"
                 size="small"
                 [theme]="CHART_THEMES['vibrant']"
                 [animated]="true"
@@ -542,16 +539,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
   CHART_THEMES = CHART_THEMES;
 
   // Revenue Chart Data - Stacked Line Chart
-  revenueChartData: ChartData = {
-    labels: [],
-    datasets: [],
-  };
+  revenueChartData: EChartsOption = {};
 
   constructor(
     private organizationDashboardService: OrganizationDashboardService,
     private route: ActivatedRoute,
     private globalFacade: GlobalFacade,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     // First check route param
@@ -617,6 +611,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private updateRevenueChart(data: any): void {
+
     if (data.profit_trend) {
       const labels = data.profit_trend.map(
         (item: any) => `${item.month} ${item.year}`,
@@ -626,55 +621,73 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const profit = data.profit_trend.map((item: any) => item.amount || 0);
 
       this.revenueChartData = {
-        labels: labels,
-        datasets: [
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: {
+            type: 'cross',
+            label: {
+              backgroundColor: '#6a7985'
+            }
+          }
+        },
+        legend: {
+          data: ['Ganancia', 'Costos', 'Ganancia Neta'],
+          bottom: 0
+        },
+        grid: {
+          left: '3%',
+          right: '4%',
+          bottom: '10%',
+          containLabel: true
+        },
+        xAxis: [
           {
-            label: 'Ganancia',
-            data: revenue,
-            borderColor: '#3b82f6', // Blue color
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            fill: false,
-            tension: 0.4,
-            borderWidth: 2,
-            pointBackgroundColor: '#ffffff',
-            pointBorderColor: '#3b82f6',
-            pointBorderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-          },
-          {
-            label: 'Costos',
-            data: costs,
-            borderColor: '#ef4444', // Red color
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            fill: false,
-            tension: 0.4,
-            borderWidth: 2,
-            pointBackgroundColor: '#ffffff',
-            pointBorderColor: '#ef4444',
-            pointBorderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-          },
-          {
-            label: 'Ganancia',
-            data: profit,
-            borderColor: '#22c55e', // Success color
-            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-            fill: true,
-            tension: 0.4,
-            borderWidth: 2,
-            pointBackgroundColor: '#ffffff',
-            pointBorderColor: '#22c55e',
-            pointBorderWidth: 2,
-            pointRadius: 4,
-            pointHoverRadius: 6,
-          },
+            type: 'category',
+            boundaryGap: false,
+            data: labels
+          }
         ],
+        yAxis: [
+          {
+            type: 'value',
+            axisLabel: {
+              formatter: (value: any) => '$' + value / 1000 + 'K'
+            }
+          }
+        ],
+        series: [
+          {
+            name: 'Ganancia',
+            type: 'line',
+            stack: 'Total',
+            areaStyle: { opacity: 0.1 },
+            emphasis: { focus: 'series' },
+            data: revenue,
+            itemStyle: { color: '#3b82f6' }
+          },
+          {
+            name: 'Costos',
+            type: 'line',
+            stack: 'Total',
+            areaStyle: { opacity: 0.1 },
+            emphasis: { focus: 'series' },
+            data: costs,
+            itemStyle: { color: '#ef4444' }
+          },
+          {
+            name: 'Ganancia Neta',
+            type: 'line',
+            stack: 'Total',
+            areaStyle: { opacity: 0.1 },
+            emphasis: { focus: 'series' },
+            data: profit,
+            itemStyle: { color: '#22c55e' },
+            label: { show: true, position: 'top' }
+          }
+        ]
       };
     }
   }
-
   private updateStoreDistributionChart(data: any): void {
     if (data.store_distribution) {
       const labels = data.store_distribution.map(
@@ -688,19 +701,47 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const total = values.reduce((sum: number, val: number) => sum + val, 0);
 
       this.storeDistributionData = {
-        labels: labels,
-        datasets: [
+        tooltip: {
+          trigger: 'item',
+          formatter: '{b}: {c} ({d}%)' // Name: Value (Percent)
+        },
+        legend: {
+          show: false
+        },
+        series: [
           {
-            label: 'Distribución de ventas',
-            data: values,
-            backgroundColor: this.storeDistributionColors,
-            borderColor: '#ffffff',
-            borderWidth: 3,
-            hoverOffset: 8,
-            hoverBorderWidth: 3,
-            spacing: 2,
-          },
-        ],
+            name: 'Distribución de ventas',
+            type: 'pie',
+            radius: ['50%', '70%'], // Doughnut style
+            avoidLabelOverlap: false,
+            itemStyle: {
+              borderRadius: 10,
+              borderColor: '#fff',
+              borderWidth: 2
+            },
+            label: {
+              show: false,
+              position: 'center'
+            },
+            emphasis: {
+              label: {
+                show: true,
+                fontSize: 20,
+                fontWeight: 'bold'
+              }
+            },
+            labelLine: {
+              show: false
+            },
+            data: data.store_distribution.map((item: any, index: number) => ({
+              value: item.revenue || 0,
+              name: item.type.charAt(0).toUpperCase() + item.type.slice(1),
+              itemStyle: {
+                color: this.storeDistributionColors[index % this.storeDistributionColors.length]
+              }
+            }))
+          }
+        ]
       };
 
       // Update the display values in the legend
@@ -715,87 +756,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
     }
   }
 
-  revenueChartOptions: ChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: {
-      mode: 'index',
-      intersect: false,
-    },
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top',
-        align: 'end',
-        labels: {
-          usePointStyle: true,
-          boxWidth: 8,
-          padding: 20,
-        },
-      },
-      tooltip: {
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
-        titleColor: '#1e293b',
-        bodyColor: '#475569',
-        borderColor: '#e2e8f0',
-        borderWidth: 1,
-        padding: 12,
-        displayColors: true,
-        boxPadding: 4,
-      },
-    },
-    scales: {
-      x: {
-        grid: {
-          display: false,
-        },
-        ticks: {
-          color: '#94a3b8',
-        },
-      },
-      y: {
-        beginAtZero: true,
-        grid: {
-          color: '#f1f5f9',
-          // drawBorder: false, // Removed as it causes lint error
-        },
-        border: {
-          display: false,
-        },
-        ticks: {
-          color: '#94a3b8',
-          callback: (value: any) => '$' + value / 1000 + 'K',
-        },
-      },
-    },
-  };
-
   // Store Distribution Data - Enhanced Doughnut Chart
-  storeDistributionData: ChartData = {
-    labels: ['Minorista', 'Alimentos y bebidas', 'Servicios'],
-    datasets: [
-      {
-        label: 'Store Distribution',
-        data: [45, 30, 25],
-        backgroundColor: ['#7ed7a5', '#06b6d4', '#fb923c'],
-        borderColor: '#ffffff',
-        borderWidth: 3,
-        hoverOffset: 8,
-        hoverBorderWidth: 3,
-        spacing: 2,
-      },
-    ],
-  };
-
-  pieChartOptions: any = {
-    // Changed to any to allow 'cutout' property
-    responsive: true,
-    maintainAspectRatio: false,
-    cutout: '75%', // Thinner ring like the example
-    plugins: {
-      legend: {
-        display: false, // Hide default legend to use the custom one below
-      },
-    },
-  };
+  storeDistributionData: EChartsOption = {};
 }

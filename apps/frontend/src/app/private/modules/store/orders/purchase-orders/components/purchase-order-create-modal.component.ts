@@ -14,11 +14,11 @@ import {
 } from '../../../../../../shared/components/index';
 
 // Interfaces
-import { Supplier, CreatePurchaseOrderDto, CreatePurchaseOrderItemDto } from '../../interfaces';
+import { Supplier, CreatePurchaseOrderDto, CreatePurchaseOrderItemDto } from '../../../inventory/interfaces';
 
 // Services (for product search)
 import { ProductsService } from '../../../products/services/products.service';
-import { InventoryService } from '../../services';
+import { InventoryService } from '../../../inventory/services';
 
 @Component({
   selector: 'app-purchase-order-create-modal',

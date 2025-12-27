@@ -8,9 +8,15 @@ export const INVENTORY_ROUTES: Routes = [
         children: [
             {
                 path: '',
+                pathMatch: 'full',
+                redirectTo: 'pop',
+            },
+            // Punto de Compra (POP) - Creating purchase orders
+            {
+                path: 'pop/:id?',
                 loadComponent: () =>
-                    import('./inventory-dashboard.component').then(
-                        (m) => m.InventoryDashboardComponent
+                    import('./pop/pop.component').then(
+                        (m) => m.PopComponent
                     ),
             },
             {
@@ -20,20 +26,7 @@ export const INVENTORY_ROUTES: Routes = [
                         (m) => m.SuppliersComponent
                     ),
             },
-            {
-                path: 'orders',
-                loadComponent: () =>
-                    import('./purchase-orders/purchase-orders.component').then(
-                        (m) => m.PurchaseOrdersComponent
-                    ),
-            },
-            {
-                path: 'orders/new',
-                loadComponent: () =>
-                    import('./purchase-orders/pop/pop.component').then(
-                        (m) => m.PopComponent
-                    ),
-            },
+            /* PopComponent kept, orders removed */
             {
                 path: 'locations',
                 loadComponent: () =>
