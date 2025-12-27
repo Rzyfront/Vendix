@@ -147,6 +147,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'purchase-orders',
+            loadComponent: () =>
+              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
+                (c) => c.PurchaseOrdersComponent
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import(
