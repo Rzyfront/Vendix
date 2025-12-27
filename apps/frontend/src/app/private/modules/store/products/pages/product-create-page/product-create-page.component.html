@@ -238,11 +238,18 @@
                 <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:flex-1 lg:flex lg:flex-col">
                     <div class="flex items-center justify-between mb-4 flex-none">
                         <h2 class="text-lg font-semibold text-gray-900">Inventario / Stock</h2>
-                        <button *ngIf="isEditMode" type="button" (click)="isStockDetailsOpen = true"
-                            class="text-xs font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1">
-                            <app-icon name="list" size="14"></app-icon>
-                            Ver detalle
-                        </button>
+                        <div class="flex gap-2">
+                            <button *ngIf="isEditMode" type="button" (click)="openAdjustmentModal()"
+                                class="text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
+                                <app-icon name="sliders" size="14"></app-icon>
+                                Realizar Ajuste
+                            </button>
+                            <button *ngIf="isEditMode" type="button" (click)="isStockDetailsOpen = true"
+                                class="text-xs font-medium text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                                <app-icon name="list" size="14"></app-icon>
+                                Ver detalle
+                            </button>
+                        </div>
                     </div>
 
                     <div class="lg:flex-1 lg:flex lg:flex-col lg:justify-center">
@@ -539,3 +546,7 @@
         <app-button variant="primary" (clicked)="isStockDetailsOpen = false">Cerrar</app-button>
     </div>
 </app-modal>
+
+<!-- Adjustment Modal -->
+<app-adjustment-create-modal [isOpen]="isAdjustmentModalOpen" [product]="product" [isSubmitting]="isAdjusting"
+    (cancel)="closeAdjustmentModal()" (save)="onAdjustmentSave($event)"></app-adjustment-create-modal>

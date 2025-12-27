@@ -1,0 +1,37 @@
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+  <!-- Total de Órdenes -->
+  <app-stats
+    title="Total Órdenes"
+    [value]="formatNumber(stats.total)"
+    iconName="file-text"
+    iconBgColor="bg-blue-100"
+    iconColor="text-blue-600"
+  ></app-stats>
+
+  <!-- Órdenes Pendientes -->
+  <app-stats
+    title="Pendientes"
+    [value]="formatNumber(stats.pending)"
+    iconName="clock"
+    iconBgColor="bg-amber-100"
+    iconColor="text-amber-600"
+  ></app-stats>
+
+  <!-- Órdenes Recibidas -->
+  <app-stats
+    title="Recibidas"
+    [value]="formatNumber(stats.received)"
+    iconName="check-circle"
+    iconBgColor="bg-green-100"
+    iconColor="text-green-600"
+  ></app-stats>
+
+  <!-- Valor Total -->
+  <app-stats
+    title="Valor Total"
+    [value]="formatCurrency(stats.total_value)"
+    iconName="dollar-sign"
+    iconBgColor="bg-purple-100"
+    iconColor="text-purple-600"
+  ></app-stats>
+</div>

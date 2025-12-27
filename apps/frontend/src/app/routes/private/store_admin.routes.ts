@@ -136,8 +136,8 @@ export const storeAdminRoutes: Routes = [
             path: 'sales',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/components/orders-list'
-              ).then((c) => c.OrdersListComponent),
+                '../../private/modules/store/orders/orders/orders.component'
+              ).then((c) => c.OrdersComponent),
           },
           {
             path: 'purchase-orders',

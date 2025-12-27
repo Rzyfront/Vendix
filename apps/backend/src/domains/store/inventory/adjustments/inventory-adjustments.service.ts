@@ -20,7 +20,7 @@ export class InventoryAdjustmentsService {
     private prisma: StorePrismaService,
     private transactionsService: InventoryTransactionsService,
     private stockLevelManager: StockLevelManager,
-  ) {}
+  ) { }
 
   /**
    * Crea un ajuste de inventario
@@ -29,13 +29,19 @@ export class InventoryAdjustmentsService {
     data: CreateAdjustmentDto,
   ): Promise<InventoryAdjustment> {
     return await this.prisma.$transaction(async (prisma) => {
+      // Ensure IDs are numbers (handling string payload from frontend)
+      const productId = Number(data.product_id);
+      const locationId = Number(data.location_id);
+      const variantId = data.product_variant_id ? Number(data.product_variant_id) : null;
+      const quantityAfter = Number(data.quantity_after);
+
       // 1. Validar stock level actual
       const currentStockLevel = await prisma.stock_levels.findUnique({
         where: {
-          product_id_location_id_product_variant_id: {
-            product_id: data.productId,
-            location_id: data.locationId,
-            product_variant_id: data.variantId || null,
+          product_id_product_variant_id_location_id: {
+            product_id: productId,
+            product_variant_id: variantId,
+            location_id: locationId,
           },
         },
       });
@@ -61,22 +67,22 @@ export class InventoryAdjustmentsService {
 
       // 3. Calcular cambios
       const quantityChange =
-        data.quantityAfter - currentStockLevel.quantity_on_hand;
+        quantityAfter - currentStockLevel.quantity_on_hand;
       const adjustment = await prisma.inventory_adjustments.create({
         data: {
-          organization_id: data.organizationId,
-          product_id: data.productId,
-          product_variant_id: data.variantId,
-          location_id: data.locationId,
+          organization_id: data.organization_id,
+          product_id: productId,
+          product_variant_id: variantId,
+          location_id: locationId,
           adjustment_type: data.type,
           quantity_before: currentStockLevel.quantity_on_hand,
-          quantity_after: data.quantityAfter,
+          quantity_after: quantityAfter,
           quantity_change: quantityChange,
-          reason_code: data.reasonCode,
+          reason_code: data.reason_code,
           description: data.description,
-          created_by_user_id: data.createdByUserId,
-          approved_by_user_id: data.approvedByUserId,
-          approved_at: data.approvedByUserId ? new Date() : null,
+          created_by_user_id: data.created_by_user_id,
+          approved_by_user_id: data.approved_by_user_id,
+          approved_at: data.approved_by_user_id ? new Date() : null,
           created_at: new Date(),
         },
         include: {
@@ -111,25 +117,25 @@ export class InventoryAdjustmentsService {
 
       // 4. Actualizar stock levels
       await this.stockLevelManager.updateStock({
-        product_id: data.productId,
-        variant_id: data.variantId,
-        location_id: data.locationId,
+        product_id: productId,
+        variant_id: variantId ?? undefined,
+        location_id: locationId,
         quantity_change: quantityChange,
         movement_type: 'adjustment',
         reason: `Adjustment: ${data.type} - ${data.description}`,
-        user_id: data.createdByUserId,
+        user_id: data.created_by_user_id,
         create_movement: true,
         validate_availability: false,
       });
 
       // 5. Crear inventory transaction
       await this.transactionsService.createTransaction({
-        productId: data.productId,
-        variantId: data.variantId,
-        type: 'adjustment_damage',
+        productId: productId,
+        variantId: variantId ?? undefined,
+        type: 'adjustment_damage', // You might want to map data.type to transaction type more accurately
         quantityChange: quantityChange,
         reason: `Inventory adjustment: ${data.type}`,
-        userId: data.createdByUserId,
+        userId: data.created_by_user_id,
       });
 
       return adjustment;
@@ -316,11 +322,11 @@ export class InventoryAdjustmentsService {
       organization_id: organizationId,
       ...(startDate &&
         endDate && {
-          created_at: {
-            gte: startDate,
-            lte: endDate,
-          },
-        }),
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+      }),
     };
 
     const summary = await this.prisma.inventory_adjustments.groupBy({
