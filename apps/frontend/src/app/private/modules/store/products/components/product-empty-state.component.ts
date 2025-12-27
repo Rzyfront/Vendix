@@ -40,7 +40,7 @@ import { ButtonComponent } from '../../../../../shared/components';
       <!-- Actions -->
       <div class="flex flex-col sm:flex-row gap-3 justify-center">
         <app-button variant="primary" (clicked)="actionClick.emit()">
-          Create First Product
+          Crear Primer Producto
         </app-button>
 
         <app-button
@@ -48,7 +48,7 @@ import { ButtonComponent } from '../../../../../shared/components';
           (clicked)="refreshClick.emit()"
           *ngIf="showRefreshButton"
         >
-          Refresh
+          Actualizar
         </app-button>
 
         <app-button
@@ -56,7 +56,7 @@ import { ButtonComponent } from '../../../../../shared/components';
           (clicked)="clearFiltersClick.emit()"
           *ngIf="showAdditionalActions"
         >
-          Clear Filters
+          Limpiar Filtros
         </app-button>
       </div>
     </div>
@@ -71,7 +71,7 @@ import { ButtonComponent } from '../../../../../shared/components';
 })
 export class ProductEmptyStateComponent {
   @Input() title = 'No products found';
-  @Input() description = 'Get started by creating your first product.';
+  @Input() description = 'Comience creando su primer producto.';
   @Input() showAdditionalActions = false;
   @Input() showRefreshButton = true;
 
