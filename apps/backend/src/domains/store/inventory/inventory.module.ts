@@ -4,6 +4,7 @@ import { LocationsModule } from './locations/locations.module';
 import { StockLevelsModule } from './stock-levels/stock-levels.module';
 import { MovementsModule } from './movements/movements.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
+import { InventoryAdjustmentsModule } from './adjustments/inventory-adjustments.module';
 import { InventoryController } from './inventory.controller';
 import { InventoryValidationService } from './services/inventory-validation.service';
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
@@ -20,6 +21,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     StockLevelsModule,
     MovementsModule,
     SuppliersModule,
+    InventoryAdjustmentsModule,
   ],
   controllers: [InventoryController],
   providers: [
@@ -44,4 +46,4 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
     InventoryTransactionsService,
   ],
 })
-export class InventoryModule {}
+export class InventoryModule { }

@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
@@ -51,6 +51,16 @@ import { CreateAdjustmentDto, AdjustmentType, InventoryLocation } from '../../in
               [error]="getError('product_id')"
             ></app-input>
             <!-- In a real implementation, this would be an autocomplete component -->
+          </div>
+
+          <!-- Variant Selection -->
+          <div *ngIf="variant_options.length > 0">
+            <label class="block text-sm font-medium text-text-secondary mb-1">Variante *</label>
+            <app-selector
+              [options]="variant_options"
+              formControlName="product_variant_id"
+              placeholder="Seleccionar variante"
+            ></app-selector>
           </div>
 
           <!-- Location -->
@@ -137,9 +147,10 @@ import { CreateAdjustmentDto, AdjustmentType, InventoryLocation } from '../../in
     </app-modal>
   `,
 })
-export class AdjustmentCreateModalComponent implements OnInit {
+export class AdjustmentCreateModalComponent implements OnInit, OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
+  @Input() product: any = null;
 
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateAdjustmentDto>();
@@ -147,6 +158,7 @@ export class AdjustmentCreateModalComponent implements OnInit {
   form: FormGroup;
   selected_type: AdjustmentType | null = null;
   location_options: SelectorOption[] = [];
+  variant_options: SelectorOption[] = [];
   reason_options: SelectorOption[] = [
     { value: 'INV_COUNT', label: 'Conteo de inventario' },
     { value: 'DAMAGED', label: 'Producto dañado' },
@@ -174,12 +186,45 @@ export class AdjustmentCreateModalComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadLocations();
+    this.checkProduct();
+  }
+
+  ngOnChanges(): void {
+    if (this.isOpen) {
+      this.checkProduct();
+    }
+  }
+
+  private checkProduct(): void {
+    if (this.product && this.isOpen) {
+      this.form.patchValue({
+        product_id: this.product.id,
+        product_name: this.product.name,
+      });
+      this.form.get('product_name')?.disable();
+
+      if (this.product.product_variants && this.product.product_variants.length > 0) {
+        this.variant_options = this.product.product_variants.map((v: any) => ({
+          value: v.id,
+          label: `${v.sku} - ${v.name || 'Variant'}`,
+        }));
+        this.form.get('product_variant_id')?.enable();
+      } else {
+        this.variant_options = [];
+        this.form.get('product_variant_id')?.disable();
+      }
+    } else if (!this.product) {
+      this.form.get('product_name')?.enable();
+      this.variant_options = [];
+      this.form.get('product_variant_id')?.disable();
+    }
   }
 
   private createForm(): FormGroup {
     return this.fb.group({
       product_id: [null, Validators.required],
       product_name: [''],
+      product_variant_id: [{ value: null, disabled: true }],
       location_id: [null, Validators.required],
       quantity_before: [{ value: 0, disabled: true }],
       quantity_after: [0, [Validators.required, Validators.min(0)]],
@@ -234,7 +279,8 @@ export class AdjustmentCreateModalComponent implements OnInit {
 
       const dto: CreateAdjustmentDto = {
         organization_id: 1, // From context
-        product_id: form_value.product_id || 1, // TODO: Proper product selection
+        product_id: form_value.product_id || (this.product ? this.product.id : null),
+        product_variant_id: form_value.product_variant_id || undefined,
         location_id: form_value.location_id,
         type: this.selected_type,
         quantity_after: Number(form_value.quantity_after),

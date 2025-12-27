@@ -39,7 +39,9 @@ import { takeUntil } from 'rxjs/operators';
                 {{ formatGrowth(dashboardStats?.productsGrowth) }}
               </span>
             </div>
-            <h3 class="text-sm font-medium text-gray-600">Total Products</h3>
+            <h3 class="text-sm font-medium text-gray-600">
+              Total de Productos
+            </h3>
             <p class="text-3xl font-bold mt-2 text-gray-900">
               {{ getTotalProducts() }}
             </p>
@@ -61,7 +63,7 @@ import { takeUntil } from 'rxjs/operators';
                 {{ formatGrowth(dashboardStats?.customersGrowth) }}
               </span>
             </div>
-            <h3 class="text-sm font-medium text-gray-600">Total Customers</h3>
+            <h3 class="text-sm font-medium text-gray-600">Total de Clientes</h3>
             <p class="text-3xl font-bold mt-2 text-gray-900">
               {{ getTotalCustomers() }}
             </p>
@@ -83,7 +85,7 @@ import { takeUntil } from 'rxjs/operators';
                 {{ formatGrowth(dashboardStats?.ordersGrowth) }}
               </span>
             </div>
-            <h3 class="text-sm font-medium text-gray-600">Monthly Orders</h3>
+            <h3 class="text-sm font-medium text-gray-600">Órdenes Mensuales</h3>
             <p class="text-3xl font-bold mt-2 text-gray-900">
               {{ getMonthlyOrders() }}
             </p>
@@ -105,7 +107,9 @@ import { takeUntil } from 'rxjs/operators';
                 {{ formatGrowth(dashboardStats?.revenueGrowth) }}
               </span>
             </div>
-            <h3 class="text-sm font-medium text-gray-600">Monthly Revenue</h3>
+            <h3 class="text-sm font-medium text-gray-600">
+              Ingresos Mensuales
+            </h3>
             <p class="text-3xl font-bold mt-2 text-gray-900">
               $ {{ getMonthlyRevenue() }}
             </p>
@@ -115,7 +119,9 @@ import { takeUntil } from 'rxjs/operators';
         <!-- Recent Activity -->
         <div class="bg-white rounded-lg shadow-sm border border-gray-200">
           <div class="px-6 py-4 border-b border-gray-200">
-            <h2 class="text-lg font-semibold text-gray-900">Recent Orders</h2>
+            <h2 class="text-lg font-semibold text-gray-900">
+              Órdenes Recientes
+            </h2>
           </div>
           <div class="p-6">
             <div *ngIf="hasRecentOrders()" class="space-y-4">
@@ -130,10 +136,10 @@ import { takeUntil } from 'rxjs/operators';
                 </div>
                 <div class="flex-1">
                   <p class="text-sm font-medium text-gray-900">
-                    Order #{{ order.id }}
+                    Pedido #{{ order.id }}
                   </p>
                   <p class="text-sm text-gray-600">
-                    {{ order.customerName }} - {{ order.items }} items
+                    {{ order.customerName }} - {{ order.items }} ítems
                   </p>
                   <p class="text-sm font-medium text-green-600">
                     $ {{ order.amount }}
@@ -153,7 +159,7 @@ import { takeUntil } from 'rxjs/operators';
               </div>
             </div>
             <div *ngIf="!hasRecentOrders()" class="text-center text-gray-500">
-              No recent orders found
+              No se encontraron órdenes recientes
             </div>
           </div>
         </div>

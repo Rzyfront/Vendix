@@ -1,13 +1,15 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, finalize } from 'rxjs';
-import {
-  CustomerListComponent,
-  CustomerModalComponent
-} from './components';
+import { CustomerListComponent, CustomerModalComponent } from './components';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
-import { Customer, CustomerStats, CreateCustomerRequest, UpdateCustomerRequest } from './models/customer.model';
+import {
+  Customer,
+  CustomerStats,
+  CreateCustomerRequest,
+  UpdateCustomerRequest,
+} from './models/customer.model';
 import { ToastService, DialogService } from '../../../../shared/components';
 
 @Component({
@@ -17,15 +19,14 @@ import { ToastService, DialogService } from '../../../../shared/components';
     CommonModule,
     StatsComponent,
     CustomerListComponent,
-    CustomerModalComponent
+    CustomerModalComponent,
   ],
   template: `
     <div class="p-6">
-
       <!-- Stats Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <app-stats
-          title="Total Customers"
+          title="Total de Clientes"
           [value]="stats?.total_customers || 0"
           smallText="+12% vs last month"
           iconName="users"
@@ -34,7 +35,7 @@ import { ToastService, DialogService } from '../../../../shared/components';
         ></app-stats>
 
         <app-stats
-          title="Active Customers"
+          title="Clientes Activos"
           [value]="stats?.active_customers || 0"
           smallText="+5% vs last month"
           iconName="user-check"
@@ -43,7 +44,7 @@ import { ToastService, DialogService } from '../../../../shared/components';
         ></app-stats>
 
         <app-stats
-          title="New This Month"
+          title="Nuevos Este Mes"
           [value]="stats?.new_customers_this_month || 0"
           smallText="+8% vs last month"
           iconName="user-plus"
@@ -52,8 +53,8 @@ import { ToastService, DialogService } from '../../../../shared/components';
         ></app-stats>
 
         <app-stats
-          title="Total Revenue"
-          [value]="((stats?.total_revenue || 0) | currency) || '$0.00'"
+          title="Ingresos Totales"
+          [value]="(stats?.total_revenue || 0 | currency) || '$0.00'"
           smallText="+15% vs last month"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -82,7 +83,7 @@ import { ToastService, DialogService } from '../../../../shared/components';
         (save)="onSave($event)"
       ></app-customer-modal>
     </div>
-  `
+  `,
 })
 export class CustomersComponent implements OnInit, OnDestroy {
   stats: CustomerStats | null = null;
@@ -106,8 +107,8 @@ export class CustomersComponent implements OnInit, OnDestroy {
   constructor(
     private customersService: CustomersService,
     private toastService: ToastService,
-    private dialogService: DialogService
-  ) { }
+    private dialogService: DialogService,
+  ) {}
 
   ngOnInit(): void {
     this.loadStats();
@@ -120,17 +121,19 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   loadStats() {
-    this.customersService.getStats()
+    this.customersService
+      .getStats()
       .pipe(takeUntil(this.destroy$))
-      .subscribe(stats => this.stats = stats);
+      .subscribe((stats) => (this.stats = stats));
   }
 
   loadCustomers() {
     this.loading = true;
-    this.customersService.getCustomers(this.page, this.limit, { search: this.searchQuery })
+    this.customersService
+      .getCustomers(this.page, this.limit, { search: this.searchQuery })
       .pipe(
         takeUntil(this.destroy$),
-        finalize(() => this.loading = false)
+        finalize(() => (this.loading = false)),
       )
       .subscribe({
         next: (response) => {
@@ -138,8 +141,8 @@ export class CustomersComponent implements OnInit, OnDestroy {
           this.totalItems = response.meta.total;
         },
         error: () => {
-          this.toastService.error('Failed to load customers');
-        }
+          this.toastService.error('Error al cargar clientes');
+        },
       });
   }
 
@@ -182,43 +185,48 @@ export class CustomersComponent implements OnInit, OnDestroy {
     request$
       .pipe(
         takeUntil(this.destroy$),
-        finalize(() => this.actionLoading = false)
+        finalize(() => (this.actionLoading = false)),
       )
       .subscribe({
         next: () => {
-          this.toastService.success(`Customer ${this.selectedCustomer ? 'updated' : 'created'} successfully`);
+          this.toastService.success(
+            `Cliente ${this.selectedCustomer ? 'actualizado' : 'creado'} exitosamente`,
+          );
           this.closeModal();
           this.loadCustomers();
           this.loadStats(); // Refresh stats too
         },
         error: (err) => {
           console.error(err);
-          this.toastService.error('Operation failed');
-        }
+          this.toastService.error('Operación fallida');
+        },
       });
   }
 
   onDelete(customer: Customer) {
-    this.dialogService.confirm({
-      title: 'Delete Customer',
-      message: `Are you sure you want to delete ${customer.first_name} ${customer.last_name}?`,
-      confirmVariant: 'danger',
-      confirmText: 'Delete'
-    }).then(confirmed => {
-      if (confirmed) {
-        this.customersService.deleteCustomer(customer.id)
-          .pipe(takeUntil(this.destroy$))
-          .subscribe({
-            next: () => {
-              this.toastService.success('Customer deleted');
-              this.loadCustomers();
-              this.loadStats();
-            },
-            error: () => {
-              this.toastService.error('Failed to delete customer');
-            }
-          });
-      }
-    });
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Cliente',
+        message: `¿Estás seguro de que quieres eliminar ${customer.first_name} ${customer.last_name}?`,
+        confirmVariant: 'danger',
+        confirmText: 'Eliminar',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.customersService
+            .deleteCustomer(customer.id)
+            .pipe(takeUntil(this.destroy$))
+            .subscribe({
+              next: () => {
+                this.toastService.success('Cliente eliminado');
+                this.loadCustomers();
+                this.loadStats();
+              },
+              error: () => {
+                this.toastService.error('Error al eliminar cliente');
+              },
+            });
+        }
+      });
   }
 }

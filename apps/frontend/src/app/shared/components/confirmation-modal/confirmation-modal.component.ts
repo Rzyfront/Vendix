@@ -23,7 +23,7 @@ export class ConfirmationModalComponent {
   @Output() confirm = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
 
-  isOpen = true;
+  @Input() isOpen = true;
 
   onConfirm(): void {
     this.confirm.emit();

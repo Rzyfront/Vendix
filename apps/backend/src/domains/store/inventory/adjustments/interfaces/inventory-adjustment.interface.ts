@@ -1,20 +1,20 @@
 export interface CreateAdjustmentDto {
-  organizationId: number;
-  productId: number;
-  variantId?: number;
-  locationId: number;
+  organization_id: number;
+  product_id: number;
+  product_variant_id?: number;
+  location_id: number;
   type:
-    | 'damage'
-    | 'loss'
-    | 'theft'
-    | 'expiration'
-    | 'count_variance'
-    | 'manual_correction';
-  quantityAfter: number;
-  reasonCode?: string;
+  | 'damage'
+  | 'loss'
+  | 'theft'
+  | 'expiration'
+  | 'count_variance'
+  | 'manual_correction';
+  quantity_after: number;
+  reason_code?: string;
   description?: string;
-  createdByUserId: number;
-  approvedByUserId?: number;
+  created_by_user_id: number;
+  approved_by_user_id?: number;
 }
 
 export interface AdjustmentQueryDto {
@@ -23,12 +23,12 @@ export interface AdjustmentQueryDto {
   variantId?: number;
   locationId?: number;
   type?:
-    | 'damage'
-    | 'loss'
-    | 'theft'
-    | 'expiration'
-    | 'count_variance'
-    | 'manual_correction';
+  | 'damage'
+  | 'loss'
+  | 'theft'
+  | 'expiration'
+  | 'count_variance'
+  | 'manual_correction';
   status?: 'pending' | 'approved';
   createdByUserId?: number;
   startDate?: Date;
@@ -44,12 +44,12 @@ export interface InventoryAdjustment {
   product_variant_id: number | null;
   location_id: number;
   adjustment_type:
-    | 'damage'
-    | 'loss'
-    | 'theft'
-    | 'expiration'
-    | 'count_variance'
-    | 'manual_correction';
+  | 'damage'
+  | 'loss'
+  | 'theft'
+  | 'expiration'
+  | 'count_variance'
+  | 'manual_correction';
   quantity_before: number;
   quantity_after: number;
   quantity_change: number;

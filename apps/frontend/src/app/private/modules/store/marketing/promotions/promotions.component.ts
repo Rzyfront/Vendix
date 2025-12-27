@@ -8,8 +8,8 @@ import { CommonModule } from '@angular/common';
   template: `
     <div class="p-6">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Promotions</h1>
-        <p class="text-gray-600">Create and manage promotional campaigns</p>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Promociones</h1>
+        <p class="text-gray-600">Crea y gestiona campañas promocionales</p>
       </div>
 
       <div class="bg-white rounded-lg shadow-sm border p-8">
@@ -32,11 +32,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Promotions Management
+            Gestión de Promociones
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Promotions management is under development. You will be able to
-            create and manage promotional campaigns here.
+           La gestión de promociones está en desarrollo. Podrás
+           cree y administre campañas promocionales aquí.
           </p>
         </div>
       </div>

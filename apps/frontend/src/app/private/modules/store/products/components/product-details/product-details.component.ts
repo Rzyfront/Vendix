@@ -9,7 +9,7 @@ import { Product } from '../../interfaces';
   template: `
     <div class="product-details">
       <!-- Product details implementation will go here -->
-      <p>Product Details Component</p>
+      <p>Componente de detalles del producto</p>
     </div>
   `,
   styles: [
