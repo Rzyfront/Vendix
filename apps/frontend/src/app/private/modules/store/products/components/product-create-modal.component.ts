@@ -1,4 +1,12 @@
-import { Component, Input, EventEmitter, Output, OnChanges, SimpleChanges, ChangeDetectionStrategy } from '@angular/core';
+import {
+  Component,
+  Input,
+  EventEmitter,
+  Output,
+  OnChanges,
+  SimpleChanges,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -21,6 +29,7 @@ import {
   ProductState,
   ProductCategory,
   Brand,
+  FilterOption,
 } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
@@ -44,7 +53,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ProductCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
@@ -62,6 +71,9 @@ export class ProductCreateModalComponent implements OnChanges {
   categoryOptions: SelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
 
+  // State buttons (EXACT pattern from order-details)
+  readonly productStateOptions = ['active', 'inactive', 'archived'] as const;
+
   // Quick create modals state
   isCategoryCreateOpen = false;
   isBrandCreateOpen = false;
@@ -72,7 +84,7 @@ export class ProductCreateModalComponent implements OnChanges {
     private categoriesService: CategoriesService,
     private brandsService: BrandsService,
     private toastService: ToastService,
-    private router: Router
+    private router: Router,
   ) {
     this.productForm = this.createForm();
     this.loadCategoriesAndBrands();
@@ -110,7 +122,7 @@ export class ProductCreateModalComponent implements OnChanges {
       sku: [''],
       category_id: [null, Validators.required],
       brand_id: [null, Validators.required],
-      state: [ProductState.ACTIVE],
+      state: ['active'],
     });
   }
 
@@ -118,7 +130,7 @@ export class ProductCreateModalComponent implements OnChanges {
     this.productForm.reset({
       base_price: 0,
       stock_quantity: 0,
-      state: ProductState.ACTIVE
+      state: 'active',
     });
   }
 
@@ -141,9 +153,12 @@ export class ProductCreateModalComponent implements OnChanges {
       base_price: this.product.base_price,
       stock_quantity: this.product.stock_quantity || 0,
       // Try to get category from new structure or legacy if exists
-      category_id: (this.product as any).category_ids?.[0] || (this.product.categories?.[0]?.id) || null,
+      category_id:
+        (this.product as any).category_ids?.[0] ||
+        this.product.categories?.[0]?.id ||
+        null,
       brand_id: this.product.brand_id || null,
-      state: this.product.state || ProductState.ACTIVE,
+      state: this.product.state || 'active',
     });
   }
 
@@ -191,6 +206,36 @@ export class ProductCreateModalComponent implements OnChanges {
     this.isBrandCreateOpen = false;
   }
 
+  // State button click handler (EXACT pattern from order-details)
+  updateProductState(newState: string): void {
+    this.productForm.patchValue({ state: newState });
+  }
+
+  // Helper methods for status display (from order-details)
+  formatStatus(status: string | undefined): string {
+    if (!status) return 'Unknown';
+    return (
+      status.charAt(0).toUpperCase() +
+      status.slice(1).replace(/([A-Z])/g, ' $1')
+    );
+  }
+
+  getStatusColor(status: string): string {
+    const statusColors: Record<string, string> = {
+      // Product Status
+      active: 'bg-green-100 text-green-800',
+      inactive: 'bg-yellow-100 text-yellow-800',
+      archived: 'bg-red-100 text-red-800',
+    };
+
+    return statusColors[status] || 'bg-gray-100 text-gray-800';
+  }
+
+  // Get current state from form
+  getCurrentState(): string {
+    return this.productForm.get('state')?.value || 'active';
+  }
+
   onCancel() {
     this.openChange.emit(false);
     this.cancel.emit();
@@ -211,7 +256,7 @@ export class ProductCreateModalComponent implements OnChanges {
       // Map single category to array for backend compat
       category_ids: val.category_id ? [Number(val.category_id)] : [],
       brand_id: val.brand_id,
-      state: val.state
+      state: val.state,
     };
 
     // Remove legacy field if it exists in val but not needed in DTO
@@ -219,7 +264,6 @@ export class ProductCreateModalComponent implements OnChanges {
 
     this.submit.emit(dto);
   }
-
 
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);

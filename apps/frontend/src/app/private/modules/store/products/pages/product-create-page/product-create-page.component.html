@@ -123,8 +123,34 @@
 
                         <!-- State -->
                         <div>
-                            <app-selector label="Estado" [options]="stateOptions" formControlName="state"
-                                placeholder="Seleccionar estado"></app-selector>
+                            <!-- State Buttons (EXACT pattern from order-details) -->
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <h3 class="text-sm font-medium text-gray-700 mb-2">Estado del Producto</h3>
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span
+                                        class="px-3 py-1 rounded-full text-sm font-medium"
+                                        [class]="getStatusColor(getCurrentState())"
+                                    >
+                                        {{ formatStatus(getCurrentState()) }}
+                                    </span>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button
+                                        *ngFor="let state of productStateOptions"
+                                        (click)="updateProductState(state)"
+                                        [disabled]="getCurrentState() === state"
+                                        [class.bg-blue-600]="getCurrentState() === state"
+                                        [class.text-white]="getCurrentState() === state"
+                                        [class.bg-white]="getCurrentState() !== state"
+                                        [class.text-gray-700]="getCurrentState() !== state"
+                                        [class.border-blue-600]="getCurrentState() === state"
+                                        [class.border-gray-300]="getCurrentState() !== state"
+                                        class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600 transition-colors"
+                                    >
+                                        {{ formatStatus(state) }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
