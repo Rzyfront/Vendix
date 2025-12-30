@@ -60,9 +60,7 @@ export class ProductsService {
       // Verificar que el slug sea único dentro de la tienda
       const existingProduct = await this.prisma.products.findFirst({
         where: {
-          store_id: store_id,
           slug: slug,
-          state: { not: ProductState.ARCHIVED },
         },
       });
 
@@ -76,14 +74,14 @@ export class ProductsService {
       if (createProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
-            store_id: store_id,
             sku: createProductDto.sku,
-            state: { not: ProductState.ARCHIVED },
           },
         });
 
         if (existingSku) {
-          throw new ConflictException('El SKU ya está en uso');
+          throw new ConflictException(
+            `El SKU '${createProductDto.sku}' ya está en uso en esta tienda. Use un SKU diferente o deje el campo vacío.`
+          );
         }
       }
 
@@ -175,7 +173,7 @@ export class ProductsService {
                 ? {}
                 : {
                   OR: [
-                    { store_id: store_id }, // Categorías específicas de la tienda
+                    { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
                     { store_id: null }, // Categorías globales
                   ],
                 }),
@@ -751,9 +749,7 @@ export class ProductsService {
       if (updateProductDto.slug) {
         const existingSlug = await this.prisma.products.findFirst({
           where: {
-            store_id: existingProduct.store_id,
             slug: updateProductDto.slug,
-            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
@@ -763,18 +759,18 @@ export class ProductsService {
         }
       }
 
-      // Si se actualiza el SKU, verificar que sea único
+      // Si se actualiza el SKU, verificar que sea único dentro de la tienda
       if (updateProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
+            store_id: existingProduct.store_id,
             sku: updateProductDto.sku,
-            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
 
         if (existingSku) {
-          throw new ConflictException('El SKU ya está en uso');
+          throw new ConflictException(`El SKU '${updateProductDto.sku}' ya está en uso en esta tienda`);
         }
       }
 

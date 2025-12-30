@@ -1,37 +1,47 @@
 // Onboarding Modal Styles
+
 app-onboarding-modal {
+
   // Main modal container with larger size
   app-modal {
     .modal-content {
-      max-width: 50rem; /* 800px */
-      width: 90vw;
-      max-height: 90vh;
+      max-width: 95rem;
+      /* 1520px - Very wide modal */
+      width: 96vw;
+      max-height: 92vh;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-xl);
+      background-color: var(--color-surface);
     }
   }
 
-  // Step content area
+  // Step content area - compact
   .step-content {
-    min-height: 25rem; /* 400px */
-    padding: 2rem 0;
+    min-height: 18rem;
+    /* Compact height */
+    padding: 1rem;
+    /* Compact padding */
 
     // Common styles for step containers
     .step-container {
-      max-width: 37.5rem; /* 600px */
+      max-width: 100%;
+      /* Use full width */
       margin: 0 auto;
       text-align: center;
+      padding: 0 1rem;
     }
 
     // Welcome step
     &.welcome-step {
       .welcome-icon {
-        width: 5rem; /* 80px */
-        height: 5rem; /* 80px */
+        width: 5rem;
+        /* 80px */
+        height: 5rem;
+        /* 80px */
         margin: 0 auto 1.5rem;
-        background: linear-gradient(
-          135deg,
-          var(--color-primary),
-          var(--color-primary-dark)
-        );
+        background: linear-gradient(135deg,
+            var(--color-primary),
+            var(--color-primary-dark));
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -83,11 +93,11 @@ app-onboarding-modal {
 
         .form-grid {
           display: grid;
-          grid-template-columns: repeat(
-            auto-fit,
-            minmax(15.625rem, 1fr)
-          ); /* 250px */
-          gap: 1.5rem;
+          grid-template-columns: repeat(auto-fit,
+              minmax(12.5rem, 1fr));
+          /* 200px - Reduced from 250px for more items per row */
+          gap: 1rem;
+          /* Reduced from 1.5rem */
 
           .form-field {
             .field-label {
@@ -120,7 +130,8 @@ app-onboarding-modal {
 
             textarea.field-input {
               resize: vertical;
-              min-height: 6.25rem; /* 100px */
+              min-height: 6.25rem;
+              /* 100px */
             }
           }
         }
@@ -131,10 +142,9 @@ app-onboarding-modal {
     &.app-config-step {
       .app-type-selection {
         display: grid;
-        grid-template-columns: repeat(
-          auto-fit,
-          minmax(12.5rem, 1fr)
-        ); /* 200px */
+        grid-template-columns: repeat(auto-fit,
+            minmax(12.5rem, 1fr));
+        /* 200px */
         gap: 1rem;
         margin-bottom: 2rem;
 
@@ -163,11 +173,9 @@ app-onboarding-modal {
             width: var(--logo-lg);
             height: var(--logo-lg);
             margin: 0 auto 1rem;
-            background: linear-gradient(
-              135deg,
-              var(--color-primary),
-              var(--color-secondary)
-            );
+            background: linear-gradient(135deg,
+                var(--color-primary),
+                var(--color-secondary));
             border-radius: var(--radius-lg);
             display: flex;
             align-items: center;
@@ -192,10 +200,9 @@ app-onboarding-modal {
 
       .color-picker-section {
         display: grid;
-        grid-template-columns: repeat(
-          auto-fit,
-          minmax(12.5rem, 1fr)
-        ); /* 200px */
+        grid-template-columns: repeat(auto-fit,
+            minmax(12.5rem, 1fr));
+        /* 200px */
         gap: 1.5rem;
         margin-bottom: 2rem;
 
@@ -232,14 +239,14 @@ app-onboarding-modal {
       text-align: center;
 
       .completion-icon {
-        width: 6.25rem; /* 100px */
-        height: 6.25rem; /* 100px */
+        width: 6.25rem;
+        /* 100px */
+        height: 6.25rem;
+        /* 100px */
         margin: 0 auto 2rem;
-        background: linear-gradient(
-          135deg,
-          var(--color-success),
-          var(--color-success-dark)
-        );
+        background: linear-gradient(135deg,
+            var(--color-success),
+            var(--color-success-dark));
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -300,11 +307,9 @@ app-onboarding-modal {
 
     .progress-fill {
       transition: width 0.5s ease-in-out;
-      background: linear-gradient(
-        90deg,
-        var(--color-primary),
-        var(--color-primary-dark)
-      );
+      background: linear-gradient(90deg,
+          var(--color-primary),
+          var(--color-primary-dark));
     }
   }
 
@@ -338,10 +343,12 @@ app-onboarding-modal {
 
 // Animations
 @keyframes bounce {
+
   0%,
   100% {
     transform: translateY(0);
   }
+
   50% {
     transform: translateY(-10px);
   }
@@ -351,6 +358,7 @@ app-onboarding-modal {
   0% {
     transform: rotate(0deg);
   }
+
   100% {
     transform: rotate(360deg);
   }
@@ -358,6 +366,7 @@ app-onboarding-modal {
 
 // Responsive adjustments
 @media (max-width: 48em) {
+
   /* 768px */
   app-onboarding-modal {
     app-modal {
@@ -370,7 +379,8 @@ app-onboarding-modal {
 
     .step-content {
       padding: 1rem 0;
-      min-height: 18.75rem; /* 300px */
+      min-height: 18.75rem;
+      /* 300px */
 
       .form-grid {
         grid-template-columns: 1fr;

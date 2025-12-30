@@ -5,5 +5,7 @@ export * from './inventory.routes';
 export * from './interfaces';
 export * from './services';
 export * from './suppliers';
-export * from './purchase-orders';
+// export * from './pop';
+export { PopComponent } from './pop';
+// export * from '../orders/purchase-orders';
 export * from './operations';

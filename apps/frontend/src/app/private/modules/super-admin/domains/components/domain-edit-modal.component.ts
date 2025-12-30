@@ -38,7 +38,7 @@ import {
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
     >
       <div slot="header" class="flex items-center justify-between">
         <h3 class="text-lg font-semibold text-text-primary">Editar Dominio</h3>
@@ -183,7 +183,7 @@ export class DomainEditModalComponent implements OnChanges {
   @Input() domain: Domain | null = null;
   @Input() isOpen = false;
   @Input() isLoading = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() update = new EventEmitter<{ id: number; data: UpdateDomainDto }>();
   @Output() cancel = new EventEmitter<void>();
   domainForm!: FormGroup;

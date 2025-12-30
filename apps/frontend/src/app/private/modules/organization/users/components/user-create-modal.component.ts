@@ -36,10 +36,9 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [(isOpen)]="isOpen"
       [size]="'lg'"
       title="Crear Nuevo Usuario"
-      (openChange)="onClose.emit()"
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -120,7 +119,7 @@ import { Subject, takeUntil } from 'rxjs';
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
           variant="outline"
-          (clicked)="onClose.emit()"
+          (clicked)="onCancel()"
           [disabled]="isCreating"
         >
           Cancelar
@@ -146,7 +145,7 @@ import { Subject, takeUntil } from 'rxjs';
 })
 export class UserCreateModalComponent implements OnInit, OnDestroy {
   @Input() isOpen: boolean = false;
-  @Output() onClose = new EventEmitter<void>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onUserCreated = new EventEmitter<void>();
 
   userForm: FormGroup;
@@ -213,7 +212,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
         next: () => {
           this.isCreating = false;
           this.onUserCreated.emit();
-          this.onClose.emit();
+          this.isOpenChange.emit(false);
           this.resetForm();
         },
         error: (error: any) => {
@@ -222,6 +221,11 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
           // TODO: Show user-friendly error message
         },
       });
+  }
+
+  onCancel(): void {
+    this.isOpenChange.emit(false);
+    this.resetForm();
   }
 
   resetForm(): void {

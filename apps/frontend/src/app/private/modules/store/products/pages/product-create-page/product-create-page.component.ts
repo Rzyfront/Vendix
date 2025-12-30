@@ -34,6 +34,9 @@ import { CategoriesService } from '../../services/categories.service';
 import { BrandsService } from '../../services/brands.service';
 import { CategoryQuickCreateComponent } from '../../components/category-quick-create.component';
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
+import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
+import { InventoryService } from '../../../inventory/services/inventory.service';
+import { CreateAdjustmentDto } from '../../../inventory/interfaces';
 
 interface VariantAttribute {
     name: string;
@@ -65,6 +68,7 @@ interface GeneratedVariant {
         ModalComponent,
         CategoryQuickCreateComponent,
         BrandQuickCreateComponent,
+        AdjustmentCreateModalComponent,
     ],
     templateUrl: './product-create-page.component.html',
 })
@@ -100,6 +104,8 @@ export class ProductCreatePageComponent implements OnInit {
     // Quick create modals state
     isCategoryCreateOpen = false;
     isBrandCreateOpen = false;
+    isAdjustmentModalOpen = false;
+    isAdjusting = false;
 
     constructor(
         private fb: FormBuilder,
@@ -108,7 +114,8 @@ export class ProductCreatePageComponent implements OnInit {
         private brandsService: BrandsService,
         private toastService: ToastService,
         private router: Router,
-        private route: ActivatedRoute
+        private route: ActivatedRoute,
+        private inventoryService: InventoryService
     ) {
         this.productForm = this.createForm();
     }
@@ -556,5 +563,40 @@ export class ProductCreatePageComponent implements OnInit {
         if (field.errors['required']) return 'Required field';
         if (field.errors['min']) return `Min value: ${field.errors['min'].min}`;
         return 'Invalid value';
+    }
+
+    // Adjustment Modal
+    openAdjustmentModal(): void {
+        this.isAdjustmentModalOpen = true;
+    }
+
+    openStockAdjustment(): void {
+        this.openAdjustmentModal();
+    }
+
+    closeAdjustmentModal(): void {
+        this.isAdjustmentModalOpen = false;
+    }
+
+    onAdjustmentSave(dto: CreateAdjustmentDto): void {
+        this.isAdjusting = true;
+        this.inventoryService.createAdjustment(dto).subscribe({
+            next: () => {
+                this.toastService.success('Ajuste de inventario realizado correctamente');
+                this.isAdjusting = false;
+                this.closeAdjustmentModal();
+                // Reload product to see stock changes (optional but good)
+                if (this.productId) {
+                    this.loadProduct(this.productId);
+                }
+                // Redirect to adjustments history as per plan
+                this.router.navigate(['/admin/inventory/adjustments']);
+            },
+            error: (err) => {
+                console.error('Error creating adjustment', err);
+                this.toastService.error('Error al realizar el ajuste');
+                this.isAdjusting = false;
+            }
+        });
     }
 }

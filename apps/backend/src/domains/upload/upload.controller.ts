@@ -48,7 +48,7 @@ export class UploadController {
     })
     @UseInterceptors(FileInterceptor('file'))
     async uploadFile(
-        @UploadedFile() file: Express.Multer.File,
+        @UploadedFile() file: any,
         @Body('entityType') entityType: string,
         @Body('entityId') entityId?: string,
         @Body('isMainImage') isMainImage?: string | boolean,

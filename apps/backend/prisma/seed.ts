@@ -3253,7 +3253,10 @@ async function main() {
   for (const product of products) {
     const createdProduct = await prisma.products.upsert({
       where: {
-        sku: product.sku,
+        store_id_sku: {
+          store_id: product.store_id,
+          sku: product.sku || '',
+        },
       },
       update: {},
       create: {
@@ -3513,7 +3516,10 @@ async function main() {
     if (variant.product_id) {
       const createdVariant = await prisma.product_variants.upsert({
         where: {
-          sku: variant.sku,
+          product_id_sku: {
+            product_id: variant.product_id,
+            sku: variant.sku,
+          },
         },
         update: {},
         create: {

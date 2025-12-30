@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 
 // Shared Components
@@ -16,15 +17,13 @@ import {
   SelectorOption,
   ToastService,
 } from '../../../../../shared/components/index';
+import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
 // Services
 import { InventoryService } from '../services';
 
 // Interfaces
 import { InventoryAdjustment, AdjustmentType } from '../interfaces';
-
-// Child Components
-import { AdjustmentCreateModalComponent } from './components/adjustment-create-modal.component';
 
 @Component({
   selector: 'app-stock-adjustments',
@@ -38,12 +37,12 @@ import { AdjustmentCreateModalComponent } from './components/adjustment-create-m
     StatsComponent,
     IconComponent,
     SelectorComponent,
-    AdjustmentCreateModalComponent,
+    ConfirmationModalComponent,
   ],
   template: `
-    <div class="p-6">
+    <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
         <app-stats
           title="Total Ajustes"
           [value]="stats.total"
@@ -163,13 +162,20 @@ import { AdjustmentCreateModalComponent } from './components/adjustment-create-m
         </div>
       </div>
 
-      <!-- Create Modal -->
-      <app-adjustment-create-modal
-        [isOpen]="is_modal_open"
-        [isSubmitting]="is_submitting"
-        (cancel)="closeModal()"
-        (save)="onCreateAdjustment($event)"
-      ></app-adjustment-create-modal>
+
+
+      <!-- Instruction Modal -->
+      <app-confirmation-modal
+        *ngIf="is_info_modal_open"
+        title="Crear Nuevo Ajuste"
+        message="Para realizar un ajuste de inventario, por favor busca el producto en la lista de Productos y selecciona la opción 'Realizar Ajuste' en el detalle del producto."
+        confirmText="Ir a Productos"
+        cancelText="Entendido"
+        confirmVariant="primary"
+        [isOpen]="true"
+        (confirm)="navigateToProducts()"
+        (cancel)="closeInfoModal()"
+      ></app-confirmation-modal>
     </div>
   `,
 })
@@ -261,14 +267,14 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   // UI State
   is_loading = false;
-  is_modal_open = false;
-  is_submitting = false;
+  is_info_modal_open = false;
 
   private subscriptions: Subscription[] = [];
 
   constructor(
     private inventoryService: InventoryService,
-    private toastService: ToastService
+    private toastService: ToastService,
+    private router: Router
   ) { }
 
   ngOnInit(): void {
@@ -347,11 +353,16 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   openCreateModal(): void {
-    this.is_modal_open = true;
+    this.is_info_modal_open = true;
   }
 
-  closeModal(): void {
-    this.is_modal_open = false;
+  closeInfoModal(): void {
+    this.is_info_modal_open = false;
+  }
+
+  navigateToProducts(): void {
+    this.is_info_modal_open = false;
+    this.router.navigate(['/admin/products']);
   }
 
   viewDetail(adjustment: InventoryAdjustment): void {
@@ -363,23 +374,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   // CRUD Operations
   // ============================================================
 
-  onCreateAdjustment(data: any): void {
-    this.is_submitting = true;
-
-    const sub = this.inventoryService.createAdjustment(data).subscribe({
-      next: () => {
-        this.toastService.success('Ajuste creado correctamente');
-        this.is_submitting = false;
-        this.closeModal();
-        this.loadAdjustments();
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al crear ajuste');
-        this.is_submitting = false;
-      },
-    });
-    this.subscriptions.push(sub);
-  }
+  // Methods removed as creation is now handled in Product Create Page
 
   // ============================================================
   // Helpers

@@ -70,6 +70,8 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [readonly]="readonly"
           [value]="value"
           [step]="step"
+          [min]="min"
+          [max]="max"
           [class]="inputClasses"
           [style]="customInputStyle"
           (input)="onInput($event)"
@@ -179,6 +181,8 @@ export class InputComponent implements ControlValueAccessor {
   @Input() suffixClickable = false;
   @Input() control?: AbstractControl | null;
   @Input() step?: string;
+  @Input() min?: string | number;
+  @Input() max?: string | number;
 
   // ✅ Nuevos inputs para personalización de estilos
   @Input() customInputStyle = ''; // Estilos inline personalizados

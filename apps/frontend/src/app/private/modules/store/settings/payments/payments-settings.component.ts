@@ -28,9 +28,9 @@ import {
     TableComponent,
   ],
   template: `
-    <div class="p-6 space-y-6">
+    <div class="w-full space-y-6">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
         <app-stats
           title="Total de Métodos"
           [value]="payment_method_stats?.total_methods || 0"

@@ -74,7 +74,7 @@ interface StatItem {
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
         <app-stats
           *ngFor="let item of statsItems"
           [title]="item.title"
@@ -411,8 +411,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     });
   }
 
-  onCreateModalChange(isOpen: boolean): void {
-    this.isCreateModalOpen = isOpen;
+  onCreateModalChange(isOpen: boolean | Event): void {
+    this.isCreateModalOpen = isOpen as boolean;
     if (!isOpen) {
       this.createStoreForm.reset();
     }
@@ -645,8 +645,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isEditModalOpen = true;
   }
 
-  onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
+  onEditModalChange(isOpen: boolean | Event): void {
+    this.isEditModalOpen = isOpen as boolean;
     if (!isOpen) {
       this.selectedStore = undefined;
     }
@@ -769,8 +769,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isSettingsModalOpen = true;
   }
 
-  onSettingsModalChange(isOpen: boolean): void {
-    this.isSettingsModalOpen = isOpen;
+  onSettingsModalChange(isOpen: boolean | Event): void {
+    this.isSettingsModalOpen = isOpen as boolean;
     if (!isOpen) {
       this.selectedStoreForSettings = undefined;
     }

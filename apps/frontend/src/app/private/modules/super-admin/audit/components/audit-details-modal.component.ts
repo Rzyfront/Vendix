@@ -302,7 +302,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       [isOpen]="isOpen"
       [title]="'Detalles del Log de Auditoría'"
       size="lg"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
     >
       <div class="audit-details-container" *ngIf="log">
         <!-- Información General -->
@@ -463,15 +463,15 @@ export class AuditDetailsModalComponent {
   @Input() isOpen = false;
   @Input() log: AuditLog | null = null;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
 
   onOpenChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
   }
 
   close(): void {
     this.isOpen = false;
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
   }
 
   getActionDisplay(action: string): { text: string; class: string } {

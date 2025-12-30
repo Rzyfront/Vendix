@@ -2,9 +2,9 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   ChartComponent,
-  ChartData,
   CHART_THEMES,
 } from '../../../shared/components';
+import { EChartsOption } from 'echarts';
 
 @Component({
   selector: 'app-chart-showcase',
@@ -56,8 +56,7 @@ import {
             Monthly sales comparison
           </p>
           <app-chart
-            [data]="barChartData"
-            type="bar"
+            [options]="barChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -76,8 +75,7 @@ import {
             Revenue trends over time
           </p>
           <app-chart
-            [data]="lineChartData"
-            type="line"
+            [options]="lineChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -96,8 +94,7 @@ import {
             Cumulative growth visualization
           </p>
           <app-chart
-            [data]="areaChartData"
-            type="area"
+            [options]="areaChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -116,8 +113,7 @@ import {
             Market share distribution
           </p>
           <app-chart
-            [data]="doughnutChartData"
-            type="doughnut"
+            [options]="doughnutChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -136,8 +132,7 @@ import {
             Category breakdown
           </p>
           <app-chart
-            [data]="pieChartData"
-            type="pie"
+            [options]="pieChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -156,8 +151,7 @@ import {
             Performance metrics comparison
           </p>
           <app-chart
-            [data]="radarChartData"
-            type="radar"
+            [options]="radarChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -176,8 +170,7 @@ import {
             Multi-dimensional comparison
           </p>
           <app-chart
-            [data]="polarAreaChartData"
-            type="polarArea"
+            [options]="polarAreaChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -196,8 +189,7 @@ import {
             Correlation analysis
           </p>
           <app-chart
-            [data]="scatterChartData"
-            type="scatter"
+            [options]="scatterChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -216,8 +208,7 @@ import {
             Three-dimensional data visualization
           </p>
           <app-chart
-            [data]="bubbleChartData"
-            type="bubble"
+            [options]="bubbleChartData"
             [theme]="currentTheme"
             size="medium"
           >
@@ -251,8 +242,7 @@ import {
                 {{ loading ? 'Stop Loading' : 'Show Loading' }}
               </button>
               <app-chart
-                [data]="barChartData"
-                type="bar"
+                [options]="barChartData"
                 [theme]="currentTheme"
                 [loading]="loading"
                 size="small"
@@ -279,8 +269,7 @@ import {
                 </p>
               </div>
               <app-chart
-                [data]="lineChartData"
-                type="line"
+                [options]="lineChartData"
                 [theme]="currentTheme"
                 size="small"
                 (chartClick)="onChartClick($event)"
@@ -311,140 +300,140 @@ export class ChartShowcaseComponent {
   lastEvent = '';
 
   // Bar Chart Data
-  barChartData: ChartData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Product A',
-        data: [12000, 19000, 15000, 25000, 22000, 30000],
-      },
-      {
-        label: 'Product B',
-        data: [8000, 12000, 18000, 14000, 20000, 24000],
-      },
-    ],
+  barChartData: EChartsOption = {
+    xAxis: { type: 'category', data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'] },
+    yAxis: { type: 'value' },
+    series: [
+      { type: 'bar', name: 'Product A', data: [12000, 19000, 15000, 25000, 22000, 30000] },
+      { type: 'bar', name: 'Product B', data: [8000, 12000, 18000, 14000, 20000, 24000] }
+    ]
   };
 
   // Line Chart Data
-  lineChartData: ChartData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Revenue',
-        data: [30000, 35000, 32000, 42000, 48000, 55000],
-      },
-      {
-        label: 'Profit',
-        data: [12000, 15000, 14000, 18000, 22000, 28000],
-      },
-    ],
+  lineChartData: EChartsOption = {
+    xAxis: { type: 'category', data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'] },
+    yAxis: { type: 'value' },
+    series: [
+      { type: 'line', name: 'Revenue', data: [30000, 35000, 32000, 42000, 48000, 55000] },
+      { type: 'line', name: 'Profit', data: [12000, 15000, 14000, 18000, 22000, 28000] }
+    ]
   };
 
   // Area Chart Data
-  areaChartData: ChartData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Cumulative Revenue',
-        data: [30000, 65000, 97000, 139000, 187000, 242000],
-      },
-    ],
+  areaChartData: EChartsOption = {
+    xAxis: { type: 'category', data: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'] },
+    yAxis: { type: 'value' },
+    series: [
+      { type: 'line', areaStyle: {}, name: 'Cumulative Revenue', data: [30000, 65000, 97000, 139000, 187000, 242000] }
+    ]
   };
 
   // Doughnut Chart Data
-  doughnutChartData: ChartData = {
-    labels: ['Electronics', 'Clothing', 'Food', 'Books', 'Other'],
-    datasets: [
+  doughnutChartData: EChartsOption = {
+    series: [
       {
-        label: 'Sales',
-        data: [35, 25, 20, 12, 8],
-      },
-    ],
+        type: 'pie',
+        radius: ['50%', '70%'],
+        data: [
+          { value: 35, name: 'Electronics' },
+          { value: 25, name: 'Clothing' },
+          { value: 20, name: 'Food' },
+          { value: 12, name: 'Books' },
+          { value: 8, name: 'Other' }
+        ]
+      }
+    ]
   };
 
   // Pie Chart Data
-  pieChartData: ChartData = {
-    labels: ['Desktop', 'Mobile', 'Tablet', 'Smart TV'],
-    datasets: [
+  pieChartData: EChartsOption = {
+    series: [
       {
-        label: 'Traffic Sources',
-        data: [45, 35, 15, 5],
-      },
-    ],
+        type: 'pie',
+        radius: '50%',
+        data: [
+          { value: 45, name: 'Desktop' },
+          { value: 35, name: 'Mobile' },
+          { value: 15, name: 'Tablet' },
+          { value: 5, name: 'Smart TV' }
+        ]
+      }
+    ]
   };
 
   // Radar Chart Data
-  radarChartData: ChartData = {
-    labels: ['Speed', 'Reliability', 'Comfort', 'Safety', 'Efficiency'],
-    datasets: [
-      {
-        label: 'Model A',
-        data: [85, 90, 78, 92, 88],
-      },
-      {
-        label: 'Model B',
-        data: [78, 85, 92, 80, 90],
-      },
-    ],
+  radarChartData: EChartsOption = {
+    radar: {
+      indicator: [
+        { name: 'Speed', max: 100 },
+        { name: 'Reliability', max: 100 },
+        { name: 'Comfort', max: 100 },
+        { name: 'Safety', max: 100 },
+        { name: 'Efficiency', max: 100 }
+      ]
+    },
+    series: [{
+      type: 'radar',
+      data: [
+        { value: [85, 90, 78, 92, 88], name: 'Model A' },
+        { value: [78, 85, 92, 80, 90], name: 'Model B' }
+      ]
+    }]
   };
 
   // Polar Area Chart Data
-  polarAreaChartData: ChartData = {
-    labels: ['North', 'South', 'East', 'West', 'Central'],
-    datasets: [
-      {
-        label: 'Sales by Region',
-        data: [42, 38, 35, 28, 45],
-      },
-    ],
+  polarAreaChartData: EChartsOption = {
+    angleAxis: {},
+    radiusAxis: {
+      type: 'category',
+      data: ['North', 'South', 'East', 'West', 'Central'],
+      z: 10
+    },
+    polar: {},
+    series: [{
+      type: 'bar',
+      data: [42, 38, 35, 28, 45],
+      coordinateSystem: 'polar',
+      name: 'Sales by Region'
+    }]
   };
 
   // Scatter Chart Data
-  scatterChartData: ChartData = {
-    datasets: [
+  scatterChartData: EChartsOption = {
+    xAxis: {},
+    yAxis: {},
+    series: [
       {
-        label: 'Dataset 1',
-        data: [
-          { x: 10, y: 20 },
-          { x: 15, y: 35 },
-          { x: 25, y: 30 },
-          { x: 35, y: 45 },
-          { x: 45, y: 40 },
-        ],
+        type: 'scatter',
+        name: 'Dataset 1',
+        data: [[10, 20], [15, 35], [25, 30], [35, 45], [45, 40]]
       },
       {
-        label: 'Dataset 2',
-        data: [
-          { x: 20, y: 25 },
-          { x: 30, y: 40 },
-          { x: 40, y: 35 },
-          { x: 50, y: 50 },
-          { x: 60, y: 45 },
-        ],
-      },
-    ],
+        type: 'scatter',
+        name: 'Dataset 2',
+        data: [[20, 25], [30, 40], [40, 35], [50, 50], [60, 45]]
+      }
+    ]
   };
 
-  // Bubble Chart Data
-  bubbleChartData: ChartData = {
-    datasets: [
+  // Bubble Chart Data - Approximated with Scatter and size override
+  bubbleChartData: EChartsOption = {
+    xAxis: {},
+    yAxis: {},
+    series: [
       {
-        label: 'Product A',
-        data: [
-          { x: 20, y: 30, r: 15 },
-          { x: 40, y: 50, r: 20 },
-          { x: 30, y: 40, r: 12 },
-        ],
+        type: 'scatter',
+        name: 'Product A',
+        symbolSize: (data: any) => data[2],
+        data: [[20, 30, 30], [40, 50, 40], [30, 40, 24]] // Multiplied size by 2 for visibility
       },
       {
-        label: 'Product B',
-        data: [
-          { x: 25, y: 35, r: 10 },
-          { x: 45, y: 55, r: 18 },
-          { x: 35, y: 45, r: 14 },
-        ],
-      },
-    ],
+        type: 'scatter',
+        name: 'Product B',
+        symbolSize: (data: any) => data[2],
+        data: [[25, 35, 20], [45, 55, 36], [35, 45, 28]]
+      }
+    ]
   };
 
   changeTheme(themeName: string): void {

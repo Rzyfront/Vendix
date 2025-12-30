@@ -1,0 +1,29 @@
+<!-- Loading State -->
+<div *ngIf="loading" class="p-2 md:p-6 text-center">
+  <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+  <p class="mt-2 text-text-secondary">Cargando órdenes...</p>
+</div>
+
+<!-- Empty State -->
+<div
+  *ngIf="!loading && orders.length === 0"
+  class="p-12 text-center text-gray-500"
+>
+  <app-icon name="file-text" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+  <h3 class="text-lg font-medium text-gray-900">No hay órdenes de compra</h3>
+  <p class="mt-1">Comienza creando una nueva orden de compra.</p>
+</div>
+
+<!-- Table -->
+<div *ngIf="!loading && orders.length > 0">
+  <app-table
+    [data]="orders"
+    [columns]="table_columns"
+    [actions]="table_actions"
+    [loading]="loading"
+    [hoverable]="true"
+    [striped]="true"
+    size="md"
+    emptyMessage="No hay órdenes de compra"
+  ></app-table>
+</div>

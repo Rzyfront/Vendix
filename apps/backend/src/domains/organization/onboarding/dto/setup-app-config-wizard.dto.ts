@@ -37,6 +37,14 @@ export class SetupAppConfigWizardDto {
   @IsHexColor()
   secondary_color: string;
 
+  @ApiPropertyOptional({
+    example: '#F59E0B',
+    description: 'Accent/tertiary brand color (hex)',
+  })
+  @IsOptional()
+  @IsHexColor()
+  accent_color?: string;
+
   @ApiProperty({
     example: false,
     description: 'Whether to use custom domain',

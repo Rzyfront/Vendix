@@ -16,6 +16,7 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../shared/components';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   Product,
   ProductState,
@@ -50,7 +51,7 @@ export class ProductCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() product: Product | null = null;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<any>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -157,7 +158,8 @@ export class ProductCreateModalComponent implements OnChanges {
         }));
       },
       error: (error: any) => {
-        console.error('Error loading categories:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar categorías');
         this.categoryOptions = [];
       },
     });
@@ -173,7 +175,8 @@ export class ProductCreateModalComponent implements OnChanges {
         }));
       },
       error: (error: any) => {
-        console.error('Error loading brands:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar marcas');
         this.brandOptions = [];
       },
     });
@@ -192,7 +195,7 @@ export class ProductCreateModalComponent implements OnChanges {
   }
 
   onCancel() {
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
@@ -208,6 +211,7 @@ export class ProductCreateModalComponent implements OnChanges {
       name: val.name,
       base_price: val.base_price,
       stock_quantity: val.stock_quantity,
+      sku: val.sku || undefined,
       // Map single category to array for backend compat
       category_ids: val.category_id ? [Number(val.category_id)] : [],
       brand_id: val.brand_id,
@@ -250,5 +254,12 @@ export class ProductCreateModalComponent implements OnChanges {
     }
 
     return 'Invalid input';
+  }
+
+  onStockAdjustmentClick(): void {
+    this.toastService.info(
+      'Para ajustar stock, use la edición avanzada del producto o el módulo de Inventario',
+      'Ajuste de Stock'
+    );
   }
 }

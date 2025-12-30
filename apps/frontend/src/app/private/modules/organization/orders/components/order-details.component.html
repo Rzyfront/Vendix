@@ -1,16 +1,16 @@
 <app-modal
-  [isOpen]="isOpen"
+  [(isOpen)]="isOpen"
   [title]="
     'Order Details - ' +
     (orderDetails?.order_number || order?.order_number || '')
   "
   size="lg"
-  (openChange)="openChange.emit($event)"
+  
 >
-  <div class="space-y-6" *ngIf="!isLoading && orderDetails">
+  <div class="space-y-2 md:space-y-4" *ngIf="!isLoading && orderDetails">
     <!-- Order Header -->
     <div class="bg-surface rounded-card border border-border p-4">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
         <div>
           <p class="text-sm text-text-secondary">Order Number</p>
           <p class="font-semibold text-text-primary">
@@ -33,7 +33,7 @@
     </div>
 
     <!-- Customer & Store Information -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
       <!-- Customer Info -->
       <div class="bg-surface rounded-card border border-border p-4">
         <h3 class="font-semibold text-text-primary mb-3 flex items-center">
@@ -82,7 +82,7 @@
     </div>
 
     <!-- Status Information -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
       <!-- Order Status -->
       <div class="bg-surface rounded-card border border-border p-4">
         <h3 class="font-semibold text-text-primary mb-3 flex items-center">
@@ -284,8 +284,8 @@
     </div>
 
     <!-- Update Form -->
-    <form [formGroup]="updateForm" class="space-y-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <form [formGroup]="updateForm" class="space-y-2 md:space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1"
             >Order Status</label
@@ -323,7 +323,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
         <div>
           <label class="block text-sm font-medium text-text-primary mb-1"
             >Tracking Number</label

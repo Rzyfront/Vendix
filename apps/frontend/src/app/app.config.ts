@@ -27,6 +27,8 @@ import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
 import { ToastService } from './shared/components/toast/toast.service';
+// Provide echarts via component
+// import { provideEcharts } from 'ngx-echarts';
 
 import { routes } from './app.routes';
 
@@ -86,5 +88,6 @@ export const appConfig: ApplicationConfig = {
     },
     ThemeService,
     ToastService,
+    // Provide in ChartComponent directly for standalone
   ],
 };

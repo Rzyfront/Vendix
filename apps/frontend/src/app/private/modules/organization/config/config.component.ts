@@ -7,7 +7,7 @@ import { RouterModule } from '@angular/router';
   standalone: true,
   imports: [CommonModule, RouterModule],
   template: `
-    <div class="p-6">
+    <div class="w-full">
       <h1 class="text-2xl font-bold mb-6">Configuración de la organización</h1>
 
       <!-- Navigation Cards -->

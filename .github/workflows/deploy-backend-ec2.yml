@@ -86,6 +86,9 @@ jobs:
           aws configure set region us-east-1
           aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
 
+          echo "🧹 Cleaning up old images..."
+          sudo docker system prune -af
+
           echo "📦 Pulling latest Docker image..."
           sudo docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
@@ -100,9 +103,6 @@ jobs:
             -p 3000:3000 \\
             --env-file /opt/vendix/.env \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-
-          echo "🧹 Cleaning up old images..."
-          sudo docker image prune -f
 
           echo "✅ Deployment completed!"
         ENDSSH

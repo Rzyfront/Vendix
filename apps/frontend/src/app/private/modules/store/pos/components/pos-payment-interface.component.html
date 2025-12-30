@@ -1,12 +1,12 @@
 <app-modal [isOpen]="isOpen" [size]="'lg'" (closed)="onModalClosed()" [showCloseButton]="true" [title]="'Procesar Pago'"
   [subtitle]="'Selecciona un método de pago para completar la venta'">
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-2 md:p-4 h-full">
     <!-- Resumen del Pedido (Columna Izquierda) -->
     <div class="lg:col-span-1 h-full block"> <!-- Ensure block display to fixing width issues if flex parent -->
       <app-card [shadow]="'md'" [customClasses]="'payment-summary-enhanced h-full flex flex-col'">
         <div class="p-5 flex-1 flex flex-col justify-between">
-          <div class="space-y-4">
+          <div class="space-y-2 md:space-y-4">
             <h4 class="section-header-enhanced text-lg mb-4">Resumen</h4>
 
             <!-- List items with better spacing -->
@@ -82,7 +82,7 @@
     </div>
 
     <!-- Opciones y Proceso de Pago (Columna Derecha - 2 columnas) -->
-    <div class="lg:col-span-2 flex flex-col gap-6">
+    <div class="lg:col-span-2 flex flex-col gap-2 md:p-4">
 
       <!-- Selección de Método de Pago -->
       <div class="animate-slide-in" style="animation-delay: 0.1s">
@@ -114,7 +114,7 @@
 
         <ng-template #noPaymentMethods>
           <div
-            class="flex flex-col items-center justify-center p-6 bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-lg text-center">
+            class="flex flex-col items-center justify-center p-2 md:p-4 bg-[var(--color-surface)] border border-dashed border-[var(--color-border)] rounded-lg text-center">
             <app-icon name="credit-card-off" [size]="32" color="var(--color-text-secondary)" class="mb-2"></app-icon>
             <p class="text-sm text-[var(--color-text-secondary)]">No hay métodos de pago configurados.</p>
             <button class="text-sm text-[var(--color-primary)] font-medium hover:underline mt-2"
@@ -145,9 +145,9 @@
               </h4>
 
               <!-- Contenido Específico: Efectivo -->
-              <div *ngIf="paymentState.selectedMethod.type === 'cash'" class="flex-1 flex flex-col gap-4">
+              <div *ngIf="paymentState.selectedMethod.type === 'cash'" class="flex-1 flex flex-col gap-2 md:gap-4">
 
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-4">
                   <!-- Input Monto -->
                   <div>
                     <label
@@ -174,7 +174,7 @@
                 </div>
 
                 <!-- Teclado y Montos Rápidos -->
-                <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4 mt-2">
+                <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-4 mt-2">
                   <!-- Montos Rápidos (Ahora Dinámicos) -->
                   <div class="grid grid-cols-1 gap-2 content-start">
                     <button type="button" (click)="setHalfAmount()"
@@ -234,7 +234,7 @@
   </div>
 
   <!-- Footer con Botones -->
-  <div slot="footer" class="flex justify-between items-center w-full gap-4 pt-2">
+  <div slot="footer" class="flex justify-between items-center w-full gap-2 md:gap-4 pt-2">
     <app-button variant="outline-danger" size="md" (clicked)="onModalClosed()" [disabled]="paymentState.isProcessing"
       [attr.aria-label]="'Cancelar y cerrar'">
       Cancelar

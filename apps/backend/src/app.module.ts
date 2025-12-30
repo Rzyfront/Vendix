@@ -14,6 +14,9 @@ import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import { RequestContextInterceptor } from '@common/interceptors/request-context.interceptor';
 
+import { AuditModule } from './common/audit/audit.module';
+import { AuditInterceptor } from './common/audit/audit.interceptor';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -26,6 +29,7 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     TestModule,
     DomainsModule, // ✅ Módulo de dominios (público y privado)
     StorageModule,
+    AuditModule, // ✅ Importar AuditModule global (desde common)
   ],
   controllers: [AppController],
   providers: [
@@ -38,6 +42,10 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestContextInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditInterceptor, // ✅ Registrar AuditInterceptor globalmente
     },
   ],
 })

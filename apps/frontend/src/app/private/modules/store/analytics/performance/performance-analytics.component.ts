@@ -6,7 +6,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="p-6">
+    <div class="w-full">
       <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900 mb-2">
           Análisis de rendimiento

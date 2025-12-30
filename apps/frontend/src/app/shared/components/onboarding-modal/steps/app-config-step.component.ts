@@ -17,275 +17,284 @@ import { ButtonComponent, IconComponent } from '../../index';
   styles: [
     `
       .app-config-step {
-        padding: 1.5rem 0;
-        background: #fafbfc;
-        border-radius: 1rem;
-        margin: -1rem;
+        padding: 0;
+        background: transparent;
       }
 
       .app-config-container {
-        max-width: 820px;
-        margin: 0 auto;
-        padding: 0 1.5rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
       }
 
       .app-config-header {
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
       .config-icon-wrapper {
-        margin-bottom: 1.5rem;
+        margin-bottom: 0.75rem;
       }
 
       .config-icon-bg {
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+        width: 56px;
+        height: 56px;
+        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 0 auto;
-        box-shadow: 0 8px 24px rgba(139, 92, 246, 0.24);
+        box-shadow: var(--shadow-md);
       }
 
       .config-icon {
-        color: white;
+        color: var(--color-text-on-primary);
       }
 
       .config-title {
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 0.5rem;
+        font-size: var(--fs-xl);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.25rem;
       }
 
       .config-subtitle {
-        color: #6b7280;
-        font-size: 1rem;
-        line-height: 1.6;
+        color: var(--color-text-secondary);
+        font-size: var(--fs-sm);
+        line-height: 1.5;
       }
 
       .config-form {
-        background: white;
-        border-radius: 0.75rem;
-        padding: 2rem;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
       }
 
       .form-section {
-        margin-bottom: 2rem;
-      }
-
-      .form-section:last-child {
-        margin-bottom: 0;
+        background: var(--color-surface);
+        padding: 1rem;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
+        display: flex;
+        flex-direction: column;
       }
 
       .section-header {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #f3f4f6;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--color-border);
       }
 
       .section-icon {
-        width: 40px;
-        height: 40px;
-        background: #f3e8ff;
-        border-radius: 0.5rem;
+        width: 28px;
+        height: 28px;
+        background: var(--color-primary-light);
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       .section-icon-element {
-        color: #8b5cf6;
+        color: var(--color-primary);
       }
 
       .section-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: #1f2937;
+        font-size: var(--fs-base);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
         margin: 0;
       }
 
-      /* Color Selector */
       .color-selector {
-        space-y: 1.5rem;
+        flex: 1;
       }
 
       .color-inputs-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 1.5rem;
-        margin-bottom: 2rem;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
+        margin-bottom: 1rem;
       }
 
       .color-input-group {
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
+        gap: 0.375rem;
       }
 
       .color-label {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #374151;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
+      }
+
+      .help-icon {
+        color: var(--color-text-muted);
+        cursor: help;
+      }
+
+      .help-icon:hover {
+        color: var(--color-primary);
       }
 
       .color-preview {
-        width: 24px;
-        height: 24px;
-        border-radius: 0.375rem;
-        border: 2px solid #e5e7eb;
+        width: 18px;
+        height: 18px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
       }
 
       .color-input-wrapper {
         display: flex;
-        gap: 0.75rem;
+        gap: 0.5rem;
         align-items: center;
       }
 
       .color-picker {
-        width: 48px;
-        height: 48px;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
+        width: 36px;
+        height: 36px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: all var(--transition-fast) ease;
+        flex-shrink: 0;
       }
 
       .color-picker:hover {
-        border-color: #8b5cf6;
+        border-color: var(--color-primary);
       }
 
       .color-text {
         flex: 1;
-        padding: 0.75rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        font-family:
-          'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-        transition: all 0.2s ease;
+        padding: 0.5rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        font-size: var(--fs-xs);
+        font-family: 'SF Mono', 'Monaco', 'Roboto Mono', monospace;
+        transition: all var(--transition-fast) ease;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        height: 36px;
       }
 
       .color-text:focus {
         outline: none;
-        border-color: #8b5cf6;
-        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px var(--color-ring);
       }
 
       .palette-preview {
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
-        border-radius: 0.75rem;
-        padding: 1.5rem;
+        background: var(--color-background);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 0.75rem;
+        margin-top: auto;
       }
 
       .palette-title {
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: #1f2937;
-        margin-bottom: 1rem;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.5rem;
       }
 
       .palette-colors {
         display: flex;
-        gap: 0.5rem;
+        gap: 0.375rem;
         flex-wrap: wrap;
       }
 
       .palette-color {
-        width: 40px;
-        height: 40px;
-        border-radius: 0.5rem;
-        border: 2px solid #e5e7eb;
+        width: 28px;
+        height: 28px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border);
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: all var(--transition-fast) ease;
       }
 
       .palette-color:hover {
-        transform: scale(1.05);
-        border-color: #8b5cf6;
+        transform: scale(1.1);
+        border-color: var(--color-primary);
       }
 
-      /* Domain Configuration */
       .domain-card {
         display: flex;
         align-items: flex-start;
-        gap: 1rem;
-        padding: 1.5rem;
-        border-radius: 0.75rem;
-        margin-bottom: 1.5rem;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-radius: var(--radius-lg);
+        margin-bottom: 1rem;
       }
 
       .domain-card.auto-domain {
-        background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-        border: 1px solid #bbf7d0;
+        background: var(--color-success-light);
+        border: 1px solid rgba(34, 197, 94, 0.3);
       }
 
       .domain-icon {
-        width: 48px;
-        height: 48px;
-        background: white;
-        border-radius: 0.5rem;
+        width: 40px;
+        height: 40px;
+        background: var(--color-surface);
+        border-radius: var(--radius-md);
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        box-shadow: 0 2px 8px rgba(34, 197, 94, 0.2);
+        box-shadow: var(--shadow-sm);
       }
 
       .domain-check-icon {
-        color: #22c55e;
+        color: var(--color-success);
       }
 
       .domain-content h4 {
-        font-size: 1rem;
-        font-weight: 600;
-        color: #166534;
-        margin-bottom: 0.25rem;
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-semibold);
+        color: var(--color-success);
+        margin-bottom: 0.125rem;
       }
 
       .domain-url {
-        font-family:
-          'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: #15803d;
-        background: white;
-        padding: 0.25rem 0.5rem;
-        border-radius: 0.25rem;
+        font-family: 'SF Mono', 'Monaco', 'Roboto Mono', monospace;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-semibold);
+        color: var(--color-success);
+        background: var(--color-surface);
+        padding: 0.125rem 0.375rem;
+        border-radius: var(--radius-sm);
         display: inline-block;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.25rem;
       }
 
       .domain-description {
-        color: #166534;
-        font-size: 0.875rem;
-        line-height: 1.4;
+        color: var(--color-text-secondary);
+        font-size: var(--fs-xs);
+        line-height: 1.3;
       }
 
       .custom-domain-toggle {
-        margin-bottom: 1.5rem;
+        margin-bottom: 0.75rem;
       }
 
       .toggle-label {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.5rem;
         cursor: pointer;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #374151;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
       }
 
       .toggle-input {
@@ -293,118 +302,94 @@ import { ButtonComponent, IconComponent } from '../../index';
       }
 
       .toggle-slider {
-        width: 44px;
-        height: 24px;
-        background: #e5e7eb;
-        border-radius: 12px;
+        width: 36px;
+        height: 20px;
+        background: var(--color-border);
+        border-radius: var(--radius-pill);
         position: relative;
-        transition: all 0.2s ease;
+        transition: all var(--transition-fast) ease;
       }
 
       .toggle-slider::before {
         content: '';
         position: absolute;
-        width: 18px;
-        height: 18px;
-        background: white;
+        width: 16px;
+        height: 16px;
+        background: var(--color-surface);
         border-radius: 50%;
-        top: 3px;
-        left: 3px;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        top: 2px;
+        left: 2px;
+        transition: all var(--transition-fast) ease;
+        box-shadow: var(--shadow-sm);
       }
 
       .toggle-input:checked + .toggle-slider {
-        background: #8b5cf6;
+        background: var(--color-primary);
       }
 
       .toggle-input:checked + .toggle-slider::before {
-        transform: translateX(20px);
+        transform: translateX(16px);
       }
 
       .custom-domain-section {
-        background: #f9fafb;
-        border: 1px solid #e5e7eb;
-        border-radius: 0.75rem;
-        padding: 1.5rem;
+        background: var(--color-background);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        padding: 0.75rem;
       }
 
       .form-field {
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.25rem;
       }
 
       .field-label {
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #374151;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
       }
 
       .field-input {
-        padding: 0.75rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        background: white;
+        padding: 0.5rem 0.625rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        transition: all var(--transition-fast) ease;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        height: 2.25rem;
       }
 
       .field-input:focus {
         outline: none;
-        border-color: #8b5cf6;
-        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px var(--color-ring);
       }
 
       .field-hint {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.25rem;
       }
 
       .hint-icon {
-        color: #9ca3af;
+        color: var(--color-text-muted);
         flex-shrink: 0;
       }
 
       .hint-text {
-        color: #6b7280;
-        font-size: 0.75rem;
-        line-height: 1.4;
+        color: var(--color-text-muted);
+        font-size: var(--fs-xs);
+        line-height: 1.3;
       }
 
-      @media (max-width: 640px) {
-        .app-config-container {
-          padding: 0 1rem;
-        }
-
+      @media (max-width: 1024px) {
         .config-form {
-          padding: 1.5rem;
+          grid-template-columns: 1fr;
         }
-
-        .config-title {
-          font-size: 1.5rem;
-        }
-
-        .section-header {
-          flex-direction: column;
-          text-align: center;
-          gap: 0.5rem;
-        }
-
         .color-inputs-grid {
           grid-template-columns: 1fr;
-          gap: 1rem;
-        }
-
-        .domain-card {
-          flex-direction: column;
-          text-align: center;
-          gap: 0.75rem;
-        }
-
-        .form-section {
-          margin-bottom: 1.5rem;
         }
       }
     `,
@@ -416,7 +401,7 @@ import { ButtonComponent, IconComponent } from '../../index';
         <div class="app-config-header">
           <div class="config-icon-wrapper">
             <div class="config-icon-bg">
-              <app-icon name="palette" size="48" class="config-icon"></app-icon>
+              <app-icon name="palette" size="40" class="config-icon"></app-icon>
             </div>
           </div>
           <div class="config-header-content">
@@ -435,7 +420,7 @@ import { ButtonComponent, IconComponent } from '../../index';
               <div class="section-icon">
                 <app-icon
                   name="droplet"
-                  size="20"
+                  size="16"
                   class="section-icon-element"
                 ></app-icon>
               </div>
@@ -463,8 +448,8 @@ import { ButtonComponent, IconComponent } from '../../index';
                       type="text"
                       class="color-text"
                       [value]="primaryColor"
-                      (input)="onPrimaryColorTextChange($event)"
-                      placeholder="#3B82F6"
+                      (input)="onPrimaryColorChange($event)"
+                      placeholder="#7ed7a5"
                     />
                   </div>
                 </div>
@@ -488,8 +473,33 @@ import { ButtonComponent, IconComponent } from '../../index';
                       type="text"
                       class="color-text"
                       [value]="secondaryColor"
-                      (input)="onSecondaryColorTextChange($event)"
-                      placeholder="#10B981"
+                      (input)="onSecondaryColorChange($event)"
+                      placeholder="#2f6f4e"
+                    />
+                  </div>
+                </div>
+
+                <div class="color-input-group">
+                  <label class="color-label">
+                    Color terciario
+                    <span
+                      class="color-preview"
+                      [style.background-color]="tertiaryColor"
+                    ></span>
+                  </label>
+                  <div class="color-input-wrapper">
+                    <input
+                      type="color"
+                      class="color-picker"
+                      [value]="tertiaryColor"
+                      (input)="onTertiaryColorChange($event)"
+                    />
+                    <input
+                      type="text"
+                      class="color-text"
+                      [value]="tertiaryColor"
+                      (input)="onTertiaryColorChange($event)"
+                      placeholder="#f59e0b"
                     />
                   </div>
                 </div>
@@ -497,30 +507,33 @@ import { ButtonComponent, IconComponent } from '../../index';
 
               <!-- Color Palette Preview -->
               <div class="palette-preview">
-                <h4 class="palette-title">Vista previa de paleta</h4>
+                <h4 class="palette-title">Paleta rápida</h4>
                 <div class="palette-colors">
-                  <div
-                    *ngFor="let color of colorPalette"
+                  @for (color of suggestedColors; track color) {
+                  <button
+                    type="button"
                     class="palette-color"
                     [style.background-color]="color"
-                    [title]="color"
-                  ></div>
+                    (click)="selectColor(color)"
+                    [attr.aria-label]="'Seleccionar color ' + color"
+                  ></button>
+                  }
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Domain Configuration -->
+          <!-- Domain Configuration Section -->
           <div class="form-section">
             <div class="section-header">
               <div class="section-icon">
                 <app-icon
                   name="globe"
-                  size="20"
+                  size="16"
                   class="section-icon-element"
                 ></app-icon>
               </div>
-              <h3 class="section-title">Configuración de dominio</h3>
+              <h3 class="section-title">Dominio de tu tienda</h3>
             </div>
 
             <!-- Auto-generated Domain -->
@@ -528,16 +541,15 @@ import { ButtonComponent, IconComponent } from '../../index';
               <div class="domain-icon">
                 <app-icon
                   name="check-circle"
-                  size="24"
+                  size="20"
                   class="domain-check-icon"
                 ></app-icon>
               </div>
               <div class="domain-content">
-                <h4 class="domain-title">Dominio automático configurado</h4>
-                <p class="domain-url">{{ generatedSubdomain }}</p>
+                <h4>Dominio automático</h4>
+                <span class="domain-url">{{ generatedDomain }}</span>
                 <p class="domain-description">
-                  Tu aplicación estará disponible inmediatamente en esta
-                  dirección
+                  Tu tienda estará disponible en este dominio gratuito
                 </p>
               </div>
             </div>
@@ -548,32 +560,38 @@ import { ButtonComponent, IconComponent } from '../../index';
                 <input
                   type="checkbox"
                   class="toggle-input"
-                  formControlName="use_custom_domain"
+                  [checked]="useCustomDomain"
+                  (change)="toggleCustomDomain()"
                 />
                 <span class="toggle-slider"></span>
-                <span class="toggle-text">Quiero usar mi propio dominio</span>
+                Usar dominio personalizado (opcional)
               </label>
             </div>
 
             <!-- Custom Domain Input -->
-            <div class="custom-domain-section" *ngIf="formGroup.get('use_custom_domain').value">
+            @if (useCustomDomain) {
+            <div class="custom-domain-section">
               <div class="form-field">
                 <label class="field-label">Tu dominio personalizado</label>
                 <input
                   type="text"
                   class="field-input"
-                  formControlName="custom_domain"
-                  placeholder="tienda.micomercio.com"
+                  placeholder="mitienda.com"
+                  formControlName="customDomain"
                 />
                 <div class="field-hint">
-                  <app-icon name="info" size="14" class="hint-icon"></app-icon>
-                  <span class="hint-text">
-                    Después de completar el wizard, te ayudaremos a configurar
-                    DNS y SSL
-                  </span>
+                  <app-icon
+                    name="info"
+                    size="12"
+                    class="hint-icon"
+                  ></app-icon>
+                  <span class="hint-text"
+                    >Requiere configuración DNS adicional</span
+                  >
                 </div>
               </div>
             </div>
+            }
           </div>
         </div>
       </div>
@@ -587,130 +605,47 @@ export class AppConfigStepComponent {
   @Output() previousStep = new EventEmitter<void>();
 
   // Color properties
-  primaryColor: string = '#3B82F6';
-  secondaryColor: string = '#10B981';
-  colorPalette: string[] = [];
+  primaryColor: string = '#7ed7a5';
+  secondaryColor: string = '#2f6f4e';
+  tertiaryColor: string = '#f59e0b';
+  suggestedColors: string[] = [
+    '#7ed7a5',
+    '#2f6f4e',
+    '#f59e0b',
+    '#3b82f6',
+    '#8b5cf6',
+    '#ec4899',
+    '#ef4444',
+    '#22c55e',
+    '#14b8a6',
+  ];
 
   // Domain properties
-  generatedSubdomain: string = 'mi-tienda.vendix.com';
-
-  constructor() {
-    this.generateColorPalette();
-  }
+  generatedDomain: string = 'mi-tienda.vendix.app';
+  useCustomDomain: boolean = false;
 
   onPrimaryColorChange(event: any): void {
     this.primaryColor = event.target.value;
-    this.generateColorPalette();
     this.updateFormColors();
-  }
-
-  onPrimaryColorTextChange(event: any): void {
-    const value = event.target.value;
-    if (this.isValidHexColor(value)) {
-      this.primaryColor = value;
-      this.generateColorPalette();
-      this.updateFormColors();
-    }
   }
 
   onSecondaryColorChange(event: any): void {
     this.secondaryColor = event.target.value;
-    this.generateColorPalette();
     this.updateFormColors();
   }
 
-  onSecondaryColorTextChange(event: any): void {
-    const value = event.target.value;
-    if (this.isValidHexColor(value)) {
-      this.secondaryColor = value;
-      this.generateColorPalette();
-      this.updateFormColors();
-    }
+  onTertiaryColorChange(event: any): void {
+    this.tertiaryColor = event.target.value;
+    this.updateFormColors();
   }
 
-
-  private isValidHexColor(color: string): boolean {
-    return /^#[0-9A-Fa-f]{6}$/.test(color);
+  selectColor(color: string): void {
+    this.primaryColor = color;
+    this.updateFormColors();
   }
 
-  private generateColorPalette(): void {
-    this.colorPalette = [
-      this.primaryColor,
-      this.secondaryColor,
-      this.lightenColor(this.primaryColor, 20),
-      this.darkenColor(this.primaryColor, 20),
-      this.lightenColor(this.secondaryColor, 20),
-      this.darkenColor(this.secondaryColor, 20),
-      this.generateAccentColor(),
-      '#FFFFFF',
-      '#F9FAFB',
-      '#1F2937',
-    ];
-  }
-
-  private lightenColor(color: string, percent: number): string {
-    const num = parseInt(color.slice(1), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = ((num >> 8) & 0x00ff) + amt;
-    const B = (num & 0x0000ff) + amt;
-    return (
-      '#' +
-      (
-        0x1000000 +
-        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-        (B < 255 ? (B < 1 ? 0 : B) : 255)
-      )
-        .toString(16)
-        .slice(1)
-        .toUpperCase()
-    );
-  }
-
-  private darkenColor(color: string, percent: number): string {
-    const num = parseInt(color.slice(1), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) - amt;
-    const G = ((num >> 8) & 0x00ff) - amt;
-    const B = (num & 0x0000ff) - amt;
-    return (
-      '#' +
-      (
-        0x1000000 +
-        (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-        (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-        (B < 255 ? (B < 1 ? 0 : B) : 255)
-      )
-        .toString(16)
-        .slice(1)
-        .toUpperCase()
-    );
-  }
-
-  private generateAccentColor(): string {
-    const r1 = parseInt(this.primaryColor.slice(1, 3), 16);
-    const g1 = parseInt(this.primaryColor.slice(3, 5), 16);
-    const b1 = parseInt(this.primaryColor.slice(5, 7), 16);
-
-    const r2 = parseInt(this.secondaryColor.slice(1, 3), 16);
-    const g2 = parseInt(this.secondaryColor.slice(3, 5), 16);
-    const b2 = parseInt(this.secondaryColor.slice(5, 7), 16);
-
-    const r = Math.round((r1 + r2) / 2);
-    const g = Math.round((g1 + g2) / 2);
-    const b = Math.round((b1 + b2) / 2);
-
-    return (
-      '#' +
-      [r, g, b]
-        .map((x) => {
-          const hex = x.toString(16);
-          return hex.length === 1 ? '0' + hex : hex;
-        })
-        .join('')
-        .toUpperCase()
-    );
+  toggleCustomDomain(): void {
+    this.useCustomDomain = !this.useCustomDomain;
   }
 
   private updateFormColors(): void {
@@ -721,6 +656,10 @@ export class AppConfigStepComponent {
       if (this.formGroup.get('secondary_color')) {
         this.formGroup.get('secondary_color').setValue(this.secondaryColor);
       }
+      if (this.formGroup.get('accent_color')) {
+        this.formGroup.get('accent_color').setValue(this.tertiaryColor);
+      }
     }
   }
 }
+

@@ -4,20 +4,46 @@ import {
   OnChanges,
   Output,
   EventEmitter,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BaseChartDirective } from 'ng2-charts';
+import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
+import type { EChartsOption } from 'echarts';
+import * as echarts from 'echarts/core';
+import { BarChart, LineChart, PieChart, ScatterChart, RadarChart, GaugeChart } from 'echarts/charts';
 import {
-  ChartData,
-  ChartOptions,
-  ChartType,
-  ChartConfiguration,
-} from 'chart.js';
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+  LegendComponent,
+  DataZoomComponent,
+  DatasetComponent,
+  TransformComponent
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+import { LabelLayout, UniversalTransition } from 'echarts/features';
 
-// Re-export Chart.js types for convenience
-export type { ChartData, ChartOptions, ChartType, ChartConfiguration };
+echarts.use([
+  BarChart,
+  LineChart,
+  PieChart,
+  ScatterChart,
+  RadarChart,
+  GaugeChart,
+  TitleComponent,
+  TooltipComponent,
+  GridComponent,
+  LegendComponent,
+  DataZoomComponent,
+  DatasetComponent,
+  TransformComponent,
+  LabelLayout,
+  UniversalTransition,
+  CanvasRenderer
+]);
 
 // Extended chart types including advanced charts
+// Kept for backward compatibility mapping if needed, or simplification
 export type ExtendedChartType =
   | 'bar'
   | 'line'
@@ -75,7 +101,10 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
 @Component({
   selector: 'app-chart',
   standalone: true,
-  imports: [CommonModule, BaseChartDirective],
+  imports: [CommonModule, NgxEchartsDirective],
+  providers: [
+    provideEchartsCore({ echarts }),
+  ],
   template: `
     <div
       class="chart-container"
@@ -85,15 +114,14 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
       <div *ngIf="loading" class="chart-loading">
         <div class="loading-spinner"></div>
       </div>
-      <canvas
-        baseChart
-        [data]="processedData"
-        [options]="mergedOptions"
-        [type]="chartJsType"
+      <div 
+        echarts 
+        [options]="mergedOptions" 
+        [theme]="$any(echartsTheme)"
+        class="echarts-chart"
         (chartClick)="onChartClick($event)"
-        (chartHover)="onChartHover($event)"
-      >
-      </canvas>
+        (chartMouseOver)="onChartHover($event)"
+      ></div>
     </div>
   `,
   styles: [
@@ -105,6 +133,7 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
         min-height: 200px;
         border-radius: 0.75rem;
         transition: all 0.3s ease;
+        overflow: hidden; /* Ensure chart doesn't overflow rounded corners */
       }
 
       .chart-container.small {
@@ -120,10 +149,10 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
           0 4px 6px -1px rgba(0, 0, 0, 0.1),
           0 2px 4px -1px rgba(0, 0, 0, 0.06);
       }
-
-      canvas {
-        max-height: 100%;
-        max-width: 100%;
+      
+      .echarts-chart {
+        width: 100%;
+        height: 100%;
       }
 
       .chart-loading {
@@ -161,13 +190,18 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
   ],
 })
 export class ChartComponent implements OnChanges {
-  @Input() data: ChartData = { labels: [], datasets: [] };
-  @Input() type: ExtendedChartType = 'bar';
-  @Input() options: ChartOptions = {};
+  // New Input for ECharts options
+  @Input() options: EChartsOption = {};
+
+  // Kept mostly for compatibility or container styling
   @Input() size: 'small' | 'medium' | 'large' = 'medium';
   @Input() className = '';
   @Input() theme: ChartTheme = CHART_THEMES['corporate'];
   @Input() loading = false;
+
+  // Deprecated usage
+  @Input() type: ExtendedChartType = 'bar';
+  @Input() data: any = {};
   @Input() animated = true;
   @Input() showLegend = true;
   @Input() showTooltip = true;
@@ -177,19 +211,16 @@ export class ChartComponent implements OnChanges {
   @Output() chartHover = new EventEmitter<any>();
 
   containerClass = '';
-  mergedOptions: ChartOptions = {};
-  processedData: ChartData = { labels: [], datasets: [] };
-  chartJsType: ChartType = 'bar';
+  mergedOptions: EChartsOption = {};
+  echartsTheme: string | object | undefined;
 
   constructor() {
     this.updateContainerClass();
   }
 
-  ngOnChanges(changes: any): void {
+  ngOnChanges(changes: SimpleChanges): void {
     this.updateContainerClass();
-    this.processData();
     this.mergeOptions();
-    this.updateChartJsType();
   }
 
   private updateContainerClass(): void {
@@ -201,224 +232,34 @@ export class ChartComponent implements OnChanges {
     this.containerClass = `${sizeClasses[this.size]} ${this.className}`.trim();
   }
 
-  private processData(): void {
-    const processedDatasets = this.data.datasets.map((dataset, index) => {
-      const themeColor = this.theme.colors[index % this.theme.colors.length];
-
-      const processedDataset: any = {
-        ...dataset,
-        backgroundColor:
-          dataset.backgroundColor ||
-          (this.type === 'line' || this.type === 'area'
-            ? themeColor + '20'
-            : themeColor),
-        borderColor: dataset.borderColor || themeColor,
-        borderWidth:
-          dataset.borderWidth ||
-          (this.type === 'line' || this.type === 'area' ? 2 : 1),
-      };
-
-      if (this.type === 'line' || this.type === 'area') {
-        processedDataset.tension =
-          (dataset as any).tension !== undefined
-            ? (dataset as any).tension
-            : 0.4;
-        processedDataset.fill =
-          (dataset as any).fill !== undefined
-            ? (dataset as any).fill
-            : this.type === 'area';
-      }
-
-      return processedDataset;
-    });
-
-    this.processedData = {
-      ...this.data,
-      datasets: processedDatasets,
-    };
-  }
-
   private mergeOptions(): void {
-    const defaultOptions: any = {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: this.animated
-        ? {
-            duration: 1000,
-            easing: 'easeInOutQuart',
-          }
-        : false,
-      interaction: {
-        mode: 'index',
-        intersect: false,
-      },
-      plugins: {
-        legend: {
-          display: this.showLegend,
-          position: 'top',
-          align: 'end',
-          labels: {
-            usePointStyle: true,
-            padding: 20,
-            font: {
-              size: 12,
-            },
-            color: this.theme.legendColor || this.theme.textColor,
-          },
-        },
-        tooltip: {
-          enabled: this.showTooltip,
-          backgroundColor: this.theme.backgroundColor
-            ? this.theme.backgroundColor + 'dd'
-            : 'rgba(15, 23, 42, 0.9)',
-          titleColor: this.theme.textColor || '#fff',
-          bodyColor: this.theme.textColor || '#fff',
-          padding: 12,
-          borderColor: this.theme.colors[0] + '40',
-          borderWidth: 1,
-          displayColors: true,
-          boxPadding: 4,
-          callbacks: {
-            label: (context: any) => {
-              let label = context.dataset.label || '';
-              if (label) {
-                label += ': ';
-              }
-              if (context.parsed.y !== null) {
-                label += new Intl.NumberFormat('en-US', {
-                  style: 'currency',
-                  currency: 'USD',
-                  minimumFractionDigits: 0,
-                }).format(context.parsed.y);
-              } else if (context.parsed !== null) {
-                label += new Intl.NumberFormat('en-US', {
-                  style: 'currency',
-                  currency: 'USD',
-                  minimumFractionDigits: 0,
-                }).format(context.parsed);
-              }
-              return label;
-            },
-          },
-        },
-      },
-    };
+    const baseOptions = { ...this.options };
 
-    if (this.type === 'line' || this.type === 'area') {
-      defaultOptions.scales = {
-        x: {
-          grid: {
-            display: false,
-          },
-          ticks: {
-            color: this.theme.textColor,
-            font: {
-              size: 12,
-            },
-          },
-        },
-        y: {
-          beginAtZero: true,
-          stacked: this.type === 'area',
-          grid: {
-            color: this.theme.gridColor,
-          },
-          ticks: {
-            color: this.theme.textColor,
-            font: {
-              size: 12,
-            },
-            callback: (value: any) => '$' + value / 1000 + 'K',
-          },
-        },
-      };
-    } else if (this.type === 'bar') {
-      defaultOptions.scales = {
-        x: {
-          grid: {
-            display: false,
-          },
-          ticks: {
-            color: this.theme.textColor,
-            font: {
-              size: 12,
-            },
-          },
-        },
-        y: {
-          beginAtZero: true,
-          grid: {
-            color: this.theme.gridColor,
-          },
-          ticks: {
-            color: this.theme.textColor,
-            font: {
-              size: 12,
-            },
-          },
-        },
-      };
-    } else if (this.type === 'doughnut' || this.type === 'polarArea') {
-      defaultOptions.cutout = this.type === 'doughnut' ? '65%' : '0%';
-    } else if (this.type === 'radar') {
-      defaultOptions.scales = {
-        r: {
-          beginAtZero: true,
-          grid: {
-            color: this.theme.gridColor,
-          },
-          ticks: {
-            color: this.theme.textColor,
-            backdropColor: 'transparent',
-          },
-          pointLabels: {
-            color: this.theme.textColor,
-            font: {
-              size: 12,
-            },
-          },
-        },
-      };
-    } else if (this.type === 'scatter' || this.type === 'bubble') {
-      defaultOptions.scales = {
-        x: {
-          type: 'linear',
-          position: 'bottom',
-          grid: {
-            color: this.theme.gridColor,
-          },
-          ticks: {
-            color: this.theme.textColor,
-          },
-        },
-        y: {
-          beginAtZero: true,
-          grid: {
-            color: this.theme.gridColor,
-          },
-          ticks: {
-            color: this.theme.textColor,
-          },
-        },
+    if (!baseOptions.color && this.theme.colors) {
+      baseOptions.color = this.theme.colors;
+    }
+
+    if (!baseOptions.tooltip && this.showTooltip) {
+      baseOptions.tooltip = {
+        trigger: 'item',
+        backgroundColor: this.theme.backgroundColor ? this.theme.backgroundColor + 'dd' : 'rgba(255, 255, 255, 0.9)',
+        textStyle: {
+          color: this.theme.textColor || '#333'
+        }
       };
     }
 
-    this.mergedOptions = { ...defaultOptions, ...this.options };
-  }
+    if (!baseOptions.legend && this.showLegend) {
+      baseOptions.legend = {
+        show: true,
+        textStyle: {
+          color: this.theme.legendColor || this.theme.textColor
+        }
+      };
+    }
 
-  private updateChartJsType(): void {
-    const typeMap: { [key in ExtendedChartType]: ChartType } = {
-      bar: 'bar',
-      line: 'line',
-      pie: 'pie',
-      doughnut: 'doughnut',
-      area: 'line',
-      radar: 'radar',
-      polarArea: 'polarArea',
-      scatter: 'scatter',
-      bubble: 'bubble',
-    };
-    this.chartJsType = typeMap[this.type];
+    this.mergedOptions = baseOptions;
+    this.echartsTheme = this.theme.name === 'Dark' ? 'dark' : undefined;
   }
 
   onChartClick(event: any): void {

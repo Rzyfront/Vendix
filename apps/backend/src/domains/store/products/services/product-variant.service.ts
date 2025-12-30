@@ -78,9 +78,11 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // Verificar que el SKU sea único
-      const existingSku = await prisma.product_variants.findUnique({
-        where: { sku: createVariantDto.sku },
+      // Verificar que el SKU sea único dentro de la tienda (auto-scoped por StorePrismaService)
+      const existingSku = await prisma.product_variants.findFirst({
+        where: {
+          sku: createVariantDto.sku
+        },
       });
 
       if (existingSku) {
@@ -119,7 +121,6 @@ export class ProductVariantService {
         attributes: createVariantDto.attributes,
         price_override:
           createVariantDto.price_override || createVariantDto.price,
-        stock_quantity: 0, // Se inicializará via stock_levels
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -171,12 +172,7 @@ export class ProductVariantService {
       const existingVariant = await prisma.product_variants.findUnique({
         where: { id: variantId },
         include: {
-          products: {
-            select: {
-              id: true,
-              store_id: true,
-            },
-          },
+          products: true,
         },
       });
 

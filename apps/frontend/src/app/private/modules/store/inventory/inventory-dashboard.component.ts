@@ -21,9 +21,9 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
   standalone: true,
   imports: [CommonModule, RouterModule, StatsComponent, IconComponent, TableComponent],
   template: `
-    <div class="p-6">
+    <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
         <app-stats
           title="Valor Total Inventario"
           [value]="formatCurrency(stats.total_stock_value)"

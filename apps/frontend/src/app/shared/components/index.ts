@@ -1,4 +1,5 @@
 // Components
+export { ConfirmationModalComponent } from './confirmation-modal/confirmation-modal.component';
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
 export { StatsComponent } from './stats/stats.component';
@@ -55,9 +56,8 @@ export type {
   MultiSelectorSize,
 } from './multi-selector/multi-selector.component';
 export type {
-  ChartData,
-  ChartOptions,
   ExtendedChartType,
   ChartTheme,
+  EChartsOption,
 } from './chart';
 export { CHART_THEMES } from './chart';

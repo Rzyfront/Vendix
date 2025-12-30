@@ -4,7 +4,7 @@ import { GlobalPrismaService as PrismaService } from '../../prisma/services/glob
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from '../../email/email.service';
-import { AuditService } from '../organization/audit/audit.service';
+import { AuditService } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import {
   ConflictException,

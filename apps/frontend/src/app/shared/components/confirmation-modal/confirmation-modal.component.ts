@@ -22,16 +22,17 @@ export class ConfirmationModalComponent {
 
   @Output() confirm = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
 
-  isOpen = true;
+  @Input() isOpen = true;
 
   onConfirm(): void {
     this.confirm.emit();
-    this.isOpen = false;
+    this.isOpenChange.emit(false);
   }
 
   onCancel(): void {
     this.cancel.emit();
-    this.isOpen = false;
+    this.isOpenChange.emit(false);
   }
 }

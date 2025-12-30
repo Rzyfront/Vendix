@@ -48,7 +48,7 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
       title="Configurar Permisos"
       [subtitle]="role ? 'Gestionar permisos del rol: ' + role.name : ''"
       size="lg"
@@ -387,7 +387,7 @@ export class RolePermissionsModalComponent
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() role: Role | null = null;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<AssignPermissionsDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -439,7 +439,7 @@ export class RolePermissionsModalComponent
     if (!isOpen) {
       this.onCancel();
     }
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
   }
 
   ngOnChanges(changes: SimpleChanges): void {

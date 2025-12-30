@@ -32,18 +32,25 @@ export class AccessValidationService {
       throw new NotFoundException(`Store with ID ${storeId} not found`);
     }
 
+    // 0. Bypass for super_admin
+    const isSuperAdmin = user.user_roles?.some(
+      (userRole: any) => userRole.roles?.name === 'super_admin',
+    );
+
+    if (isSuperAdmin) {
+      return true;
+    }
+
     // 1. Check if user is an Organization Admin/Owner for the store's organization
     // Users with organization-level access (Owner, Org Admin) have access to all stores in their org
-    // Note: The user object might not directly have organization_id if it's not part of the authentication payload.
-    // This check assumes `user.organization_id` is available and represents the primary organization of the user,
-    // or that user.user_roles contains the organization_id for org-level roles.
-    const hasOrgLevelRoleForStoreOrg = user.user_roles?.some(
-      (userRole: any) =>
-        userRole.organization_id === store.organization_id &&
-        (userRole.roles?.name === 'owner' ||
+    const hasOrgLevelRoleForStoreOrg =
+      user.organization_id === store.organization_id &&
+      user.user_roles?.some(
+        (userRole: any) =>
+          userRole.roles?.name === 'owner' ||
           userRole.roles?.name === 'admin' ||
-          userRole.roles?.name === 'org_admin')
-    );
+          userRole.roles?.name === 'org_admin'
+      );
 
     if (hasOrgLevelRoleForStoreOrg) {
       return true;
@@ -53,16 +60,16 @@ export class AccessValidationService {
     // Fetch store_users relation directly since it might not be populated on the user object
     // We use this.prisma (GlobalPrismaService) to query the relation
     const storeUser = await this.prisma.store_users.findUnique({
-        where: {
-            store_id_user_id: {
-                store_id: storeId,
-                user_id: user.id
-            }
+      where: {
+        store_id_user_id: {
+          store_id: storeId,
+          user_id: user.id
         }
+      }
     });
 
     if (storeUser) {
-        return true;
+      return true;
     }
 
     throw new ForbiddenException(
@@ -101,21 +108,21 @@ export class AccessValidationService {
     // Verify organization access
     // We check if the user's assigned organization_id matches the target
     if (user.organization_id === organizationId) {
-       return true;
+      return true;
     }
 
     // Also check if any role grants specific access (if logic required, but usually org_id on user is authoratative for membership)
     // For now, if the token says they belong to the org, they have access.
     // Logic for "belongsToOrg" is redundant if we check user.organization_id
-    
+
     // Check if they have an org-admin role (just in case strict role check is needed)
     const hasOrgAdminRole = user.user_roles?.some(
-        (ur: any) => 
-            (ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'org_admin')
+      (ur: any) =>
+        (ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'org_admin')
     );
 
     if (hasOrgAdminRole && user.organization_id === organizationId) {
-        return true;
+      return true;
     }
 
     throw new ForbiddenException(
@@ -177,10 +184,14 @@ export class AccessValidationService {
     const orgIds = new Set<number>();
 
     user.user_roles?.forEach((userRole: any) => {
-      if (userRole.organization_id) {
-        orgIds.add(userRole.organization_id);
+      if (userRole.roles?.organization_id) {
+        orgIds.add(userRole.roles.organization_id);
       }
     });
+
+    if (user.organization_id) {
+      orgIds.add(user.organization_id);
+    }
 
     return Array.from(orgIds);
   }

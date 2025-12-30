@@ -30,7 +30,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
       title="Edit Role"
       subtitle="Modify the role details and permissions"
       size="md"
@@ -342,7 +342,7 @@ export class RoleEditModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() role: Role | null = null;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<UpdateRoleDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -359,7 +359,7 @@ export class RoleEditModalComponent implements OnChanges {
     if (!isOpen) {
       this.onCancel();
     }
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
   }
 
   ngOnChanges(): void {

@@ -30,7 +30,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
       title="Create New Role"
       subtitle="Fill in the details to create a new role"
       size="md"
@@ -261,7 +261,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 export class RoleCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<CreateRoleDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -279,7 +279,7 @@ export class RoleCreateModalComponent implements OnChanges {
     if (!isOpen) {
       this.onCancel();
     }
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
   }
 
   onSubmit(): void {

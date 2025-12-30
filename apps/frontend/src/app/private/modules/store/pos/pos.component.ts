@@ -46,7 +46,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
     PosRegisterConfigModalComponent,
   ],
   template: `
-    <div class="h-full flex flex-col gap-4 p-4 overflow-hidden">
+    <div class="h-full flex flex-col gap-4 overflow-hidden">
       <!-- POS Stats -->
       <div class="flex-none">
         <app-pos-stats [cartState]="cartState"></app-pos-stats>
@@ -85,37 +85,33 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
               <!-- Customer Badge -->
               <div
                 *ngIf="selectedCustomer"
-                class="group flex items-center gap-4 bg-primary-light px-6 py-3 rounded-xl cursor-pointer hover:bg-primary-light/80 transition-all border border-primary/20 shadow-sm"
+                class="group flex items-center gap-2.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 py-2 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
                 (click)="onOpenCustomerModal()"
               >
                 <div
-                  class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary"
+                  class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
                 >
-                  <app-icon name="user" [size]="18"></app-icon>
+                  <app-icon name="user" [size]="16"></app-icon>
                 </div>
-                <div class="flex flex-col min-w-0">
+                <div class="flex flex-col min-w-0 flex-1">
                   <span
-                    class="text-xs text-text-secondary font-medium leading-tight"
-                    >Cliente</span
-                  >
-                  <span
-                    class="font-semibold text-text-primary leading-tight truncate max-w-[200px]"
+                    class="font-semibold text-text-primary text-sm leading-tight truncate"
                     [title]="selectedCustomer.name"
                     >{{ selectedCustomer.name }}</span
                   >
                   <span
-                    class="text-xs text-text-secondary leading-tight truncate max-w-[200px]"
+                    class="text-xs text-text-secondary leading-tight truncate"
                     [title]="selectedCustomer.email"
                     >{{ selectedCustomer.email }}</span
                   >
                 </div>
                 <div
-                  class="w-8 h-8 rounded-full hover:bg-surface/50 flex items-center justify-center ml-2 transition-colors"
+                  class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
                   (click)="$event.stopPropagation(); onClearCustomer()"
                 >
                   <app-icon
                     name="x"
-                    [size]="16"
+                    [size]="14"
                     class="text-text-secondary group-hover:text-destructive transition-colors"
                   ></app-icon>
                 </div>
@@ -124,17 +120,17 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
               <app-button
                 *ngIf="!selectedCustomer"
                 variant="outline"
-                size="md"
+                size="sm"
                 (clicked)="onOpenCustomerModal()"
-                class="rounded-lg"
+                class="rounded-lg h-9"
               >
                 <app-icon
                   name="user-plus"
-                  [size]="18"
+                  [size]="16"
                   slot="icon"
                   class="text-primary"
                 ></app-icon>
-                Asignar Cliente
+                <span class="hidden sm:inline">Cliente</span>
               </app-button>
 
               <div class="flex gap-2 items-center">

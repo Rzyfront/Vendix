@@ -11,7 +11,12 @@ export interface PurchaseOrder {
   subtotal: number;
   tax_amount?: number;
   total_amount: number;
+  discount_amount?: number;
+  shipping_cost?: number;
+  payment_terms?: string;
+  shipping_method?: string;
   notes?: string;
+  internal_notes?: string;
   created_by_user_id: number;
   approved_by_user_id?: number;
   created_at: Date;
@@ -29,6 +34,9 @@ export interface PurchaseOrderItem {
   unit_cost: number;
   total_cost: number;
   notes?: string;
+  batch_number?: string;
+  manufacturing_date?: Date;
+  expiration_date?: Date;
   created_at: Date;
 }
 
@@ -36,13 +44,20 @@ export interface CreatePurchaseOrderRequest {
   supplier_id: number;
   location_id: number;
   expected_date?: string;
+  payment_terms?: string;
+  shipping_method?: string;
+  shipping_cost?: number;
   notes?: string;
+  internal_notes?: string;
   items: {
     product_id: number;
     product_variant_id?: number;
     quantity: number;
     unit_cost: number;
     notes?: string;
+    batch_number?: string;
+    manufacturing_date?: string;
+    expiration_date?: string;
   }[];
 }
 
@@ -50,7 +65,11 @@ export interface UpdatePurchaseOrderRequest {
   supplier_id?: number;
   location_id?: number;
   expected_date?: string;
+  payment_terms?: string;
+  shipping_method?: string;
+  shipping_cost?: number;
   notes?: string;
+  internal_notes?: string;
   status?: PurchaseOrder['status'];
   items?: {
     id?: number;
@@ -59,6 +78,9 @@ export interface UpdatePurchaseOrderRequest {
     quantity: number;
     unit_cost: number;
     notes?: string;
+    batch_number?: string;
+    manufacturing_date?: string;
+    expiration_date?: string;
   }[];
 }
 

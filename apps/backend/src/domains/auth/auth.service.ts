@@ -19,7 +19,7 @@ import {
   AuditService,
   AuditAction,
   AuditResource,
-} from '../superadmin/audit/audit.service';
+} from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 
 @Injectable()
@@ -138,7 +138,7 @@ export class AuthService {
     registerOwnerDto: RegisterOwnerDto,
     client_info?: { ip_address?: string; user_agent?: string },
   ) {
-    const { email, password, first_name, last_name, organization_name } =
+    const { email, password, first_name, last_name, organization_name, phone } =
       registerOwnerDto as any;
 
     // Preparar datos críticos antes de la transacción
@@ -271,6 +271,7 @@ export class AuthService {
           password: hashedPassword,
           first_name,
           last_name,
+          phone,
           username: await this.generateUniqueUsername(email),
           email_verified: false,
           organization_id: organization.id,

@@ -10,6 +10,7 @@ import { BrandsService } from './services/brands.service';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 // Models
 import {
@@ -40,9 +41,12 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   ],
   providers: [ProductsService],
   template: `
-    <div class="p-6">
+    <
+    <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+      <div
+        class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
+      >
         <app-stats
           title="Productos Totales"
           [value]="stats.total_products"
@@ -97,17 +101,15 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
       <!-- Modals -->
       <app-product-create-modal
-        [isOpen]="isCreateModalOpen"
+        [(isOpen)]="isCreateModalOpen"
         [product]="null"
         [isSubmitting]="isCreatingProduct"
-        (openChange)="!$event ? onModalClose() : null"
         (cancel)="onModalClose()"
         (submit)="onSaveProduct($event)"
       ></app-product-create-modal>
 
       <app-bulk-upload-modal
-        [isOpen]="isBulkUploadModalOpen"
-        (closeModal)="onBulkUploadClose()"
+        [(isOpen)]="isBulkUploadModalOpen"
         (uploadComplete)="onBulkUploadComplete()"
       ></app-bulk-upload-modal>
     </div>
@@ -252,8 +254,9 @@ export class ProductsComponent implements OnInit, OnDestroy {
         this.loadProducts();
         this.loadStats();
       },
-      error: () => {
-        this.toastService.error('Error al crear producto');
+      error: (error: any) => {
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al crear producto');
         this.isCreatingProduct = false;
       },
     });
@@ -288,17 +291,12 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.isBulkUploadModalOpen = true;
   }
 
-  onBulkUploadClose(): void {
-    this.isBulkUploadModalOpen = false;
-  }
-
   onBulkUploadComplete(): void {
     this.isBulkUploadModalOpen = false;
     this.loadProducts();
     this.loadStats();
     this.toastService.success('Carga masiva completada');
   }
-
   // Helpers
   getGrowthPercentage(val: number): string {
     return val > 0 ? `+${val}%` : `${val}%`;

@@ -46,7 +46,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
           <!-- Header con gradiente sutil -->
           <div
             *ngIf="hasHeader"
-            class="px-6 py-5 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
+            class="p-2 md:px-6 md:py-5 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
           >
             <div class="flex-1 min-w-0">
               <h3
@@ -90,7 +90,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
           <!-- Body con scroll mejorado y padding consistente -->
           <div
-            class="px-6 py-5 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
+            class="p-2 md:px-6 md:py-5 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
             style="scroll-behavior: smooth;"
           >
             <ng-content></ng-content>
@@ -99,7 +99,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
           <!-- Footer con diseño mejorado -->
           <div
             *ngIf="hasFooter"
-            class="px-6 py-4 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
+            class="p-2 md:px-6 md:py-4 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
           >
             <ng-content select="[slot=footer]"></ng-content>
           </div>
@@ -109,7 +109,32 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
   `,
 })
 export class ModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
+  private _isOpen = false;
+
+  @Input()
+  set isOpen(value: boolean) {
+    if (this._isOpen !== value) {
+      this._isOpen = value;
+      this.isOpenChange.emit(value);
+      if (value) {
+        this.opened.emit();
+      } else {
+        this.closed.emit();
+      }
+
+      // Manage body scroll based on modal state
+      if (value) {
+        document.body.style.overflow = 'hidden';
+      } else {
+        document.body.style.overflow = '';
+      }
+    }
+  }
+
+  get isOpen(): boolean {
+    return this._isOpen;
+  }
+
   @Input() title?: string;
   @Input() subtitle?: string;
   @Input() size: ModalSize = 'md';
@@ -119,7 +144,6 @@ export class ModalComponent implements OnInit, OnDestroy {
   @Input() showCloseButton = true;
   @Input() customClasses = '';
 
-  @Output() openChange = new EventEmitter<boolean>();
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() opened = new EventEmitter<void>();
@@ -135,11 +159,6 @@ export class ModalComponent implements OnInit, OnDestroy {
       };
       document.addEventListener('keydown', this.escapeListener);
     }
-
-    // Prevent body scroll when modal is open
-    if (this.isOpen) {
-      document.body.style.overflow = 'hidden';
-    }
   }
 
   ngOnDestroy(): void {
@@ -147,8 +166,10 @@ export class ModalComponent implements OnInit, OnDestroy {
       document.removeEventListener('keydown', this.escapeListener);
     }
 
-    // Restore body scroll
-    document.body.style.overflow = '';
+    // Restore body scroll when component is destroyed
+    if (this.isOpen) {
+      document.body.style.overflow = '';
+    }
   }
 
   get modalClasses(): string {
@@ -180,18 +201,10 @@ export class ModalComponent implements OnInit, OnDestroy {
 
   open(): void {
     this.isOpen = true;
-    this.openChange.emit(true);
-    this.isOpenChange.emit(true);
-    this.opened.emit();
-    document.body.style.overflow = 'hidden';
   }
 
   close(): void {
     this.isOpen = false;
-    this.openChange.emit(false);
-    this.isOpenChange.emit(false);
-    this.closed.emit();
-    document.body.style.overflow = '';
   }
 
   onBackdropClick(event: Event): void {

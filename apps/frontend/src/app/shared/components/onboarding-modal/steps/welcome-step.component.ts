@@ -23,43 +23,42 @@ import { Subject } from 'rxjs';
   styles: [
     `
       .welcome-step {
-        padding: 2rem 0;
-        min-height: 600px;
+        padding: 1rem 0;
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       .welcome-container {
-        max-width: 900px;
+        max-width: 100%;
         margin: 0 auto;
-        padding: 0 1.5rem;
+        padding: 0;
         text-align: center;
       }
 
       .welcome-header {
-        margin-bottom: 3rem;
+        margin-bottom: 1.5rem;
       }
 
       .welcome-icon-wrapper {
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
       }
 
       .welcome-icon-bg {
-        width: 120px;
-        height: 120px;
+        width: 72px;
+        height: 72px;
         background: linear-gradient(
           135deg,
-          var(--color-primary, #7ed7a5) 0%,
-          var(--color-secondary, #2f6f4e) 100%
+          var(--color-primary) 0%,
+          var(--color-secondary) 100%
         );
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
         margin: 0 auto;
-        box-shadow: 0 12px 40px rgba(126, 215, 165, 0.32);
-        animation: welcomePop 0.8s ease-out;
+        box-shadow: var(--shadow-lg);
+        animation: welcomePop 0.6s ease-out;
       }
 
       @keyframes welcomePop {
@@ -77,18 +76,18 @@ import { Subject } from 'rxjs';
       }
 
       .welcome-icon {
-        color: white;
+        color: var(--color-text-on-primary);
       }
 
       .welcome-title {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 1rem;
+        font-size: var(--fs-2xl);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.5rem;
         background: linear-gradient(
           135deg,
-          var(--color-primary, #7ed7a5) 0%,
-          var(--color-secondary, #2f6f4e) 100%
+          var(--color-primary) 0%,
+          var(--color-secondary) 100%
         );
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
@@ -96,47 +95,46 @@ import { Subject } from 'rxjs';
       }
 
       .welcome-greeting {
-        font-size: 1.5rem;
-        font-weight: 600;
-        color: var(--color-text-primary, #0f172a);
-        margin-bottom: 0.5rem;
+        font-size: var(--fs-lg);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.25rem;
       }
 
       .welcome-subtitle {
-        font-size: 1.125rem;
-        color: var(--color-text-secondary, #94a3b8);
-        line-height: 1.6;
-        margin-bottom: 2rem;
-        max-width: 600px;
+        font-size: var(--fs-base);
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        margin-bottom: 1.5rem;
+        max-width: 500px;
         margin-left: auto;
         margin-right: auto;
       }
 
       .welcome-context {
-        background: linear-gradient(
-          135deg,
-          rgba(126, 215, 165, 0.1) 0%,
-          rgba(47, 111, 78, 0.05) 100%
-        );
-        border: 1px solid var(--color-primary, #7ed7a5);
-        border-radius: 1rem;
-        padding: 1.5rem;
-        margin-bottom: 3rem;
+        background: var(--color-primary-light);
+        border: 1px solid var(--color-primary);
+        border-radius: var(--radius-lg);
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        max-width: 600px;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .context-header {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 0.75rem;
-        margin-bottom: 1rem;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
       }
 
       .context-icon {
-        width: 40px;
-        height: 40px;
-        background: var(--color-surface, #ffffff);
-        border-radius: 0.5rem;
+        width: 32px;
+        height: 32px;
+        background: var(--color-surface);
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -144,36 +142,39 @@ import { Subject } from 'rxjs';
       }
 
       .context-icon-element {
-        color: var(--color-primary, #7ed7a5);
+        color: var(--color-primary);
       }
 
       .context-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--color-text-primary, #0f172a);
+        font-size: var(--fs-base);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
         margin: 0;
       }
 
       .context-text {
-        font-size: 1rem;
-        color: var(--color-text-secondary, #94a3b8);
-        line-height: 1.6;
+        font-size: var(--fs-sm);
+        color: var(--color-text-secondary);
+        line-height: 1.5;
       }
 
       .business-type-selector {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-        gap: 1.5rem;
-        margin-bottom: 2rem;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .business-type-option {
-        background: var(--color-surface, #ffffff);
-        border: 2px solid var(--color-border, #e6edf3);
-        border-radius: 1rem;
-        padding: 2rem;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        padding: 1.25rem;
         cursor: pointer;
-        transition: all 0.3s ease;
+        transition: all var(--transition-fast) ease;
         position: relative;
         overflow: hidden;
       }
@@ -184,134 +185,107 @@ import { Subject } from 'rxjs';
         top: 0;
         left: 0;
         right: 0;
-        height: 4px;
-        background: var(--color-border, #e6edf3);
-        transition: all 0.3s ease;
+        height: 3px;
+        background: var(--color-border);
+        transition: all var(--transition-fast) ease;
       }
 
       .business-type-option:hover {
-        border-color: var(--color-primary, #7ed7a5);
-        transform: translateY(-4px);
-        box-shadow: 0 12px 24px rgba(126, 215, 165, 0.15);
+        border-color: var(--color-primary);
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
       }
 
       .business-type-option:hover::before {
-        background: var(--color-primary, #7ed7a5);
+        background: var(--color-primary);
       }
 
       .business-type-icon {
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(
-          135deg,
-          rgba(126, 215, 165, 0.1) 0%,
-          rgba(47, 111, 78, 0.2) 100%
-        );
-        border-radius: 1rem;
+        width: 56px;
+        height: 56px;
+        background: var(--color-primary-light);
+        border-radius: var(--radius-md);
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 0 auto 1.5rem;
-        border: 1px solid var(--color-primary, #7ed7a5);
+        margin: 0 auto 1rem;
+        border: 1px solid var(--color-primary);
       }
 
       .type-icon-element {
-        color: var(--color-primary, #7ed7a5);
+        color: var(--color-primary);
       }
 
       .business-type-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: var(--color-text-primary, #0f172a);
-        margin-bottom: 0.75rem;
+        font-size: var(--fs-lg);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.5rem;
       }
 
       .business-type-description {
-        font-size: 1rem;
-        color: var(--color-text-secondary, #94a3b8);
-        line-height: 1.6;
-        margin-bottom: 1rem;
+        font-size: var(--fs-sm);
+        color: var(--color-text-secondary);
+        line-height: 1.5;
+        margin-bottom: 0.75rem;
       }
 
       .business-type-features {
         text-align: left;
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
+        gap: 0.375rem;
       }
 
       .feature-item {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-        color: var(--color-text-primary, #0f172a);
+        gap: 0.375rem;
+        font-size: var(--fs-xs);
+        color: var(--color-text-primary);
       }
 
       .feature-icon {
-        color: var(--color-primary, #7ed7a5);
+        color: var(--color-primary);
         flex-shrink: 0;
       }
 
       .business-action {
-        margin-top: 2rem;
+        margin-top: 1rem;
       }
 
       .action-button {
-        min-width: 200px;
-        padding: 1rem 2rem;
+        min-width: 180px;
+        padding: 0.75rem 1.5rem;
       }
 
       .welcome-footer {
-        margin-top: 2rem;
-        padding: 1rem;
-        background: var(--color-background, #f8fafc);
-        border-radius: 0.75rem;
-        border: 1px solid var(--color-border, #e6edf3);
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background: var(--color-background);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--color-border);
+        max-width: 500px;
+        margin-left: auto;
+        margin-right: auto;
       }
 
       .footer-text {
-        font-size: 0.875rem;
-        color: var(--color-text-secondary, #94a3b8);
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 0.5rem;
+        gap: 0.375rem;
       }
 
       .footer-icon {
-        color: var(--color-primary, #7ed7a5);
+        color: var(--color-primary);
       }
 
-      @media (max-width: 640px) {
-        .welcome-container {
-          padding: 0 1rem;
-        }
-
-        .welcome-title {
-          font-size: 2rem;
-        }
-
-        .welcome-greeting {
-          font-size: 1.25rem;
-        }
-
+      @media (max-width: 768px) {
         .business-type-selector {
           grid-template-columns: 1fr;
-          gap: 1rem;
-        }
-
-        .business-type-option {
-          padding: 1.5rem;
-        }
-
-        .business-type-icon {
-          width: 64px;
-          height: 64px;
-        }
-
-        .business-type-title {
-          font-size: 1.25rem;
         }
       }
     `,
@@ -518,7 +492,7 @@ export class WelcomeStepComponent implements OnInit {
     private authFacade: AuthFacade,
     private wizardService: OnboardingWizardService,
     private configFacade: ConfigFacade,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadThemeColors();

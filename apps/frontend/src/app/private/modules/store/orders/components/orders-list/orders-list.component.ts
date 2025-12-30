@@ -112,18 +112,18 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
   ];
 
   actions: TableAction[] = [
-
     {
-      label: 'Edit',
-      icon: 'edit',
-      action: (order: Order) => this.editOrder(order.id.toString()),
+      label: 'View Details',
+      icon: 'eye',
+      action: (order: Order) => this.viewOrderDetails(order),
       variant: 'ghost',
     },
     {
-      label: 'Pay',
-      icon: 'credit-card',
-      action: (order: Order) => this.deleteOrder(order.id.toString()),
+      label: 'Cancel Order',
+      icon: 'x-circle',
+      action: (order: Order) => this.cancelOrder(order),
       variant: 'danger',
+      show: (order: Order) => ['created', 'pending_payment', 'processing'].includes(order.state),
     },
   ];
 
@@ -251,14 +251,30 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
     this.viewOrder.emit(orderId);
   }
 
-  editOrder(orderId: string): void {
-    // For now, navigate to order details
-    // In the future, this could open an edit modal
-    this.viewOrder.emit(orderId);
+  viewOrderDetails(order: Order): void {
+    this.viewOrder.emit(order.id.toString());
   }
 
-  deleteOrder(orderId: string): void {
-    this.router.navigate(['/admin/pos']);
+  async cancelOrder(order: Order): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Cancelar Orden',
+      message: `¿Estás seguro de que deseas cancelar la orden ${order.order_number}? Esta acción no se puede deshacer.`,
+      confirmText: 'Cancelar Orden',
+      cancelText: 'Volver',
+    });
+
+    if (confirmed) {
+      this.ordersService.updateOrderStatus(order.id.toString(), 'cancelled').pipe(takeUntil(this.destroy$)).subscribe({
+        next: () => {
+          this.toastService.success('Orden cancelada exitosamente');
+          this.loadOrders();
+        },
+        error: (error: any) => {
+          console.error('Error cancelling order:', error);
+          this.toastService.error('Error al cancelar la orden. Por favor intenta nuevamente.');
+        }
+      });
+    }
   }
 
   exportOrders(): void {

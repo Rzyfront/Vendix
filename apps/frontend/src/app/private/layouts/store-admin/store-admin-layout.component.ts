@@ -54,7 +54,7 @@ import { takeUntil } from 'rxjs/operators';
 
         <!-- Page Content -->
         <main
-          class="flex-1 overflow-y-auto overflow-x-hidden px-4 transition-all duration-300 ease-in-out"
+          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 py-2 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
           <div class="w-full">
@@ -178,7 +178,18 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     {
       label: 'Órdenes',
       icon: 'cart',
-      route: '/admin/orders',
+      children: [
+        {
+          label: 'Ordenes de Venta',
+          icon: 'circle',
+          route: '/admin/orders/sales',
+        },
+        {
+          label: 'Ordenes de Compra',
+          icon: 'circle',
+          route: '/admin/orders/purchase-orders',
+        },
+      ],
     },
     {
       label: 'Productos',
@@ -189,15 +200,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       label: 'Inventario',
       icon: 'warehouse',
       children: [
+
         {
-          label: 'Dashboard',
+          label: 'Punto de Compra',
           icon: 'circle',
-          route: '/admin/inventory',
-        },
-        {
-          label: 'Órdenes de Compra',
-          icon: 'circle',
-          route: '/admin/inventory/orders',
+          route: '/admin/inventory/pop',
         },
         {
           label: 'Ajustes de Stock',
