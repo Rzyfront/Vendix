@@ -1,11 +1,11 @@
 <app-modal
-  [isOpen]="isOpen"
+  [(isOpen)]="isOpen"
   [title]="
     'Order Details - ' +
     (orderDetails?.order_number || order?.order_number || '')
   "
   size="lg"
-  (openChange)="openChange.emit($event)"
+  
 >
   <div class="space-y-6" *ngIf="!isLoading && orderDetails">
     <!-- Order Header -->

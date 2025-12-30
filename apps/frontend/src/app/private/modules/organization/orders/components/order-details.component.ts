@@ -43,7 +43,7 @@ import {
 export class OrderDetailsComponent implements OnInit, OnDestroy {
   @Input() isOpen = false;
   @Input() order?: OrderListItem;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
 
   orderDetails?: OrderDetails;
   isLoading = false;
@@ -145,7 +145,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   onClose(): void {
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
   }
 
   onUpdateOrder(): void {

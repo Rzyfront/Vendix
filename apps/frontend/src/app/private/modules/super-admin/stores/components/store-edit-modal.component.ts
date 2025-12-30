@@ -32,7 +32,7 @@ import {
       [size]="'lg'"
       title="Editar Tienda"
       subtitle="Actualizar la información de la tienda"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6" *ngIf="store">
         <!-- Basic Information -->
@@ -281,7 +281,7 @@ export class StoreEditModalComponent {
   @Input() isSubmitting = false;
   @Input() store?: StoreListItem;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<UpdateStoreDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -359,7 +359,7 @@ export class StoreEditModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

@@ -33,7 +33,7 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
       [size]="'lg'"
       title="Edit Organization"
       subtitle="Update the organization information"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="organizationForm" class="space-y-6">
         <!-- Basic Information -->
@@ -173,7 +173,7 @@ export class OrganizationEditModalComponent implements OnChanges {
   @Input() isSubmitting = false;
   @Input() organization?: OrganizationListItem;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<any>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -212,7 +212,7 @@ export class OrganizationEditModalComponent implements OnChanges {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

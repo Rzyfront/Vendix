@@ -83,8 +83,20 @@
 
                         <!-- Stock (only if no variants) -->
                         <div *ngIf="!hasVariants">
-                            <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
-                                [error]="getErrorMessage('stock_quantity')" placeholder="0"></app-input>
+                            <!-- Create mode: editable initial stock -->
+                            <div *ngIf="!isEditMode">
+                                <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
+                                    [error]="getErrorMessage('stock_quantity')" placeholder="0"
+                                    helperText="Este valor se registrará como movimiento de stock inicial"></app-input>
+                            </div>
+
+                            <!-- Edit mode: read-only, click to adjust -->
+                            <div *ngIf="isEditMode" class="relative">
+                                <div (click)="openStockAdjustment()" class="cursor-pointer" title="Click para ajustar stock">
+                                    <app-input label="Stock" type="number" formControlName="stock_quantity"
+                                        [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"></app-input>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Tax Categories (Multi-select) -->
@@ -416,10 +428,10 @@
 </div>
 
 <!-- Quick Create Modals -->
-<app-category-quick-create [isOpen]="isCategoryCreateOpen" (openChange)="isCategoryCreateOpen = $event"
+<app-category-quick-create [(isOpen)]="isCategoryCreateOpen"
     (created)="onCategoryCreated($event)"></app-category-quick-create>
 
-<app-brand-quick-create [isOpen]="isBrandCreateOpen" (openChange)="isBrandCreateOpen = $event"
+<app-brand-quick-create [(isOpen)]="isBrandCreateOpen"
     (created)="onBrandCreated($event)"></app-brand-quick-create>
 
 <!-- Stock Details Modal -->
@@ -548,5 +560,5 @@
 </app-modal>
 
 <!-- Adjustment Modal -->
-<app-adjustment-create-modal [isOpen]="isAdjustmentModalOpen" [product]="product" [isSubmitting]="isAdjusting"
+<app-adjustment-create-modal [(isOpen)]="isAdjustmentModalOpen" [product]="product" [isSubmitting]="isAdjusting"
     (cancel)="closeAdjustmentModal()" (save)="onAdjustmentSave($event)"></app-adjustment-create-modal>

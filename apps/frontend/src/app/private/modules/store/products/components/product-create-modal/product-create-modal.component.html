@@ -6,17 +6,28 @@
 
       <!-- Name -->
       <div>
-        <app-input label="Nombre" formControlName="name" placeholder="Ej. Camiseta Algodón"
+        <app-input label="Nombre del Producto" formControlName="name" placeholder="Ej. Camiseta Algodón Premium"
           [error]="getErrorMessage('name')" [required]="true"></app-input>
       </div>
 
       <!-- Price, Stock & SKU Row -->
       <div class="grid grid-cols-3 gap-4">
-        <app-input label="Precio" type="number" formControlName="base_price" [error]="getErrorMessage('base_price')"
+        <app-input label="Precio Base" type="number" formControlName="base_price" [error]="getErrorMessage('base_price')"
           prefix="$" [required]="true" placeholder="0.00"></app-input>
 
-        <app-input label="Stock" type="number" formControlName="stock_quantity"
-          [error]="getErrorMessage('stock_quantity')" placeholder="0"></app-input>
+        <!-- Stock Field: Different behavior for create vs edit mode -->
+        <div *ngIf="!isEditMode">
+          <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
+            [error]="getErrorMessage('stock_quantity')" placeholder="0"
+            helperText="Se registrará como movimiento inicial"></app-input>
+        </div>
+
+        <div *ngIf="isEditMode" class="relative">
+          <div (click)="onStockAdjustmentClick()" class="cursor-pointer" title="Click para ajustar stock">
+            <app-input label="Stock" type="number" formControlName="stock_quantity"
+              [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"></app-input>
+          </div>
+        </div>
 
         <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
           [error]="getErrorMessage('sku')"></app-input>
@@ -25,27 +36,25 @@
       <!-- Category & Brand Row -->
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
-          <div class="flex gap-2">
-            <app-selector class="flex-1" [options]="categoryOptions" formControlName="category_id"
+          <div class="flex gap-2 items-end">
+            <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
               placeholder="Seleccionar"></app-selector>
             <button type="button" (click)="isCategoryCreateOpen = true"
-              class="p-2 text-gray-500 hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors"
-              title="Nueva categoría">
-              <app-icon name="plus" size="18"></app-icon>
+              class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+              style="border-radius: var(--radius-sm);">
+              <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Marca</label>
-          <div class="flex gap-2">
-            <app-selector class="flex-1" [options]="brandOptions" formControlName="brand_id"
-              placeholder="Seleccionar"></app-selector>
+          <div class="flex gap-2 items-end">
+            <app-selector class="flex-1" label="Marca" [options]="brandOptions"
+              formControlName="brand_id" placeholder="Seleccionar"></app-selector>
             <button type="button" (click)="isBrandCreateOpen = true"
-              class="p-2 text-gray-500 hover:bg-gray-50 rounded-lg border border-gray-300 transition-colors"
-              title="Nueva marca">
-              <app-icon name="plus" size="18"></app-icon>
+              class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+              style="border-radius: var(--radius-sm);">
+              <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
         </div>
@@ -66,24 +75,26 @@
   <!-- Footer -->
   <div slot="footer" class="max-w-full">
     <div class="flex items-center justify-end gap-3 px-6 py-4 bg-gray-50 rounded-b-xl">
-      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting">
+      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting"
+        customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
         Cancelar
       </app-button>
 
-      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="productForm.invalid">
-        {{ isEditMode ? 'Guardar' : 'Crear Producto' }}
+      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="productForm.invalid"
+        customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
+        {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
       </app-button>
     </div>
   </div>
 </app-modal>
 
 <!-- Quick Create Modals -->
-<app-category-quick-create [isOpen]="isCategoryCreateOpen" (openChange)="isCategoryCreateOpen = $event"
+<app-category-quick-create [isOpen]="isCategoryCreateOpen" (isOpenChange)="isCategoryCreateOpen = $event"
   (created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen = false"></app-category-quick-create>
 
 <app-brand-quick-create
   [isOpen]="isBrandCreateOpen"
-  (openChange)="isBrandCreateOpen = $event"
+  (isOpenChange)="isBrandCreateOpen = $event"
   (created)="onBrandCreated($event)"
   (cancel)="isBrandCreateOpen = false"
 ></app-brand-quick-create>

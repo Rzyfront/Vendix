@@ -57,18 +57,15 @@
   </div>
 
   <!-- Create Role Modal -->
-  <app-role-create-modal [isOpen]="showCreateModal" [isSubmitting]="isCreatingRole"
-    (openChange)="showCreateModal = $event" (submit)="onRoleCreated($event)"
+  <app-role-create-modal [(isOpen)]="showCreateModal" [isSubmitting]="isCreatingRole"
     (cancel)="showCreateModal = false"></app-role-create-modal>
 
   <!-- Edit Role Modal -->
-  <app-role-edit-modal [isOpen]="showEditModal" [isSubmitting]="isUpdatingRole" [role]="currentRole"
-    (openChange)="showEditModal = $event" (submit)="onRoleUpdated($event)"
+  <app-role-edit-modal [(isOpen)]="showEditModal" [isSubmitting]="isUpdatingRole" [role]="currentRole"
     (cancel)="showEditModal = false"></app-role-edit-modal>
 
   <!-- Permissions Modal -->
-  <app-role-permissions-modal [isOpen]="showPermissionsModal" [isSubmitting]="isUpdatingPermissions"
-    [role]="currentRole" (openChange)="showPermissionsModal = $event" (submit)="onPermissionsUpdated($event)"
+  <app-role-permissions-modal [(isOpen)]="showPermissionsModal" [isSubmitting]="isUpdatingPermissions"
     (cancel)="showPermissionsModal = false"></app-role-permissions-modal>
 
   <!-- Delete Confirmation Modal -->

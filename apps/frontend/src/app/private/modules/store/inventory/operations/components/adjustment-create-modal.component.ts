@@ -38,7 +38,8 @@ import { CreateAdjustmentDto, AdjustmentType, InventoryLocation } from '../../in
       [isOpen]="isOpen"
       title="Nuevo Ajuste de Inventario"
       size="md"
-      (close)="onCancel()"
+      (closed)="onCancel()"
+      (isOpenChange)="isOpenChange.emit($event)"
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-6">
@@ -128,22 +129,25 @@ import { CreateAdjustmentDto, AdjustmentType, InventoryLocation } from '../../in
             [control]="form.get('description')"
           ></app-textarea>
         </div>
-
-        <!-- Footer -->
-        <div class="flex justify-end gap-3 mt-8 pt-4 border-t border-border">
-          <app-button variant="secondary" type="button" (clicked)="onCancel()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            type="submit"
-            [loading]="isSubmitting"
-            [disabled]="form.invalid || isSubmitting || !selected_type"
-          >
-            Crear Ajuste
-          </app-button>
-        </div>
       </form>
+
+      <!-- Footer in modal slot -->
+      <div slot="footer" class="flex justify-end gap-3 px-6 py-4 bg-gray-50 rounded-b-xl">
+        <app-button variant="outline" type="button" (clicked)="onCancel()"
+          customClasses="!rounded-xl font-bold">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          type="button"
+          (clicked)="onSubmit()"
+          [loading]="isSubmitting"
+          [disabled]="form.invalid || isSubmitting || !selected_type"
+          customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+        >
+          Crear Ajuste
+        </app-button>
+      </div>
     </app-modal>
   `,
 })
@@ -152,6 +156,7 @@ export class AdjustmentCreateModalComponent implements OnInit, OnChanges {
   @Input() isSubmitting = false;
   @Input() product: any = null;
 
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateAdjustmentDto>();
 

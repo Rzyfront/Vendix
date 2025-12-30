@@ -78,7 +78,7 @@ import { ProductCategory } from '../interfaces';
 })
 export class CategoryQuickCreateComponent {
   @Input() isOpen = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() created = new EventEmitter<ProductCategory>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -105,7 +105,7 @@ export class CategoryQuickCreateComponent {
 
   onCancel() {
     this.categoryForm.reset();
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
@@ -123,7 +123,7 @@ export class CategoryQuickCreateComponent {
         this.created.emit(category);
         this.isSubmitting = false;
         this.categoryForm.reset();
-        this.openChange.emit(false);
+        this.isOpenChange.emit(false);
       },
       error: (error) => {
         console.error('Error creating category:', error);

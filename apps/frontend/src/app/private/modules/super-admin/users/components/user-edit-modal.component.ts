@@ -37,7 +37,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [(isOpen)]="isOpen"
       [size]="'lg'"
       title="Editar Usuario"
       [subtitle]="
@@ -48,7 +48,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
             user.last_name
           : ''
       "
-      (openChange)="onClose.emit()"
+      
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -258,7 +258,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
           variant="outline"
-          (clicked)="onClose.emit()"
+          (clicked)="onCancel()"
           [disabled]="isUpdating"
         >
           Cancelar
@@ -285,7 +285,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
 export class UserEditModalComponent implements OnInit, OnDestroy {
   @Input() user: User | null = null;
   @Input() isOpen: boolean = false;
-  @Output() onClose = new EventEmitter<void>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onUserUpdated = new EventEmitter<void>();
 
   userForm: FormGroup;
@@ -359,7 +359,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         next: () => {
           this.isUpdating = false;
           this.onUserUpdated.emit();
-          this.onClose.emit();
+          this.isOpenChange.emit(false);
         },
         error: (error: any) => {
           this.isUpdating = false;

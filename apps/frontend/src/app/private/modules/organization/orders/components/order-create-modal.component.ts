@@ -45,7 +45,7 @@ import {
       [size]="'lg'"
       title="Create New Order"
       subtitle="Fill in the details to create a new order"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="orderForm" class="space-y-6">
         <!-- Order Information -->
@@ -608,7 +608,7 @@ export class OrderCreateModalComponent {
   @Input() isOpen = false;
   @Input() storeOptions: Array<{ label: string; value: string }> = [];
   @Input() selectedStoreId: number | null = null;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() orderCreated = new EventEmitter<CreateOrderDto>();
 
   orderForm!: FormGroup;
@@ -846,7 +846,7 @@ export class OrderCreateModalComponent {
 
   onModalChange(isOpen: boolean): void {
     this.isOpen = isOpen;
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
 
     if (!isOpen) {
       this.resetForm();
@@ -854,7 +854,7 @@ export class OrderCreateModalComponent {
   }
 
   onCancel(): void {
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
   }
 
   onSubmit(): void {
@@ -1007,7 +1007,7 @@ export class OrderCreateModalComponent {
         next: (response: any) => {
           this.orderCreated.emit(response.data || response);
           this.isSubmitting = false;
-          this.openChange.emit(false);
+          this.isOpenChange.emit(false);
           this.resetForm();
         },
         error: (error) => {

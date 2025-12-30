@@ -74,7 +74,7 @@ export interface StoreCreateModalData {
       size="lg"
       title="Crear Nueva Tienda"
       subtitle="Completa los detalles para crear una nueva tienda en tu organización"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-4">
         <!-- Basic Information Section -->
@@ -305,7 +305,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<StoreCreateModalData>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -387,7 +387,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

@@ -132,9 +132,9 @@
 </div>
 
 <!-- Create User Modal -->
-<app-user-create-modal *ngIf="showCreateModal" [isOpen]="showCreateModal" (onClose)="showCreateModal = false"
+<app-user-create-modal [(isOpen)]="showCreateModal"
   (onUserCreated)="onUserCreated()"></app-user-create-modal>
 
 <!-- Edit User Modal -->
-<app-user-edit-modal *ngIf="showEditModal && currentUser" [user]="currentUser" [isOpen]="showEditModal"
-  (onClose)="showEditModal = false" (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
+<app-user-edit-modal *ngIf="currentUser" [user]="currentUser" [(isOpen)]="showEditModal"
+  (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
