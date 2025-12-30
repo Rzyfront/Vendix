@@ -1,10 +1,10 @@
-<div class="space-y-6">
+<div class="space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <app-role-stats [stats]="roleStats"></app-role-stats>
 
   <!-- Roles List Header -->
-  <div class="px-6 py-4 border-b border-border sticky top-0 bg-surface z-10">
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+  <div class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
       <div class="flex-1 min-w-0">
         <h2 class="text-lg font-semibold text-text-primary">
           Todos los Roles
@@ -38,7 +38,7 @@
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="isLoading" class="p-8 text-center">
+      <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         <p class="mt-2 text-text-secondary">Cargando roles...</p>
       </div>
@@ -79,7 +79,7 @@
       <!-- Modal panel -->
       <div
         class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
-        <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+        <div class="bg-white px-4 pt-5 pb-4 sm:p-2 md:p-4 sm:pb-4">
           <div class="sm:flex sm:items-start">
             <div
               class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">

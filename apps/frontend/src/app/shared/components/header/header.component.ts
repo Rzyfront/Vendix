@@ -29,9 +29,8 @@ import { BreadcrumbItem } from '../../../core/services/breadcrumb.service';
   ],
   template: `
     <header
-      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative z-50"
-    >
-      <div class="flex items-center justify-between p-4 gap-6">
+      class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative z-50">
+      <div class="flex items-center justify-between md:px-4 md:py-2 gap-6">
         <div class="flex items-center gap-5 flex-1 min-w-0">
           <!-- Toggle Sidebar Button -->
           <app-button

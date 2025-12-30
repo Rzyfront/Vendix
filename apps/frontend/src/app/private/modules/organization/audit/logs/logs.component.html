@@ -1,4 +1,4 @@
-<div class="flex flex-col gap-6 ">
+<div class="flex flex-col gap-2 md:p-4 ">
   <!-- Stats Section -->
   <div class="grid grid-cols-4 gap-2 md:gap-4" *ngIf="statsItems.length > 0">
     <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
@@ -9,7 +9,7 @@
   <!-- Main Content -->
   <div class="bg-surface rounded-card shadow-card border border-border">
     <!-- Header & Filters -->
-    <div class="px-6 py-4 border-b border-border flex flex-col md:flex-row gap-4 justify-between items-center">
+    <div class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col md:flex-row gap-2 md:gap-4 justify-between items-center">
       <h2 class="text-lg font-semibold text-text-primary">Registros de Auditoría</h2>
 
       <div class="flex gap-2 w-full md:w-auto" [formGroup]="filterForm">
@@ -34,7 +34,7 @@
     </div>
 
     <!-- Table -->
-    <div class="p-6">
+    <div class="p-2 md:p-4">
       <app-table [columns]="tableColumns" [data]="logs" [loading]="isLoading" [actions]="tableActions">
         <!-- Custom Templates could go here if needed -->
       </app-table>
@@ -62,9 +62,9 @@
 <!-- Detail Modal -->
 <app-modal [isOpen]="showDetailModal" [title]="'Detalle de Auditoría'"
   [subtitle]="selectedLog ? 'Evento ID: ' + selectedLog.id : ''" [size]="'lg'" (closed)="closeModal()">
-  <div class="space-y-6" *ngIf="selectedLog">
+  <div class="space-y-2 md:space-y-4" *ngIf="selectedLog">
     <!-- Info Grid -->
-    <div class="grid grid-cols-2 gap-4 text-sm">
+    <div class="grid grid-cols-2 gap-2 md:gap-4 text-sm">
       <div>
         <span class="block text-gray-500">Fecha</span>
         <span class="font-medium text-gray-900">{{ selectedLog.created_at | date:'medium' }}</span>
@@ -92,7 +92,7 @@
     <hr class="border-gray-100" />
 
     <!-- Diff View if changes -->
-    <div *ngIf="hasChanges(selectedLog)" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div *ngIf="hasChanges(selectedLog)" class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
       <div *ngIf="selectedLog.old_values" class="bg-red-50 p-4 rounded-lg border border-red-100">
         <h4 class="text-xs font-semibold text-red-700 uppercase mb-2">Valor Anterior</h4>
         <pre

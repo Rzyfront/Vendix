@@ -1,14 +1,14 @@
-<div class="space-y-6">
+<div class="space-y-2 md:space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <!-- Stats Cards -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
     <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
       [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
   </div>
 
   <!-- Users Table Header -->
-  <div class="px-6 py-4 border-b border-border sticky top-0 bg-surface z-10">
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+  <div class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4">
       <!-- Título y contador -->
       <div class="flex-1 min-w-0">
         <h2 class="text-lg font-semibold text-text-primary">
@@ -44,7 +44,7 @@
       </div>
     </div>
     <!-- Loading State -->
-    <div *ngIf="isLoading" class="p-8 text-center">
+    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
       <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       <p class="mt-2 text-text-secondary">Loading users...</p>
     </div>
@@ -123,8 +123,8 @@
   </div>
 
   <!-- Cards View -->
-  <div *ngIf="users.length > 0 && viewMode === 'cards'" class="p-6">
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  <div *ngIf="users.length > 0 && viewMode === 'cards'" class="p-2 md:p-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 md:p-4">
       <app-user-card *ngFor="let user of users" [user]="user" (edit)="editUser($event)" (delete)="confirmDelete($event)"
         (toggleStatus)="toggleUserStatus($event)"></app-user-card>
     </div>

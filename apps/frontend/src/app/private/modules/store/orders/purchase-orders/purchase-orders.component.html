@@ -1,12 +1,12 @@
-<div class="space-y-6">
+<div class="space-y-2 md:space-y-4">
   <!-- Tarjetas de Estadísticas -->
   <app-purchase-order-stats [stats]="stats"></app-purchase-order-stats>
 
   <!-- Lista de Órdenes de Compra -->
   <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
-    <div class="px-6 py-4 border-b border-border">
+    <div class="p-2 md:px-6 md:py-4 border-b border-border">
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4"
       >
         <div class="flex-1 min-w-0">
           <h2 class="text-lg font-semibold text-text-primary">
@@ -62,7 +62,7 @@
     </div>
 
     <!-- Tabla de Órdenes de Compra -->
-    <div class="p-6">
+    <div class="p-2 md:p-4">
       <app-purchase-order-list
         [filters]="{ status: currentStatus, search: searchTerm }"
         (viewOrder)="viewOrderDetails($event)"
