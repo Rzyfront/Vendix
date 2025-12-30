@@ -3516,7 +3516,10 @@ async function main() {
     if (variant.product_id) {
       const createdVariant = await prisma.product_variants.upsert({
         where: {
-          sku: variant.sku,
+          product_id_sku: {
+            product_id: variant.product_id,
+            sku: variant.sku,
+          },
         },
         update: {},
         create: {
