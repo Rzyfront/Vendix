@@ -4,8 +4,25 @@
 
 .stat-card {
   transition: all 0.2s ease-in-out;
+  max-width: 100%; // Prevenir overflow en móviles
 
   &:hover {
     transform: translateY(-2px);
+  }
+}
+
+// Mobile: altura ultra compacta para 4 columnas
+@media (max-width: 767px) {
+  :host {
+    display: block;
+    min-height: 90px;
+  }
+}
+
+// Tablet: altura compacta
+@media (min-width: 768px) and (max-width: 1023px) {
+  :host {
+    display: block;
+    min-height: 100px;
   }
 }

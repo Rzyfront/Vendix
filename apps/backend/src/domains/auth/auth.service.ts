@@ -19,7 +19,7 @@ import {
   AuditService,
   AuditAction,
   AuditResource,
-} from '../superadmin/audit/audit.service';
+} from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 
 @Injectable()

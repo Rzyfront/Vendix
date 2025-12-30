@@ -17,7 +17,7 @@ import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AuditService, AuditAction, AuditResource } from '../../superadmin/audit/audit.service';
+import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 
 @Injectable()

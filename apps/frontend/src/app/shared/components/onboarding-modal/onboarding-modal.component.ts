@@ -525,11 +525,12 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       description: [''],
       store_type: ['physical', Validators.required],
       timezone: ['America/Bogota', Validators.required],
-      address_line1: ['', Validators.required],
-      city: ['', Validators.required],
-      state_province: ['', Validators.required],
-      postal_code: ['', Validators.required],
-      country_code: ['CO', Validators.required],
+      // Address fields are now optional as requested
+      address_line1: [''],
+      city: [''],
+      state_province: [''],
+      postal_code: [''],
+      country_code: ['CO'],
     });
 
     // App Config Form
@@ -537,6 +538,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       app_type: ['ORG_ADMIN', Validators.required],
       primary_color: ['#3B82F6', Validators.required],
       secondary_color: ['#10B981', Validators.required],
+      accent_color: ['#F59E0B'], // Optional accent/tertiary color
       use_custom_domain: [false],
       custom_domain: [''],
       subdomain: [''],
@@ -890,11 +892,29 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     this.isSubmitting = true;
     this.cdr.markForCheck();
-    const appConfigData = this.appConfigForm.value;
+    const formData = this.appConfigForm.value;
 
-    // Sanitize payload: if not using custom domain, ensure it's empty
-    if (!appConfigData.use_custom_domain) {
-      appConfigData.custom_domain = '';
+    // Sanitize payload: only send fields the backend expects
+    const appConfigData: any = {
+      app_type: formData.app_type,
+      primary_color: formData.primary_color,
+      secondary_color: formData.secondary_color,
+      use_custom_domain: formData.use_custom_domain,
+    };
+
+    // Include accent_color if provided
+    if (formData.accent_color) {
+      appConfigData.accent_color = formData.accent_color;
+    }
+
+    // Only include subdomain if it has a value
+    if (formData.subdomain && formData.subdomain.trim()) {
+      appConfigData.subdomain = formData.subdomain.trim();
+    }
+
+    // Only include custom_domain if using custom domain and has a value
+    if (formData.use_custom_domain && formData.custom_domain && formData.custom_domain.trim()) {
+      appConfigData.custom_domain = formData.custom_domain.trim();
     }
 
     this.wizardService.setupAppConfig(appConfigData).subscribe({

@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { AuditService, AuditAction, AuditResource } from '../../superadmin/audit/audit.service';
+import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateRoleDto,

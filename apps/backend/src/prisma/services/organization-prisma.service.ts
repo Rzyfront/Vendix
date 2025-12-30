@@ -12,12 +12,20 @@ export class OrganizationPrismaService extends BasePrismaService {
     'users',
     'stores',
     'suppliers',
-    'domains',
     'addresses',
     'audit_logs',
     'roles',
     'organization_settings',
     'domain_settings',
+    'inventory_locations',
+    'inventory_movements',
+    'inventory_adjustments',
+    'stock_reservations',
+    'purchase_orders',
+    'sales_orders',
+    'stock_transfers',
+    'return_orders',
+    'organization_payment_policies',
   ];
 
   constructor() {
@@ -41,6 +49,9 @@ export class OrganizationPrismaService extends BasePrismaService {
       'updateMany',
       'delete',
       'deleteMany',
+      'groupBy',
+      'aggregate',
+      'upsert',
     ];
 
     for (const model of this.org_scoped_models) {

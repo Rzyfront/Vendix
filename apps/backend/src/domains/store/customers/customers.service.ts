@@ -7,7 +7,7 @@ import {
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { AuditResource } from '../../superadmin/audit/audit.service';
+import { AuditResource } from '../../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()

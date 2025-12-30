@@ -10,7 +10,6 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent } from '../../index';
-import { InputComponent } from '../../input/input.component'; // ✅ Importar
 import {
   CountryService,
   Country,
@@ -27,72 +26,74 @@ import {
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
-    InputComponent,
-  ], // ✅ Agregar InputComponent
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
       .store-step {
-        padding: 1.5rem 0;
-        background: #fafbfc;
-        border-radius: 1rem;
-        margin: -1rem;
+        padding: 0;
+        background: transparent;
       }
 
       .store-container {
-        max-width: 780px;
-        margin: 0 auto;
-        padding: 0 1.5rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
       }
 
       .store-header {
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
       .store-icon-wrapper {
-        margin-bottom: 1.5rem;
+        margin-bottom: 0.75rem;
       }
 
       .store-icon-bg {
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        width: 56px;
+        height: 56px;
+        background: linear-gradient(135deg, var(--color-warning) 0%, #ea580c 100%);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 0 auto;
-        box-shadow: 0 8px 24px rgba(245, 158, 11, 0.24);
+        box-shadow: var(--shadow-md);
       }
 
       .store-icon {
-        color: white;
+        color: var(--color-text-on-primary);
       }
 
       .store-title {
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 0.5rem;
+        font-size: var(--fs-xl);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.25rem;
       }
 
       .store-subtitle {
-        color: #6b7280;
-        font-size: 1rem;
-        line-height: 1.6;
+        color: var(--color-text-secondary);
+        font-size: var(--fs-sm);
+        line-height: 1.5;
       }
 
       .store-form {
-        background: white;
-        border-radius: 0.75rem;
-        padding: 2rem;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        background: transparent;
+        padding: 0;
+        border: none;
+        box-shadow: none;
       }
 
       .form-section {
-        margin-bottom: 2rem;
+        margin-bottom: 1.25rem;
+        background: var(--color-surface);
+        padding: 1rem;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
       }
 
       .form-section:last-child {
@@ -102,37 +103,37 @@ import {
       .section-header {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #f3f4f6;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--color-border);
       }
 
       .section-icon {
-        width: 40px;
-        height: 40px;
-        background: #fef3c7;
-        border-radius: 0.5rem;
+        width: 28px;
+        height: 28px;
+        background: var(--color-warning-light);
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       .section-icon-element {
-        color: #f59e0b;
+        color: var(--color-warning);
       }
 
       .section-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: #1f2937;
+        font-size: var(--fs-base);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
         margin: 0;
       }
 
       .form-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
       }
 
       .form-field {
@@ -144,82 +145,133 @@ import {
         grid-column: 1 / -1;
       }
 
+      .form-field.half-width {
+        grid-column: span 2;
+      }
+
       .field-label {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #374151;
-        margin-bottom: 0.5rem;
+        gap: 0.375rem;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
+        margin-bottom: 0.375rem;
+      }
+
+      .help-icon {
+        color: var(--color-text-muted);
+        cursor: help;
+        position: relative;
+        display: inline-flex;
+      }
+
+      .help-icon:hover {
+        color: var(--color-warning);
+      }
+
+      .help-icon[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        border-radius: var(--radius-sm);
+        white-space: nowrap;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+      }
+
+      .help-icon[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
       }
 
       .field-required {
-        color: #ef4444;
-        font-size: 0.75rem;
-        font-weight: 600;
+        color: var(--color-error);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-bold);
       }
 
       .field-optional {
-        color: #9ca3af;
-        font-size: 0.75rem;
-        font-weight: 400;
+        color: var(--color-text-muted);
+        font-size: var(--fs-xs);
+        font-style: italic;
       }
 
       .field-input {
-        padding: 0.75rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        background: white;
+        padding: 0.5rem 0.625rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        transition: all var(--transition-fast) ease;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        height: 2.25rem;
+        width: 100%;
       }
 
       .field-input:focus {
         outline: none;
-        border-color: #f59e0b;
-        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+        border-color: var(--color-warning);
+        box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.15);
       }
 
       .field-input::placeholder {
-        color: #9ca3af;
+        color: var(--color-text-muted);
       }
 
       .store-type-selector {
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.75rem;
       }
 
       .store-type-option {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 1rem;
-        padding: 1.25rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.75rem;
+        gap: 0.5rem;
+        padding: 1rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
         cursor: pointer;
-        transition: all 0.2s ease;
-        background: white;
+        transition: all var(--transition-fast) ease;
+        background: var(--color-surface);
         position: relative;
+        text-align: center;
       }
 
       .store-type-option:hover {
-        border-color: #f59e0b;
-        background: #fffbeb;
+        border-color: var(--color-warning);
+        background: var(--color-warning-light);
       }
 
       .store-type-option.active {
-        border-color: #f59e0b;
-        background: #fffbeb;
-        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+        border-color: var(--color-warning);
+        background: var(--color-warning-light);
+        box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.15);
       }
 
       .store-type-icon {
-        width: 56px;
-        height: 56px;
-        background: #fef3c7;
-        border-radius: 0.75rem;
+        width: 40px;
+        height: 40px;
+        background: var(--color-warning-light);
+        border-radius: var(--radius-md);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -227,7 +279,7 @@ import {
       }
 
       .type-icon-element {
-        color: #f59e0b;
+        color: var(--color-warning);
       }
 
       .store-type-content {
@@ -235,65 +287,40 @@ import {
       }
 
       .store-type-title {
-        font-size: 1rem;
-        font-weight: 600;
-        color: #1f2937;
-        margin-bottom: 0.25rem;
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.125rem;
       }
 
       .store-type-description {
-        font-size: 0.875rem;
-        color: #6b7280;
-        line-height: 1.4;
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        line-height: 1.3;
       }
 
       .store-type-check {
         position: absolute;
-        top: 1rem;
-        right: 1rem;
+        top: 0.5rem;
+        right: 0.5rem;
       }
 
       .check-icon {
-        color: #f59e0b;
+        color: var(--color-warning);
+      }
+
+      @media (max-width: 1024px) {
+        .form-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .store-type-selector {
+          grid-template-columns: 1fr;
+        }
       }
 
       @media (max-width: 640px) {
-        .store-container {
-          padding: 0 1rem;
-        }
-
         .form-grid {
           grid-template-columns: 1fr;
-          gap: 1rem;
-        }
-
-        .store-form {
-          padding: 1.5rem;
-        }
-
-        .store-title {
-          font-size: 1.5rem;
-        }
-
-        .section-header {
-          flex-direction: column;
-          text-align: center;
-          gap: 0.5rem;
-        }
-
-        .store-type-option {
-          flex-direction: column;
-          text-align: center;
-          gap: 0.75rem;
-        }
-
-        .store-type-check {
-          position: static;
-          margin-top: 0.5rem;
-        }
-
-        .form-section {
-          margin-bottom: 1.5rem;
         }
       }
     `,
@@ -335,6 +362,7 @@ import {
               <div class="form-field">
                 <label class="field-label">
                   Nombre de la tienda
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="El nombre visible para tus clientes"></app-icon>
                   <span class="field-required">*</span>
                 </label>
                 <input
@@ -348,6 +376,7 @@ import {
               <div class="form-field">
                 <label class="field-label">
                   Zona horaria
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Para reportes y horarios de atención"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <select class="field-input" formControlName="timezone">
@@ -485,9 +514,10 @@ import {
             </div>
 
             <div class="form-grid">
-              <div class="form-field full-width">
+              <div class="form-field half-width">
                 <label class="field-label">
                   Calle y número
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Dirección principal de la tienda"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <input
@@ -499,9 +529,13 @@ import {
               </div>
 
               <div class="form-field">
-                <label class="field-label">País</label>
+                <label class="field-label">
+                  País
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="País de operación"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
                 <select class="field-input" formControlName="country_code">
-                  <option value="">Selecciona un país</option>
+                  <option value="">Selecciona</option>
                   <option
                     *ngFor="let country of countries"
                     [value]="country.code"
@@ -512,9 +546,13 @@ import {
               </div>
 
               <div class="form-field">
-                <label class="field-label">Departamento</label>
+                <label class="field-label">
+                  Departamento
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Estado o región"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
                 <select class="field-input" formControlName="state_province">
-                  <option value="">Selecciona un departamento</option>
+                  <option value="">Selecciona</option>
                   <option *ngFor="let dep of departments" [value]="dep.id">
                     {{ dep.name }}
                   </option>
@@ -523,25 +561,32 @@ import {
 
               <!-- Ciudad -->
               <div class="form-field">
-                <label class="field-label">Ciudad</label>
+                <label class="field-label">
+                  Ciudad
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Ciudad de operación"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
                 <select class="field-input" formControlName="city">
-                  <option value="">Selecciona una ciudad</option>
+                  <option value="">Selecciona</option>
                   <option *ngFor="let city of cities" [value]="city.id">
                     {{ city.name }}
                   </option>
                 </select>
               </div>
 
-              <!-- ✅ Código postal con app-input -->
+              <!-- Código postal -->
               <div class="form-field">
-                <app-input
-                  label="Código postal"
+                <label class="field-label">
+                  Código postal
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Código postal del área"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  class="field-input"
                   formControlName="postal_code"
-                  type="tel"
                   placeholder="06000"
-                  customWrapperClass="-mt-4"
-                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-amber-400 focus:!ring-2 focus:!ring-amber-400/10"
-                ></app-input>
+                />
               </div>
             </div>
           </div>
@@ -564,7 +609,7 @@ export class StoreSetupStepComponent implements OnInit {
   constructor(
     private countryService: CountryService,
     private cdr: ChangeDetectorRef,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();

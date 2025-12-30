@@ -16,7 +16,6 @@ import {
   Department,
   City,
 } from '../../../../services/country.service';
-import { InputComponent } from '../../input/input.component';
 
 @Component({
   selector: 'app-user-setup-step',
@@ -26,94 +25,95 @@ import { InputComponent } from '../../input/input.component';
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
-    InputComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
       .user-step {
-        padding: 1.5rem 0;
-        background: #fafbfc;
-        border-radius: 1rem;
-        margin: -1rem;
+        padding: 0;
+        background: transparent;
       }
 
       .user-container {
-        max-width: 680px;
-        margin: 0 auto;
-        padding: 0 1.5rem;
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
       }
 
       .user-header {
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
       .user-icon-wrapper {
-        margin-bottom: 1.5rem;
+        margin-bottom: 0.75rem;
       }
 
       .user-icon-bg {
-        width: 80px;
-        height: 80px;
-        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+        width: 56px;
+        height: 56px;
+        background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        margin: 0 auto;
-        box-shadow: 0 8px 24px rgba(139, 92, 246, 0.24);
+        box-shadow: var(--shadow-md);
       }
 
       .user-icon {
-        color: white;
+        color: var(--color-text-on-primary);
       }
 
       .user-title {
-        font-size: 1.75rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 0.5rem;
+        font-size: var(--fs-xl);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.25rem;
       }
 
       .user-subtitle {
-        color: #6b7280;
-        font-size: 1rem;
-        line-height: 1.6;
+        color: var(--color-text-secondary);
+        font-size: var(--fs-sm);
+        line-height: 1.5;
       }
 
       .optional-badge {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        justify-content: center;
-        gap: 0.5rem;
-        background: #f0fdf4;
-        border: 1px solid #bbf7d0;
-        border-radius: 0.5rem;
-        padding: 0.75rem 1rem;
-        margin-bottom: 2rem;
+        gap: 0.375rem;
+        background: var(--color-success-light);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-radius: var(--radius-md);
+        padding: 0.5rem 0.75rem;
+        margin-bottom: 1rem;
       }
 
       .optional-icon {
-        color: #22c55e;
+        color: var(--color-success);
       }
 
       .optional-text {
-        color: #166534;
-        font-size: 0.875rem;
-        font-weight: 500;
+        color: var(--color-success);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
       }
 
       .user-form {
-        background: white;
-        border-radius: 0.75rem;
-        padding: 1.5rem;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        background: transparent;
+        padding: 0;
+        border: none;
+        box-shadow: none;
       }
 
       .form-section {
-        margin-bottom: 2rem;
+        margin-bottom: 1.25rem;
+        background: var(--color-surface);
+        padding: 1rem;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-border);
       }
 
       .form-section:last-child {
@@ -123,37 +123,37 @@ import { InputComponent } from '../../input/input.component';
       .section-header {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1.5rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #f3f4f6;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--color-border);
       }
 
       .section-icon {
-        width: 40px;
-        height: 40px;
-        background: #f3f4f6;
-        border-radius: 0.5rem;
+        width: 28px;
+        height: 28px;
+        background: var(--color-primary-light);
+        border-radius: var(--radius-sm);
         display: flex;
         align-items: center;
         justify-content: center;
       }
 
       .section-icon-element {
-        color: #8b5cf6;
+        color: var(--color-primary);
       }
 
       .section-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: #1f2937;
+        font-size: var(--fs-base);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
         margin: 0;
       }
 
       .form-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 1.5rem;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
       }
 
       .form-field {
@@ -165,105 +165,142 @@ import { InputComponent } from '../../input/input.component';
         grid-column: 1 / -1;
       }
 
+      .form-field.half-width {
+        grid-column: span 2;
+      }
+
       .field-label {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #374151;
-        margin-bottom: 0.5rem;
+        gap: 0.375rem;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
+        margin-bottom: 0.375rem;
+      }
+
+      .help-icon {
+        color: var(--color-text-muted);
+        cursor: help;
+        position: relative;
+        display: inline-flex;
+      }
+
+      .help-icon:hover {
+        color: var(--color-primary);
+      }
+
+      .help-icon[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-regular);
+        border-radius: var(--radius-sm);
+        white-space: nowrap;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+      }
+
+      .help-icon[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
       }
 
       .field-optional {
-        color: #9ca3af;
-        font-size: 0.75rem;
-        font-weight: 400;
+        color: var(--color-text-muted);
+        font-size: var(--fs-xs);
+        font-style: italic;
       }
 
       .field-input {
-        padding: 0.75rem 1rem;
-        border: 2px solid #e5e7eb;
-        border-radius: 0.5rem;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        background: white;
+        padding: 0.5rem 0.625rem;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        transition: all var(--transition-fast) ease;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        height: 2.25rem;
+        width: 100%;
       }
 
       .field-input:focus {
         outline: none;
-        border-color: #8b5cf6;
-        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 2px var(--color-ring);
       }
 
       .field-input::placeholder {
-        color: #9ca3af;
+        color: var(--color-text-muted);
       }
 
       .field-hint {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        margin-top: 0.5rem;
+        gap: 0.25rem;
+        margin-top: 0.25rem;
       }
 
       .hint-icon {
-        color: #9ca3af;
+        color: var(--color-text-muted);
       }
 
       .hint-text {
-        color: #6b7280;
-        font-size: 0.75rem;
-        line-height: 1.4;
+        color: var(--color-text-muted);
+        font-size: var(--fs-xs);
+        line-height: 1.3;
       }
 
       .user-skip {
-        margin-top: 1.5rem;
+        margin-top: 1rem;
         text-align: center;
       }
 
       .skip-content {
         display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 1rem;
-        background: #fef3c7;
-        border: 1px solid #fde68a;
-        border-radius: 0.5rem;
+        gap: 0.375rem;
+        padding: 0.5rem 0.75rem;
+        background: var(--color-warning-light);
+        border: 1px solid rgba(251, 146, 60, 0.3);
+        border-radius: var(--radius-md);
       }
 
       .skip-icon {
-        color: #d97706;
+        color: var(--color-warning);
       }
 
       .skip-text {
-        color: #92400e;
-        font-size: 0.875rem;
-        line-height: 1.4;
+        color: var(--color-warning);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+      }
+
+      @media (max-width: 1024px) {
+        .form-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
 
       @media (max-width: 640px) {
-        .user-container {
-          padding: 0 1rem;
-        }
-
         .form-grid {
           grid-template-columns: 1fr;
-          gap: 1rem;
-        }
-
-        .user-form {
-          padding: 1rem;
-        }
-
-        .user-title {
-          font-size: 1.5rem;
-        }
-
-        .section-header {
-          flex-direction: column;
-          text-align: center;
-          gap: 0.5rem;
         }
       }
     `,
@@ -311,6 +348,7 @@ import { InputComponent } from '../../input/input.component';
               <div class="form-field">
                 <label class="field-label">
                   Nombre
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Tu primer nombre"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <input
@@ -324,6 +362,7 @@ import { InputComponent } from '../../input/input.component';
               <div class="form-field">
                 <label class="field-label">
                   Apellido
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Tu apellido principal"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <input
@@ -336,15 +375,17 @@ import { InputComponent } from '../../input/input.component';
 
               <!-- Teléfono -->
               <div class="form-field">
-                <app-input
-                  label="Teléfono"
-                  formControlName="phone"
+                <label class="field-label">
+                  Teléfono
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Solo para notificaciones importantes"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
+                <input
                   type="tel"
+                  class="field-input"
+                  formControlName="phone"
                   placeholder="+57 123 456 7890"
-                  helperText="Solo para notificaciones importantes"
-                  customWrapperClass="-mt-4"
-                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-purple-500 focus:!ring-2 focus:!ring-purple-500/10"
-                ></app-input>
+                />
               </div>
             </div>
           </div>
@@ -363,9 +404,10 @@ import { InputComponent } from '../../input/input.component';
             </div>
 
             <div class="form-grid">
-              <div class="form-field full-width">
+              <div class="form-field half-width">
                 <label class="field-label">
                   Calle y número
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Dirección de tu domicilio"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <input
@@ -376,9 +418,10 @@ import { InputComponent } from '../../input/input.component';
                 />
               </div>
 
-              <div class="form-field full-width">
+              <div class="form-field half-width">
                 <label class="field-label">
                   Apartamento, suite, etc.
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Información adicional de dirección"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <input
@@ -392,10 +435,11 @@ import { InputComponent } from '../../input/input.component';
               <div class="form-field">
                 <label class="field-label">
                   País
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="País de residencia"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <select class="field-input" formControlName="country_code">
-                  <option value="">Selecciona un país</option>
+                  <option value="">Selecciona</option>
                   <option
                     *ngFor="let country of countries"
                     [value]="country.code"
@@ -409,6 +453,7 @@ import { InputComponent } from '../../input/input.component';
               <div class="form-field">
                 <label class="field-label">
                   Departamento
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Estado o departamento"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <select class="field-input" formControlName="state_province">
@@ -423,6 +468,7 @@ import { InputComponent } from '../../input/input.component';
               <div class="form-field">
                 <label class="field-label">
                   Ciudad
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Ciudad de residencia"></app-icon>
                   <span class="field-optional">(opcional)</span>
                 </label>
                 <select class="field-input" formControlName="city">
@@ -435,14 +481,17 @@ import { InputComponent } from '../../input/input.component';
 
               <!-- Código postal -->
               <div class="form-field">
-                <app-input
-                  label="Código postal"
+                <label class="field-label">
+                  Código postal
+                  <app-icon name="help-circle" size="14" class="help-icon" data-tooltip="Código postal de tu ubicación"></app-icon>
+                  <span class="field-optional">(opcional)</span>
+                </label>
+                <input
+                  type="text"
+                  class="field-input"
                   formControlName="postal_code"
-                  type="tel"
                   placeholder="06000"
-                  customWrapperClass="-mt-4"
-                  customInputClass="!p-3 !border-2 !border-gray-300 !rounded-sm focus:!border-purple-500 focus:!ring-2 focus:!ring-purple-500/10"
-                ></app-input>
+                />
               </div>
             </div>
           </div>
@@ -474,7 +523,7 @@ export class UserSetupStepComponent implements OnInit {
   constructor(
     private countryService: CountryService,
     private cdr: ChangeDetectorRef,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
