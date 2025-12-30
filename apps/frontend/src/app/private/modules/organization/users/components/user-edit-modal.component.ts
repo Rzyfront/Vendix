@@ -236,6 +236,11 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void { }
 
+  onCancel(): void {
+    this.isOpen = false;
+    this.isOpenChange.emit(false);
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();

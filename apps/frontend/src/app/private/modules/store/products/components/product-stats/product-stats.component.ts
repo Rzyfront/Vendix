@@ -1,12 +1,12 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductStats } from '../../interfaces/product.interface';
-import { IconComponent } from '../../../../../../shared/components/index';
+import { StatsComponent } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-product-stats',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, StatsComponent],
   templateUrl: './product-stats.component.html',
   styleUrls: ['./product-stats.component.scss'],
 })

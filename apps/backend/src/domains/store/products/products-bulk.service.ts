@@ -33,7 +33,7 @@ export class ProductsBulkService {
     private readonly accessValidationService: AccessValidationService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
-  ) {}
+  ) { }
 
   /**
    * Procesa la carga masiva de productos
@@ -179,10 +179,10 @@ export class ProductsBulkService {
       try {
         // Skip if this SKU is a duplicate in the batch
         if (duplicateSkus.has(product.sku)) {
-             // We don't add to validProducts, and we don't need to add another error message 
-             // because we already added "Duplicate SKU found in batch" globally.
-             // OR we can add a specific error for this row if desired, but user just wants it excluded from valid.
-             continue;
+          // We don't add to validProducts, and we don't need to add another error message 
+          // because we already added "Duplicate SKU found in batch" globally.
+          // OR we can add a specific error for this row if desired, but user just wants it excluded from valid.
+          continue;
         }
 
         await this.validateProductData(product, storeId);
@@ -190,9 +190,7 @@ export class ProductsBulkService {
         // Verificar si el SKU ya existe en la base de datos
         const existingProduct = await this.prisma.products.findFirst({
           where: {
-            store_id: storeId,
             sku: product.sku,
-            state: { not: ProductState.ARCHIVED },
           },
         });
 

@@ -1,8 +1,8 @@
 <!-- Top Action Bar / Header -->
 <div class="sticky top-0 z-30 -mx-4 bg-white border-b border-gray-200 shadow-sm rounded-b-xl mb-6">
     <div
-        class="max-w-[1600px] mx-auto px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div class="flex items-center gap-4">
+        class="max-w-[1600px] mx-auto p-2 md:px-6 md:py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 md:gap-4">
+        <div class="flex items-center gap-2 md:gap-4">
             <app-button variant="ghost" routerLink="/admin/products"
                 customClasses="!p-0 !w-10 !h-10 !rounded-xl border border-transparent hover:border-gray-200">
                 <app-icon name="arrow-left" size="20" class="text-gray-500"></app-icon>
@@ -37,18 +37,18 @@
     </div>
 </div>
 
-<div class="p-6 space-y-6 max-w-[1600px] mx-auto">
+<div class="p-2 md:p-4 space-y-2 md:space-y-4 max-w-[1600px] mx-auto">
 
-    <form [formGroup]="productForm" class="space-y-6">
+    <form [formGroup]="productForm" class="space-y-2 md:space-y-4">
         <!-- Main Grid: General Info + Images -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-2 md:p-4">
 
             <!-- Left Column: General Information (2 cols) -->
             <div class="lg:col-span-2 flex flex-col h-full">
-                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex-1">
+                <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm flex-1">
                     <h2 class="text-lg font-semibold text-gray-900 mb-6">Información General</h2>
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
                         <!-- Name -->
                         <div class="md:col-span-2">
                             <app-input label="Nombre del Producto" formControlName="name"
@@ -143,12 +143,12 @@
             </div>
 
             <!-- Right Column: Images & Stock -->
-            <div class="flex flex-col gap-6 h-full">
+            <div class="flex flex-col gap-2 md:p-4 h-full">
                 <!-- Images Section -->
-                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:flex-1 lg:flex lg:flex-col">
+                <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm lg:flex-1 lg:flex lg:flex-col">
                     <h2 class="text-lg font-semibold text-gray-900 mb-4 flex-none">Imágenes del Producto</h2>
 
-                    <div class="space-y-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between">
+                    <div class="space-y-2 md:space-y-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between">
                         <!-- Main Preview / Carousel Area -->
                         <div
                             class="relative aspect-video w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group">
@@ -191,7 +191,7 @@
 
                             <ng-template #emptyState>
                                 <div
-                                    class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center bg-gray-50/50">
+                                    class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-2 md:p-6 text-center bg-gray-50/50">
                                     <div
                                         class="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
                                         <app-icon name="image" size="32" class="opacity-20 text-gray-400"></app-icon>
@@ -247,7 +247,7 @@
                 </div>
 
                 <!-- Stock Section -->
-                <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm lg:flex-1 lg:flex lg:flex-col">
+                <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm lg:flex-1 lg:flex lg:flex-col">
                     <div class="flex items-center justify-between mb-4 flex-none">
                         <h2 class="text-lg font-semibold text-gray-900">Inventario / Stock</h2>
                         <div class="flex gap-2">
@@ -265,7 +265,7 @@
                     </div>
 
                     <div class="lg:flex-1 lg:flex lg:flex-col lg:justify-center">
-                        <div class="grid grid-cols-2 gap-4">
+                        <div class="grid grid-cols-2 gap-2 md:gap-4">
                             <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
                                 <span
                                     class="block text-[10px] text-gray-400 uppercase font-bold tracking-wider mb-1">Total
@@ -308,7 +308,7 @@
         </div>
 
         <!-- Variants Section (Full Width) -->
-        <div class="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+        <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm">
             <div class="flex items-center justify-between mb-4">
                 <div>
                     <h2 class="text-lg font-semibold text-gray-900">Variantes</h2>
@@ -329,12 +329,12 @@
             </div>
 
             <!-- Variants UI -->
-            <div *ngIf="hasVariants" class="space-y-6 animate-fadeIn">
+            <div *ngIf="hasVariants" class="space-y-2 md:space-y-4 animate-fadeIn">
                 <!-- Attribute Manager -->
-                <div class="space-y-4">
+                <div class="space-y-2 md:space-y-4">
                     <div *ngFor="let attr of variantAttributes; let i = index"
                         class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <div class="flex items-start gap-4">
+                        <div class="flex items-start gap-2 md:gap-4">
                             <div class="w-1/3">
                                 <app-input label="Nombre del Atributo" size="sm" [(ngModel)]="attr.name"
                                     [ngModelOptions]="{standalone: true}" placeholder="Ej. Talla, Color"
@@ -437,9 +437,9 @@
 <!-- Stock Details Modal -->
 <app-modal [isOpen]="isStockDetailsOpen" (closed)="isStockDetailsOpen = false" [title]="'Detalle de Inventario'"
     size="lg">
-    <div class="space-y-6">
+    <div class="space-y-2 md:space-y-4">
         <!-- Summary Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
             <div class="p-4 bg-gray-50 rounded-xl border border-gray-100">
                 <p class="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Total en Sistema</p>
                 <p class="text-2xl font-bold text-gray-900">{{ totalStockOnHand }}</p>

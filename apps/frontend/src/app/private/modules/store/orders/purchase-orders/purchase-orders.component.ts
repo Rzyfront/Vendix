@@ -28,6 +28,7 @@ import {
   PurchaseOrderListComponent,
   PurchaseOrderCreateModalComponent,
   PurchaseOrderDetailModalComponent,
+  PurchaseOrderEmptyStateComponent,
 } from './components';
 
 @Component({
@@ -44,6 +45,7 @@ import {
     PurchaseOrderListComponent,
     PurchaseOrderCreateModalComponent,
     PurchaseOrderDetailModalComponent,
+    PurchaseOrderEmptyStateComponent,
   ],
   templateUrl: './purchase-orders.component.html',
   styleUrls: ['./purchase-orders.component.scss'],
@@ -141,6 +143,34 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
       (sum, o) => sum + (o.total_amount || 0),
       0
     );
+  }
+
+  // Check if there are active filters
+  get hasFilters(): boolean {
+    return !!(this.searchTerm || this.currentStatus !== 'all');
+  }
+
+  // Get empty state title based on filters
+  getEmptyStateTitle(): string {
+    if (this.hasFilters) {
+      return 'No se encontraron órdenes de compra';
+    }
+    return 'No hay órdenes de compra';
+  }
+
+  // Get empty state description based on filters
+  getEmptyStateDescription(): string {
+    if (this.hasFilters) {
+      return 'Intenta ajustar tus filtros para ver más resultados';
+    }
+    return 'Comienza creando tu primera orden de compra para reabastecer inventario.';
+  }
+
+  // Clear all filters
+  clearFilters(): void {
+    this.searchTerm = '';
+    this.currentStatus = 'all';
+    this.refreshList();
   }
 
   // Search functionality

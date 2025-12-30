@@ -186,13 +186,20 @@ export class EnvironmentSwitchService {
         store.store_users.length > 0;
 
       if (!has_access) {
-        // Doble check por si se acaba de crear la relación y prisma no la trajo en el include anterior (aunque unlikely en misma transacción, pero aquí son commmits distintos)
+        // Doble check por si se acaba de crear la relación y prisma no la trajo en el include anterior
         const specific_access = await this.prismaService.store_users.findFirst({
           where: { store_id: store.id, user_id: userId }
         });
 
         if (!specific_access) {
-          throw new UnauthorizedException('No tienes acceso a esta tienda');
+          if (has_high_privilege) {
+            console.log(`✨ SWITCH - Creating automatic store_users relation in Target Store: ${store.slug}`);
+            await this.prismaService.store_users.create({
+              data: { store_id: store.id, user_id: userId }
+            });
+          } else {
+            throw new UnauthorizedException('No tienes acceso a esta tienda');
+          }
         }
       }
 

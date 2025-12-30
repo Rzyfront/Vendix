@@ -4,18 +4,18 @@ import { CommonModule } from '@angular/common';
 import {
   ButtonComponent,
   IconComponent,
-} from '../../../../../../shared/components/index';
+} from '../../../../../../../shared/components/index';
 
 @Component({
-  selector: 'app-order-empty-state',
+  selector: 'app-purchase-order-empty-state',
   standalone: true,
   imports: [CommonModule, ButtonComponent, IconComponent],
-  templateUrl: './order-empty-state.component.html',
-  styleUrls: ['./order-empty-state.component.scss'],
+  templateUrl: './purchase-order-empty-state.component.html',
+  styleUrls: ['./purchase-order-empty-state.component.scss'],
 })
-export class OrderEmptyStateComponent {
-  @Input() title = 'No se encontraron órdenes';
-  @Input() description = 'Comienza creando tu primera orden de venta.';
+export class PurchaseOrderEmptyStateComponent {
+  @Input() title = 'No se encontraron órdenes de compra';
+  @Input() description = 'Comienza creando tu primera orden de compra para reabastecer inventario.';
   @Input() actionButtonText = 'Crear Primera Orden';
   @Input() showActionButton = true;
   @Input() showAdditionalActions = false;

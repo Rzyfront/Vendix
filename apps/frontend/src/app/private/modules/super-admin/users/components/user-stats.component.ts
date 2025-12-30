@@ -1,236 +1,115 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { IconComponent } from '../../../../../shared/components/index';
+import { CommonModule } from '@angular/common';
+import { StatsComponent } from '../../../../../shared/components/index';
 import { UserStats } from '../interfaces/user.interface';
 
 @Component({
   selector: 'app-user-stats',
   standalone: true,
-  imports: [IconComponent],
+  imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- Total Users -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">
-              Total Usuarios
-            </p>
-            <p class="text-2xl font-bold mt-1 text-text-primary">
-              {{ stats?.total_usuarios || 0 }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
-          >
-            <app-icon name="users" [size]="24" class="text-primary"></app-icon>
-          </div>
-        </div>
-      </div>
+    <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <app-stats
+        title="Total Usuarios"
+        [value]="stats?.total_usuarios || 0"
+        iconName="users"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      ></app-stats>
 
-      <!-- Active Users -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Activos</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">
-              {{ stats?.activos || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.activos || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-          >
-            <app-icon
-              name="check-circle"
-              [size]="24"
-              class="text-green-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Activos"
+        [value]="stats?.activos || 0"
+        [smallText]="
+          calculatePercentage(stats?.activos || 0, stats?.total_usuarios || 0) +
+          '% del total'
+        "
+        iconName="check-circle"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
 
-      <!-- Pending Verification -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Pendientes</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">
-              {{ stats?.pendientes || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.pendientes || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100"
-          >
-            <app-icon
-              name="clock"
-              [size]="24"
-              class="text-yellow-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Pendientes"
+        [value]="stats?.pendientes || 0"
+        [smallText]="
+          calculatePercentage(
+            stats?.pendientes || 0,
+            stats?.total_usuarios || 0
+          ) + '% del total'
+        "
+        iconName="clock"
+        iconBgColor="bg-yellow-100"
+        iconColor="text-yellow-600"
+      ></app-stats>
 
-      <!-- With 2FA -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Con 2FA</p>
-            <p class="text-2xl font-bold mt-1 text-purple-600">
-              {{ stats?.con_2fa || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.con_2fa || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100"
-          >
-            <app-icon
-              name="shield"
-              [size]="24"
-              class="text-purple-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Con 2FA"
+        [value]="stats?.con_2fa || 0"
+        [smallText]="
+          calculatePercentage(stats?.con_2fa || 0, stats?.total_usuarios || 0) +
+          '% del total'
+        "
+        iconName="shield"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
 
-      <!-- Inactive -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Inactivos</p>
-            <p class="text-2xl font-bold mt-1 text-gray-600">
-              {{ stats?.inactivos || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.inactivos || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-gray-100"
-          >
-            <app-icon
-              name="user-x"
-              [size]="24"
-              class="text-gray-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Inactivos"
+        [value]="stats?.inactivos || 0"
+        [smallText]="
+          calculatePercentage(
+            stats?.inactivos || 0,
+            stats?.total_usuarios || 0
+          ) + '% del total'
+        "
+        iconName="user-x"
+        iconBgColor="bg-gray-100"
+        iconColor="text-gray-600"
+      ></app-stats>
 
-      <!-- Suspended -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Suspendidos</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">
-              {{ stats?.suspendidos || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.suspendidos || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100"
-          >
-            <app-icon
-              name="alert-triangle"
-              [size]="24"
-              class="text-red-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Suspendidos"
+        [value]="stats?.suspendidos || 0"
+        [smallText]="
+          calculatePercentage(
+            stats?.suspendidos || 0,
+            stats?.total_usuarios || 0
+          ) + '% del total'
+        "
+        iconName="alert-triangle"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
 
-      <!-- Verified Emails -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">
-              Email Verificado
-            </p>
-            <p class="text-2xl font-bold mt-1 text-emerald-600">
-              {{ stats?.email_verificado || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.email_verificado || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-emerald-100"
-          >
-            <app-icon
-              name="mail-check"
-              [size]="24"
-              class="text-emerald-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Email Verificado"
+        [value]="stats?.email_verificado || 0"
+        [smallText]="
+          calculatePercentage(
+            stats?.email_verificado || 0,
+            stats?.total_usuarios || 0
+          ) + '% del total'
+        "
+        iconName="mail-check"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
 
-      <!-- Archived -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Archivados</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">
-              {{ stats?.archivados || 0 }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  stats?.archivados || 0,
-                  stats?.total_usuarios || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100"
-          >
-            <app-icon
-              name="archive"
-              [size]="24"
-              class="text-red-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Archivados"
+        [value]="stats?.archivados || 0"
+        [smallText]="
+          calculatePercentage(
+            stats?.archivados || 0,
+            stats?.total_usuarios || 0
+          ) + '% del total'
+        "
+        iconName="archive"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
     </div>
   `,
   styles: [
@@ -244,9 +123,9 @@ import { UserStats } from '../interfaces/user.interface';
 export class UserStatsComponent implements OnInit {
   @Input() stats: UserStats | null = null;
 
-  constructor() {}
+  constructor() { }
 
-  ngOnInit(): void {}
+  ngOnInit(): void { }
 
   calculatePercentage(part: number, total: number): number {
     if (total === 0) return 0;

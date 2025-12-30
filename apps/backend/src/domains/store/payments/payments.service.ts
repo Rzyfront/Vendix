@@ -3,8 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  ConflictException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { Prisma } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { LocationsService } from '../inventory/locations/locations.service';
@@ -478,65 +480,85 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
     user: any,
   ) {
-    // Generate order number if not provided
-    const orderNumber = await this.generateOrderNumber(tx);
+    let retries = 3;
+    let orderNumber: string;
 
-    // Create order items
-    const orderItems = dto.items.map((item) => {
-      const orderItem: any = {
-        product_name: item.product_name,
-        variant_sku: item.product_sku, // Mapear product_sku del frontend a variant_sku del backend
-        variant_attributes: item.variant_attributes
-          ? JSON.stringify(item.variant_attributes)
-          : undefined,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.total_price,
-        tax_rate: item.tax_rate,
-        tax_amount_item: item.tax_amount_item,
-        cost: item.cost,
-        notes: item.notes,
-      };
+    while (retries > 0) {
+      try {
+        // Generate order number
+        orderNumber = await this.generateOrderNumber(tx);
 
-      if (item.product_id) {
-        orderItem.products = { connect: { id: item.product_id } };
+        // Create order items
+        const orderItems = dto.items.map((item) => {
+          const orderItem: any = {
+            product_name: item.product_name,
+            variant_sku: item.product_sku, // Mapear product_sku del frontend a variant_sku del backend
+            variant_attributes: item.variant_attributes
+              ? JSON.stringify(item.variant_attributes)
+              : undefined,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: item.total_price,
+            tax_rate: item.tax_rate,
+            tax_amount_item: item.tax_amount_item,
+            cost: item.cost,
+            notes: item.notes,
+          };
+
+          if (item.product_id) {
+            orderItem.products = { connect: { id: item.product_id } };
+          }
+
+          if (item.product_variant_id) {
+            orderItem.product_variants = {
+              connect: { id: item.product_variant_id },
+            };
+          }
+
+          return orderItem;
+        });
+
+        // Create the order
+        const order = await tx.orders.create({
+          data: {
+            customer_id: dto.customer_id,
+            store_id: dto.store_id,
+            order_number: orderNumber,
+            state: 'processing', // Match enum order_state_enum
+            subtotal_amount: dto.subtotal,
+            tax_amount: dto.tax_amount || 0,
+            discount_amount: dto.discount_amount || 0,
+            grand_total: dto.total_amount,
+            currency: dto.currency || 'USD',
+            billing_address_id: dto.billing_address_id,
+            shipping_address_id: dto.shipping_address_id,
+            internal_notes: dto.internal_notes,
+            order_items: {
+              create: orderItems,
+            },
+          },
+          include: {
+            order_items: true,
+            stores: true,
+          },
+        });
+
+        return order;
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          const target = error.meta?.target as string[];
+          if (Array.isArray(target) && target.includes('order_number')) {
+            retries--;
+            if (retries === 0) {
+              throw new ConflictException('Failed to generate unique POS order number after multiple attempts');
+            }
+            // Retry with new order number
+            continue;
+          }
+        }
+        throw error;
       }
-
-      if (item.product_variant_id) {
-        orderItem.product_variants = {
-          connect: { id: item.product_variant_id },
-        };
-      }
-
-      return orderItem;
-    });
-
-    // Create the order
-    const order = await tx.orders.create({
-      data: {
-        customer_id: dto.customer_id,
-        store_id: dto.store_id,
-        order_number: orderNumber,
-        state: 'processing', // Match enum order_state_enum
-        subtotal_amount: dto.subtotal,
-        tax_amount: dto.tax_amount || 0,
-        discount_amount: dto.discount_amount || 0,
-        grand_total: dto.total_amount,
-        currency: dto.currency || 'USD',
-        billing_address_id: dto.billing_address_id,
-        shipping_address_id: dto.shipping_address_id,
-        internal_notes: dto.internal_notes,
-        order_items: {
-          create: orderItems,
-        },
-      },
-      include: {
-        order_items: true,
-        stores: true,
-      },
-    });
-
-    return order;
+    }
   }
 
   /**

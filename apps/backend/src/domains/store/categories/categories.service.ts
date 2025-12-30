@@ -188,7 +188,7 @@ export class CategoriesService {
     storeId: number,
     excludeId?: number,
   ) {
-    const where: any = { slug, store_id: storeId };
+    const where: any = { slug };
     if (excludeId) where.id = { not: excludeId };
     const existing = await this.prisma.categories.findFirst({ where });
     if (existing)

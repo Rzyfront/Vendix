@@ -8,7 +8,7 @@
   <div class="modal-body">
     <p [innerHTML]="message"></p>
   </div>
-  <div slot="footer" class="modal-footer flex justify-end gap-4">
+  <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">
     <app-button variant="outline" (clicked)="onCancel()">{{
       cancelText
     }}</app-button>

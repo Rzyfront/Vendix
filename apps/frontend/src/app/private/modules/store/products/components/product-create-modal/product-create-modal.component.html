@@ -1,8 +1,8 @@
 <app-modal [size]="'md'" [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'" [isOpen]="isOpen"
   (closed)="onCancel()">
 
-  <div class="p-6">
-    <form [formGroup]="productForm" class="space-y-5">
+  <div class="p-2 md:p-4">
+    <form [formGroup]="productForm" class="space-y-2 md:space-y-2 md:space-y-4">
 
       <!-- Name -->
       <div>
@@ -11,7 +11,7 @@
       </div>
 
       <!-- Price, Stock & SKU Row -->
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-3 gap-2 md:gap-4">
         <app-input label="Precio Base" type="number" formControlName="base_price" [error]="getErrorMessage('base_price')"
           prefix="$" [required]="true" placeholder="0.00"></app-input>
 
@@ -34,7 +34,7 @@
       </div>
 
       <!-- Category & Brand Row -->
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-2 gap-2 md:gap-4">
         <div>
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
@@ -74,7 +74,7 @@
 
   <!-- Footer -->
   <div slot="footer" class="max-w-full">
-    <div class="flex items-center justify-end gap-3 px-6 py-4 bg-gray-50 rounded-b-xl">
+    <div class="flex items-center justify-end gap-2 md:gap-3 p-2 md:px-4 md:py-3 bg-gray-50 rounded-b-xl">
       <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
         Cancelar

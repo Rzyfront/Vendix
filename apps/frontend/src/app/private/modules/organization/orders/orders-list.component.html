@@ -1,4 +1,4 @@
-<div class="space-y-6">
+<div class="space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <app-order-stats [stats]="stats"></app-order-stats>
 
@@ -11,8 +11,8 @@
       overflow-x: hidden !important;
     "
   >
-    <div class="px-6 py-4 border-b border-border">
-      <div class="flex flex-col gap-4">
+    <div class="p-2 md:px-6 md:py-4 border-b border-border">
+      <div class="flex flex-col gap-2 md:gap-4">
         <!-- Action Buttons -->
         <div class="flex justify-start gap-3">
           <app-button variant="primary" size="sm" (clicked)="createOrder()">
@@ -30,7 +30,7 @@
 
         <!-- Title and Filters -->
         <div
-          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4"
         >
           <div class="flex-1 min-w-0">
             <h2 class="text-lg font-semibold text-text-primary">
@@ -115,7 +115,7 @@
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="isLoading" class="p-8 text-center">
+      <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
         <div
           class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
         ></div>
@@ -123,7 +123,7 @@
       </div>
 
       <!-- Empty State -->
-      <div *ngIf="!isLoading && orders.length === 0" class="p-8 text-center">
+      <div *ngIf="!isLoading && orders.length === 0" class="p-2 md:p-6 text-center">
         <app-icon
           name="shopping-cart"
           [size]="48"
@@ -144,7 +144,7 @@
       </div>
 
       <!-- Orders Table -->
-      <div *ngIf="!isLoading && orders.length > 0" class="p-6 overflow-x-auto">
+      <div *ngIf="!isLoading && orders.length > 0" class="p-2 md:p-4 overflow-x-auto">
         <app-table
           [data]="orders"
           [columns]="tableColumns"
