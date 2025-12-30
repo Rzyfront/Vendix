@@ -162,9 +162,8 @@
 
     <!-- Create Order Modal -->
     <app-order-create-modal
-      [isOpen]="showCreateOrderModal"
+      [(isOpen)]="showCreateOrderModal"
       [storeOptions]="storeOptionsForModal"
-      (openChange)="onCreateOrderModalChange($event)"
       (orderCreated)="onOrderCreated($event)"
     ></app-order-create-modal>
   </div>

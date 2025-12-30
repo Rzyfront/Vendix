@@ -1,13 +1,17 @@
 import { Component, Output, EventEmitter, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+
+// Import shared components
+import { StatsComponent } from '../../../../../shared/components/index';
+
 import { PosDashboardService } from '../services/pos-dashboard.service';
 import { DashboardData, DashboardFilters } from '../models/dashboard.model';
 
 @Component({
   selector: 'app-pos-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, StatsComponent],
   template: `
     <div class="pos-dashboard-container">
       <div class="dashboard-header">
@@ -36,68 +40,46 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       </div>
 
       <div class="stats-overview" *ngIf="dashboardData">
-        <div class="stat-card">
-          <div class="stat-icon sales">
-            <i class="fas fa-dollar-sign"></i>
-          </div>
-          <div class="stat-content">
-            <h3>Ventas</h3>
-            <p class="stat-value">
-              \${{ dashboardData.todayStats.totalSales | number: '1.0-0' }}
-            </p>
-            <p class="stat-change positive">
-              <i class="fas fa-arrow-up"></i>
-              +12.5%
-            </p>
-          </div>
-        </div>
+        <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+          <!-- Ventas -->
+          <app-stats
+            title="Ventas"
+            [value]="'$' + formatNumber(dashboardData.todayStats.totalSales)"
+            smallText="+12.5% vs ayer"
+            iconName="dollar-sign"
+            iconBgColor="bg-primary/10"
+            iconColor="text-primary"
+          ></app-stats>
 
-        <div class="stat-card">
-          <div class="stat-icon orders">
-            <i class="fas fa-shopping-cart"></i>
-          </div>
-          <div class="stat-content">
-            <h3>Órdenes</h3>
-            <p class="stat-value">{{ dashboardData.todayStats.totalOrders }}</p>
-            <p class="stat-change positive">
-              <i class="fas fa-arrow-up"></i>
-              +8.2%
-            </p>
-          </div>
-        </div>
+          <!-- Órdenes -->
+          <app-stats
+            title="Órdenes"
+            [value]="dashboardData.todayStats.totalOrders"
+            smallText="+8.2% vs ayer"
+            iconName="shopping-cart"
+            iconBgColor="bg-pink-100"
+            iconColor="text-pink-600"
+          ></app-stats>
 
-        <div class="stat-card">
-          <div class="stat-icon customers">
-            <i class="fas fa-users"></i>
-          </div>
-          <div class="stat-content">
-            <h3>Clientes</h3>
-            <p class="stat-value">
-              {{ dashboardData.todayStats.totalCustomers }}
-            </p>
-            <p class="stat-change positive">
-              <i class="fas fa-arrow-up"></i>
-              +15.3%
-            </p>
-          </div>
-        </div>
+          <!-- Clientes -->
+          <app-stats
+            title="Clientes"
+            [value]="dashboardData.todayStats.totalCustomers"
+            smallText="+15.3% vs ayer"
+            iconName="users"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
 
-        <div class="stat-card">
-          <div class="stat-icon avg-order">
-            <i class="fas fa-chart-line"></i>
-          </div>
-          <div class="stat-content">
-            <h3>Promedio</h3>
-            <p class="stat-value">
-              \${{
-                dashboardData.todayStats.averageOrderValue | number: '1.0-0'
-              }}
-            </p>
-            <p class="stat-change negative">
-              <i class="fas fa-arrow-down"></i>
-              -2.1%
-            </p>
-          </div>
+          <!-- Promedio -->
+          <app-stats
+            title="Promedio"
+            [value]="'$' + formatNumber(dashboardData.todayStats.averageOrderValue)"
+            smallText="-2.1% vs ayer"
+            iconName="trending-up"
+            iconBgColor="bg-green-100"
+            iconColor="text-green-600"
+          ></app-stats>
         </div>
       </div>
 
@@ -318,80 +300,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
       }
 
       .stats-overview {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 20px;
         margin-bottom: 32px;
-      }
-
-      .stat-card {
-        background: white;
-        border-radius: 12px;
-        padding: 24px;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        display: flex;
-        align-items: center;
-        gap: 16px;
-      }
-
-      .stat-icon {
-        width: 56px;
-        height: 56px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-        color: white;
-      }
-
-      .stat-icon.sales {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      }
-      .stat-icon.orders {
-        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-      }
-      .stat-icon.customers {
-        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-      }
-      .stat-icon.avg-order {
-        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-      }
-
-      .stat-content {
-        flex: 1;
-      }
-
-      .stat-content h3 {
-        margin: 0 0 8px;
-        font-size: 14px;
-        font-weight: 500;
-        color: #64748b;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-
-      .stat-value {
-        margin: 0 0 4px;
-        font-size: 24px;
-        font-weight: 700;
-        color: #1e293b;
-      }
-
-      .stat-change {
-        margin: 0;
-        font-size: 12px;
-        font-weight: 500;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-
-      .stat-change.positive {
-        color: #10b981;
-      }
-      .stat-change.negative {
-        color: #ef4444;
       }
 
       .dashboard-content {
@@ -626,10 +535,6 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
           gap: 16px;
         }
 
-        .stats-overview {
-          grid-template-columns: 1fr;
-        }
-
         .header-controls {
           justify-content: center;
         }
@@ -713,5 +618,15 @@ export class PosDashboardComponent implements OnInit {
 
   trackByCategory(_index: number, item: any): string {
     return item.category;
+  }
+
+  // Formatear número para visualización
+  formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toFixed(0);
   }
 }

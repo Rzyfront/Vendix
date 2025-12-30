@@ -38,18 +38,18 @@ import { CommonModule } from '@angular/common';
 })
 export class DropdownComponent {
   @Input() open = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @ViewChild('root') rootRef!: ElementRef<HTMLElement>;
 
   toggle() {
     this.open = !this.open;
-    this.openChange.emit(this.open);
+    this.isOpenChange.emit(this.open);
   }
 
   close() {
     if (this.open) {
       this.open = false;
-      this.openChange.emit(false);
+      this.isOpenChange.emit(false);
     }
   }
 

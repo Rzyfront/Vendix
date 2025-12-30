@@ -14,10 +14,9 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
+      [(isOpen)]="isOpen"
       [size]="'md'"
       title="Carga Masiva de Productos"
-      [isOpen]="isOpen"
-      (closed)="onCancel()"
     >
         <!-- Initial State: Instructions & Upload -->
         <div *ngIf="!uploadResults" class="space-y-6">
@@ -171,7 +170,8 @@ import {
         </div>
 
       <div
-        class="flex justify-end space-x-3 pt-6 border-t border-gray-200 mt-6"
+        slot="footer"
+        class="flex justify-end gap-3 pt-6 border-t border-gray-200 mt-6"
       >
         <app-button
           variant="outline"
@@ -203,7 +203,7 @@ import {
 })
 export class BulkUploadModalComponent {
   @Input() isOpen = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() uploadComplete = new EventEmitter<void>();
 
   selectedFile: File | null = null;
@@ -219,7 +219,7 @@ export class BulkUploadModalComponent {
   ) { }
 
   onCancel() {
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
     this.resetState();
   }
 

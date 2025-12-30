@@ -35,10 +35,10 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [(isOpen)]="isOpen"
       [size]="'lg'"
       title="Configuración de Usuario"
-      (openChange)="onClose.emit()"
+      
     >
       <form [formGroup]="configForm" (ngSubmit)="onSubmit()" *ngIf="user">
         <!-- Tabs -->
@@ -162,7 +162,7 @@ import { Subject, takeUntil } from 'rxjs';
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
           variant="outline"
-          (clicked)="onClose.emit()"
+          (clicked)="onCancel()"
           [disabled]="isSaving"
         >
           Cancelar
@@ -189,7 +189,7 @@ import { Subject, takeUntil } from 'rxjs';
 export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   @Input() user: User | null = null;
   @Input() isOpen: boolean = false;
-  @Output() onClose = new EventEmitter<void>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onSaved = new EventEmitter<void>();
 
   configForm: FormGroup;
@@ -291,7 +291,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         next: () => {
           this.isSaving = false;
           this.onSaved.emit();
-          this.onClose.emit();
+          this.isOpenChange.emit(false);
         },
         error: (err: any) => {
           console.error('Failed to save config', err);

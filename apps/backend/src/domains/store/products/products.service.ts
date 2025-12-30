@@ -83,7 +83,9 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new ConflictException('El SKU ya está en uso');
+          throw new ConflictException(
+            `El SKU '${createProductDto.sku}' ya está en uso en esta tienda. Use un SKU diferente o deje el campo vacío.`
+          );
         }
       }
 
@@ -763,10 +765,11 @@ export class ProductsService {
         }
       }
 
-      // Si se actualiza el SKU, verificar que sea único
+      // Si se actualiza el SKU, verificar que sea único dentro de la tienda
       if (updateProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
+            store_id: existingProduct.store_id,
             sku: updateProductDto.sku,
             state: { not: ProductState.ARCHIVED },
             NOT: { id },
@@ -774,7 +777,7 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new ConflictException('El SKU ya está en uso');
+          throw new ConflictException(`El SKU '${updateProductDto.sku}' ya está en uso en esta tienda`);
         }
       }
 

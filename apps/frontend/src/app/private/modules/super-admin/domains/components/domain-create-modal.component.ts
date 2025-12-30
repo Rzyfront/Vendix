@@ -27,7 +27,7 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
     <app-modal
       [isOpen]="isOpen"
       [size]="'lg'"
-      (openChange)="onOpenChange($event)"
+      (isOpenChange)="onOpenChange($event)"
     >
       <form [formGroup]="domainForm">
         <div slot="header" class="flex items-center justify-between">
@@ -153,7 +153,7 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
 export class DomainCreateModalComponent {
   @Input() isOpen = false;
   @Input() isLoading = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() create = new EventEmitter<CreateDomainDto>();
   @Output() cancel = new EventEmitter<void>();
   domainForm!: FormGroup;

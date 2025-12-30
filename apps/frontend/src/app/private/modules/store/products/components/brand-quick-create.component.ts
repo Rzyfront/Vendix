@@ -78,7 +78,7 @@ import { Brand } from '../interfaces';
 })
 export class BrandQuickCreateComponent {
   @Input() isOpen = false;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() created = new EventEmitter<Brand>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -98,7 +98,7 @@ export class BrandQuickCreateComponent {
 
   onCancel() {
     this.brandForm.reset();
-    this.openChange.emit(false);
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
@@ -114,7 +114,7 @@ export class BrandQuickCreateComponent {
         this.created.emit(brand);
         this.isSubmitting = false;
         this.brandForm.reset();
-        this.openChange.emit(false);
+        this.isOpenChange.emit(false);
       },
       error: (error) => {
         console.error('Error creating brand:', error);

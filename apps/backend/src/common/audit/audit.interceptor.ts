@@ -18,7 +18,8 @@ export class AuditInterceptor implements NestInterceptor {
         const url = request.url;
         const body = request.body;
         const query = request.query;
-        const userId = request.user?.id;
+        const user = request.user;
+        const userId = user?.id;
 
         if (!userId) {
             return next.handle();
@@ -27,23 +28,81 @@ export class AuditInterceptor implements NestInterceptor {
         return next.handle().pipe(
             tap(async (data) => {
                 try {
+                    // Obtener organization_id y store_id del contexto o del body/query
+                    const organizationId = this.getOrganizationId(request);
+                    const storeId = this.getStoreId(request);
+
                     if (method === 'GET') {
-                        await this.logGetOperation(userId, url, query);
+                        await this.logGetOperation(userId, organizationId, storeId, url, query);
                     } else if (method === 'POST' && this.isCreateOperation(url)) {
-                        await this.logCreateOperation(userId, url, data);
-                    } else if (method === 'PUT' && this.isUpdateOperation(url, method)) {
-                        await this.logUpdateOperation(userId, url, body, data);
+                        await this.logCreateOperation(userId, organizationId, storeId, url, data);
+                    } else if ((method === 'PUT' || method === 'PATCH') && this.isUpdateOperation(url, method)) {
+                        await this.logUpdateOperation(userId, organizationId, storeId, url, body, data);
                     } else if (
-                        method === 'DELETE' &&
+                        (method === 'DELETE' || url.includes('/delete')) &&
                         this.isDeleteOperation(url, method)
                     ) {
-                        await this.logDeleteOperation(userId, url);
+                        await this.logDeleteOperation(userId, organizationId, storeId, url);
                     }
                 } catch (error) {
                     console.error('Error en AuditInterceptor:', error);
                 }
             }),
         );
+    }
+
+    private getOrganizationId(request: any): number | undefined {
+        // 1. Del usuario autenticado
+        if (request.user?.organization_id) {
+            return request.user.organization_id;
+        }
+
+        // 2. Intentar obtener del body o query o params
+        const bodyOrgId = request.body?.organization_id || request.body?.organizationId;
+        const queryOrgId = request.query?.organization_id || request.query?.organizationId;
+        const paramOrgId = request.params?.organization_id || request.params?.organizationId;
+
+        if (bodyOrgId) return parseInt(bodyOrgId);
+        if (queryOrgId) return parseInt(queryOrgId);
+        if (paramOrgId) return parseInt(paramOrgId);
+
+        // 3. Intentar extraer de la URL si tiene el patrón /organizations/:id/
+        const urlSegments = request.url.split('/');
+        const orgIndex = urlSegments.indexOf('organizations');
+        if (orgIndex !== -1 && urlSegments[orgIndex + 1]) {
+            const id = parseInt(urlSegments[orgIndex + 1]);
+            if (!isNaN(id)) return id;
+        }
+
+        return undefined;
+    }
+
+    private getStoreId(request: any): number | undefined {
+        // 1. Del usuario autenticado
+        if (request.user?.store_id) {
+            return request.user.store_id;
+        }
+
+        // 2. Intentar obtener del body o query o params
+        const bodyStoreId = request.body?.store_id || request.body?.storeId;
+        const queryStoreId = request.query?.store_id || request.query?.storeId;
+        const paramStoreId = request.params?.store_id || request.params?.storeId || request.params?.id; // En rutas de stores, :id suele ser el storeId
+
+        // Si la URL empieza por /store/ o contiene /stores/, el siguiente segmento suele ser el ID en rutas RESTful
+        const urlSegments = request.url.split('?')[0].split('/').filter(s => s);
+
+        if (bodyStoreId) return parseInt(bodyStoreId);
+        if (queryStoreId) return parseInt(queryStoreId);
+        if (paramStoreId && request.url.includes('/stores/')) return parseInt(paramStoreId);
+
+        // 3. Lógica específica de segmentos URL
+        const storeIndex = urlSegments.indexOf('stores');
+        if (storeIndex !== -1 && urlSegments[storeIndex + 1]) {
+            const id = parseInt(urlSegments[storeIndex + 1]);
+            if (!isNaN(id)) return id;
+        }
+
+        return undefined;
     }
 
     private isCreateOperation(url: string): boolean {
@@ -53,7 +112,9 @@ export class AuditInterceptor implements NestInterceptor {
             (url.includes('/api/') &&
                 !url.includes('/update') &&
                 !url.includes('/edit') &&
-                !url.includes('/delete'))
+                !url.includes('/delete')) ||
+            // General REST POST usually means create if not a specific action
+            (!url.includes('/search') && !url.includes('/login') && !url.includes('/logout'))
         );
     }
 
@@ -61,7 +122,7 @@ export class AuditInterceptor implements NestInterceptor {
         return (
             url.includes('/update') ||
             url.includes('/edit') ||
-            (method === 'PUT' &&
+            ((method === 'PUT' || method === 'PATCH') &&
                 !url.includes('/create') &&
                 !url.includes('/register') &&
                 !url.includes('/delete'))
@@ -69,10 +130,10 @@ export class AuditInterceptor implements NestInterceptor {
     }
 
     private isDeleteOperation(url: string, method: string): boolean {
-        return method === 'DELETE' || url.includes('/delete');
+        return method === 'DELETE' || url.includes('/delete') || url.includes('/remove');
     }
 
-    private async logGetOperation(userId: number, url: string, query: any) {
+    private async logGetOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string, query: any) {
         const resource = this.extractResourceFromUrl(url);
         const resourceId = this.extractIdFromUrl(url);
 
@@ -82,6 +143,8 @@ export class AuditInterceptor implements NestInterceptor {
 
             await this.auditService.log({
                 userId,
+                organizationId,
+                storeId,
                 action,
                 resource,
                 resourceId: resourceId || undefined,
@@ -90,43 +153,64 @@ export class AuditInterceptor implements NestInterceptor {
         }
     }
 
-    private async logCreateOperation(userId: number, url: string, data: any) {
+    private async logCreateOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string, data: any) {
         const resource = this.extractResourceFromUrl(url);
         if (resource && data?.id) {
-            await this.auditService.logCreate(userId, resource, data.id, data);
+            await this.auditService.log({
+                userId,
+                organizationId,
+                storeId,
+                action: AuditAction.CREATE,
+                resource,
+                resourceId: data.id,
+                newValues: data,
+            });
         }
     }
 
     private async logUpdateOperation(
         userId: number,
+        organizationId: number | undefined,
+        storeId: number | undefined,
         url: string,
         oldData: any,
         newData: any,
     ) {
         const resource = this.extractResourceFromUrl(url);
-        const resourceId = this.extractIdFromUrl(url) || newData?.id;
+        const resourceId = this.extractIdFromUrl(url) || newData?.id || oldData?.id;
 
         if (resource && resourceId) {
-            await this.auditService.logUpdate(
+            await this.auditService.log({
                 userId,
+                organizationId,
+                storeId,
+                action: AuditAction.UPDATE,
                 resource,
                 resourceId,
-                oldData,
-                newData,
-                { method: 'UPDATE' }
-            );
+                oldValues: oldData,
+                newValues: newData,
+                metadata: { method: 'UPDATE' }
+            });
         }
     }
 
-    private async logDeleteOperation(userId: number, url: string) {
+    private async logDeleteOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string) {
         const resource = this.extractResourceFromUrl(url);
         const resourceId = this.extractIdFromUrl(url);
         if (resource && resourceId) {
-            await this.auditService.logDelete(userId, resource, resourceId, {});
+            await this.auditService.log({
+                userId,
+                organizationId,
+                storeId,
+                action: AuditAction.DELETE,
+                resource,
+                resourceId,
+                oldValues: {},
+            });
         }
     }
 
-    private extractResourceFromUrl(url: string): AuditResource | null {
+    private extractResourceFromUrl(url: string): AuditResource | string | null {
         const cleanUrl = url.split('?')[0];
         const segments = cleanUrl.split('/').filter((s) => s);
         const resourceMap: Record<string, AuditResource> = {
@@ -138,9 +222,26 @@ export class AuditInterceptor implements NestInterceptor {
             auth: AuditResource.AUTH,
             roles: AuditResource.ROLES,
             permissions: AuditResource.PERMISSIONS,
+            addresses: AuditResource.ADDRESSES,
+            categories: AuditResource.CATEGORIES,
+            brands: AuditResource.BRANDS,
+            customers: AuditResource.CUSTOMERS,
+            suppliers: AuditResource.SUPPLIERS,
+            inventory: AuditResource.INVENTORY,
+            'stock-levels': AuditResource.STOCK_LEVELS,
+            transactions: AuditResource.TRANSACTIONS,
+            payments: AuditResource.PAYMENTS,
+            taxes: AuditResource.TAXES,
+            domains: AuditResource.DOMAINS,
+            settings: AuditResource.SETTINGS,
+            'onboarding-wizard': AuditResource.SYSTEM,
+            'onboarding': AuditResource.SYSTEM,
+            'upload': AuditResource.SYSTEM,
         };
 
-        for (const segment of segments) {
+        // Try to find the most specific resource (last matching segment)
+        for (let i = segments.length - 1; i >= 0; i--) {
+            const segment = segments[i];
             if (resourceMap[segment]) {
                 return resourceMap[segment];
             }
@@ -152,9 +253,10 @@ export class AuditInterceptor implements NestInterceptor {
     private extractIdFromUrl(url: string): number | null {
         const cleanUrl = url.split('?')[0];
         const segments = cleanUrl.split('/').filter((s) => s);
-        for (const segment of segments) {
-            const id = parseInt(segment);
-            if (!isNaN(id)) {
+        // Look for the last numeric segment that isn't at a known resource position
+        for (let i = segments.length - 1; i >= 0; i--) {
+            const id = parseInt(segments[i]);
+            if (!isNaN(id) && segments[i].length < 10) { // Simple check to avoid some large numbers/timestamps if any
                 return id;
             }
         }

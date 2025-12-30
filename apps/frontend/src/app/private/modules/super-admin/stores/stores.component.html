@@ -69,17 +69,15 @@
   </div>
 
   <!-- Create Store Modal -->
-  <app-store-create-modal [isOpen]="isCreateModalOpen" [isSubmitting]="isCreatingStore"
-    (openChange)="onCreateModalChange($event)" (submit)="createStore($event)"
+  <app-store-create-modal [(isOpen)]="isCreateModalOpen" [isSubmitting]="isCreatingStore"
     (cancel)="onCreateModalCancel()"></app-store-create-modal>
 
   <!-- Edit Store Modal -->
-  <app-store-edit-modal [isOpen]="isEditModalOpen" [isSubmitting]="isUpdatingStore" [store]="selectedStore"
-    (openChange)="onEditModalChange($event)" (submit)="updateStore($event)"
+  <app-store-edit-modal [(isOpen)]="isEditModalOpen" [isSubmitting]="isUpdatingStore" [store]="selectedStore"
     (cancel)="onEditModalCancel()"></app-store-edit-modal>
 
   <!-- Settings Store Modal -->
-  <app-store-settings-modal *ngIf="selectedStoreForSettings" [isOpen]="isSettingsModalOpen"
-    [isSubmitting]="isUpdatingSettings" (openChange)="onSettingsModalChange($event)"
+  <app-store-settings-modal *ngIf="selectedStoreForSettings" [(isOpen)]="isSettingsModalOpen"
+    [isSubmitting]="isUpdatingSettings"
     (submit)="updateStoreSettings($event)" (cancel)="onSettingsModalCancel()"></app-store-settings-modal>
 </div>

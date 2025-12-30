@@ -31,7 +31,7 @@ import {
       [size]="'lg'"
       title="Crear Nueva Tienda"
       subtitle="Completa los detalles para crear una nueva tienda"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6">
         <!-- Basic Information -->
@@ -277,7 +277,7 @@ export class StoreCreateModalComponent {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<CreateStoreDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -319,7 +319,7 @@ export class StoreCreateModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

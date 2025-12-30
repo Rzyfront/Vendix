@@ -28,7 +28,7 @@ export class StoreEditModalComponent {
   @Input() isSubmitting = false;
   @Input() store?: StoreListItem;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<any>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -119,7 +119,7 @@ export class StoreEditModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

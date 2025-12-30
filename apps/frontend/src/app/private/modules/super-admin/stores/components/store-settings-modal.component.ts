@@ -30,7 +30,7 @@ import {
       [size]="'lg'"
       title="Configuración de Tienda"
       subtitle="Configurar preferencias y notificaciones de la tienda"
-      (openChange)="onModalChange($event)"
+      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="settingsForm" class="space-y-6">
         <!-- General Settings -->
@@ -177,7 +177,7 @@ export class StoreSettingsModalComponent {
   @Input() isSubmitting = false;
   @Input() settings?: StoreSettings;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<StoreSettingsUpdateDto>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -237,7 +237,7 @@ export class StoreSettingsModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

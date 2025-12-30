@@ -163,7 +163,7 @@ import './organizations.component.css';
       <app-organization-create-modal
         [isOpen]="isCreateModalOpen"
         [isSubmitting]="isCreatingOrganization"
-        (openChange)="onCreateModalChange($event)"
+        
         (submit)="createOrganization($event)"
         (cancel)="onCreateModalCancel()"
       ></app-organization-create-modal>
@@ -173,7 +173,7 @@ import './organizations.component.css';
         [isOpen]="isEditModalOpen"
         [isSubmitting]="isUpdatingOrganization"
         [organization]="selectedOrganization"
-        (openChange)="onEditModalChange($event)"
+        
         (submit)="updateOrganization($event)"
         (cancel)="onEditModalCancel()"
       ></app-organization-edit-modal>

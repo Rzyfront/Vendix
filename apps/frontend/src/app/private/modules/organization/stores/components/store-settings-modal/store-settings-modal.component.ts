@@ -23,7 +23,7 @@ export class StoreSettingsModalComponent {
   @Input() isOpen: boolean = false;
   @Input() isSubmitting: boolean = false;
   @Input() settings: StoreSettings | null = null;
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() submit = new EventEmitter<StoreSettings>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -78,7 +78,7 @@ export class StoreSettingsModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }

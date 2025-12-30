@@ -33,6 +33,18 @@ export enum AuditResource {
     ROLES = 'roles',
     PERMISSIONS = 'permissions',
     SYSTEM = 'system',
+    ADDRESSES = 'addresses',
+    CATEGORIES = 'categories',
+    BRANDS = 'brands',
+    CUSTOMERS = 'customers',
+    SUPPLIERS = 'suppliers',
+    INVENTORY = 'inventory',
+    STOCK_LEVELS = 'stock_levels',
+    TRANSACTIONS = 'transactions',
+    PAYMENTS = 'payments',
+    TAXES = 'taxes',
+    DOMAINS = 'domains',
+    SETTINGS = 'settings',
     CUSTOM = 'custom', // ✅ Recurso genérico para eventos personalizados
 }
 

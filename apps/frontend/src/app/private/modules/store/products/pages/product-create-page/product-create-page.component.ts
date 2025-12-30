@@ -570,6 +570,10 @@ export class ProductCreatePageComponent implements OnInit {
         this.isAdjustmentModalOpen = true;
     }
 
+    openStockAdjustment(): void {
+        this.openAdjustmentModal();
+    }
+
     closeAdjustmentModal(): void {
         this.isAdjustmentModalOpen = false;
     }
