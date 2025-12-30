@@ -7,7 +7,7 @@ import { ActivatedRoute } from '@angular/router';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="p-6">
+    <div class="w-full">
       <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Customer Details</h1>
         <p class="text-gray-600">

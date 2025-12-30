@@ -1,0 +1,46 @@
+<div class="empty-state-container">
+  <!-- Icon -->
+  <div class="empty-state-icon">
+    <app-icon name="package" [size]="48" class="empty-state-icon-svg"></app-icon>
+  </div>
+
+  <!-- Title -->
+  <h3 class="empty-state-title">
+    {{ title }}
+  </h3>
+
+  <!-- Description -->
+  <p class="empty-state-description">
+    {{ description }}
+  </p>
+
+  <!-- Actions -->
+  <div class="empty-state-actions">
+    <app-button
+      variant="primary"
+      (clicked)="actionClick.emit()"
+      *ngIf="showActionButton"
+    >
+      <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+      {{ actionButtonText }}
+    </app-button>
+
+    <app-button
+      variant="outline"
+      (clicked)="refreshClick.emit()"
+      *ngIf="showRefreshButton"
+    >
+      <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+      Actualizar
+    </app-button>
+
+    <app-button
+      variant="ghost"
+      (clicked)="clearFiltersClick.emit()"
+      *ngIf="showAdditionalActions"
+    >
+      <app-icon name="x" [size]="16" slot="icon"></app-icon>
+      Limpiar Filtros
+    </app-button>
+  </div>
+</div>

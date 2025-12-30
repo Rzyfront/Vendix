@@ -1,7 +1,7 @@
 <div class="space-y-2 md:space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <!-- Stats Cards -->
-  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
+  <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
     <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
       [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
   </div>
@@ -132,8 +132,7 @@
 </div>
 
 <!-- Create User Modal -->
-<app-user-create-modal [(isOpen)]="showCreateModal"
-  (onUserCreated)="onUserCreated()"></app-user-create-modal>
+<app-user-create-modal [(isOpen)]="showCreateModal" (onUserCreated)="onUserCreated()"></app-user-create-modal>
 
 <!-- Edit User Modal -->
 <app-user-edit-modal *ngIf="currentUser" [user]="currentUser" [(isOpen)]="showEditModal"

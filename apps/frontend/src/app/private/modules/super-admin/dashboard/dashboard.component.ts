@@ -3,14 +3,15 @@ import { CommonModule } from '@angular/common';
 import { SuperAdminDashboardService } from './services/super-admin-dashboard.service';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
+import { StatsComponent } from '../../../../shared/components';
 
 interface StatCard {
   title: string;
   value: string;
   change: number;
   icon: string;
-  color: string;
-  trend: 'up' | 'down';
+  iconBgColor: string;
+  iconColor: string;
 }
 
 interface ActivityItem {
@@ -36,72 +37,20 @@ interface ChartData {
 @Component({
   selector: 'app-super-admin-dashboard',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, StatsComponent],
   template: `
-    <div class="p-4" style="background-color: var(--color-background);">
+    <div style="background-color: var(--color-background);">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div
-          *ngFor="let stat of statsData; let i = index"
-          class="rounded-card p-4 flex items-center gap-4 shadow-card hover:shadow-lg transition-all duration-300 relative overflow-hidden"
-          style="background: linear-gradient(135deg, var(--color-surface) 0%, rgba(126, 215, 165, 0.05) 100%); border: 1px solid var(--color-border);"
-        >
-          <div
-            class="absolute top-0 right-0 w-16 h-16 rounded-full opacity-20 -mr-8 -mt-8"
-            [style.background]="getStatColor(i, 0.1)"
-          ></div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center relative z-10 text-white"
-            [style.background]="getStatColor(i, 1)"
-          >
-            <i class="fas {{ stat.icon }} text-lg"></i>
-          </div>
-          <div class="flex-1 relative z-10">
-            <h3
-              class="text-sm font-medium mb-1"
-              style="color: var(--color-text-secondary);"
-            >
-              {{ stat.title }}
-            </h3>
-            <p
-              class="text-2xl font-bold mb-2"
-              style="color: var(--color-text-primary);"
-            >
-              {{ stat.value }}
-            </p>
-            <div class="flex items-center gap-2">
-              <div
-                class="w-6 h-6 rounded-full flex items-center justify-center"
-                [style.background]="
-                  stat.trend === 'up'
-                    ? 'rgba(126, 215, 165, 0.15)'
-                    : 'rgba(239, 68, 68, 0.15)'
-                "
-              >
-                <i
-                  class="fas text-xs"
-                  [class.fa-arrow-up]="stat.trend === 'up'"
-                  [class.fa-arrow-down]="stat.trend === 'down'"
-                  [style.color]="
-                    stat.trend === 'up'
-                      ? 'var(--color-primary)'
-                      : 'var(--color-destructive)'
-                  "
-                ></i>
-              </div>
-              <span
-                class="text-sm font-semibold"
-                [style.color]="
-                  stat.trend === 'up'
-                    ? 'var(--color-primary)'
-                    : 'var(--color-destructive)'
-                "
-              >
-                {{ getAbsValue(stat.change) }}%
-              </span>
-            </div>
-          </div>
-        </div>
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-6">
+        <app-stats
+          *ngFor="let stat of statsData"
+          [title]="stat.title"
+          [value]="stat.value"
+          [smallText]="getTrendText(stat.change)"
+          [iconName]="stat.icon"
+          [iconBgColor]="stat.iconBgColor"
+          [iconColor]="stat.iconColor"
+        ></app-stats>
       </div>
 
       <!-- Charts Section -->
@@ -545,7 +494,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   recentActivities: ActivityItem[] = [];
   topOrganizations: any[] = [];
 
-  constructor(private superAdminDashboardService: SuperAdminDashboardService) {}
+  constructor(private superAdminDashboardService: SuperAdminDashboardService) { }
 
   ngOnInit(): void {
     this.loadDashboardData();
@@ -583,33 +532,33 @@ export class DashboardComponent implements OnInit, OnDestroy {
         title: 'Total de Organizaciones',
         value: data.totalOrganizations?.toLocaleString() || '0',
         change: data.organizationGrowth || 0,
-        icon: 'fa-building',
-        color: '#7ed7a5',
-        trend: data.organizationGrowth >= 0 ? 'up' : 'down',
+        icon: 'building',
+        iconBgColor: 'bg-green-100',
+        iconColor: 'text-green-600',
       },
       {
         title: 'Total de Usuarios',
         value: data.totalUsers?.toLocaleString() || '0',
         change: data.userGrowth || 0,
-        icon: 'fa-users',
-        color: '#06b6d4',
-        trend: data.userGrowth >= 0 ? 'up' : 'down',
+        icon: 'users',
+        iconBgColor: 'bg-cyan-100',
+        iconColor: 'text-cyan-600',
       },
       {
         title: 'Tiendas Activas',
         value: data.activeStores?.toLocaleString() || '0',
         change: data.storeGrowth || 0,
-        icon: 'fa-store',
-        color: '#10b981',
-        trend: data.storeGrowth >= 0 ? 'up' : 'down',
+        icon: 'store',
+        iconBgColor: 'bg-emerald-100',
+        iconColor: 'text-emerald-600',
       },
       {
         title: 'Crecimiento de la Plataforma',
         value: `${data.platformGrowth || 0}%`,
         change: data.platformGrowth || 0,
-        icon: 'fa-chart-line',
-        color: '#8b5cf6',
-        trend: data.platformGrowth >= 0 ? 'up' : 'down',
+        icon: 'trending-up',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600',
       },
     ];
   }
@@ -684,30 +633,19 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   // Helper methods for template expressions
-  getBarHeight(bar: number): number {
-    const maxValue = Math.max(...this.chartData.datasets[0].data);
-    return (bar / maxValue) * 100;
-  }
-
-  getGrowthDirection(growth: number): string {
-    return growth > 0 ? 'up' : 'down';
+  getTrendText(change: number): string {
+    const icon = change >= 0 ? '↑' : '↓';
+    const absValue = Math.abs(change);
+    const sign = change >= 0 ? '+' : '';
+    return `${icon} ${sign}${absValue}% vs mes anterior`;
   }
 
   getAbsValue(value: number): number {
     return Math.abs(value);
   }
 
-  getProgressWidth(change: number): number {
-    return Math.min(Math.abs(change) * 10, 100);
-  }
-
-  getStatColor(index: number, opacity: number): string {
-    const colors = [
-      `rgba(126, 215, 165, ${opacity})`, // Green
-      `rgba(6, 182, 212, ${opacity})`, // Cyan
-      `rgba(139, 92, 246, ${opacity})`, // Purple
-      `rgba(251, 146, 60, ${opacity})`, // Orange
-    ];
-    return colors[index % colors.length];
+  getBarHeight(bar: number): number {
+    const maxValue = Math.max(...this.chartData.datasets[0].data);
+    return (bar / maxValue) * 100;
   }
 }

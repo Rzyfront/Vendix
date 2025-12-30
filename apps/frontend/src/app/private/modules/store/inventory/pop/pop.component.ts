@@ -42,7 +42,7 @@ import { PopPreBulkModalComponent } from './components/pop-prebulk-modal.compone
     PopPreBulkModalComponent
   ],
   template: `
-    <div class="h-full flex flex-col gap-4 p-4 overflow-hidden bg-[var(--color-background)]">
+    <div class="h-full flex flex-col gap-4 overflow-hidden bg-[var(--color-background)]">
       
       <!-- Main Content Container with Shadow/Card styling like POS -->
       <div class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden">

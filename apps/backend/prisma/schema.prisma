@@ -595,7 +595,7 @@ model product_tax_assignments {
 model product_variants {
   id                       Int                        @id @default(autoincrement())
   product_id               Int
-  sku                      String                     @unique @db.VarChar(100)
+  sku                      String                     @db.VarChar(100)
   name                     String?                    @db.VarChar(255)
   price_override           Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
@@ -618,6 +618,8 @@ model product_variants {
   stock_reservations       stock_reservations[]
   stock_transfer_items     stock_transfer_items[]
   supplier_products        supplier_products[]        @relation("product_variantsTosupplier_products")
+
+  @@unique([product_id, sku])
 }
 
 model products {

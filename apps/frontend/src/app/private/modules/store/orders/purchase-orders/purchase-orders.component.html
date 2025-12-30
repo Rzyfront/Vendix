@@ -61,8 +61,21 @@
       </div>
     </div>
 
+    <!-- Estado Vacío -->
+    <app-purchase-order-empty-state
+      *ngIf="orders.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      [showAdditionalActions]="hasFilters"
+      [actionButtonText]="'Crear Primera Orden'"
+      (actionClick)="createOrder()"
+      (refreshClick)="refreshList()"
+      (clearFiltersClick)="clearFilters()"
+    >
+    </app-purchase-order-empty-state>
+
     <!-- Tabla de Órdenes de Compra -->
-    <div class="p-2 md:p-4">
+    <div *ngIf="orders.length > 0" class="p-2 md:p-4">
       <app-purchase-order-list
         [filters]="{ status: currentStatus, search: searchTerm }"
         (viewOrder)="viewOrderDetails($event)"

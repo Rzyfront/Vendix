@@ -225,6 +225,11 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
 
   ngOnInit(): void { }
 
+  onCancel(): void {
+    this.isOpen = false;
+    this.isOpenChange.emit(false);
+  }
+
   ngOnChanges(): void {
     if (this.isOpen && this.user) {
       this.loadConfiguration();

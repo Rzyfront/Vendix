@@ -1,180 +1,76 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
-
-// Import shared components
-import { IconComponent } from '../../../../../shared/components';
+import { StatsComponent } from '../../../../../shared/components';
 
 @Component({
   selector: 'app-store-stats',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- Total Stores -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Total Stores</p>
-            <p class="text-2xl font-bold mt-1 text-text-primary">
-              {{ stats.total_stores }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
-          >
-            <app-icon name="store" [size]="24" class="text-primary"></app-icon>
-          </div>
-        </div>
-      </div>
+    <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <app-stats
+        title="Total Stores"
+        [value]="stats.total_stores"
+        iconName="store"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      ></app-stats>
 
-      <!-- Active Stores -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Active</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">
-              {{ stats.active_stores }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-          >
-            <app-icon
-              name="check"
-              [size]="24"
-              class="text-green-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Active"
+        [value]="stats.active_stores"
+        iconName="check"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
 
-      <!-- Inactive Stores -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Inactive</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">
-              {{ stats.inactive_stores }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100"
-          >
-            <app-icon
-              name="pause"
-              [size]="24"
-              class="text-yellow-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Inactive"
+        [value]="stats.inactive_stores"
+        iconName="pause"
+        iconBgColor="bg-yellow-100"
+        iconColor="text-yellow-600"
+      ></app-stats>
 
-      <!-- Draft Stores -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Draft</p>
-            <p class="text-2xl font-bold mt-1 text-gray-600">
-              {{ stats.draft_stores }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-gray-100"
-          >
-            <app-icon
-              name="file-text"
-              [size]="24"
-              class="text-gray-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Draft"
+        [value]="stats.draft_stores"
+        iconName="file-text"
+        iconBgColor="bg-gray-100"
+        iconColor="text-gray-600"
+      ></app-stats>
 
-      <!-- Suspended Stores -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Suspended</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">
-              {{ stats.suspended_stores }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100"
-          >
-            <app-icon
-              name="alert-triangle"
-              [size]="24"
-              class="text-red-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Suspended"
+        [value]="stats.suspended_stores"
+        iconName="alert-triangle"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
 
-      <!-- Total Revenue -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Total Revenue</p>
-            <p class="text-2xl font-bold mt-1 text-blue-600">
-              $ {{ formatCurrency(stats.total_revenue) }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-blue-100"
-          >
-            <app-icon
-              name="dollar-sign"
-              [size]="24"
-              class="text-blue-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Total Revenue"
+        [value]="'$ ' + formatCurrency(stats.total_revenue)"
+        iconName="dollar-sign"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
 
-      <!-- Total Orders -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Total Orders</p>
-            <p class="text-2xl font-bold mt-1 text-purple-600">
-              {{ formatNumber(stats.total_orders) }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100"
-          >
-            <app-icon
-              name="shopping-cart"
-              [size]="24"
-              class="text-purple-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Total Orders"
+        [value]="formatNumber(stats.total_orders)"
+        iconName="shopping-cart"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
 
-      <!-- Total Products -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">
-              Total Products
-            </p>
-            <p class="text-2xl font-bold mt-1 text-orange-600">
-              {{ formatNumber(stats.total_products) }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-orange-100"
-          >
-            <app-icon
-              name="package"
-              [size]="24"
-              class="text-orange-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Total Products"
+        [value]="formatNumber(stats.total_products)"
+        iconName="package"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
     </div>
   `,
   styles: [

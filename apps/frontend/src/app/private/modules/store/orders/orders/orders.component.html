@@ -87,7 +87,7 @@
     </app-order-empty-state>
 
     <!-- Tabla de Órdenes -->
-    <div *ngIf="!isLoading" class="p-2 md:p-2 md:p-4">
+    <div *ngIf="!isLoading && orders.length > 0" class="p-2 md:p-2 md:p-4">
       <app-orders-list
         [filters]="filters"
         (viewOrder)="viewOrderDetails($event)"

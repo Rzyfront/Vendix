@@ -7,11 +7,12 @@ import {
 } from './services/store-dashboard.service';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
+import { StatsComponent } from '../../../../shared/components';
 
 @Component({
   selector: 'app-store-dashboard',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, StatsComponent],
   template: `
     <div class="space-y-6">
       <div *ngIf="loading" class="flex items-center justify-center h-64">
@@ -22,98 +23,42 @@ import { takeUntil } from 'rxjs/operators';
 
       <div *ngIf="!loading">
         <!-- Stats Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-          <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-              <div
-                class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-              >
-                <i class="fas fa-box text-xl text-green-600"></i>
-              </div>
-              <span
-                class="text-sm font-medium"
-                [ngStyle]="{
-                  color: getGrowthColor(dashboardStats?.productsGrowth),
-                }"
-              >
-                {{ formatGrowth(dashboardStats?.productsGrowth) }}
-              </span>
-            </div>
-            <h3 class="text-sm font-medium text-gray-600">
-              Total de Productos
-            </h3>
-            <p class="text-3xl font-bold mt-2 text-gray-900">
-              {{ getTotalProducts() }}
-            </p>
-          </div>
+        <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-6">
+          <app-stats
+            title="Total de Productos"
+            [value]="getTotalProducts()"
+            [smallText]="formatGrowth(dashboardStats?.productsGrowth)"
+            iconName="package"
+            iconBgColor="bg-green-100"
+            iconColor="text-green-600"
+          ></app-stats>
 
-          <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-              <div
-                class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-              >
-                <i class="fas fa-users text-xl text-green-600"></i>
-              </div>
-              <span
-                class="text-sm font-medium"
-                [ngStyle]="{
-                  color: getGrowthColor(dashboardStats?.customersGrowth),
-                }"
-              >
-                {{ formatGrowth(dashboardStats?.customersGrowth) }}
-              </span>
-            </div>
-            <h3 class="text-sm font-medium text-gray-600">Total de Clientes</h3>
-            <p class="text-3xl font-bold mt-2 text-gray-900">
-              {{ getTotalCustomers() }}
-            </p>
-          </div>
+          <app-stats
+            title="Total de Clientes"
+            [value]="getTotalCustomers()"
+            [smallText]="formatGrowth(dashboardStats?.customersGrowth)"
+            iconName="users"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
 
-          <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-              <div
-                class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-              >
-                <i class="fas fa-shopping-cart text-xl text-green-600"></i>
-              </div>
-              <span
-                class="text-sm font-medium"
-                [ngStyle]="{
-                  color: getGrowthColor(dashboardStats?.ordersGrowth),
-                }"
-              >
-                {{ formatGrowth(dashboardStats?.ordersGrowth) }}
-              </span>
-            </div>
-            <h3 class="text-sm font-medium text-gray-600">Órdenes Mensuales</h3>
-            <p class="text-3xl font-bold mt-2 text-gray-900">
-              {{ getMonthlyOrders() }}
-            </p>
-          </div>
+          <app-stats
+            title="Órdenes Mensuales"
+            [value]="getMonthlyOrders()"
+            [smallText]="formatGrowth(dashboardStats?.ordersGrowth)"
+            iconName="shopping-cart"
+            iconBgColor="bg-orange-100"
+            iconColor="text-orange-600"
+          ></app-stats>
 
-          <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-            <div class="flex items-center justify-between mb-4">
-              <div
-                class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-              >
-                <i class="fas fa-dollar-sign text-xl text-green-600"></i>
-              </div>
-              <span
-                class="text-sm font-medium"
-                [ngStyle]="{
-                  color: getGrowthColor(dashboardStats?.revenueGrowth),
-                }"
-              >
-                {{ formatGrowth(dashboardStats?.revenueGrowth) }}
-              </span>
-            </div>
-            <h3 class="text-sm font-medium text-gray-600">
-              Ingresos Mensuales
-            </h3>
-            <p class="text-3xl font-bold mt-2 text-gray-900">
-              $ {{ getMonthlyRevenue() }}
-            </p>
-          </div>
+          <app-stats
+            title="Ingresos Mensuales"
+            [value]="'$ ' + getMonthlyRevenue()"
+            [smallText]="formatGrowth(dashboardStats?.revenueGrowth)"
+            iconName="dollar-sign"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-600"
+          ></app-stats>
         </div>
 
         <!-- Recent Activity -->
@@ -200,7 +145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   constructor(
     private route: ActivatedRoute,
     private storeDashboardService: StoreDashboardService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     const id = this.route.parent?.snapshot.paramMap.get('id');

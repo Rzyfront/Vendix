@@ -28,7 +28,7 @@ import {
     TableComponent,
   ],
   template: `
-    <div class="p-6 space-y-6">
+    <div class="w-full space-y-6">
       <!-- Stats Cards -->
       <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
         <app-stats

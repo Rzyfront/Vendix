@@ -1,5 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
-import { IconComponent } from '../../../../../shared/components/index';
+import { CommonModule } from '@angular/common';
+import { StatsComponent } from '../../../../../shared/components/index';
 import {
   AuditStats,
   AuditAction,
@@ -9,215 +10,105 @@ import {
 @Component({
   selector: 'app-audit-stats',
   standalone: true,
-  imports: [IconComponent],
+  imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- Total Logs -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Total Logs</p>
-            <p class="text-2xl font-bold mt-1 text-text-primary">
-              {{ stats?.total_logs || 0 }}
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-primary/10"
-          >
-            <app-icon name="list" [size]="24" class="text-primary"></app-icon>
-          </div>
-        </div>
-      </div>
+    <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <app-stats
+        title="Total Logs"
+        [value]="stats?.total_logs || 0"
+        iconName="list"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      ></app-stats>
 
-      <!-- Create Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Creaciones</p>
-            <p class="text-2xl font-bold mt-1 text-green-600">
-              {{ getActionCount('CREATE') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('CREATE'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-green-100"
-          >
-            <app-icon name="plus" [size]="24" class="text-green-600"></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Creaciones"
+        [value]="getActionCount('CREATE')"
+        [smallText]="
+          calculatePercentage(
+            getActionCount('CREATE'),
+            stats?.total_logs || 0
+          ) + '% del total'
+        "
+        iconName="plus"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
 
-      <!-- Update Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">
-              Actualizaciones
-            </p>
-            <p class="text-2xl font-bold mt-1 text-blue-600">
-              {{ getActionCount('UPDATE') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('UPDATE'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-blue-100"
-          >
-            <app-icon name="edit" [size]="24" class="text-blue-600"></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Actualizaciones"
+        [value]="getActionCount('UPDATE')"
+        [smallText]="
+          calculatePercentage(
+            getActionCount('UPDATE'),
+            stats?.total_logs || 0
+          ) + '% del total'
+        "
+        iconName="edit"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
 
-      <!-- Delete Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Eliminaciones</p>
-            <p class="text-2xl font-bold mt-1 text-red-600">
-              {{ getActionCount('DELETE') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('DELETE'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-red-100"
-          >
-            <app-icon
-              name="trash-2"
-              [size]="24"
-              class="text-red-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Eliminaciones"
+        [value]="getActionCount('DELETE')"
+        [smallText]="
+          calculatePercentage(
+            getActionCount('DELETE'),
+            stats?.total_logs || 0
+          ) + '% del total'
+        "
+        iconName="trash-2"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
 
-      <!-- Login Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Logins</p>
-            <p class="text-2xl font-bold mt-1 text-purple-600">
-              {{ getActionCount('LOGIN') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('LOGIN'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-purple-100"
-          >
-            <app-icon
-              name="log-in"
-              [size]="24"
-              class="text-purple-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Logins"
+        [value]="getActionCount('LOGIN')"
+        [smallText]="
+          calculatePercentage(getActionCount('LOGIN'), stats?.total_logs || 0) +
+          '% del total'
+        "
+        iconName="log-in"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
 
-      <!-- Logout Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Logouts</p>
-            <p class="text-2xl font-bold mt-1 text-gray-600">
-              {{ getActionCount('LOGOUT') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('LOGOUT'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-gray-100"
-          >
-            <app-icon
-              name="log-out"
-              [size]="24"
-              class="text-gray-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Logouts"
+        [value]="getActionCount('LOGOUT')"
+        [smallText]="
+          calculatePercentage(
+            getActionCount('LOGOUT'),
+            stats?.total_logs || 0
+          ) + '% del total'
+        "
+        iconName="log-out"
+        iconBgColor="bg-gray-100"
+        iconColor="text-gray-600"
+      ></app-stats>
 
-      <!-- Read Actions -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">Lecturas</p>
-            <p class="text-2xl font-bold mt-1 text-yellow-600">
-              {{ getActionCount('READ') }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{
-                calculatePercentage(
-                  getActionCount('READ'),
-                  stats?.total_logs || 0
-                )
-              }}% del total
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-yellow-100"
-          >
-            <app-icon name="eye" [size]="24" class="text-yellow-600"></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Lecturas"
+        [value]="getActionCount('READ')"
+        [smallText]="
+          calculatePercentage(getActionCount('READ'), stats?.total_logs || 0) +
+          '% del total'
+        "
+        iconName="eye"
+        iconBgColor="bg-yellow-100"
+        iconColor="text-yellow-600"
+      ></app-stats>
 
-      <!-- Top Resource -->
-      <div class="bg-surface rounded-card shadow-card border border-border p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <p class="text-sm font-medium text-text-secondary">
-              Recurso Más Activo
-            </p>
-            <p class="text-lg font-bold mt-1 text-text-primary truncate">
-              {{ getTopResource()?.name || 'N/A' }}
-            </p>
-            <p class="text-xs text-text-secondary mt-1">
-              {{ getTopResource()?.count || 0 }} acciones
-            </p>
-          </div>
-          <div
-            class="w-12 h-12 rounded-lg flex items-center justify-center bg-indigo-100"
-          >
-            <app-icon
-              name="database"
-              [size]="24"
-              class="text-indigo-600"
-            ></app-icon>
-          </div>
-        </div>
-      </div>
+      <app-stats
+        title="Recurso Más Activo"
+        [value]="getTopResource()?.name || 'N/A'"
+        [smallText]="(getTopResource()?.count || 0) + ' acciones'"
+        iconName="database"
+        iconBgColor="bg-indigo-100"
+        iconColor="text-indigo-600"
+      ></app-stats>
     </div>
   `,
   styles: [
@@ -231,9 +122,9 @@ import {
 export class AuditStatsComponent implements OnInit {
   @Input() stats: AuditStats | null = null;
 
-  constructor() {}
+  constructor() { }
 
-  ngOnInit(): void {}
+  ngOnInit(): void { }
 
   getActionCount(action: string): number {
     return this.stats?.logs_by_action?.[action as AuditAction] || 0;

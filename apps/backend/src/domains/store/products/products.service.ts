@@ -60,9 +60,7 @@ export class ProductsService {
       // Verificar que el slug sea único dentro de la tienda
       const existingProduct = await this.prisma.products.findFirst({
         where: {
-          store_id: store_id,
           slug: slug,
-          state: { not: ProductState.ARCHIVED },
         },
       });
 
@@ -76,9 +74,7 @@ export class ProductsService {
       if (createProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
-            store_id: store_id,
             sku: createProductDto.sku,
-            state: { not: ProductState.ARCHIVED },
           },
         });
 
@@ -177,7 +173,7 @@ export class ProductsService {
                 ? {}
                 : {
                   OR: [
-                    { store_id: store_id }, // Categorías específicas de la tienda
+                    { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
                     { store_id: null }, // Categorías globales
                   ],
                 }),
@@ -753,9 +749,7 @@ export class ProductsService {
       if (updateProductDto.slug) {
         const existingSlug = await this.prisma.products.findFirst({
           where: {
-            store_id: existingProduct.store_id,
             slug: updateProductDto.slug,
-            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
@@ -769,9 +763,7 @@ export class ProductsService {
       if (updateProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
-            store_id: existingProduct.store_id,
             sku: updateProductDto.sku,
-            state: { not: ProductState.ARCHIVED },
             NOT: { id },
           },
         });
