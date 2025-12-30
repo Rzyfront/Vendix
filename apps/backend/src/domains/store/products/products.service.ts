@@ -763,6 +763,7 @@ export class ProductsService {
       if (updateProductDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
+            store_id: existingProduct.store_id,
             sku: updateProductDto.sku,
             NOT: { id },
           },
