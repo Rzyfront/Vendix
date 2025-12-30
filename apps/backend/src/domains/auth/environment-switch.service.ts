@@ -9,9 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import {
   AuditService,
+  AuditLogData,
   AuditAction,
   AuditResource,
-} from '../superadmin/audit/audit.service';
+} from '../../common/audit/audit.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()

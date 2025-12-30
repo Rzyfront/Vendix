@@ -74,7 +74,7 @@ interface StatItem {
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
         <app-stats
           *ngFor="let item of statsItems"
           [title]="item.title"

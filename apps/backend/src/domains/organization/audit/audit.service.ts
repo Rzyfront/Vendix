@@ -3,10 +3,10 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import {
     AuditAction,
     AuditResource,
-} from '../../superadmin/audit/audit.service';
+} from '../../../common/audit/audit.service';
 
 @Injectable()
-export class AuditService {
+export class OrganizationAuditService {
     constructor(private readonly prismaService: OrganizationPrismaService) { }
 
     /**

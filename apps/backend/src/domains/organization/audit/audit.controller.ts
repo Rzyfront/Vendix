@@ -5,11 +5,11 @@ import {
     ApiResponse,
     ApiBearerAuth,
 } from '@nestjs/swagger';
-import { AuditService } from './audit.service';
+import { OrganizationAuditService } from './audit.service';
 import {
     AuditAction,
     AuditResource,
-} from '../../superadmin/audit/audit.service';
+} from '../../../common/audit/audit.service';
 import { ResponseService } from '@common/responses/response.service';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
@@ -24,7 +24,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 @ApiBearerAuth()
 export class AuditController {
     constructor(
-        private readonly auditService: AuditService,
+        private readonly auditService: OrganizationAuditService,
         private readonly responseService: ResponseService,
     ) { }
 

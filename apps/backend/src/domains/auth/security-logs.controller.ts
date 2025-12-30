@@ -5,7 +5,8 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { AuditService, AuditAction } from '../superadmin/audit/audit.service';
+import { SuperAdminAuditService } from '../superadmin/audit/audit.service';
+import { AuditAction } from '../../common/audit/audit.service';
 import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Security Logs')
@@ -13,7 +14,7 @@ import { ResponseService } from '@common/responses/response.service';
 @ApiBearerAuth()
 export class SecurityLogsController {
   constructor(
-    private readonly auditService: AuditService,
+    private readonly auditService: SuperAdminAuditService,
     private readonly responseService: ResponseService,
   ) { }
 
