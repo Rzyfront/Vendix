@@ -221,7 +221,17 @@ export class PosProductService {
         totalStock = product.stock_quantity || 0;
       }
 
-      return {
+      // Get image URL with fallbacks
+      let imageUrl = '';
+      if (product.product_images && product.product_images.length > 0) {
+        imageUrl = product.product_images[0].url;
+      } else if (product.image_url) {
+        imageUrl = product.image_url;
+      } else if (product.image) {
+        imageUrl = product.image;
+      }
+
+      const transformed = {
         id: product.id?.toString() || '',
         name: product.name || '',
         sku: product.sku || '',
@@ -234,10 +244,8 @@ export class PosProductService {
         brand: product.brands?.name || '',
         stock: totalStock,
         minStock: product.min_stock_level || 5,
-        image:
-          product.product_images && product.product_images.length > 0
-            ? product.product_images[0].url
-            : product.image_url || product.image || '',
+        image: imageUrl,
+        image_url: imageUrl, // Also include as image_url for compatibility
         description: product.description || '',
         barcode: product.barcode || '',
         tags: product.tags || [],
@@ -247,7 +255,18 @@ export class PosProductService {
         // Include additional data for debugging
         _rawStockLevels: product.stock_levels,
         _rawStockQuantity: product.stock_quantity,
+        _rawImageUrl: product.image_url, // Debug: preserve original
       };
+
+      // Debug log for first product
+      if (products.indexOf(product) === 0) {
+        console.log('POS Product transform:', {
+          original: product,
+          transformed
+        });
+      }
+
+      return transformed;
     });
   }
 

@@ -146,8 +146,8 @@ import {
             >
               <!-- Product Image -->
               <img
-                *ngIf="product.image_url"
-                [src]="product.image_url"
+                *ngIf="product.image || product.image_url"
+                [src]="product.image || product.image_url"
                 [alt]="product.name"
                 class="w-full h-full object-cover"
                 (error)="onImageError($event)"
@@ -155,7 +155,7 @@ import {
 
               <!-- Default Icon when no image -->
               <div
-                *ngIf="!product.image_url"
+                *ngIf="!product.image && !product.image_url"
                 class="absolute inset-0 flex items-center justify-center"
               >
                 <div

@@ -69,18 +69,14 @@ export class ProductListComponent {
   // Table configuration
   tableColumns: TableColumn[] = [
     {
-      key: 'images',
+      key: 'image_url',
       label: '', // Empty label for symmetry
       sortable: false,
       width: '50px',
       align: 'center',
       priority: 1,
       type: 'image',
-      transform: (value: any[]) => {
-        if (!value || value.length === 0) return '';
-        const mainImage = value.find((img: any) => img.is_main);
-        return mainImage ? mainImage.image_url : value[0].image_url;
-      },
+      transform: (value: string) => value || '',
     },
     {
       key: 'name',
