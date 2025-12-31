@@ -2151,75 +2151,109 @@ async function main() {
     // Configuración de user_settings según rol
     let app = 'VENDIX_LANDING';
     let panel_ui = {};
+
     if (user.roles.includes(superAdminRole.id)) {
       app = 'VENDIX_ADMIN';
       panel_ui = {
-        superadmin: true,
-        tenants: true,
-        dashboard: true,
-        user_management: true,
-        billing: true,
-        system_analytics: true,
+        VENDIX_ADMIN: {
+          superadmin: true,
+          tenants: true,
+          dashboard: true,
+          user_management: true,
+          billing: true,
+          system_analytics: true,
+        }
       };
     } else if (user.roles.includes(ownerRole.id)) {
       app = 'ORG_ADMIN';
       panel_ui = {
-        stores: true,
-        users: true,
-        dashboard: true,
-        orders: true,
-        analytics: true,
-        reports: true,
-        inventory: true,
-        billing: true,
-        ecommerce: true,
-        audit: true,
-        settings: true,
+        ORG_ADMIN: {
+          stores: true,
+          users: true,
+          dashboard: true,
+          orders: true,
+          analytics: true,
+          reports: true,
+          inventory: true,
+          billing: true,
+          ecommerce: true,
+          audit: true,
+          settings: true,
+        },
+        STORE_ADMIN: {
+          pos: true,
+          users: true,
+          dashboard: true,
+          analytics: true,
+          reports: true,
+          billing: true,
+          ecommerce: true,
+          settings: true,
+        }
       };
     } else if (user.roles.includes(adminRole.id)) {
       app = 'ORG_ADMIN';
       panel_ui = {
-        stores: true,
-        users: true,
-        dashboard: true,
-        orders: true,
-        analytics: true,
-        reports: true,
-        inventory: true,
-        billing: true,
-        ecommerce: true,
-        audit: true,
-        settings: true,
+        ORG_ADMIN: {
+          stores: true,
+          users: true,
+          dashboard: true,
+          orders: true,
+          analytics: true,
+          reports: true,
+          inventory: true,
+          billing: true,
+          ecommerce: true,
+          audit: true,
+          settings: true,
+        },
+        STORE_ADMIN: {
+          pos: true,
+          users: true,
+          dashboard: true,
+          analytics: true,
+          reports: true,
+          billing: true,
+          ecommerce: true,
+          settings: true,
+        }
       };
     } else if (user.roles.includes(managerRole.id)) {
       app = 'STORE_ADMIN';
       panel_ui = {
-        pos: true,
-        users: true,
-        dashboard: true,
-        analytics: true,
-        reports: true,
-        billing: true,
-        ecommerce: true,
-        settings: true,
+        STORE_ADMIN: {
+          pos: true,
+          users: true,
+          dashboard: true,
+          analytics: true,
+          reports: true,
+          billing: true,
+          ecommerce: true,
+          settings: true,
+        }
       };
     } else if (user.roles.includes(customerRole.id)) {
       app = 'STORE_ECOMMERCE';
       panel_ui = {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true,
+        STORE_ECOMMERCE: {
+          profile: true,
+          history: true,
+          dashboard: true,
+          favorites: true,
+          orders: true,
+          settings: true,
+        }
       };
     } else {
       // Otros roles (supervisor, employee, etc.)
       app = 'VENDIX_LANDING';
       panel_ui = {
-        dashboard: false,
+        VENDIX_LANDING: {
+          dashboard: false,
+        }
       };
     }
+
     await prisma.user_settings.upsert({
       where: { user_id: createdUser.id },
       update: {},
@@ -2228,6 +2262,10 @@ async function main() {
         config: {
           app,
           panel_ui: panel_ui,
+          preferences: {
+            language: 'es',
+            theme: 'aura'
+          }
         },
       },
     });
