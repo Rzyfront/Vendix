@@ -35,11 +35,7 @@ export abstract class BasePaymentProcessor {
   }
 
   protected logTransaction(action: string, data: any, result?: any): void {
-    console.log(`[PaymentProcessor:${this.constructor.name}] ${action}`, {
-      timestamp: new Date().toISOString(),
-      data,
-      result,
-    });
+    // Transaction logging placeholder
   }
 
   protected handleError(error: any, context: string): PaymentResult {

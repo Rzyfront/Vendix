@@ -480,7 +480,7 @@ model orders {
   id                                              Int              @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int
-  order_number                                    String           @unique @db.VarChar(50)
+  order_number                                    String           @db.VarChar(50)
   shipping_address_id                             Int?
   billing_address_id                              Int?
   shipping_address_snapshot                       Json?
@@ -503,6 +503,9 @@ model orders {
   stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
+
+  @@unique([store_id, order_number])
+  @@index([store_id, order_number])
 }
 
 model system_payment_methods {
@@ -579,6 +582,9 @@ model product_images {
   product_id       Int?
   image_url        String
   is_main          Boolean?           @default(false)
+  alt_text         String?            @db.VarChar(255)
+  sort_order       Int?               @default(0)
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
   products         products?          @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variants product_variants[]
 }

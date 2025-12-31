@@ -259,9 +259,6 @@ export class AuthService {
 
       if (existingCustomer) {
         // Es un customer en otra organización, permitir crear owner
-        console.log(
-          `Creando owner para email ${email} (customer existente en org: ${existingCustomer.organizations?.name})`,
-        );
       }
 
       // Crear nuevo usuario
@@ -415,7 +412,6 @@ export class AuthService {
         organizationSlug = organization?.slug;
       }
     } catch (error) {
-      console.error('❌ Error obteniendo slug de organización:', error);
       // Continuar sin organization slug si hay error
     }
 
@@ -427,12 +423,7 @@ export class AuthService {
         `${userWithRoles.first_name} ${userWithRoles.last_name}`,
         organizationSlug,
       );
-      console.log(`✅ Email de verificación enviado a: ${userWithRoles.email}`);
-      if (organizationSlug) {
-        console.log(`🏢 vLink (organization slug): ${organizationSlug}`);
-      }
     } catch (error) {
-      console.error('❌ Error enviando email de verificación:', error);
       // No fallar el registro si el email no se puede enviar
     }
 
@@ -669,7 +660,6 @@ export class AuthService {
         organizationSlug = organization?.slug;
       }
     } catch (error) {
-      console.error('❌ Error obteniendo slug de organización:', error);
       // Continuar sin organization slug si hay error
     }
 
@@ -685,14 +675,7 @@ export class AuthService {
         userWithRoles.email,
         userWithRoles.first_name,
       );
-      console.log(
-        `✅ Email de verificación y bienvenida enviado a: ${userWithRoles.email}`,
-      );
     } catch (error) {
-      console.error(
-        '❌ Error enviando email de verificación/bienvenida:',
-        error,
-      );
       // No fallar el registro si el email no se puede enviar
     }
 
@@ -981,13 +964,6 @@ export class AuthService {
     const { user_roles, ...userWithoutRoles } = user;
     const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
-    console.log('🔍 LOGIN - Transformación de roles:', {
-      user_id: user.id,
-      email: user.email,
-      original_user_roles_count: user_roles?.length || 0,
-      transformed_roles: roles,
-    });
-
     const userWithRolesArray = {
       ...userWithoutRoles,
       roles, // Array simple: ["owner", "admin"]
@@ -1072,10 +1048,6 @@ export class AuthService {
       // Intentar encontrar una tienda para este usuario si no ha especificado una
       // Esto es crítico para que generateTokens reciba un store_id válido
       if (!effective_store_slug) {
-        console.log(
-          '🔄 LOGIN - STORE_ADMIN user logged in via Org Slug - Attempting to auto-select store context',
-        );
-
         // Estrategia 1: Main Store (si existe)
         if (user.main_store_id) {
           const main_store = await this.prismaService.stores.findUnique({
@@ -1102,7 +1074,6 @@ export class AuthService {
 
                 // AUTO-RELATION: Si es High Privilege y no tiene acceso, crear la relación
                 if (hasHighPrivilege && !has_access) {
-                  console.log(`✨ LOGIN - Creating automatic store_users relation for High Privilege user in Main Store: ${main_store.slug}`);
                   await this.prismaService.store_users.create({
                     data: {
                       store_id: main_store.id,
@@ -1110,8 +1081,6 @@ export class AuthService {
                     }
                   });
                 }
-
-                console.log('✅ LOGIN - Auto-selected Main Store:', main_store.slug);
               }
             }
           }
@@ -1132,7 +1101,6 @@ export class AuthService {
           if (first_store_user && first_store_user.store) {
             effective_organization_slug = undefined;
             effective_store_slug = first_store_user.store.slug;
-            console.log('✅ LOGIN - Auto-selected First Available Store:', first_store_user.store.slug);
           }
         }
 
@@ -1147,15 +1115,12 @@ export class AuthService {
             effective_store_slug = first_org_store.slug;
 
             // AUTO-RELATION: Crear relación explícita
-            console.log(`✨ LOGIN - Creating automatic store_users relation for High Privilege user in Fallback Store: ${first_org_store.slug}`);
             await this.prismaService.store_users.create({
               data: {
                 store_id: first_org_store.id,
                 user_id: user.id
               }
             });
-
-            console.log('✅ LOGIN - Auto-selected First Organization Store (High Privilege):', first_org_store.slug);
           }
         }
       }
@@ -1167,8 +1132,6 @@ export class AuthService {
       userSettings &&
       userSettings.config?.['app'] === 'ORG_ADMIN'
     ) {
-      console.log('🔄 LOGIN - Switching ORG_ADMIN to STORE_ADMIN app_type');
-
       // Actualizar app_type en base de datos
       const newConfig = {
         ...(userSettings.config as object),
@@ -1408,10 +1371,6 @@ export class AuthService {
       // 🔒 VERIFICAR QUE EL TOKEN TIENE USUARIO ASOCIADO
       const user = tokenRecord.users;
       if (!user) {
-        console.error('Refresh token - No user associated:', {
-          token_id: tokenRecord.id,
-          user_id: tokenRecord.user_id,
-        });
         throw new UnauthorizedException(
           'Refresh token inválido: usuario no encontrado',
         );
@@ -1419,11 +1378,6 @@ export class AuthService {
 
       // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el token scope corresponde al usuario
       if (Number(payload.organization_id) !== user.organization_id) {
-        console.error('Refresh token - Organization mismatch:', {
-          user_id: user.id,
-          token_organization_id: payload.organization_id,
-          user_organization_id: user.organization_id,
-        });
         throw new UnauthorizedException(
           'Token scope inválido: organización no corresponde al usuario',
         );
@@ -1460,13 +1414,6 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
-      // Log intento sospechoso
-      console.error('🚨 Intento de refresh token sospechoso:', {
-        error: error.message,
-        client_info,
-        timestamp: new Date().toISOString(),
-      });
-
       throw new UnauthorizedException('Token de refresco inválido');
     }
   }
@@ -1537,9 +1484,7 @@ export class AuthService {
         all_tokens_invalidated: true,
       });
 
-      console.log(
-        `🔒 LOGOUT COMPLETO: Usuario ${user_id} - ${result.count} sesiones revocadas`,
-      );
+
 
       return {
         message: `Todas las sesiones han sido cerradas por seguridad.`,
@@ -1596,9 +1541,7 @@ export class AuthService {
           security_level: 'enhanced',
         });
 
-        console.log(
-          `🔒 LOGOUT SEGURO: Usuario ${user_id} - ${totalRevoked} sesiones revocadas`,
-        );
+
 
         return {
           message:
@@ -1610,7 +1553,6 @@ export class AuthService {
           },
         };
       } catch (error) {
-        console.error('Error during logout:', error);
         throw new BadRequestException(
           'No se pudo cerrar la sesión. Intenta de nuevo.',
         );
@@ -1686,7 +1628,6 @@ export class AuthService {
         organizationSlug = organization?.slug;
       }
     } catch (error) {
-      console.error('❌ Error obteniendo slug de organización:', error);
       // Continuar sin organization slug si hay error
     }
 
@@ -2441,7 +2382,6 @@ export class AuthService {
   ): Promise<void> {
     // Si no hay información del cliente, permitir (compatibilidad con versiones anteriores)
     if (!client_info) {
-      console.warn('⚠️ Refresh token usado sin información del cliente');
       return;
     }
 
@@ -2457,13 +2397,6 @@ export class AuthService {
     // 🔍 VERIFICAR IP ADDRESS
     if (tokenRecord.ip_address && client_info.ip_address) {
       if (tokenRecord.ip_address !== client_info.ip_address) {
-        console.warn('🚨 IP Address mismatch:', {
-          stored: tokenRecord.ip_address,
-          current: client_info.ip_address,
-          userId: tokenRecord.user_id,
-          timestamp: new Date().toISOString(),
-        });
-
         if (config.strictIpCheck) {
           throw new UnauthorizedException(
             'Token usage from different IP address detected',
@@ -2477,34 +2410,6 @@ export class AuthService {
       const current_fingerprint = this.generateDeviceFingerprint(client_info);
 
       if (tokenRecord.device_fingerprint !== current_fingerprint) {
-        const storedBrowser = this.extractBrowserFromUserAgent(
-          tokenRecord.user_agent || '',
-        );
-        const currentBrowser = this.extractBrowserFromUserAgent(
-          client_info.user_agent,
-        );
-        const storedOS = this.extractOSFromUserAgent(
-          tokenRecord.user_agent || '',
-        );
-        const currentOS = this.extractOSFromUserAgent(client_info.user_agent);
-
-        console.error('🚨 DEVICE FINGERPRINT MISMATCH:', {
-          userId: tokenRecord.user_id,
-          stored: {
-            fingerprint: tokenRecord.device_fingerprint,
-            browser: storedBrowser,
-            os: storedOS,
-            ip: tokenRecord.ip_address,
-          },
-          current: {
-            fingerprint: current_fingerprint,
-            browser: currentBrowser,
-            os: currentOS,
-            ip: client_info.ip_address,
-          },
-          timestamp: new Date().toISOString(),
-        });
-
         if (config.strictDeviceCheck && !config.allowCrossDevice) {
           // Revocar el token sospechoso
           await this.prismaService.refresh_tokens.update({
@@ -2530,12 +2435,6 @@ export class AuthService {
         (this.configService.get<number>('MAX_REFRESH_FREQUENCY') || 30) * 1000;
 
       if (timeSinceLastUse < minTimeBetweenRefresh) {
-        console.warn('🚨 Refresh token being used too frequently:', {
-          userId: tokenRecord.user_id,
-          timeSinceLastUse: Math.round(timeSinceLastUse / 1000),
-          minRequired: Math.round(minTimeBetweenRefresh / 1000),
-        });
-
         throw new UnauthorizedException(
           'Token refresh rate exceeded. Please wait before trying again.',
         );
@@ -2548,16 +2447,6 @@ export class AuthService {
     }
 
     // ✅ Log exitoso para monitoreo
-    console.log('✅ Refresh token validation passed:', {
-      userId: tokenRecord.user_id,
-      clientIP: client_info.ip_address,
-      browser: this.extractBrowserFromUserAgent(client_info.user_agent || ''),
-      os: this.extractOSFromUserAgent(client_info.user_agent || ''),
-      device_matched:
-        tokenRecord.device_fingerprint ===
-        this.generateDeviceFingerprint(client_info),
-      timestamp: new Date().toISOString(),
-    });
   }
 
   // Extraer navegador principal del User Agent

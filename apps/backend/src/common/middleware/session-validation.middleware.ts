@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class SessionValidationMiddleware implements NestMiddleware {
-  constructor(private readonly prismaService: GlobalPrismaService) {}
+  constructor(private readonly prismaService: GlobalPrismaService) { }
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Solo validar para rutas protegidas que usan refresh tokens
@@ -45,7 +45,6 @@ export class SessionValidationMiddleware implements NestMiddleware {
             throw error;
           }
           // Log error pero continuar (podría ser un problema de hash)
-          console.error('Error validating refresh token:', error);
         }
       }
     }

@@ -37,6 +37,7 @@ import { BrandQuickCreateComponent } from '../../components/brand-quick-create.c
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import { CreateAdjustmentDto } from '../../../inventory/interfaces';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 interface VariantAttribute {
     name: string;
@@ -225,6 +226,8 @@ export class ProductCreatePageComponent implements OnInit {
             },
             error: (error: any) => {
                 console.error('Error loading categories:', error);
+                const message = extractApiErrorMessage(error);
+                this.toastService.error(message, 'Error al cargar categorías');
             },
         });
     }
@@ -250,6 +253,8 @@ export class ProductCreatePageComponent implements OnInit {
             },
             error: (error: any) => {
                 console.error('Error loading brands:', error);
+                const message = extractApiErrorMessage(error);
+                this.toastService.error(message, 'Error al cargar marcas');
             },
         });
     }
@@ -486,6 +491,10 @@ export class ProductCreatePageComponent implements OnInit {
     onSubmit(): void {
         if (this.productForm.invalid || this.isSubmitting) {
             this.productForm.markAllAsTouched();
+            this.toastService.error(
+                'Por favor, completa todos los campos requeridos correctamente',
+                'Formulario inválido'
+            );
             return;
         }
 
@@ -545,9 +554,11 @@ export class ProductCreatePageComponent implements OnInit {
                 );
                 this.router.navigate(['/admin/products']);
             },
-            error: (err: any) => { // Fix implicit any
+            error: (err: any) => {
                 console.error('Error saving product:', err);
+                const message = extractApiErrorMessage(err);
                 this.toastService.error(
+                    message,
                     this.isEditMode
                         ? 'Error al actualizar el producto'
                         : 'Error al crear el producto'

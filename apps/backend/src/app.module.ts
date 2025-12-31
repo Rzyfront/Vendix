@@ -16,9 +16,11 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
 
 import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
+import { SecretsModule } from './common/config/secrets.module';
 
 @Module({
   imports: [
+    SecretsModule, // Load secrets from AWS before ConfigModule
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

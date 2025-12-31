@@ -35,7 +35,7 @@ export class OrdersService {
     while (retries > 0) {
       try {
         if (!createOrderDto.order_number) {
-          createOrderDto.order_number = await this.generateOrderNumber();
+          createOrderDto.order_number = await this.generateOrderNumber(store_id);
         }
 
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
@@ -206,25 +206,28 @@ export class OrdersService {
     return this.prisma.orders.delete({ where: { id } });
   }
 
-  private async generateOrderNumber(): Promise<string> {
+  private async generateOrderNumber(storeId: number): Promise<string> {
     const now = new Date();
     const year = now.getFullYear().toString().slice(-2);
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
     const day = now.getDate().toString().padStart(2, '0');
+    const prefix = `ORD${year}${month}${day}`;
 
-    // 🔧 FIX: Usar cliente sin scope para generar número de orden
-    const client = this.prisma.withoutScope();
-
-    const lastOrder = await client.orders.findFirst({
-      where: { order_number: { startsWith: `ORD${year}${month}${day}` } },
+    // Filter by store_id for per-store unique order numbers
+    const lastOrder = await this.prisma.orders.findFirst({
+      where: {
+        store_id: storeId,
+        order_number: { startsWith: prefix },
+      },
       orderBy: { order_number: 'desc' },
     });
+
     let sequence = 1;
     if (lastOrder) {
       const lastSequence = parseInt(lastOrder.order_number.slice(-4));
       sequence = lastSequence + 1;
     }
-    return `ORD${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+    return `${prefix}${sequence.toString().padStart(4, '0')}`;
   }
 
   async getStats(): Promise<OrderStatsDto> {

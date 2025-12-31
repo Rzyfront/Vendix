@@ -184,6 +184,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
       },
       error: (error: any) => {
         console.error('Error loading products:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar productos');
         this.isLoading = false;
       },
     });
@@ -201,7 +203,11 @@ export class ProductsComponent implements OnInit, OnDestroy {
       next: (response: any) => {
         if (response) this.stats = response;
       },
-      error: console.error,
+      error: (error: any) => {
+        console.error('Error loading stats:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar estadísticas');
+      },
     });
     this.subscriptions.push(sub);
   }

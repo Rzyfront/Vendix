@@ -24,7 +24,7 @@ export class CreateCategoryDto {
   @ApiProperty({ example: 'Ropa', description: 'Nombre de la categoría' })
   @IsString()
   @IsNotEmpty({ message: 'El nombre no puede estar vacío' })
-  @MinLength(4, { message: 'El nombre debe tener al menos 4 caracter' })
+  @MinLength(2, { message: 'El nombre debe tener al menos 2 caracteres' })
   @MaxLength(255)
   name: string;
 

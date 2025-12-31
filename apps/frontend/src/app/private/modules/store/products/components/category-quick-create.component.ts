@@ -95,7 +95,7 @@ export class CategoryQuickCreateComponent {
         '',
         [
           Validators.required,
-          Validators.minLength(4),
+          Validators.minLength(2),
           Validators.maxLength(255),
         ],
       ],
@@ -139,7 +139,7 @@ export class CategoryQuickCreateComponent {
       return '';
     }
     if (field.errors['required']) return 'This field is required';
-    if (field.errors['minlength']) return 'Minimum 4 characters required';
+    if (field.errors['minlength']) return 'Minimum 2 characters required';
     if (field.errors['maxlength']) return 'Maximum 255 characters allowed';
     return 'Invalid input';
   }

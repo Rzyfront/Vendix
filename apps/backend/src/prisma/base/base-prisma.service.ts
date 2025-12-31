@@ -20,18 +20,15 @@ export abstract class BasePrismaService implements OnModuleInit {
 
     this.baseClient = new PrismaClient({
       adapter,
-      log:
-        process.env.NODE_ENV === 'development'
-          ? ['query', 'error', 'warn']
-          : ['error'],
+      log: ['error', 'warn'],
     });
 
-    this.logger.log(`🚀 [${this.constructor.name}] PrismaClient initialized`);
+
   }
 
   async onModuleInit() {
     await this.baseClient.$connect();
-    this.logger.log('✅ Prisma connected to database');
+
   }
 
   async enableShutdownHooks(app: INestApplication) {

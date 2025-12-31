@@ -116,7 +116,7 @@ export class EmailService {
               'Failed to initialize SES/SMTP provider, falling back to console:',
               error,
             );
-            console.error(error);
+            this.logger.error(error);
             this.provider = new ConsoleProvider(this.config);
           }
         }
