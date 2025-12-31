@@ -146,7 +146,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   constructor(
     private route: ActivatedRoute,
     private storeDashboardService: StoreDashboardService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     const id = this.route.parent?.snapshot.paramMap.get('id');
