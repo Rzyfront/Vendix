@@ -9,7 +9,6 @@ import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import {
   AuditService,
-  AuditLogData,
   AuditAction,
   AuditResource,
 } from '../../common/audit/audit.service';
@@ -92,8 +91,6 @@ export class EnvironmentSwitchService {
         user_role_names.includes('super_admin');
 
       if (!effective_store_slug) {
-        console.log('🔄 SWITCH - STORE_ADMIN switch without slug - Attempting to auto-select store context');
-
         // Estrategia 1: Main Store
         if (user.main_store_id) {
           const main_store = await this.prismaService.stores.findUnique({
@@ -115,7 +112,6 @@ export class EnvironmentSwitchService {
 
               // AUTO-RELATION
               if (has_high_privilege && !has_access) {
-                console.log(`✨ SWITCH - Creating automatic store_users relation in Main Store: ${main_store.slug}`);
                 await this.prismaService.store_users.create({
                   data: { store_id: main_store.id, user_id: user.id }
                 });
@@ -146,7 +142,6 @@ export class EnvironmentSwitchService {
           if (first_org_store) {
             effective_store_slug = first_org_store.slug;
             // AUTO-RELATION
-            console.log(`✨ SWITCH - Creating automatic store_users relation in Fallback Store: ${first_org_store.slug}`);
             await this.prismaService.store_users.create({
               data: { store_id: first_org_store.id, user_id: user.id }
             });
@@ -193,7 +188,6 @@ export class EnvironmentSwitchService {
 
         if (!specific_access) {
           if (has_high_privilege) {
-            console.log(`✨ SWITCH - Creating automatic store_users relation in Target Store: ${store.slug}`);
             await this.prismaService.store_users.create({
               data: { store_id: store.id, user_id: userId }
             });
@@ -221,7 +215,6 @@ export class EnvironmentSwitchService {
     }
 
     // Generar tokens con scope específico para el cambio de entorno
-    // Usar el MISMO formato que auth.service.ts para que el JwtStrategy funcione correctamente
     let organization_id: number;
     if (store_id) {
       // Switch a STORE_ADMIN: usar la org del store seleccionado
@@ -237,8 +230,8 @@ export class EnvironmentSwitchService {
 
     const payload = {
       sub: user.id,
-      organization_id: organization_id, // ✅ snake_case como en auth.service.ts
-      store_id: store_id, // ✅ snake_case como en auth.service.ts
+      organization_id: organization_id,
+      store_id: store_id,
     };
 
     const accessTokenExpiry =
@@ -256,11 +249,6 @@ export class EnvironmentSwitchService {
 
     // Guardar sesión en DB
     await this.createUserSession(user.id, refresh_token, client_info);
-
-    const tokens = {
-      access_token: access_token,
-      refresh_token: refresh_token,
-    };
 
     // Obtener configuración actual para no perder preferencias (ej: panel_ui)
     const currentSettings = await this.prismaService.user_settings.findUnique({
@@ -293,12 +281,6 @@ export class EnvironmentSwitchService {
         where: { id: userId },
         data: { main_store_id: store_id },
       });
-      console.log('🔍 SWITCH - Updated main_store_id:', {
-        user_id: userId,
-        targetEnvironment,
-        store_id,
-        main_store_id: store_id,
-      });
     }
 
     // Obtener el usuario completo con todas las relaciones necesarias
@@ -323,16 +305,9 @@ export class EnvironmentSwitchService {
     const { user_roles, ...user_without_roles } = complete_user;
     const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
-    console.log('🔍 SWITCH - Transformación de roles:', {
-      user_id: userId,
-      targetEnvironment,
-      original_user_roles_count: user_roles?.length || 0,
-      transformed_roles: roles,
-    });
-
     const user_with_roles_array = {
       ...user_without_roles,
-      roles, // Array simple: ["owner", "admin"]
+      roles,
     };
 
     // Obtener user_settings actualizados (después de la actualización)
@@ -352,9 +327,9 @@ export class EnvironmentSwitchService {
       },
     });
 
-    // Remover password del response (igual que en login)
+    // Remover password del response
     const { password, ...user_with_roles_and_password } =
-      user_with_roles_array || user;
+      user_with_roles_array;
 
     // Agregar active_store al usuario para consistencia con login
     const user_with_store = {
@@ -362,15 +337,14 @@ export class EnvironmentSwitchService {
       store: active_store,
     };
 
-    // Estructura idéntica a la del login: { user, user_settings, ...tokens }
     const response = {
-      user: user_with_store, // Usar usuario con roles array simple y store activo
+      user: user_with_store,
       user_settings: user_settings,
-      access_token: access_token, // Formato igual que login
-      refresh_token: refresh_token, // Formato igual que login
-      token_type: 'Bearer', // Igual que login
-      expires_in: this.parseExpiryToMilliseconds(accessTokenExpiry), // ✅ Correct ms
-      updatedEnvironment: targetEnvironment, // Campo adicional específico del switch
+      access_token: access_token,
+      refresh_token: refresh_token,
+      token_type: 'Bearer',
+      expires_in: this.parseExpiryToMilliseconds(accessTokenExpiry),
+      updatedEnvironment: targetEnvironment,
     };
 
     return response;
@@ -384,21 +358,16 @@ export class EnvironmentSwitchService {
       user_agent?: string;
     },
   ) {
-    // Obtener duración del refresh token del entorno
     const refreshTokenExpiry =
       this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') || '7d';
     const expiryMs = this.parseExpiryToMilliseconds(refreshTokenExpiry);
-
-    // Generar fingerprint del dispositivo
     const device_fingerprint = this.generateDeviceFingerprint(client_info);
-
-    // Hashear el refresh token para almacenamiento seguro
     const hashedRefreshToken = await bcrypt.hash(refresh_token, 12);
 
     await this.prismaService.refresh_tokens.create({
       data: {
         user_id: user_id,
-        token: hashedRefreshToken, // Guardar hash en lugar del token en claro
+        token: hashedRefreshToken,
         expires_at: new Date(Date.now() + expiryMs),
         ip_address: client_info?.ip_address || null,
         user_agent: client_info?.user_agent || null,
@@ -409,11 +378,10 @@ export class EnvironmentSwitchService {
     });
   }
 
-  // Método auxiliar para convertir duraciones JWT a milisegundos
   private parseExpiryToMilliseconds(expiry: string): number {
     const match = expiry.match(/^(\d+)([smhd])$/);
     if (!match) {
-      return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
+      return 7 * 24 * 60 * 60 * 1000;
     }
 
     const value = parseInt(match[1]);
@@ -429,11 +397,10 @@ export class EnvironmentSwitchService {
       case 'd':
         return value * 24 * 60 * 60 * 1000;
       default:
-        return 7 * 24 * 60 * 60 * 1000; // Default: 7 días
+        return 7 * 24 * 60 * 60 * 1000;
     }
   }
 
-  // Generar fingerprint único del dispositivo
   private generateDeviceFingerprint(client_info?: {
     ip_address?: string;
     user_agent?: string;
@@ -442,16 +409,11 @@ export class EnvironmentSwitchService {
       return 'unknown-device';
     }
 
-    // Extraer información básica del User Agent
     const browser = this.extractBrowserFromUserAgent(
       client_info.user_agent || '',
     );
     const os = this.extractOSFromUserAgent(client_info.user_agent || '');
-
-    // Crear fingerprint básico (sin ser invasivo)
     const fingerprint = `${browser}-${os}-${client_info.ip_address?.split('.')[0] || 'unknown'}`;
-
-    // Hash para ofuscar información sensible
     const crypto = require('crypto');
     return crypto
       .createHash('sha256')
@@ -460,24 +422,19 @@ export class EnvironmentSwitchService {
       .substring(0, 32);
   }
 
-  // Extraer navegador principal del User Agent
   private extractBrowserFromUserAgent(userAgent: string): string {
     if (!userAgent) return 'unknown';
-
     if (userAgent.includes('Chrome')) return 'Chrome';
     if (userAgent.includes('Firefox')) return 'Firefox';
     if (userAgent.includes('Safari') && !userAgent.includes('Chrome'))
       return 'Safari';
     if (userAgent.includes('Edge')) return 'Edge';
     if (userAgent.includes('Opera')) return 'Opera';
-
     return 'other';
   }
 
-  // Extraer sistema operativo del User Agent
   private extractOSFromUserAgent(userAgent: string): string {
     if (!userAgent) return 'unknown';
-
     if (userAgent.includes('Windows NT 10.0')) return 'Windows10';
     if (userAgent.includes('Windows NT')) return 'Windows';
     if (userAgent.includes('Mac OS X')) return 'macOS';
@@ -485,7 +442,6 @@ export class EnvironmentSwitchService {
     if (userAgent.includes('Android')) return 'Android';
     if (userAgent.includes('iPhone') || userAgent.includes('iPad'))
       return 'iOS';
-
     return 'other';
   }
 }

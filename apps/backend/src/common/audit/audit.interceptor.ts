@@ -45,7 +45,7 @@ export class AuditInterceptor implements NestInterceptor {
                         await this.logDeleteOperation(userId, organizationId, storeId, url);
                     }
                 } catch (error) {
-                    console.error('Error en AuditInterceptor:', error);
+                    // Error logging audit
                 }
             }),
         );

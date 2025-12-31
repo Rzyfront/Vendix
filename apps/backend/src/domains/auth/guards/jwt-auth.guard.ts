@@ -31,11 +31,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       return true;
     }
 
-    console.log('JWT Guard - Path:', path, 'Is Public:', isPublic);
-    console.log(
-      'JWT Guard - Headers:',
-      request.headers.authorization ? 'Bearer token present' : 'No auth header',
-    );
+
 
     return super.canActivate(context);
   }

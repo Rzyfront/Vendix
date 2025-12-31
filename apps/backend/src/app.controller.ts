@@ -37,7 +37,7 @@ export class AppController {
     }
 
     try {
-      console.log('🌱 Ejecutando seeds...');
+
 
       // Ejecutar el seed script compilado
       const { stdout, stderr } = await execPromise('node prisma/seed.js', {
@@ -45,8 +45,7 @@ export class AppController {
         env: { ...process.env },
       });
 
-      console.log('Seed output:', stdout);
-      if (stderr) console.error('Seed errors:', stderr);
+      if (stderr) { }
 
       return {
         success: true,
@@ -55,7 +54,6 @@ export class AppController {
         errors: stderr || null,
       };
     } catch (error) {
-      console.error('Error ejecutando seeds:', error);
       return {
         success: false,
         message: 'Error ejecutando seeds',
@@ -73,15 +71,14 @@ export class AppController {
     }
 
     try {
-      console.log('🧹 Ejecutando limpieza de BD...');
+
 
       const { stdout, stderr } = await execPromise('node prisma/clean.js', {
         cwd: '/app/dist',
         env: { ...process.env },
       });
 
-      console.log('Clean output:', stdout);
-      if (stderr) console.error('Clean errors:', stderr);
+      if (stderr) { }
 
       return {
         success: true,
@@ -90,7 +87,6 @@ export class AppController {
         errors: stderr || null,
       };
     } catch (error) {
-      console.error('Error limpiando BD:', error);
       return {
         success: false,
         message: 'Error limpiando base de datos',
@@ -108,23 +104,23 @@ export class AppController {
     }
 
     try {
-      console.log('🔄 Ejecutando reset completo de BD (Clean + Seed)...');
+
 
       // 1. Ejecutar Clean
-      console.log('1️⃣ Iniciando limpieza...');
+
       const cleanResult = await execPromise('node prisma/clean.js', {
         cwd: '/app/dist',
         env: { ...process.env },
       });
-      if (cleanResult.stderr) console.error('Clean errors:', cleanResult.stderr);
+      if (cleanResult.stderr) { }
 
       // 2. Ejecutar Seed
-      console.log('2️⃣ Iniciando seed...');
+
       const seedResult = await execPromise('node prisma/seed.js', {
         cwd: '/app/dist',
         env: { ...process.env },
       });
-      if (seedResult.stderr) console.error('Seed errors:', seedResult.stderr);
+      if (seedResult.stderr) { }
 
       return {
         success: true,
@@ -137,7 +133,6 @@ export class AppController {
         },
       };
     } catch (error) {
-      console.error('Error durante el reset:', error);
       return {
         success: false,
         message: 'Error durante el reset de base de datos',

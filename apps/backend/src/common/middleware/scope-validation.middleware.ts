@@ -16,7 +16,7 @@ export interface ScopeValidationOptions {
 
 @Injectable()
 export class ScopeValidationMiddleware implements NestMiddleware {
-  constructor(private readonly requestContextService: RequestContextService) {}
+  constructor(private readonly requestContextService: RequestContextService) { }
 
   use(
     req: Request,
@@ -100,7 +100,6 @@ export class ScopeValidationMiddleware implements NestMiddleware {
     };
 
     // Aquí podrías integrar con tu servicio de logs
-    console.log('Scope validation success:', JSON.stringify(log_data));
   }
 
   /**
@@ -127,7 +126,6 @@ export class ScopeValidationMiddleware implements NestMiddleware {
     };
 
     // Aquí podrías integrar con tu servicio de logs de seguridad
-    console.warn('Scope validation FAILED:', JSON.stringify(log_data));
   }
 }
 
