@@ -80,6 +80,7 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
   isDetailModalOpen = false;
   selectedOrder: PurchaseOrder | null = null;
   isSubmitting = false;
+  isLoading = true;
 
   orders: PurchaseOrder[] = [];
   totalItems = 0;
@@ -90,7 +91,7 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
     private router: Router,
     private purchaseOrdersService: PurchaseOrdersService,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     // Stats will be calculated when orders are loaded
@@ -130,6 +131,7 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
     this.orders = event.orders;
     this.totalItems = event.total;
     this.calculateStats();
+    this.isLoading = false;
   }
 
   // Calculate stats from orders
@@ -176,17 +178,20 @@ export class PurchaseOrdersComponent implements OnInit, OnDestroy {
   // Search functionality
   onSearch(searchTerm: string): void {
     this.searchTerm = searchTerm;
+    this.isLoading = true;
     this.refreshList();
   }
 
   // Filter functionality
   filterByStatus(status: any): void {
     this.currentStatus = status as PurchaseOrderStatus | 'all';
+    this.isLoading = true;
     this.refreshList();
   }
 
   // Refresh purchase orders list
   refreshList(): void {
+    this.isLoading = true;
     if (this.purchaseOrderList) {
       this.purchaseOrderList.loadOrders();
     }

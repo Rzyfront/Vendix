@@ -2,6 +2,8 @@ import {
   IsString,
   IsOptional,
   IsInt,
+  IsNotEmpty,
+  MinLength,
   MaxLength,
   Min,
   IsUrl,
@@ -13,6 +15,8 @@ import { PartialType } from '@nestjs/mapped-types';
 export class CreateBrandDto {
   @ApiProperty({ example: 'Nike', description: 'Nombre de la marca' })
   @IsString()
+  @IsNotEmpty({ message: 'El nombre no puede estar vacío' })
+  @MinLength(2, { message: 'El nombre debe tener al menos 2 caracteres' })
   @MaxLength(100)
   name: string;
 

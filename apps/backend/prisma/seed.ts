@@ -18,10 +18,10 @@ const prisma = new PrismaClient({ adapter });
 // Usaremos any para flexibilidad en el seed
 
 async function main() {
-  console.log('🌱 Iniciando seed mejorado de la base de datos para Fase 2...');
+
 
   // Limpiar datos existentes (opcional - comentar en producción)
-  console.log('🧹 Limpiando datos existentes...');
+
   // Omitir limpieza por ahora para evitar errores de foreign key
   // await prisma.role_permissions.deleteMany({});
   // await prisma.user_roles.deleteMany({});
@@ -1264,7 +1264,7 @@ async function main() {
   });
 
   // 2. Crear roles
-  console.log('👥 Creando roles...');
+
   const superAdminRole = await prisma.roles.upsert({
     where: { name: 'super_admin' },
     update: {},
@@ -1339,7 +1339,7 @@ async function main() {
   });
 
   // 3. Asignar permisos a roles
-  console.log('🔗 Asignando permisos a roles...');
+
   const allPermissions = await prisma.permissions.findMany();
 
   // Asignar todos los permisos al super_admin
@@ -1560,7 +1560,7 @@ async function main() {
   }
 
   // 3.5. Crear métodos de pago del sistema
-  console.log('💳 Creando métodos de pago del sistema...');
+
 
   const systemMethods: any[] = [
     {
@@ -1719,7 +1719,7 @@ async function main() {
     });
 
     if (existing) {
-      console.log(`  ✓ System payment method '${method.name}' already exists`);
+
       continue;
     }
 
@@ -1727,11 +1727,11 @@ async function main() {
       data: method,
     });
 
-    console.log(`  ✓ Created system payment method: ${method.display_name}`);
+
   }
 
   // 4. Crear múltiples organizaciones
-  console.log('🏢 Creando organizaciones de prueba...');
+
   const organizations = [
     {
       name: 'Vendix Corp',
@@ -1817,7 +1817,7 @@ async function main() {
   const homeLivingOrg: any = createdOrganizations[4];
 
   // 5. Crear múltiples tiendas para cada organización
-  console.log('🏬 Creando tiendas de prueba...');
+
   const stores = [
     // Tiendas para Vendix Corp
     {
@@ -1945,7 +1945,7 @@ async function main() {
   const homeStore1: any = createdStores[8];
 
   // 6. Crear usuarios con diferentes roles
-  console.log('👤 Creando usuarios de prueba con diferentes roles...');
+
   const hashedPassword = await bcrypt.hash('1125634q', 10);
 
   const users = [
@@ -2249,7 +2249,7 @@ async function main() {
   const customer2: any = createdUsers[12];
 
   // 7. Crear relaciones store_users
-  console.log('🔗 Asignando usuarios a tiendas...');
+
   const storeUsers = [
     { store_id: techStore1.id, user_id: techManager.id },
     { store_id: techStore1.id, user_id: techSupervisor.id },
@@ -2291,7 +2291,7 @@ async function main() {
   }
 
   // 8. Configurar dominios
-  console.log('🌐 Configurando dominios...');
+
   const domainSettings = [
     // Dominio principal de Vendix (.online - PRODUCCIÓN DEFAULT)
     {
@@ -2509,7 +2509,7 @@ async function main() {
   }
 
   // 9. Crear direcciones
-  console.log('📍 Creando direcciones...');
+
   const addresses = [
     // Direcciones de organizaciones
     {
@@ -2632,7 +2632,7 @@ async function main() {
   }
 
   // 10. Configurar settings de organizaciones y tiendas
-  console.log('⚙️ Configurando settings...');
+
 
   // Settings de organizaciones
   await prisma.organization_settings.upsert({
@@ -2751,7 +2751,7 @@ async function main() {
   });
 
   // 11. Crear categorías de impuestos
-  console.log('💰 Creando categorías de impuestos...');
+
   const taxCategories = [
     {
       name: 'IVA General',
@@ -2797,7 +2797,7 @@ async function main() {
   }
 
   // Crear tax rates
-  console.log('💰 Creando tasas de impuestos...');
+
   const createdTaxRates: any[] = [];
   for (const taxCategory of taxCategories) {
     const createdTaxRate = await prisma.tax_rates.create({
@@ -2817,7 +2817,7 @@ async function main() {
   }
 
   // 12. Crear categorías
-  console.log('📂 Creando categorías...');
+
   const categories = [
     // Categorías para Tech Solutions
     {
@@ -2902,7 +2902,7 @@ async function main() {
   // Parent-child relationships handled differently or not needed for now
 
   // 12. Crear marcas
-  console.log('🏷️ Creando marcas...');
+
   const brands = [
     // Marcas para Tech Solutions
     {
@@ -2979,7 +2979,7 @@ async function main() {
   }
 
   // 13. Crear ubicaciones de inventario
-  console.log('📍 Creando ubicaciones de inventario...');
+
   const locations = [
     // Ubicaciones para Tech Solutions
     {
@@ -3070,7 +3070,7 @@ async function main() {
   );
 
   // 14. Crear productos
-  console.log('📦 Creando productos...');
+
   const products = [
     // Productos para Tech Solutions
     {
@@ -3280,7 +3280,7 @@ async function main() {
   }
 
   // Asignar categorías de impuestos a productos
-  console.log('💰 Asignando categorías de impuestos a productos...');
+
   for (const product of products) {
     const createdProduct = createdProducts.find((p) => p.sku === product.sku);
     if (createdProduct) {
@@ -3308,7 +3308,7 @@ async function main() {
   }
 
   // 15. Crear imágenes de productos
-  console.log('🖼️ Creando imágenes de productos...');
+
   const productImages = [
     // Imágenes para MacBook Pro
     {
@@ -3390,7 +3390,7 @@ async function main() {
   }
 
   // 16. Crear variantes de productos
-  console.log('🎨 Creando variantes de productos...');
+
   const productVariants = [
     // Variantes para MacBook Pro
     {
@@ -3514,22 +3514,31 @@ async function main() {
   const createdVariants: any[] = [];
   for (const variant of productVariants) {
     if (variant.product_id) {
-      const createdVariant = await prisma.product_variants.upsert({
+      // Check if variant exists
+      const existing = await prisma.product_variants.findFirst({
         where: {
-          sku: variant.sku,
-        },
-        update: {},
-        create: {
           product_id: variant.product_id,
           sku: variant.sku,
         },
       });
+
+      let createdVariant;
+      if (existing) {
+        createdVariant = existing;
+      } else {
+        createdVariant = await prisma.product_variants.create({
+          data: {
+            product_id: variant.product_id,
+            sku: variant.sku,
+          },
+        });
+      }
       createdVariants.push(createdVariant);
     }
   }
 
   // 16. Crear niveles de stock iniciales
-  console.log('📊 Creando niveles de stock iniciales...');
+
   const stockLevels = [
     // Stock para productos Tech Solutions
     {
@@ -3636,7 +3645,7 @@ async function main() {
   }
 
   // 17. Crear lotes de inventario
-  console.log('🏷️ Creando lotes de inventario...');
+
   const inventoryBatches = [
     {
       batch_number: 'BATCH-MBP-2024-001',
@@ -3719,7 +3728,7 @@ async function main() {
   }
 
   // 18. Crear números de serie para productos que lo requieren
-  console.log('🔢 Creando números de serie...');
+
   const serialNumbers: any[] = [];
 
   // Números de serie para MacBook Pro
@@ -3777,7 +3786,7 @@ async function main() {
   }
 
   // 19. Crear órdenes de prueba
-  console.log('🛒 Crear órdenes de prueba...');
+
 
   // Primero crear las direcciones para las órdenes
   const orderAddresses = [
@@ -3873,7 +3882,7 @@ async function main() {
   }
 
   // Crear reseñas de productos
-  console.log('⭐ Creando reseñas de productos...');
+
   const reviews = [
     {
       product_id: createdProducts.find((p) => p.sku === 'IP15P-256-BLK')?.id,
@@ -3916,7 +3925,7 @@ async function main() {
   }
 
   // 20. Crear transacciones de inventario iniciales
-  console.log('📋 Creando transacciones de inventario iniciales...');
+
   const inventoryTransactions = [
     {
       product_id: createdProducts.find((p) => p.sku === 'MBP14-M3-512')?.id,
@@ -4004,48 +4013,46 @@ async function main() {
     }
   }
 
-  console.log('🎉 Seed mejorado completado exitosamente!');
-  console.log('');
-  console.log('📊 RESUMEN DEL SEED MEJORADO:');
-  console.log(`🏢 Organizaciones creadas: ${createdOrganizations.length}`);
-  console.log(`🏬 Tiendas creadas: ${createdStores.length}`);
-  console.log(`👤 Usuarios creados: ${createdUsers.length}`);
-  console.log(`🔗 Relaciones store_users: ${storeUsers.length}`);
-  console.log(`🌐 Dominios configurados: ${domainSettings.length}`);
-  console.log(`📍 Direcciones creadas: ${addresses.length}`);
-  console.log(`💰 Categorías de impuestos: ${createdTaxCategories.length}`);
-  console.log(`📂 Categorías creadas: ${createdCategories.length}`);
-  console.log(`🏷️ Marcas creadas: ${createdBrands.length}`);
-  console.log(`📍 Ubicaciones de inventario: ${createdLocations.length}`);
-  console.log(`📦 Productos creados: ${createdProducts.length}`);
-  console.log(`🖼️ Imágenes de productos: ${productImages.length}`);
-  console.log(`🎨 Variantes de productos: ${createdVariants.length}`);
-  console.log(`🏷️ Lotes de inventario: ${createdBatches.length}`);
-  console.log(`🔢 Números de serie: ${serialNumbers.length}`);
-  console.log(`🛒 Órdenes de prueba: ${createdOrders.length}`);
-  console.log(`⭐ Reseñas de productos: ${reviews.length}`);
-  console.log(
-    `📋 Transacciones de inventario: ${inventoryTransactions.length}`,
-  );
-  console.log('');
-  console.log('🔑 CREDENCIALES DE PRUEBA:');
-  console.log('Super Admin: superadmin@vendix.com / 1125634q');
-  console.log('Tech Owner: owner@techsolutions.co / 1125634q');
-  console.log('Fashion Owner: owner@fashionretail.com / 1125634q');
-  console.log('Customer: cliente1@example.com / 1125634q');
-  console.log('');
-  console.log('🌐 URLS DE PRUEBA:');
-  console.log('Vendix PRODUCCIÓN: vendix.online (DEFAULT)');
-  console.log('Vendix DEV: vendix.com');
-  console.log('Tech Solutions: techsolutions.vendix.com');
-  console.log('Fashion Retail: fashionretail.vendix.com');
-  console.log('Tienda Online Tech: tienda-techsolutions.vendix.com');
-  console.log('Tienda Online Fashion: moda-fashionretail.vendix.com');
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }
 
 main()
   .catch((e) => {
-    console.error('❌ Error en el seed:', e);
+
     process.exit(1);
   })
   .finally(async () => {

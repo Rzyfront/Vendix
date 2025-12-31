@@ -147,7 +147,6 @@ export class UsersService {
         organization_slug = organization?.slug;
       }
     } catch (error) {
-      console.error('❌ Error obteniendo slug de organización:', error);
       // Continuar sin organization slug si hay error
     }
 

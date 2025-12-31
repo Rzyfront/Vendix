@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
@@ -107,8 +107,9 @@ async function bootstrap() {
   const port = process.env.PORT ?? 3000;
   await app.listen(port);
 
-  console.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);
-  console.log(`❤️  Health Check: http://localhost:${port}/api/health`);
-  console.log(`📄  API Docs: http://localhost:${port}/api-docs`);
+  const logger = new Logger('Bootstrap');
+  logger.log(`🚀 Vendix Backend is running on: http://localhost:${port}/api`);
+  logger.log(`❤️  Health Check: http://localhost:${port}/api/health`);
+  logger.log(`📄  API Docs: http://localhost:${port}/api-docs`);
 }
 bootstrap();

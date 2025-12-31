@@ -96,19 +96,24 @@ export class S3Service {
     /**
      * Uploads a base64 encoded image to S3
      */
-    async uploadBase64(base64: string, key: string, contentType?: string): Promise<{ key: string }> {
+    async uploadBase64(
+        base64: string,
+        key: string,
+        contentType?: string,
+        options: { generateThumbnail?: boolean } = {}
+    ): Promise<{ key: string; thumbKey?: string }> {
         const matches = base64.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
 
         if (!matches || matches.length !== 3) {
             // If it doesn't match dataURI pattern, maybe it's raw base64
             const buffer = Buffer.from(base64, 'base64');
-            return this.uploadImage(buffer, key);
+            return this.uploadImage(buffer, key, options);
         }
 
         const buffer = Buffer.from(matches[2], 'base64');
 
         // Use uploadImage to optimize it
-        return this.uploadImage(buffer, key);
+        return this.uploadImage(buffer, key, options);
     }
 
     /**

@@ -226,6 +226,11 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
           console.error('Error loading orders:', error);
           this.toastService.error('Failed to load orders. Please try again.');
           this.loading = false;
+          this.ordersLoaded.emit({
+            orders: [],
+            totalItems: 0,
+            filters: this.filters,
+          });
         },
       });
   }

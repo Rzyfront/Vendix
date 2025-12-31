@@ -9,9 +9,9 @@ import { ActivatedRoute } from '@angular/router';
   template: `
     <div class="w-full">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Customer Details</h1>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Detalles del cliente</h1>
         <p class="text-gray-600">
-          View detailed information about this customer
+          Ver información detallada sobre este cliente
         </p>
       </div>
 
@@ -35,14 +35,14 @@ import { ActivatedRoute } from '@angular/router';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Customer Profile
+            Perfil del cliente
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Customer ID: {{ customerId || 'Loading...' }}
+           ID del Cliente: {{ customerId || 'Loading...' }}
           </p>
           <p class="text-gray-600 max-w-md mx-auto mt-2">
-            Customer details view is under development. You will be able to view
-            complete customer information here.
+            La vista de detalles del cliente está en desarrollo. Podrás ver 
+            información completa del cliente aquí.
           </p>
         </div>
       </div>

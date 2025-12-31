@@ -103,7 +103,7 @@ export class OnboardingWizardService {
    * Select application type for the user
    */
   async selectAppType(userId: number, selectAppTypeDto: SelectAppTypeDto) {
-    console.log('select_app_type', { user_id: userId, select_app_type_dto: selectAppTypeDto });
+
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: { user_settings: true },
@@ -154,7 +154,7 @@ export class OnboardingWizardService {
    * Setup user with address
    */
   async setupUser(userId: number, setupUserDto: SetupUserWizardDto) {
-    console.log('setup_user', { user_id: userId, setup_user_dto: setupUserDto });
+
     // Update user data
     const updatedUser = await this.prismaService.users.update({
       where: { id: userId },
@@ -217,7 +217,7 @@ export class OnboardingWizardService {
     userId: number,
     setupOrgDto: SetupOrganizationWizardDto,
   ) {
-    console.log('setup_organization', { user_id: userId, setup_org_dto: setupOrgDto });
+
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -288,7 +288,7 @@ export class OnboardingWizardService {
    * Setup store with address
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
-    console.log('setup_store', { user_id: userId, setup_store_dto: setupStoreDto });
+
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -346,7 +346,7 @@ export class OnboardingWizardService {
     userId: number,
     setupAppConfigDto: SetupAppConfigWizardDto,
   ) {
-    console.log('setup_app_config', { user_id: userId, setup_app_config_dto: setupAppConfigDto });
+
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: {
@@ -696,10 +696,6 @@ export class OnboardingWizardService {
     if (!selectedAppType && !hasBasicSetup) {
       // Only require app_type if they don't have basic setup completed
       missingSteps.push('app_type_selection');
-      console.log(
-        'Missing app type selection and basic setup. User settings config:',
-        userConfig,
-      );
     }
 
     // Validate core requirements regardless of app type

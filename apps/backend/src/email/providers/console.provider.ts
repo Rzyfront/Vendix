@@ -25,15 +25,7 @@ export class ConsoleProvider implements EmailProvider {
     html: string,
     text?: string,
   ): Promise<EmailResult> {
-    this.logger.log('========== EMAIL TO SEND ==========');
-    this.logger.log(`From: ${this.config.fromName} <${this.config.fromEmail}>`);
-    this.logger.log(`To: ${to}`);
-    this.logger.log(`Subject: ${subject}`);
-    this.logger.log('Text Content:');
-    this.logger.log(text || 'No text content');
-    this.logger.log('HTML Content:');
-    this.logger.log(html);
-    this.logger.log('===================================');
+    this.logger.log(`📧 Email to: ${to} | Subject: ${subject}`);
 
     return {
       success: true,

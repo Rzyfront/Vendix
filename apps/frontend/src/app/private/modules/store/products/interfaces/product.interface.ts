@@ -34,6 +34,7 @@ export interface Product {
   inventory_batches?: InventoryBatch[];
   total_stock_available?: number;
   total_stock_reserved?: number;
+  image_url?: string; // Main thumbnail URL from API
 }
 
 export interface StockLevel {

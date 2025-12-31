@@ -41,9 +41,12 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   ],
   providers: [ProductsService],
   template: `
+    <
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
+      <div
+        class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
+      >
         <app-stats
           title="Productos Totales"
           [value]="stats.total_products"
@@ -181,6 +184,8 @@ export class ProductsComponent implements OnInit, OnDestroy {
       },
       error: (error: any) => {
         console.error('Error loading products:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar productos');
         this.isLoading = false;
       },
     });
@@ -198,7 +203,11 @@ export class ProductsComponent implements OnInit, OnDestroy {
       next: (response: any) => {
         if (response) this.stats = response;
       },
-      error: console.error,
+      error: (error: any) => {
+        console.error('Error loading stats:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar estadísticas');
+      },
     });
     this.subscriptions.push(sub);
   }
@@ -294,7 +303,6 @@ export class ProductsComponent implements OnInit, OnDestroy {
     this.loadStats();
     this.toastService.success('Carga masiva completada');
   }
-
   // Helpers
   getGrowthPercentage(val: number): string {
     return val > 0 ? `+${val}%` : `${val}%`;

@@ -53,7 +53,8 @@
                         <div class="md:col-span-2">
                             <app-input label="Nombre del Producto" formControlName="name"
                                 placeholder="Ej. Camiseta Algodón Premium"
-                                [error]="getErrorMessage('name')"></app-input>
+                                [error]="getErrorMessage('name')"
+                                [required]="true"></app-input>
                         </div>
 
                         <!-- SKU -->
@@ -87,14 +88,23 @@
                             <div *ngIf="!isEditMode">
                                 <app-input label="Stock Inicial" type="number" formControlName="stock_quantity"
                                     [error]="getErrorMessage('stock_quantity')" placeholder="0"
-                                    helperText="Este valor se registrará como movimiento de stock inicial"></app-input>
+                                    helperText="Este valor se registrará como movimiento de stock inicial"
+                                    [tooltipText]="'Define la cantidad inicial de unidades disponibles. Este valor se registrará como un movimiento de stock inicial y podrás ajustarlo posteriormente mediante el módulo de inventario.'"></app-input>
                             </div>
 
                             <!-- Edit mode: read-only, click to adjust -->
                             <div *ngIf="isEditMode" class="relative">
-                                <div (click)="openStockAdjustment()" class="cursor-pointer" title="Click para ajustar stock">
+                                <div (click)="openStockAdjustment()" class="cursor-pointer group" title="Click para ajustar stock">
                                     <app-input label="Stock" type="number" formControlName="stock_quantity"
-                                        [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"></app-input>
+                                        [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
+                                        [suffixIcon]="true"
+                                        [tooltipText]="'El stock no se puede editar directamente. Haz clic en el campo o utiliza el botón \'Realizar Ajuste\' para abrir el modal de ajustes de inventario. Allí podrás registrar incrementos, mermas, daños o realizar conteos físicos.'">
+                                        <ng-container slot="suffix-icon">
+                                            <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                            </svg>
+                                        </ng-container>
+                                    </app-input>
                                 </div>
                             </div>
                         </div>

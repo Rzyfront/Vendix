@@ -17,7 +17,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
-  ) {}
+  ) { }
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
@@ -322,7 +322,7 @@ export class PaymentGatewayService {
   }
 
   private async createOrderFromPaymentData(paymentData: any) {
-    const orderNumber = await this.generateOrderNumber();
+    const orderNumber = await this.generateOrderNumber(paymentData.storeId);
 
     return await this.prisma.orders.create({
       data: {
@@ -412,20 +412,26 @@ export class PaymentGatewayService {
     }
   }
 
-  private async generateOrderNumber(): Promise<string> {
+  private async generateOrderNumber(storeId: number): Promise<string> {
     const now = new Date();
     const year = now.getFullYear().toString().slice(-2);
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
     const day = now.getDate().toString().padStart(2, '0');
+    const prefix = `ORD${year}${month}${day}`;
+
     const lastOrder = await this.prisma.orders.findFirst({
-      where: { order_number: { startsWith: `ORD${year}${month}${day}` } },
+      where: {
+        store_id: storeId,
+        order_number: { startsWith: prefix },
+      },
       orderBy: { order_number: 'desc' },
     });
+
     let sequence = 1;
     if (lastOrder) {
       const lastSequence = parseInt(lastOrder.order_number.slice(-4));
       sequence = lastSequence + 1;
     }
-    return `ORD${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+    return `${prefix}${sequence.toString().padStart(4, '0')}`;
   }
 }
