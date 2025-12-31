@@ -68,7 +68,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   selectedStatus = '';
   selectedPaymentStatus = '';
   selectedDateRange = '';
-  isLoading = false;
+  isLoading = true;
 
   // Filters
   filters: OrderQuery = {
@@ -90,7 +90,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   constructor(
     private router: Router,
     private ordersService: StoreOrdersService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadOrderStats();
@@ -128,7 +128,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
         },
       });
   }
-  
+
 
   get hasFilters(): boolean {
     return !!(
@@ -179,7 +179,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
     this.filters.search = searchTerm;
-    this.filters.page = 1;
+    this.isLoading = true;
     if (this.ordersList) {
       this.ordersList.loadOrders();
     }
@@ -195,6 +195,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     this.filters.payment_status = query.payment_status;
     this.filters.date_range = query.date_range;
     this.filters.page = 1;
+    this.isLoading = true;
 
     if (this.ordersList) {
       this.ordersList.loadOrders();
@@ -213,6 +214,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     this.filters.payment_status = undefined;
     this.filters.date_range = undefined;
     this.filters.page = 1;
+    this.isLoading = true;
 
     if (this.ordersList) {
       this.ordersList.loadOrders();
@@ -221,6 +223,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // Refresh orders
   refreshOrders(): void {
+    this.isLoading = true;
     if (this.ordersList) {
       this.ordersList.loadOrders();
     }
@@ -236,6 +239,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   onOrdersLoaded(event: any): void {
     this.orders = event.orders;
     this.totalItems = event.totalItems;
+    this.isLoading = false;
   }
 
   // Format currency helper

@@ -38,9 +38,9 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     status: PurchaseOrderStatus | 'all';
     search: string;
   } = {
-    status: 'all',
-    search: '',
-  };
+      status: 'all',
+      search: '',
+    };
 
   @Output() viewOrder = new EventEmitter<PurchaseOrder>();
   @Output() ordersLoaded = new EventEmitter<{
@@ -147,7 +147,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     private suppliersService: SuppliersService,
     private dialogService: DialogService,
     private toastService: ToastService
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadOrders();
@@ -194,6 +194,10 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
             'Failed to load purchase orders. Please try again.'
           );
           this.loading = false;
+          this.ordersLoaded.emit({
+            orders: [],
+            total: 0,
+          });
         },
       });
   }
