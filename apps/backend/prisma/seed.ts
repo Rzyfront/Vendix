@@ -3514,19 +3514,25 @@ async function main() {
   const createdVariants: any[] = [];
   for (const variant of productVariants) {
     if (variant.product_id) {
-      const createdVariant = await prisma.product_variants.upsert({
+      // Check if variant exists
+      const existing = await prisma.product_variants.findFirst({
         where: {
-          product_id_sku: {
-            product_id: variant.product_id,
-            sku: variant.sku,
-          },
-        },
-        update: {},
-        create: {
           product_id: variant.product_id,
           sku: variant.sku,
         },
       });
+
+      let createdVariant;
+      if (existing) {
+        createdVariant = existing;
+      } else {
+        createdVariant = await prisma.product_variants.create({
+          data: {
+            product_id: variant.product_id,
+            sku: variant.sku,
+          },
+        });
+      }
       createdVariants.push(createdVariant);
     }
   }

@@ -21,4 +21,9 @@ Thumbs.db
 # Documentation
 docs/
 .claude/
-docs
+
+# Production keys and sensitive docs
+vendix-production-key.pem
+*_PRODUCTION_INFO.md
+MIGRATION_COMPLETE.md
+GITHUB_SECRET_INSTRUCTIONS.txt

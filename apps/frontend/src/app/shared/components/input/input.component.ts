@@ -44,8 +44,18 @@ export type InputSize = 'sm' | 'md' | 'lg';
           'block text-sm font-medium text-[var(--color-text-primary)] mb-2 ' +
           customLabelClass
         "
+        class="label-with-tooltip"
       >
-        {{ label }}
+        <span>{{ label }}</span>
+        <span
+          *ngIf="tooltipText"
+          class="help-icon"
+          [attr.data-tooltip]="tooltipText"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </span>
         <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
           >*</span
         >
@@ -164,6 +174,60 @@ export type InputSize = 'sm' | 'md' | 'lg';
       -moz-appearance: textfield;
       appearance: textfield;
     }
+
+    /* Tooltip help icon styles */
+    .label-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .help-icon {
+      color: var(--color-text-muted);
+      cursor: help;
+      position: relative;
+      display: inline-flex;
+      transition: color 0.2s ease;
+    }
+
+    .help-icon:hover {
+      color: var(--color-warning);
+    }
+
+    .help-icon[data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.375rem 0.5rem;
+      background: var(--color-text-primary);
+      color: var(--color-surface);
+      font-size: var(--fs-xs);
+      border-radius: var(--radius-sm);
+      white-space: normal;
+      box-shadow: var(--shadow-md);
+      z-index: 50;
+      margin-bottom: 0.375rem;
+      pointer-events: none;
+      max-width: 300px;
+      width: max-content;
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    .help-icon[data-tooltip]:hover::before {
+      content: '';
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: var(--color-text-primary);
+      margin-bottom: -0.125rem;
+      z-index: 50;
+      pointer-events: none;
+    }
   `],
 })
 export class InputComponent implements ControlValueAccessor {
@@ -190,6 +254,7 @@ export class InputComponent implements ControlValueAccessor {
   @Input() customLabelClass = ''; // Clases para el label
   @Input() customInputClass = ''; // Clases adicionales para el input
   @Input() customClasses = ''; // Retrocompatibilidad
+  @Input() tooltipText?: string; // Texto para el tooltip de ayuda (muestra ícono automáticamente)
 
   @Output() inputChange = new EventEmitter<string>();
   @Output() inputFocus = new EventEmitter<void>();

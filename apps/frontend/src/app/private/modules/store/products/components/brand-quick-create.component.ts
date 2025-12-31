@@ -91,7 +91,7 @@ export class BrandQuickCreateComponent {
     private toastService: ToastService,
   ) {
     this.brandForm = this.fb.group({
-      name: ['', [Validators.required, Validators.maxLength(100)]],
+      name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(100)]],
       description: [''],
     });
   }
@@ -130,6 +130,7 @@ export class BrandQuickCreateComponent {
       return '';
     }
     if (field.errors['required']) return 'This field is required';
+    if (field.errors['minlength']) return 'Minimum 2 characters required';
     if (field.errors['maxlength']) return 'Maximum 100 characters allowed';
     return 'Invalid input';
   }

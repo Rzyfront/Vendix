@@ -1241,7 +1241,9 @@ export class ProductsService {
       if (imageUrl.startsWith('data:image')) {
         const result = await this.s3Service.uploadBase64(
           imageUrl,
-          `products/${productSlug}-${Date.now()}-${index}`
+          `products/${productSlug}-${Date.now()}-${index}`,
+          undefined,
+          { generateThumbnail: true }
         );
         imageUrl = result.key;
       }
