@@ -473,8 +473,8 @@ export class PaymentsService {
 
     while (retries > 0) {
       try {
-        // Generate order number
-        orderNumber = await this.generateOrderNumber(tx);
+        // Generate order number for this store
+        orderNumber = await this.generateOrderNumber(tx, dto.store_id);
 
         // Create order items
         const orderItems = dto.items.map((item) => {
@@ -691,17 +691,19 @@ export class PaymentsService {
   }
 
   /**
-   * Generate unique order number
+   * Generate unique order number per store
    */
-  private async generateOrderNumber(tx: any): Promise<string> {
+  private async generateOrderNumber(tx: any, storeId: number): Promise<string> {
     const date = new Date();
     const year = date.getFullYear();
+    const prefix = `POS-${year}`;
 
-    // Find the last order number for this year
+    // Find the last order number for this store and year
     const lastOrder = await tx.orders.findFirst({
       where: {
+        store_id: storeId,
         order_number: {
-          startsWith: `POS-${year}`,
+          startsWith: prefix,
         },
       },
       orderBy: {
@@ -716,7 +718,7 @@ export class PaymentsService {
       sequence = lastSequence + 1;
     }
 
-    return `POS-${year}-${sequence.toString().padStart(4, '0')}`;
+    return `${prefix}-${sequence.toString().padStart(4, '0')}`;
   }
 
   /**

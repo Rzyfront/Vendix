@@ -224,7 +224,8 @@ export class PosProductService {
       // Get image URL with fallbacks
       let imageUrl = '';
       if (product.product_images && product.product_images.length > 0) {
-        imageUrl = product.product_images[0].url;
+        // Backend returns image_url, not url
+        imageUrl = product.product_images[0].image_url;
       } else if (product.image_url) {
         imageUrl = product.image_url;
       } else if (product.image) {
