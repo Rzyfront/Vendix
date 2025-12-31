@@ -1,0 +1,85 @@
+<div class="home-page">
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Bienvenido a nuestra tienda</h1>
+            <p>Encuentra los mejores productos al mejor precio</p>
+            <a routerLink="/catalog" class="hero-btn">Ver productos</a>
+        </div>
+    </section>
+
+    <!-- Categories Section -->
+    @if (categories.length > 0) {
+    <section class="categories-section">
+        <div class="section-header">
+            <h2>Categorías</h2>
+            <a routerLink="/catalog" class="see-all">Ver todas</a>
+        </div>
+        <div class="categories-grid">
+            @for (cat of categories; track cat.id) {
+            <a [routerLink]="['/catalog']" [queryParams]="{category: cat.id}" class="category-card">
+                @if (cat.image_url) {
+                <img [src]="cat.image_url" [alt]="cat.name">
+                } @else {
+                <div class="category-placeholder">
+                    <i class="pi pi-th-large"></i>
+                </div>
+                }
+                <span>{{ cat.name }}</span>
+            </a>
+            }
+        </div>
+    </section>
+    }
+
+    <!-- Featured Products -->
+    <section class="products-section">
+        <div class="section-header">
+            <h2>Productos destacados</h2>
+            <a routerLink="/catalog" class="see-all">Ver todos</a>
+        </div>
+
+        @if (is_loading) {
+        <div class="loading-grid">
+            @for (i of [1,2,3,4]; track i) {
+            <div class="skeleton-card">
+                <div class="skeleton-image"></div>
+                <div class="skeleton-text"></div>
+                <div class="skeleton-text short"></div>
+            </div>
+            }
+        </div>
+        } @else {
+        <div class="products-grid">
+            @for (product of featured_products; track product.id) {
+            <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
+                (toggle_wishlist)="onToggleWishlist($event)" />
+            }
+        </div>
+        }
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section">
+        <div class="feature">
+            <i class="pi pi-truck"></i>
+            <h3>Envío gratis</h3>
+            <p>En compras mayores a $50</p>
+        </div>
+        <div class="feature">
+            <i class="pi pi-refresh"></i>
+            <h3>Devoluciones</h3>
+            <p>30 días para devolver</p>
+        </div>
+        <div class="feature">
+            <i class="pi pi-shield"></i>
+            <h3>Pago seguro</h3>
+            <p>Tus datos protegidos</p>
+        </div>
+        <div class="feature">
+            <i class="pi pi-headphones"></i>
+            <h3>Soporte 24/7</h3>
+            <p>Estamos para ayudarte</p>
+        </div>
+    </section>
+</div>

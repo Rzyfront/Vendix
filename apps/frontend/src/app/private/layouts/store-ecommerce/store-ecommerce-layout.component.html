@@ -1,0 +1,130 @@
+<div class="ecommerce-layout">
+  <!-- Header -->
+  <header class="ecommerce-header">
+    <div class="header-container">
+      <!-- Logo -->
+      <a routerLink="/" class="logo">
+        @if (store_logo) {
+          <img [src]="store_logo" [alt]="store_name" class="logo-img">
+        } @else {
+          <span class="logo-text">{{ store_name }}</span>
+        }
+      </a>
+
+      <!-- Search Bar -->
+      <div class="search-bar">
+        <input type="text" placeholder="Buscar productos..." class="search-input">
+        <button class="search-btn">
+          <i class="pi pi-search"></i>
+        </button>
+      </div>
+
+      <!-- Actions -->
+      <div class="header-actions">
+        <!-- Wishlist -->
+        <button class="action-btn" (click)="goToWishlist()" title="Favoritos">
+          <i class="pi pi-heart"></i>
+        </button>
+
+        <!-- Cart -->
+        <button class="action-btn cart-btn" (click)="goToCart()">
+          <i class="pi pi-shopping-cart"></i>
+          @if (cart_count > 0) {
+            <span class="cart-badge">{{ cart_count }}</span>
+          }
+        </button>
+
+        <!-- User Menu -->
+        @if (is_authenticated) {
+          <div class="user-menu-container">
+            <button class="user-btn" (click)="toggleUserMenu()">
+              <i class="pi pi-user"></i>
+              <span class="user-name">{{ user_name }}</span>
+              <i class="pi pi-chevron-down"></i>
+            </button>
+            @if (show_user_menu) {
+              <div class="user-dropdown">
+                <a (click)="goToAccount()">
+                  <i class="pi pi-user"></i> Mi Cuenta
+                </a>
+                <a (click)="goToOrders()">
+                  <i class="pi pi-list"></i> Mis Pedidos
+                </a>
+                <hr>
+                <a (click)="logout()" class="logout-link">
+                  <i class="pi pi-sign-out"></i> Cerrar Sesión
+                </a>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="auth-buttons">
+            <button class="btn-login" (click)="login()">Iniciar Sesión</button>
+            <button class="btn-register" (click)="register()">Registrarse</button>
+          </div>
+        }
+
+        <!-- Mobile Menu Toggle -->
+        <button class="mobile-menu-btn" (click)="toggleMobileMenu()">
+          <i class="pi pi-bars"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="main-nav" [class.open]="show_mobile_menu">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Inicio</a>
+      <a routerLink="/catalog" routerLinkActive="active">Productos</a>
+      <a routerLink="/catalog?category=ofertas" routerLinkActive="active">Ofertas</a>
+      <a routerLink="/contact" routerLinkActive="active">Contacto</a>
+    </nav>
+  </header>
+
+  <!-- Main Content -->
+  <main class="ecommerce-main">
+    <router-outlet></router-outlet>
+  </main>
+
+  <!-- Footer -->
+  <footer class="ecommerce-footer">
+    <div class="footer-container">
+      <div class="footer-section">
+        <h4>{{ store_name }}</h4>
+        <p>Tu tienda de confianza</p>
+      </div>
+      <div class="footer-section">
+        <h4>Enlaces</h4>
+        <a routerLink="/catalog">Productos</a>
+        <a routerLink="/about">Nosotros</a>
+        <a routerLink="/contact">Contacto</a>
+      </div>
+      <div class="footer-section">
+        <h4>Ayuda</h4>
+        <a routerLink="/faq">Preguntas Frecuentes</a>
+        <a routerLink="/shipping">Envíos</a>
+        <a routerLink="/returns">Devoluciones</a>
+      </div>
+      <div class="footer-section">
+        <h4>Síguenos</h4>
+        <div class="social-links">
+          <a href="#" target="_blank"><i class="pi pi-facebook"></i></a>
+          <a href="#" target="_blank"><i class="pi pi-instagram"></i></a>
+          <a href="#" target="_blank"><i class="pi pi-twitter"></i></a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; {{ store_name }} 2025. Todos los derechos reservados.</p>
+    </div>
+  </footer>
+</div>
+
+<!-- Overlay for mobile menu -->
+@if (show_mobile_menu) {
+  <div class="mobile-overlay" (click)="toggleMobileMenu()"></div>
+}
+
+<!-- Overlay for user menu -->
+@if (show_user_menu) {
+  <div class="menu-overlay" (click)="toggleUserMenu()"></div>
+}

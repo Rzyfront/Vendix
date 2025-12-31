@@ -1,0 +1,168 @@
+<div class="account-page">
+    <div class="account-header">
+        <h1>Mi Cuenta</h1>
+        <button class="logout-btn" (click)="logout()">
+            <i class="pi pi-sign-out"></i>
+            Cerrar sesión
+        </button>
+    </div>
+
+    <nav class="account-nav">
+        <a routerLink="/account" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+            <i class="pi pi-user"></i> Perfil
+        </a>
+        <a routerLink="/account/orders" routerLinkActive="active">
+            <i class="pi pi-list"></i> Mis Pedidos
+        </a>
+    </nav>
+
+    @if (success_message) {
+    <div class="success-message">
+        <i class="pi pi-check-circle"></i>
+        {{ success_message }}
+    </div>
+    }
+
+    @if (error_message) {
+    <div class="error-message">
+        <i class="pi pi-exclamation-circle"></i>
+        {{ error_message }}
+    </div>
+    }
+
+    @if (is_loading) {
+    <div class="loading">
+        <div class="spinner"></div>
+    </div>
+    } @else {
+    <div class="account-content">
+        <!-- Profile Section -->
+        <section class="account-section">
+            <h2>Información Personal</h2>
+            <form [formGroup]="profile_form" (ngSubmit)="saveProfile()">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Nombre</label>
+                        <input type="text" formControlName="first_name" placeholder="Tu nombre">
+                    </div>
+                    <div class="form-group">
+                        <label>Apellido</label>
+                        <input type="text" formControlName="last_name" placeholder="Tu apellido">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Teléfono</label>
+                        <input type="tel" formControlName="phone" placeholder="Teléfono">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" [value]="profile?.email" disabled>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Tipo de Documento</label>
+                        <select formControlName="document_type">
+                            <option value="">Seleccionar</option>
+                            <option value="CC">Cédula de Ciudadanía</option>
+                            <option value="CE">Cédula de Extranjería</option>
+                            <option value="NIT">NIT</option>
+                            <option value="passport">Pasaporte</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Número de Documento</label>
+                        <input type="text" formControlName="document_number" placeholder="Número">
+                    </div>
+                </div>
+                <button type="submit" class="save-btn" [disabled]="is_saving || !profile_form.valid">
+                    @if (is_saving) {
+                    Guardando...
+                    } @else {
+                    Guardar cambios
+                    }
+                </button>
+            </form>
+        </section>
+
+        <!-- Password Section -->
+        <section class="account-section">
+            <h2>Seguridad</h2>
+            @if (!show_password_form) {
+            <button class="secondary-btn" (click)="show_password_form = true">
+                Cambiar contraseña
+            </button>
+            } @else {
+            <form [formGroup]="password_form" (ngSubmit)="changePassword()">
+                <div class="form-group">
+                    <label>Contraseña actual</label>
+                    <input type="password" formControlName="current_password" placeholder="Contraseña actual">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Nueva contraseña</label>
+                        <input type="password" formControlName="new_password" placeholder="Nueva contraseña">
+                    </div>
+                    <div class="form-group">
+                        <label>Confirmar contraseña</label>
+                        <input type="password" formControlName="confirm_password" placeholder="Confirmar">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="cancel-btn"
+                        (click)="show_password_form = false; password_form.reset()">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="save-btn" [disabled]="is_changing_password || !password_form.valid">
+                        @if (is_changing_password) {
+                        Cambiando...
+                        } @else {
+                        Cambiar contraseña
+                        }
+                    </button>
+                </div>
+            </form>
+            }
+        </section>
+
+        <!-- Addresses Section -->
+        <section class="account-section">
+            <div class="section-header">
+                <h2>Direcciones</h2>
+                <button class="add-btn">
+                    <i class="pi pi-plus"></i>
+                    Agregar
+                </button>
+            </div>
+
+            @if (addresses.length === 0) {
+            <p class="empty-text">No tienes direcciones guardadas</p>
+            } @else {
+            <div class="address-grid">
+                @for (addr of addresses; track addr.id) {
+                <div class="address-card" [class.primary]="addr.is_primary">
+                    @if (addr.is_primary) {
+                    <span class="primary-badge">Principal</span>
+                    }
+                    <p class="address-line">{{ addr.address_line1 }}</p>
+                    @if (addr.address_line2) {
+                    <p class="address-line">{{ addr.address_line2 }}</p>
+                    }
+                    <p class="address-city">{{ addr.city }}, {{ addr.state_province }}</p>
+                    @if (addr.phone_number) {
+                    <p class="address-phone">Tel: {{ addr.phone_number }}</p>
+                    }
+                    <div class="address-actions">
+                        <button class="delete-btn" (click)="deleteAddress(addr.id)">
+                            <i class="pi pi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                }
+            </div>
+            }
+        </section>
+    </div>
+    }
+</div>

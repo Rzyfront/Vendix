@@ -1,0 +1,392 @@
+.catalog-page {
+    min-height: 60vh;
+}
+
+// Header
+.catalog-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+
+    h1 {
+        font-size: var(--fs-2xl);
+        font-weight: var(--fw-bold);
+        color: var(--color-text-primary);
+        margin: 0;
+    }
+
+    .catalog-meta {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    .product-count {
+        color: var(--color-text-secondary);
+        font-size: var(--fs-sm);
+    }
+
+    .filter-toggle {
+        display: none;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        color: var(--color-text-primary);
+        font-size: var(--fs-sm);
+        cursor: pointer;
+
+        @media (max-width: 992px) {
+            display: flex;
+        }
+    }
+}
+
+// Content layout
+.catalog-content {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 2rem;
+
+    @media (max-width: 992px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+// Sidebar
+.catalog-sidebar {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-border);
+    padding: 1.5rem;
+    height: fit-content;
+    position: sticky;
+    top: 120px;
+
+    @media (max-width: 992px) {
+        position: fixed;
+        top: 0;
+        left: -100%;
+        width: 300px;
+        height: 100vh;
+        z-index: 100;
+        border-radius: 0;
+        overflow-y: auto;
+        transition: left 0.3s ease;
+
+        &.open {
+            left: 0;
+        }
+    }
+
+    .sidebar-header {
+        display: none;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--color-border);
+
+        @media (max-width: 992px) {
+            display: flex;
+        }
+
+        h3 {
+            font-size: var(--fs-lg);
+            font-weight: var(--fw-semibold);
+            margin: 0;
+        }
+
+        .close-filters {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: transparent;
+            color: var(--color-text-primary);
+            cursor: pointer;
+            font-size: var(--fs-lg);
+        }
+    }
+}
+
+.filter-section {
+    margin-bottom: 1.5rem;
+
+    label {
+        display: block;
+        font-size: var(--fs-sm);
+        font-weight: var(--fw-semibold);
+        color: var(--color-text-primary);
+        margin-bottom: 0.75rem;
+    }
+}
+
+.filter-input {
+    width: 100%;
+    padding: var(--control-padding);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-family: var(--font-base);
+    background: var(--color-background);
+    color: var(--color-text-primary);
+
+    &:focus {
+        outline: none;
+        border-color: var(--color-primary);
+    }
+}
+
+.filter-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 200px;
+    overflow-y: auto;
+
+    li {
+        padding: 0.5rem 0.75rem;
+        font-size: var(--fs-sm);
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        border-radius: var(--radius-sm);
+        transition: all var(--transition-fast);
+
+        &:hover {
+            background: var(--color-background);
+            color: var(--color-text-primary);
+        }
+
+        &.active {
+            background: var(--color-primary-light);
+            color: var(--color-primary);
+            font-weight: var(--fw-medium);
+        }
+    }
+}
+
+.price-inputs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+
+    span {
+        color: var(--color-text-muted);
+    }
+}
+
+.apply-price-btn {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+
+    &:hover {
+        background: var(--color-secondary);
+    }
+}
+
+.clear-filters-btn {
+    width: 100%;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+
+    &:hover {
+        background: var(--color-background);
+        color: var(--color-text-primary);
+    }
+}
+
+// Main content
+.catalog-main {
+    min-height: 400px;
+}
+
+.catalog-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1.5rem;
+}
+
+.sort-select {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-family: var(--font-base);
+    background: var(--color-surface);
+    color: var(--color-text-primary);
+    cursor: pointer;
+
+    &:focus {
+        outline: none;
+        border-color: var(--color-primary);
+    }
+}
+
+// Products grid
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+
+    @media (max-width: 1200px) {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    @media (max-width: 768px) {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1rem;
+    }
+
+    @media (max-width: 480px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+// Loading skeleton
+.loading-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+
+    @media (max-width: 1200px) {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    @media (max-width: 768px) {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.skeleton-card {
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+    animation: pulse 1.5s infinite;
+
+    .skeleton-image {
+        aspect-ratio: 1;
+        background: var(--color-background);
+        border-radius: var(--radius-md);
+        margin-bottom: 1rem;
+    }
+
+    .skeleton-text {
+        height: 14px;
+        background: var(--color-background);
+        border-radius: var(--radius-sm);
+        margin-bottom: 0.5rem;
+
+        &.short {
+            width: 60%;
+        }
+    }
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
+}
+
+// Empty state
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+
+    i {
+        font-size: 4rem;
+        color: var(--color-text-muted);
+        margin-bottom: 1rem;
+    }
+
+    h3 {
+        font-size: var(--fs-xl);
+        color: var(--color-text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    p {
+        color: var(--color-text-secondary);
+        margin-bottom: 1.5rem;
+    }
+
+    button {
+        padding: 0.75rem 1.5rem;
+        background: var(--color-primary);
+        color: var(--color-text-on-primary);
+        border: none;
+        border-radius: var(--radius-md);
+        font-weight: var(--fw-medium);
+        cursor: pointer;
+    }
+}
+
+// Pagination
+.pagination {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
+
+    button {
+        min-width: 40px;
+        height: 40px;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
+        border-radius: var(--radius-md);
+        font-size: var(--fs-sm);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+
+        &:hover:not(:disabled) {
+            background: var(--color-background);
+            border-color: var(--color-primary);
+        }
+
+        &.active {
+            background: var(--color-primary);
+            color: var(--color-text-on-primary);
+            border-color: var(--color-primary);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+}
+
+// Filter overlay
+.filter-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+}

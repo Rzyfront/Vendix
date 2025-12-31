@@ -1,0 +1,139 @@
+<div class="order-detail-page">
+    <div class="page-header">
+        <a routerLink="/account/orders" class="back-link">
+            <i class="pi pi-arrow-left"></i>
+            Mis pedidos
+        </a>
+        @if (order) {
+        <h1>Pedido #{{ order.order_number }}</h1>
+        }
+    </div>
+
+    @if (is_new_order) {
+    <div class="success-banner">
+        <i class="pi pi-check-circle"></i>
+        <div>
+            <h3>¡Pedido realizado con éxito!</h3>
+            <p>Recibirás un correo con los detalles de tu compra</p>
+        </div>
+    </div>
+    }
+
+    @if (is_loading) {
+    <div class="loading">
+        <div class="spinner"></div>
+    </div>
+    } @else if (order) {
+    <div class="order-content">
+        <div class="order-main">
+            <!-- Status -->
+            <div class="order-status">
+                <span class="status-badge" [class]="getStateClass(order.state)">
+                    {{ getStateLabel(order.state) }}
+                </span>
+                <span class="order-date">
+                    Realizado el {{ order.created_at | date:'dd MMM yyyy, HH:mm' }}
+                </span>
+            </div>
+
+            <!-- Items -->
+            <section class="order-section">
+                <h2>Productos</h2>
+                <div class="order-items">
+                    @for (item of order.items; track item.id) {
+                    <div class="order-item">
+                        <div class="item-image">
+                            @if (item.image_url) {
+                            <img [src]="item.image_url" [alt]="item.product_name">
+                            } @else {
+                            <div class="no-image">
+                                <i class="pi pi-image"></i>
+                            </div>
+                            }
+                        </div>
+                        <div class="item-info">
+                            <h4>{{ item.product_name }}</h4>
+                            @if (item.variant_sku) {
+                            <span class="item-variant">{{ item.variant_sku }}</span>
+                            }
+                            <span class="item-qty">Cantidad: {{ item.quantity }}</span>
+                        </div>
+                        <div class="item-price">
+                            {{ item.total_price | currency }}
+                        </div>
+                    </div>
+                    }
+                </div>
+            </section>
+
+            <!-- Shipping -->
+            @if (order.shipping_address) {
+            <section class="order-section">
+                <h2>Dirección de envío</h2>
+                <div class="shipping-info">
+                    <p>{{ order.shipping_address.address_line1 }}</p>
+                    @if (order.shipping_address.address_line2) {
+                    <p>{{ order.shipping_address.address_line2 }}</p>
+                    }
+                    <p>{{ order.shipping_address.city }}, {{ order.shipping_address.state_province }}</p>
+                    @if (order.shipping_address.phone_number) {
+                    <p>Tel: {{ order.shipping_address.phone_number }}</p>
+                    }
+                </div>
+            </section>
+            }
+
+            <!-- Payments -->
+            @if (order.payments.length > 0) {
+            <section class="order-section">
+                <h2>Pagos</h2>
+                <div class="payments-list">
+                    @for (payment of order.payments; track payment.id) {
+                    <div class="payment-item">
+                        <span class="payment-method">{{ payment.method || 'Método de pago' }}</span>
+                        <span class="payment-amount">{{ payment.amount | currency }}</span>
+                        <span class="payment-state" [class]="payment.state === 'completed' ? 'success' : 'pending'">
+                            {{ payment.state === 'completed' ? 'Pagado' : 'Pendiente' }}
+                        </span>
+                    </div>
+                    }
+                </div>
+            </section>
+            }
+        </div>
+
+        <!-- Summary -->
+        <div class="order-summary">
+            <div class="summary-card">
+                <h3>Resumen</h3>
+
+                <div class="summary-row">
+                    <span>Subtotal</span>
+                    <span>{{ order.subtotal_amount | currency }}</span>
+                </div>
+                @if (order.discount_amount > 0) {
+                <div class="summary-row discount">
+                    <span>Descuento</span>
+                    <span>-{{ order.discount_amount | currency }}</span>
+                </div>
+                }
+                <div class="summary-row">
+                    <span>Envío</span>
+                    <span>{{ order.shipping_cost > 0 ? (order.shipping_cost | currency) : 'Gratis' }}</span>
+                </div>
+                <div class="summary-row">
+                    <span>Impuestos</span>
+                    <span>{{ order.tax_amount | currency }}</span>
+                </div>
+
+                <hr>
+
+                <div class="summary-row total">
+                    <span>Total</span>
+                    <span>{{ order.grand_total | currency }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    }
+</div>

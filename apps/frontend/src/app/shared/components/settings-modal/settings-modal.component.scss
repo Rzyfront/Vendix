@@ -3,11 +3,29 @@
   display: block;
 }
 
-// ==================== Section 1: App Type Selection ====================
-.app-type-section {
-  margin-bottom: 2rem;
+// Main form container
+.settings-form {
+  max-width: 100%;
+  margin: 0;
 }
 
+// ==================== Section Styling ====================
+.settings-section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.section-title {
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+// ==================== Section 1: App Type Selection ====================
 .app-type-selection {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -96,14 +114,6 @@
 }
 
 // ==================== Section 2: Panel UI Configuration ====================
-.panel-ui-config {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
 .toggles-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -136,7 +146,6 @@
   .module-description {
     font-size: var(--fs-sm);
     color: var(--color-text-secondary);
-    margin-left: 0;
     line-height: 1.5;
     display: block;
     width: 100%;
@@ -144,14 +153,6 @@
 }
 
 // ==================== Section 3: Preferences ====================
-.preferences-section {
-  margin-bottom: 2rem;
-  padding: 1.5rem;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
 .preference-row {
   display: flex;
   flex-direction: column;
@@ -187,16 +188,15 @@
 
 .theme-selector {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
 }
 
 .theme-option {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.75rem;
-  padding: 1rem;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
   background: var(--color-background);
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -215,10 +215,26 @@
     box-shadow: 0 0 0 3px rgba(126, 215, 165, 0.1);
   }
 
-  span {
-    font-size: var(--fs-sm);
-    font-weight: var(--fw-medium);
-    color: var(--color-text-primary);
+  app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  .theme-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    .theme-name {
+      font-size: var(--fs-base);
+      font-weight: var(--fw-semibold);
+      color: var(--color-text-primary);
+    }
+
+    .theme-description {
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+    }
   }
 }
 
@@ -238,6 +254,14 @@
   }
 }
 
+// ==================== Modal Footer ====================
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  width: 100%;
+}
+
 // ==================== Responsive Design ====================
 @media (max-width: 768px) {
   .app-type-selection {
@@ -252,12 +276,7 @@
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .app-type-card {
-    padding: 1rem;
-  }
-
-  .panel-ui-config,
-  .preferences-section {
+  .settings-section {
     padding: 1rem;
   }
 }
@@ -270,30 +289,12 @@
   .toggle-item {
     padding: 0.75rem;
   }
-}
 
-// ==================== Animations ====================
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
+  .modal-footer {
+    flex-direction: column;
+
+    app-button {
+      width: 100%;
+    }
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.app-type-section,
-.panel-ui-config,
-.preferences-section {
-  animation: fadeIn 0.3s ease-out;
-}
-
-// ==================== Loading State ====================
-.loading-spinner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3rem;
 }

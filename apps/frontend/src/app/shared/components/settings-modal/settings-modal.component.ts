@@ -114,13 +114,13 @@ const APP_MODULES = {
         </div>
 
         <!-- Section 3: Preferences -->
-        <div class="preferences-section">
+        <div formGroupName="preferences" class="preferences-section">
           <h4 class="text-lg font-medium text-gray-900 mb-4">Preferencias</h4>
 
           <!-- Language (disabled) -->
           <div class="preference-row">
             <label>Idioma</label>
-            <select formControlName="preferences.language" [disabled]="true" class="disabled-select">
+            <select formControlName="language" [disabled]="true" class="disabled-select">
               <option value="es">Español</option>
             </select>
             <small class="text-gray-500">Español es el único idioma disponible actualmente</small>
@@ -128,21 +128,27 @@ const APP_MODULES = {
 
           <!-- Theme -->
           <div class="preference-row">
-            <label>Tema</label>
+            <label>Tema de la aplicación</label>
             <div class="theme-selector">
-              <div
-                class="theme-option"
-                [class.selected]="settingsForm.get('preferences.theme')?.value === 'aura'"
-                (click)="selectTheme('aura')">
-                <div class="theme-preview aura-theme"></div>
-                <span>Aura (verde)</span>
-              </div>
               <div
                 class="theme-option"
                 [class.selected]="settingsForm.get('preferences.theme')?.value === 'default'"
                 (click)="selectTheme('default')">
-                <div class="theme-preview default-theme"></div>
-                <span>Default</span>
+                <app-icon name="circle" [size]="32"></app-icon>
+                <div class="theme-info">
+                  <span class="theme-name">Default</span>
+                  <span class="theme-description">Tema por defecto del sistema</span>
+                </div>
+              </div>
+              <div
+                class="theme-option"
+                [class.selected]="settingsForm.get('preferences.theme')?.value === 'aura'"
+                (click)="selectTheme('aura')">
+                <app-icon name="sparkles" [size]="32"></app-icon>
+                <div class="theme-info">
+                  <span class="theme-name">Aura</span>
+                  <span class="theme-description">Estilo alternativo</span>
+                </div>
               </div>
             </div>
           </div>
@@ -189,15 +195,27 @@ export class SettingsModalComponent implements OnInit {
     canChangeAppType: boolean = false;
 
     constructor() {
+        // Initialize panel_ui controls for ORG_ADMIN
+        const orgAdminControls: any = {};
+        APP_MODULES.ORG_ADMIN.forEach(module => {
+            orgAdminControls[module.key] = [true]; // Default to true
+        });
+
+        // Initialize panel_ui controls for STORE_ADMIN
+        const storeAdminControls: any = {};
+        APP_MODULES.STORE_ADMIN.forEach(module => {
+            storeAdminControls[module.key] = [true]; // Default to true
+        });
+
         this.settingsForm = this.fb.group({
             app: ['ORG_ADMIN', Validators.required],
             panel_ui: this.fb.group({
-                ORG_ADMIN: this.fb.group({}),
-                STORE_ADMIN: this.fb.group({})
+                ORG_ADMIN: this.fb.group(orgAdminControls),
+                STORE_ADMIN: this.fb.group(storeAdminControls)
             }),
             preferences: this.fb.group({
                 language: ['es'],
-                theme: ['aura']
+                theme: ['default']
             })
         });
 
@@ -212,6 +230,11 @@ export class SettingsModalComponent implements OnInit {
     }
 
     onClose() {
+        this.closeModal();
+    }
+
+    closeModal() {
+        this.isOpen = false;
         this.isOpenChange.emit(false);
         this.settingsForm.reset();
     }
@@ -247,49 +270,46 @@ export class SettingsModalComponent implements OnInit {
     }
 
     initializeForm(config: any) {
-        console.log('🔧 Initializing form with config:', config);
+        console.log('🔧 Updating form with config:', config);
 
-        const panelUiGroups: any = {
-            ORG_ADMIN: {},
-            STORE_ADMIN: {}
+        // Build patch object efficiently
+        const patchObj: any = {
+            app: this.currentAppType,
+            panel_ui: {
+                ORG_ADMIN: {},
+                STORE_ADMIN: {}
+            },
+            preferences: {
+                language: 'es',
+                theme: 'default'
+            }
         };
 
-        // Initialize ORG_ADMIN modules
+        // Update ORG_ADMIN modules
         APP_MODULES.ORG_ADMIN.forEach(module => {
-            // Try new format first (nested by app type), then old format (flat)
             const currentValue = config.panel_ui?.ORG_ADMIN?.[module.key] ??
                                 config.panel_ui?.[module.key] ??
-                                true; // Default to true
-            panelUiGroups.ORG_ADMIN[module.key] = [currentValue];
-            console.log(`ORG_ADMIN.${module.key}:`, currentValue);
+                                true;
+            patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
         });
 
-        // Initialize STORE_ADMIN modules
+        // Update STORE_ADMIN modules
         APP_MODULES.STORE_ADMIN.forEach(module => {
             const currentValue = config.panel_ui?.STORE_ADMIN?.[module.key] ??
                                 config.panel_ui?.[module.key] ??
-                                true; // Default to true
-            panelUiGroups.STORE_ADMIN[module.key] = [currentValue];
-            console.log(`STORE_ADMIN.${module.key}:`, currentValue);
+                                true;
+            patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
         });
 
-        this.settingsForm.setControl('panel_ui', this.fb.group(panelUiGroups));
+        // Update preferences
+        const prefs = config.preferences || { language: 'es', theme: 'default' };
+        patchObj.preferences.language = prefs.language;
+        patchObj.preferences.theme = prefs.theme || 'default';
 
-        // Patch app type
-        this.settingsForm.patchValue({
-            app: this.currentAppType
-        });
+        // Apply all patches at once
+        this.settingsForm.patchValue(patchObj);
 
-        // Patch preferences
-        const prefs = config.preferences || { language: 'es', theme: 'aura' };
-        this.settingsForm.patchValue({
-            preferences: {
-                language: prefs.language,
-                theme: prefs.theme
-            }
-        });
-
-        console.log('✅ Form initialized:', this.settingsForm.value);
+        console.log('✅ Form updated:', this.settingsForm.value);
     }
 
     getModulesForAppType(appType: string): any[] {
