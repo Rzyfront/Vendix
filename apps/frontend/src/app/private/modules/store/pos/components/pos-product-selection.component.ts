@@ -462,6 +462,12 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: any): void {
+    if (product.stock > 0 && product.stock <= 5) {
+      this.toastService.warning(
+        `Producto con existencias bajo (${product.stock} unidades restantes)`,
+      );
+    }
+
     if (product.stock === 0) {
       this.toastService.warning('Producto sin stock disponible');
       return;
