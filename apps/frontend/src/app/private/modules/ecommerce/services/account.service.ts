@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { DomainService } from '../../../../core/services/domain.service';
+import { TenantConfig } from '../../../../core/models/tenant-config.interface';
+import { TenantFacade } from '../../../../core/store';
 
 export interface UserProfile {
     id: number;
@@ -72,11 +73,11 @@ export class AccountService {
 
     constructor(
         private http: HttpClient,
-        private domain_service: DomainService,
+        private domain_service: TenantFacade,
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const domain_config = this.domain_service.getCurrentDomainConfig();
+        const domain_config = this.domain_service.getCurrentTenantConfig();
         return new HttpHeaders({
             'x-store-id': domain_config?.store?.id?.toString() || '',
         });

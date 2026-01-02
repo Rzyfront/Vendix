@@ -1,8 +1,8 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { AuthFacade } from '../../../core/auth/services/auth.facade';
-import { DomainService } from '../../../core/services/domain.service';
+import { AuthFacade } from '../../../core/store';
+import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
 
 @Component({
@@ -23,24 +23,25 @@ export class StoreEcommerceLayoutComponent implements OnInit {
 
     constructor(
         private auth_facade: AuthFacade,
-        private domain_service: DomainService,
+        private domain_service: TenantFacade,
         private cart_service: CartService,
         private router: Router,
     ) { }
 
     ngOnInit(): void {
         // Get store info from domain resolution
-        const domain_config = this.domain_service.getCurrentDomainConfig();
-        if (domain_config) {
-            this.store_name = domain_config.store?.name || 'Tienda';
-            this.store_logo = domain_config.store?.logo_url || null;
+        const tenantConfig = this.domain_service.getCurrentTenantConfig();
+        const storeConfig = this.domain_service.getCurrentStore();
+        if (tenantConfig && storeConfig) {
+            this.store_name = storeConfig.name || 'Tienda';
+            this.store_logo = tenantConfig.branding?.logo?.url || null;
         }
 
         // Check authentication
         this.auth_facade.isAuthenticated$.subscribe((is_auth) => {
             this.is_authenticated = is_auth;
             if (is_auth) {
-                this.auth_facade.currentUser$.subscribe((user) => {
+                this.auth_facade.user$.subscribe((user) => {
                     if (user) {
                         this.user_name = `${user.first_name} ${user.last_name}`.trim();
                     }

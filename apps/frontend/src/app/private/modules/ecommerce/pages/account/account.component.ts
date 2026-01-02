@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { AccountService, UserProfile, Address } from '../../services/account.service';
-import { AuthFacade } from '../../../../../core/auth/services/auth.facade';
+import { AuthFacade } from '../../../../../core/store';
 
 @Component({
   selector: 'app-account',
