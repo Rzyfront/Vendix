@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { DomainService } from '../../../../core/services/domain.service';
+import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 
 export interface WishlistItem {
     id: number;
@@ -43,11 +43,11 @@ export class WishlistService {
 
     constructor(
         private http: HttpClient,
-        private domain_service: DomainService,
+        private domain_service: TenantFacade,
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const domain_config = this.domain_service.getCurrentDomainConfig();
+        const domain_config = this.domain_service.getCurrentTenantConfig();
         return new HttpHeaders({
             'x-store-id': domain_config?.store?.id?.toString() || '',
         });

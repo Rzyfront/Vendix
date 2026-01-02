@@ -4,7 +4,7 @@ import { RouterModule, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
-import { AuthFacade } from '../../../../../core/auth/services/auth.facade';
+import { AuthFacade } from '../../../../../core/store';
 
 @Component({
   selector: 'app-cart',
