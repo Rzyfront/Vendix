@@ -99,6 +99,7 @@ import {
   Unlock,
   UploadCloud,
   LucideIconData,
+  Heart,
 } from 'lucide-angular';
 
 /**
@@ -239,6 +240,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   unlock: Unlock,
   'upload-cloud': UploadCloud,
   copy: Copy,
+  heart: Heart,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

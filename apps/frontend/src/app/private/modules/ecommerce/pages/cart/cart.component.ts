@@ -28,7 +28,7 @@ export class CartComponent implements OnInit, OnDestroy {
   ) { }
 
   ngOnInit(): void {
-    this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth) => {
+    this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
       this.is_authenticated = is_auth;
       if (is_auth) {
         this.loadCart();

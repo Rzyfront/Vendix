@@ -240,6 +240,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       ],
     },
     {
+      label: 'E-commerce',
+      icon: 'shopping-bag',
+      route: '/admin/ecommerce',
+    },
+    {
       label: 'Marketing',
       icon: 'megaphone',
       children: [
@@ -299,6 +304,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Seguridad',
           icon: 'circle',
           route: '/admin/settings/security',
+        },
+        {
+          label: 'Dominios',
+          icon: 'circle',
+          route: '/admin/settings/domains',
         },
       ],
     },

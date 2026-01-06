@@ -2390,11 +2390,6 @@ async function main() {
           favicon_url: null,
         },
         security: {
-          cors_origins: [
-            'http://vendix.com',
-            'https://vendix.com',
-            'http://api.vendix.com',
-          ],
           session_timeout: 3600000,
           max_login_attempts: 5,
         },

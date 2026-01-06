@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { AuthFacade } from '../../../core/store';
@@ -12,7 +12,7 @@ import { CartService } from '../../modules/ecommerce/services/cart.service';
     templateUrl: './store-ecommerce-layout.component.html',
     styleUrls: ['./store-ecommerce-layout.component.scss'],
 })
-export class StoreEcommerceLayoutComponent implements OnInit {
+export class StoreEcommerceLayoutComponent implements OnInit, OnDestroy {
     store_name = 'Tienda';
     store_logo: string | null = null;
     cart_count = 0;
@@ -20,6 +20,8 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     user_name = '';
     show_user_menu = false;
     show_mobile_menu = false;
+
+    private destroy$ = new Subject<void>();
 
     constructor(
         private auth_facade: AuthFacade,
@@ -38,7 +40,7 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         }
 
         // Check authentication
-        this.auth_facade.isAuthenticated$.subscribe((is_auth) => {
+        this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
             this.is_authenticated = is_auth;
             if (is_auth) {
                 this.auth_facade.user$.subscribe((user) => {
@@ -50,9 +52,14 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         });
 
         // Subscribe to cart changes
-        this.cart_service.cart$.subscribe((cart) => {
+        this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
             this.cart_count = cart?.item_count || 0;
         });
+    }
+
+    ngOnDestroy(): void {
+        this.destroy$.next();
+        this.destroy$.complete();
     }
 
     toggleUserMenu(): void {
