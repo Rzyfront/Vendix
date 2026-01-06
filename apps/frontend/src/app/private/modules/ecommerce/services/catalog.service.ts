@@ -72,9 +72,9 @@ export class CatalogService {
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const domain_config = this.domain_service.getCurrentTenantConfig();
+        const storeConfig = this.domain_service.getCurrentStore();
         return new HttpHeaders({
-            'x-store-id': store_id?.toString() || '',
+            'x-store-id': storeConfig?.id?.toString() || '',
         });
     }
 

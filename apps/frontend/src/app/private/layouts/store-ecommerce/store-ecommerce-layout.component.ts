@@ -1,6 +1,7 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
+import { map } from 'rxjs/operators';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
@@ -12,23 +13,29 @@ import { CartService } from '../../modules/ecommerce/services/cart.service';
     templateUrl: './store-ecommerce-layout.component.html',
     styleUrls: ['./store-ecommerce-layout.component.scss'],
 })
-export class StoreEcommerceLayoutComponent implements OnInit, OnDestroy {
+export class StoreEcommerceLayoutComponent implements OnInit {
     store_name = 'Tienda';
     store_logo: string | null = null;
-    cart_count = 0;
-    is_authenticated = false;
-    user_name = '';
     show_user_menu = false;
     show_mobile_menu = false;
 
-    private destroy$ = new Subject<void>();
+    // Inject dependencies first, then create observables
+    private auth_facade = inject(AuthFacade);
+    private domain_service = inject(TenantFacade);
+    private cart_service = inject(CartService);
+    private router = inject(Router);
 
-    constructor(
-        private auth_facade: AuthFacade,
-        private domain_service: TenantFacade,
-        private cart_service: CartService,
-        private router: Router,
-    ) { }
+    // Expose observables for AsyncPipe (after injection)
+    is_authenticated$ = this.auth_facade.isAuthenticated$;
+    user_name$ = this.auth_facade.user$.pipe(
+        map(user => user ? `${user.first_name} ${user.last_name}`.trim() : '')
+    );
+    cart_badge$ = this.cart_service.cart$.pipe(
+        map(cart => {
+            const count = cart?.item_count || 0;
+            return { show: count > 0, count };
+        })
+    );
 
     ngOnInit(): void {
         // Get store info from domain resolution
@@ -38,28 +45,6 @@ export class StoreEcommerceLayoutComponent implements OnInit, OnDestroy {
             this.store_name = storeConfig.name || 'Tienda';
             this.store_logo = tenantConfig.branding?.logo?.url || null;
         }
-
-        // Check authentication
-        this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
-            this.is_authenticated = is_auth;
-            if (is_auth) {
-                this.auth_facade.user$.subscribe((user) => {
-                    if (user) {
-                        this.user_name = `${user.first_name} ${user.last_name}`.trim();
-                    }
-                });
-            }
-        });
-
-        // Subscribe to cart changes
-        this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
-            this.cart_count = cart?.item_count || 0;
-        });
-    }
-
-    ngOnDestroy(): void {
-        this.destroy$.next();
-        this.destroy$.complete();
     }
 
     toggleUserMenu(): void {
