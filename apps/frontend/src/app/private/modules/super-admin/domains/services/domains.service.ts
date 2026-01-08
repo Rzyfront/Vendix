@@ -36,7 +36,7 @@ export interface PaginatedResponse<T> {
 export class DomainsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   /**
    * Get all domains with pagination and filtering

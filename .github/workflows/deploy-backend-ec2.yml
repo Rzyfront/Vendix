@@ -2,7 +2,7 @@ name: Deploy Backend to EC2
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main ]
     paths:
       - 'apps/backend/**'
       - 'apps/backend/Dockerfile'
@@ -51,7 +51,7 @@ jobs:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: vendix-backend
         IMAGE_TAG: ${{ github.sha }}
-        EC2_INSTANCE_ID: i-088e863265209355a
+        EC2_INSTANCE_ID: i-097972b9868de9cd8
         SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
         AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
         AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -92,6 +92,11 @@ jobs:
           echo "📦 Pulling latest Docker image..."
           sudo docker pull $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
+          echo "🔑 Fetching secrets from AWS Secrets Manager..."
+          DATABASE_URL=\$(aws secretsmanager get-secret-value --secret-id vendix/production/database --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin)['DATABASE_URL'])")
+          JWT_SECRET=\$(aws secretsmanager get-secret-value --secret-id vendix/production/jwt --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin)['JWT_SECRET'])")
+          EMAIL_PASSWORD=\$(aws secretsmanager get-secret-value --secret-id vendix/production/email --query SecretString --output text | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('EMAIL_PASSWORD', ''))")
+
           echo "🛑 Stopping current container..."
           sudo docker stop vendix-backend || true
           sudo docker rm vendix-backend || true
@@ -101,7 +106,12 @@ jobs:
             --name vendix-backend \\
             --restart unless-stopped \\
             -p 3000:3000 \\
-            --env-file /opt/vendix/.env \\
+            -e NODE_ENV=production \\
+            -e USE_SECRETS_MANAGER=true \\
+            -e AWS_REGION=us-east-1 \\
+            -e DATABASE_URL="\$DATABASE_URL" \\
+            -e JWT_SECRET="\$JWT_SECRET" \\
+            -e EMAIL_PASSWORD="\$EMAIL_PASSWORD" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
           echo "✅ Deployment completed!"

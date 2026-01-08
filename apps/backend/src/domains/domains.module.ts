@@ -5,6 +5,7 @@ import { OrganizationDomainModule } from './organization/organization.module';
 import { StoreDomainModule } from './store/store.module';
 import { PublicDomainModule } from './public/public.module';
 import { UploadModule } from './upload/upload.module';
+import { EcommerceDomainModule } from './ecommerce/ecommerce.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { UploadModule } from './upload/upload.module';
     StoreDomainModule,
     PublicDomainModule,
     UploadModule,
+    EcommerceDomainModule,
   ],
 })
 export class DomainsModule { }

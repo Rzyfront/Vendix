@@ -1,0 +1,143 @@
+<div class="catalog-page">
+    <!-- Header -->
+    <div class="catalog-header">
+        <h1>Productos</h1>
+        <div class="catalog-meta">
+            <span class="product-count">{{ total_products }} productos</span>
+            <button class="filter-toggle" (click)="toggleFilters()">
+                <i class="pi pi-filter"></i>
+                Filtros
+            </button>
+        </div>
+    </div>
+
+    <div class="catalog-content">
+        <!-- Sidebar Filters -->
+        <aside class="catalog-sidebar" [class.open]="show_filters">
+            <div class="sidebar-header">
+                <h3>Filtros</h3>
+                <button class="close-filters" (click)="toggleFilters()">
+                    <i class="pi pi-times"></i>
+                </button>
+            </div>
+
+            <!-- Search -->
+            <div class="filter-section">
+                <label>Buscar</label>
+                <input type="text" [(ngModel)]="search_term" (ngModelChange)="onSearchChange()"
+                    placeholder="Buscar productos..." class="filter-input">
+            </div>
+
+            <!-- Categories -->
+            <div class="filter-section">
+                <label>Categorías</label>
+                <ul class="filter-list">
+                    <li [class.active]="!selected_category_id" (click)="onCategorySelect(null)">
+                        Todas las categorías
+                    </li>
+                    @for (cat of categories; track cat.id) {
+                    <li [class.active]="selected_category_id === cat.id" (click)="onCategorySelect(cat.id)">
+                        {{ cat.name }}
+                    </li>
+                    }
+                </ul>
+            </div>
+
+            <!-- Brands -->
+            <div class="filter-section">
+                <label>Marcas</label>
+                <ul class="filter-list">
+                    <li [class.active]="!selected_brand_id" (click)="onBrandSelect(null)">
+                        Todas las marcas
+                    </li>
+                    @for (brand of brands; track brand.id) {
+                    <li [class.active]="selected_brand_id === brand.id" (click)="onBrandSelect(brand.id)">
+                        {{ brand.name }}
+                    </li>
+                    }
+                </ul>
+            </div>
+
+            <!-- Price Range -->
+            <div class="filter-section">
+                <label>Precio</label>
+                <div class="price-inputs">
+                    <input type="number" [(ngModel)]="min_price" placeholder="Mín" class="filter-input">
+                    <span>-</span>
+                    <input type="number" [(ngModel)]="max_price" placeholder="Máx" class="filter-input">
+                </div>
+                <button class="apply-price-btn" (click)="applyPriceFilter()">Aplicar</button>
+            </div>
+
+            <!-- Clear Filters -->
+            <button class="clear-filters-btn" (click)="clearFilters()">
+                Limpiar filtros
+            </button>
+        </aside>
+
+        <!-- Products Grid -->
+        <main class="catalog-main">
+            <!-- Sort -->
+            <div class="catalog-toolbar">
+                <select [(ngModel)]="sort_by" (ngModelChange)="onSortChange()" class="sort-select">
+                    <option value="newest">Más recientes</option>
+                    <option value="name">Nombre A-Z</option>
+                    <option value="price_asc">Precio: menor a mayor</option>
+                    <option value="price_desc">Precio: mayor a menor</option>
+                </select>
+            </div>
+
+            <!-- Loading -->
+            @if (is_loading) {
+            <div class="loading-grid">
+                @for (i of [1,2,3,4,5,6,7,8]; track i) {
+                <div class="skeleton-card">
+                    <div class="skeleton-image"></div>
+                    <div class="skeleton-text"></div>
+                    <div class="skeleton-text short"></div>
+                </div>
+                }
+            </div>
+            } @else {
+            <!-- Products -->
+            @if (products.length > 0) {
+            <div class="products-grid">
+                @for (product of products; track product.id) {
+                <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
+                    (toggle_wishlist)="onToggleWishlist($event)" />
+                }
+            </div>
+            } @else {
+            <div class="empty-state">
+                <i class="pi pi-search"></i>
+                <h3>No se encontraron productos</h3>
+                <p>Intenta cambiar los filtros de búsqueda</p>
+                <button (click)="clearFilters()">Limpiar filtros</button>
+            </div>
+            }
+
+            <!-- Pagination -->
+            @if (total_pages > 1) {
+            <div class="pagination">
+                <button [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
+                    <i class="pi pi-chevron-left"></i>
+                </button>
+                @for (page of page_numbers; track page) {
+                <button [class.active]="current_page === page" (click)="goToPage(page)">
+                    {{ page }}
+                </button>
+                }
+                <button [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
+                    <i class="pi pi-chevron-right"></i>
+                </button>
+            </div>
+            }
+            }
+        </main>
+    </div>
+</div>
+
+<!-- Mobile filter overlay -->
+@if (show_filters) {
+<div class="filter-overlay" (click)="toggleFilters()"></div>
+}

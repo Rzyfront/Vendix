@@ -94,12 +94,9 @@ export class AuditService {
                 },
             });
 
-            // Log console para desarrollo/debugging
-            console.log(
-                `📊 AUDIT: ${auditData.action} on ${auditData.resource}${auditData.resourceId ? ` (${auditData.resourceId})` : ''} by user ${auditData.userId || 'system'}`,
-            );
+
         } catch (error) {
-            console.error('❌ Error registrando auditoría:', error);
+            // Error registrando auditoría
         }
     }
 

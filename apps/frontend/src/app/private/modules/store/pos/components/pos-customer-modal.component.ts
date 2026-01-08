@@ -50,11 +50,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       [isOpen]="isOpen"
       [size]="'lg'"
       (closed)="onModalClosed()"
-      [showCloseButton]="true"
+      [showCloseButton]="false"
     >
       <!-- Modal Header -->
       <div
-        class="flex items-center gap-3 p-6 border-b border-[var(--color-border)]"
+        class="relative flex items-center gap-3 p-6 border-b border-[var(--color-border)]"
       >
         <div
           class="w-10 h-10 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center"
@@ -85,6 +85,26 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             }}
           </p>
         </div>
+        <button
+          type="button"
+          class="absolute top-4 right-4 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+          (click)="onModalClosed()"
+          aria-label="Cerrar modal"
+        >
+          <svg
+            class="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
       </div>
 
       <!-- Modal Content -->
@@ -261,8 +281,6 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               >
               </app-input>
             </div>
-
-
           </form>
         </div>
       </div>
@@ -347,7 +365,6 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
       phone: [''],
       documentType: [''],
       documentNumber: ['', [Validators.required]],
-
     });
   }
 
@@ -422,7 +439,6 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
         phone: this.customer.phone || '',
         documentType: this.customer.document_type || '',
         documentNumber: this.customer.document_number || '',
-
       });
     }
   }
@@ -470,8 +486,6 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
 
     this.loading = true;
 
-
-
     const formData = this.customerForm.value;
     const customerData: CreatePosCustomerRequest = {
       email: formData.email,
@@ -480,7 +494,6 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
       phone: formData.phone || undefined,
       document_type: formData.documentType,
       document_number: formData.documentNumber,
-
     };
 
     if (this.customer) {

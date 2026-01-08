@@ -24,11 +24,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
   async validate(payload: JwtPayload) {
-    console.log('JWT Strategy - Validating payload:', payload);
-    console.log(
-      'JWT Strategy - Using secret:',
-      this.configService.get<string>('JWT_SECRET'),
-    );
+
     try {
       const user = await this.prismaService.users.findUnique({
         where: { id: parseInt(payload.sub.toString()) },
@@ -66,12 +62,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el organization_id del token
       // corresponde al usuario (incluso para super_admin para consistencia)
       if (Number(payload.organization_id) !== user.organization_id) {
-        console.error('JWT Strategy - Organization mismatch:', {
-          token_org_id: payload.organization_id,
-          user_org_id: user.organization_id,
-          user_id: user.id,
-          email: user.email,
-        });
         throw new UnauthorizedException(
           'Token scope inválido: organización no corresponde al usuario',
         );
@@ -100,7 +90,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ),
       };
     } catch (error) {
-      console.error('JWT Strategy - Error validating payload:', error);
       throw new UnauthorizedException('Token inválido o expirado');
     }
   }

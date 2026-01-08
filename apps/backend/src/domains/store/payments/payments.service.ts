@@ -328,8 +328,7 @@ export class PaymentsService {
     if (payment.orders && payment.orders.store_id) {
       await this.validateUserAccess(user, payment.orders.store_id);
     } else {
-      // If for some reason order linkage is missing (should not happen), log warning
-      console.warn(`Payment ${paymentId} has no linked order/store context`);
+      // If for some reason order linkage is missing (should not happen)
       // For safety, only super_admin should access orphaned records
       if (!user.roles || !user.roles.includes('super_admin')) {
         throw new ForbiddenException('Access denied to this payment record');
@@ -379,12 +378,6 @@ export class PaymentsService {
     }
 
     // 6. Access denied
-    console.error(
-      `Access denied: User ${user.id} (Roles: ${JSON.stringify(
-        user.roles,
-      )}, Org: ${user.organization_id}, Main Store: ${user.main_store_id}, Token Store: ${user.store_id}) tried to access store ${storeId} (Org: ${store?.organization_id
-      }). Allowed stores: ${JSON.stringify(userStoreIds)}`,
-    );
     throw new ForbiddenException('Access denied to this store');
   }
 
@@ -428,10 +421,6 @@ export class PaymentsService {
         // 4. Send confirmation if required
         if (createPosPaymentDto.send_email_confirmation) {
           // TODO: Implement email confirmation
-          console.log(
-            'Email confirmation would be sent to:',
-            createPosPaymentDto.customer_email,
-          );
         }
 
         return {
@@ -463,7 +452,6 @@ export class PaymentsService {
         };
       });
     } catch (error) {
-      console.error('Error processing POS payment:', error);
       return {
         success: false,
         message: error.message || 'Error processing payment',
@@ -485,8 +473,8 @@ export class PaymentsService {
 
     while (retries > 0) {
       try {
-        // Generate order number
-        orderNumber = await this.generateOrderNumber(tx);
+        // Generate order number for this store
+        orderNumber = await this.generateOrderNumber(tx, dto.store_id);
 
         // Create order items
         const orderItems = dto.items.map((item) => {
@@ -680,9 +668,6 @@ export class PaymentsService {
     });
 
     if (!defaultLocation) {
-      console.warn(
-        `No default location found for store ${order.store_id}. Skipping inventory update.`,
-      );
       return;
     }
 
@@ -706,17 +691,19 @@ export class PaymentsService {
   }
 
   /**
-   * Generate unique order number
+   * Generate unique order number per store
    */
-  private async generateOrderNumber(tx: any): Promise<string> {
+  private async generateOrderNumber(tx: any, storeId: number): Promise<string> {
     const date = new Date();
     const year = date.getFullYear();
+    const prefix = `POS-${year}`;
 
-    // Find the last order number for this year
+    // Find the last order number for this store and year
     const lastOrder = await tx.orders.findFirst({
       where: {
+        store_id: storeId,
         order_number: {
-          startsWith: `POS-${year}`,
+          startsWith: prefix,
         },
       },
       orderBy: {
@@ -731,7 +718,7 @@ export class PaymentsService {
       sequence = lastSequence + 1;
     }
 
-    return `POS-${year}-${sequence.toString().padStart(4, '0')}`;
+    return `${prefix}-${sequence.toString().padStart(4, '0')}`;
   }
 
   /**

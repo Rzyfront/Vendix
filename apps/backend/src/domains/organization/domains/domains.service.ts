@@ -38,7 +38,6 @@ export class DomainsService implements OnModuleInit {
   ) { }
 
   async onModuleInit() {
-    this.logger.log('🚀 DomainsService initialized');
   }
 
   // ==================== VALIDATION METHODS ====================
@@ -102,7 +101,6 @@ export class DomainsService implements OnModuleInit {
   ) {
     await this.prisma.domain_settings.updateMany({
       where: {
-
         store_id: storeId || null,
         domain_type: domainType as any,
         is_primary: true,
@@ -122,8 +120,6 @@ export class DomainsService implements OnModuleInit {
   // ==================== ESTADÍSTICAS DE DOMINIOS ====================
 
   async getDomainStats(): Promise<DomainStats> {
-    this.logger.log('📊 Fetching domain statistics');
-
     // Obtener todos los dominios con sus estados
     const domains = await this.prisma.domain_settings.findMany({
       select: {
@@ -183,10 +179,6 @@ export class DomainsService implements OnModuleInit {
       }
     });
 
-    this.logger.log(
-      `✅ Domain stats calculated: Total=${stats.total}, Active=${stats.active}, Pending=${stats.pending}`,
-    );
-
     return stats;
   }
 
@@ -198,8 +190,6 @@ export class DomainsService implements OnModuleInit {
     forwardedHost?: string,
   ) {
     // Implementation for domain resolution
-    this.logger.log(`🔍 Resolving domain: ${hostname}`);
-
     const domain = await this.prisma.domain_settings.findUnique({
       where: { hostname },
       include: {
@@ -233,8 +223,6 @@ export class DomainsService implements OnModuleInit {
   }
 
   async checkHostnameAvailability(hostname: string) {
-    this.logger.log(`🔍 Checking hostname availability: ${hostname}`);
-
     const existing = await this.prisma.domain_settings.findUnique({
       where: { hostname },
     });
@@ -248,8 +236,6 @@ export class DomainsService implements OnModuleInit {
   // ==================== CRUD OPERATIONS ====================
 
   async createDomainSetting(data: CreateDomainSettingDto) {
-    this.logger.log(`➕ Creating domain setting for: ${data.hostname}`);
-
     // Validate hostname
     this.validateHostnameFormat(data.hostname);
 
@@ -304,13 +290,10 @@ export class DomainsService implements OnModuleInit {
       },
     });
 
-    this.logger.log(`✅ Domain setting created: ${domainSetting.hostname}`);
     return domainSetting;
   }
 
   async getAllDomainSettings(filters: any) {
-    this.logger.log('📋 Getting all domain settings');
-
     const { page = 1, limit = 10 } = filters;
     const skip = (page - 1) * limit;
 
@@ -352,8 +335,6 @@ export class DomainsService implements OnModuleInit {
   }
 
   async getDomainSettingByHostname(hostname: string) {
-    this.logger.log(`🔍 Getting domain setting by hostname: ${hostname}`);
-
     const domain_setting = await this.prisma.domain_settings.findUnique({
       where: { hostname },
       include: {
@@ -369,8 +350,6 @@ export class DomainsService implements OnModuleInit {
   }
 
   async getDomainSettingById(id: number) {
-    this.logger.log(`🔍 Getting domain setting by ID: ${id}`);
-
     const domain_setting = await this.prisma.domain_settings.findUnique({
       where: { id },
       include: {
@@ -389,8 +368,6 @@ export class DomainsService implements OnModuleInit {
     hostname: string,
     updateData: UpdateDomainSettingDto,
   ) {
-    this.logger.log(`✏️ Updating domain setting: ${hostname}`);
-
     const existing_record = await this.getDomainSettingByHostname(hostname);
 
     // Handle primary domain changes
@@ -412,27 +389,18 @@ export class DomainsService implements OnModuleInit {
       data: updates,
     });
 
-    this.logger.log(`✅ Domain setting updated: ${hostname}`);
     return updated;
   }
 
   async deleteDomainSetting(hostname: string) {
-    this.logger.log(`🗑️ Deleting domain setting: ${hostname}`);
-
-    const domainSetting = await this.getDomainSettingByHostname(hostname);
+    await this.getDomainSettingByHostname(hostname);
 
     await this.prisma.domain_settings.delete({
       where: { hostname },
     });
-
-    this.logger.log(`✅ Domain setting deleted: ${hostname}`);
   }
 
   async duplicateDomainSetting(hostname: string, newHostname: string) {
-    this.logger.log(
-      `📋 Duplicating domain setting: ${hostname} -> ${newHostname}`,
-    );
-
     const source = await this.getDomainSettingByHostname(hostname);
 
     // Check if new hostname is available
@@ -453,8 +421,6 @@ export class DomainsService implements OnModuleInit {
   }
 
   async validateHostname(hostname: string) {
-    this.logger.log(`✅ Validating hostname: ${hostname}`);
-
     const exists = await this.prisma.domain_settings.findUnique({
       where: { hostname },
     });
@@ -470,8 +436,6 @@ export class DomainsService implements OnModuleInit {
     hostname: string,
     body: VerifyDomainDto,
   ): Promise<VerifyDomainResult> {
-    this.logger.log(`🔍 Verifying domain: ${hostname}`);
-
     const domain = await this.getDomainSettingByHostname(hostname);
 
     // Basic verification logic

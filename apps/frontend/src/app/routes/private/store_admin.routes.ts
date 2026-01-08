@@ -251,6 +251,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // E-commerce Routes
+      {
+        path: 'ecommerce',
+        loadComponent: () =>
+          import(
+            '../../private/modules/store/ecommerce/ecommerce.component'
+          ).then((c) => c.EcommerceComponent),
+      },
       // Settings Routes
       {
         path: 'settings',
@@ -287,6 +295,13 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/settings/security/security-settings.component'
               ).then((c) => c.SecuritySettingsComponent),
+          },
+          {
+            path: 'domains',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/settings/domains/store-domains.component'
+              ).then((c) => c.StoreDomainsComponent),
           },
         ],
       },

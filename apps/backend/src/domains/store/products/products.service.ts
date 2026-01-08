@@ -95,14 +95,6 @@ export class ProductsService {
         });
 
         if (!brand) {
-          // Log específico para debugging
-          console.error(
-            `Brand ID ${createProductDto.brand_id} not found. Available brands:`,
-            await this.prisma.brands.findMany({
-              select: { id: true, name: true, state: true },
-            }),
-          );
-
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
             `Please check available brands in the system.`,
@@ -110,9 +102,6 @@ export class ProductsService {
         }
       } else {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
-        console.warn(
-          'Creating product without brand_id. This might cause FK violation.',
-        );
       }
 
       const {
@@ -1241,7 +1230,9 @@ export class ProductsService {
       if (imageUrl.startsWith('data:image')) {
         const result = await this.s3Service.uploadBase64(
           imageUrl,
-          `products/${productSlug}-${Date.now()}-${index}`
+          `products/${productSlug}-${Date.now()}-${index}`,
+          undefined,
+          { generateThumbnail: true }
         );
         imageUrl = result.key;
       }

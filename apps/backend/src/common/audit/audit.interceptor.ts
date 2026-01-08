@@ -25,6 +25,11 @@ export class AuditInterceptor implements NestInterceptor {
             return next.handle();
         }
 
+        // Extract IP address and user agent from request
+        const raw_ip = request.ip || request.connection?.remoteAddress;
+        const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+        const user_agent = request.headers['user-agent'] || '';
+
         return next.handle().pipe(
             tap(async (data) => {
                 try {
@@ -33,19 +38,19 @@ export class AuditInterceptor implements NestInterceptor {
                     const storeId = this.getStoreId(request);
 
                     if (method === 'GET') {
-                        await this.logGetOperation(userId, organizationId, storeId, url, query);
+                        await this.logGetOperation(userId, organizationId, storeId, url, query, ip_address, user_agent);
                     } else if (method === 'POST' && this.isCreateOperation(url)) {
-                        await this.logCreateOperation(userId, organizationId, storeId, url, data);
+                        await this.logCreateOperation(userId, organizationId, storeId, url, data, ip_address, user_agent);
                     } else if ((method === 'PUT' || method === 'PATCH') && this.isUpdateOperation(url, method)) {
-                        await this.logUpdateOperation(userId, organizationId, storeId, url, body, data);
+                        await this.logUpdateOperation(userId, organizationId, storeId, url, body, data, ip_address, user_agent);
                     } else if (
                         (method === 'DELETE' || url.includes('/delete')) &&
                         this.isDeleteOperation(url, method)
                     ) {
-                        await this.logDeleteOperation(userId, organizationId, storeId, url);
+                        await this.logDeleteOperation(userId, organizationId, storeId, url, ip_address, user_agent);
                     }
                 } catch (error) {
-                    console.error('Error en AuditInterceptor:', error);
+                    // Error logging audit
                 }
             }),
         );
@@ -133,7 +138,15 @@ export class AuditInterceptor implements NestInterceptor {
         return method === 'DELETE' || url.includes('/delete') || url.includes('/remove');
     }
 
-    private async logGetOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string, query: any) {
+    private async logGetOperation(
+        userId: number,
+        organizationId: number | undefined,
+        storeId: number | undefined,
+        url: string,
+        query: any,
+        ipAddress: string,
+        userAgent: string
+    ) {
         const resource = this.extractResourceFromUrl(url);
         const resourceId = this.extractIdFromUrl(url);
 
@@ -149,11 +162,21 @@ export class AuditInterceptor implements NestInterceptor {
                 resource,
                 resourceId: resourceId || undefined,
                 metadata: hasQuery ? { query } : undefined,
+                ipAddress,
+                userAgent,
             });
         }
     }
 
-    private async logCreateOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string, data: any) {
+    private async logCreateOperation(
+        userId: number,
+        organizationId: number | undefined,
+        storeId: number | undefined,
+        url: string,
+        data: any,
+        ipAddress: string,
+        userAgent: string
+    ) {
         const resource = this.extractResourceFromUrl(url);
         if (resource && data?.id) {
             await this.auditService.log({
@@ -164,6 +187,8 @@ export class AuditInterceptor implements NestInterceptor {
                 resource,
                 resourceId: data.id,
                 newValues: data,
+                ipAddress,
+                userAgent,
             });
         }
     }
@@ -175,6 +200,8 @@ export class AuditInterceptor implements NestInterceptor {
         url: string,
         oldData: any,
         newData: any,
+        ipAddress: string,
+        userAgent: string
     ) {
         const resource = this.extractResourceFromUrl(url);
         const resourceId = this.extractIdFromUrl(url) || newData?.id || oldData?.id;
@@ -189,12 +216,21 @@ export class AuditInterceptor implements NestInterceptor {
                 resourceId,
                 oldValues: oldData,
                 newValues: newData,
-                metadata: { method: 'UPDATE' }
+                metadata: { method: 'UPDATE' },
+                ipAddress,
+                userAgent,
             });
         }
     }
 
-    private async logDeleteOperation(userId: number, organizationId: number | undefined, storeId: number | undefined, url: string) {
+    private async logDeleteOperation(
+        userId: number,
+        organizationId: number | undefined,
+        storeId: number | undefined,
+        url: string,
+        ipAddress: string,
+        userAgent: string
+    ) {
         const resource = this.extractResourceFromUrl(url);
         const resourceId = this.extractIdFromUrl(url);
         if (resource && resourceId) {
@@ -206,6 +242,8 @@ export class AuditInterceptor implements NestInterceptor {
                 resource,
                 resourceId,
                 oldValues: {},
+                ipAddress,
+                userAgent,
             });
         }
     }

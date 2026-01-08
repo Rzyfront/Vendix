@@ -1,4 +1,12 @@
-import { Component, Input, EventEmitter, Output, OnChanges, SimpleChanges, ChangeDetectionStrategy } from '@angular/core';
+import {
+  Component,
+  Input,
+  EventEmitter,
+  Output,
+  OnChanges,
+  SimpleChanges,
+  ChangeDetectionStrategy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -15,14 +23,10 @@ import {
   IconComponent,
   SelectorComponent,
   SelectorOption,
+  DialogService,
 } from '../../../../../shared/components';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import {
-  Product,
-  ProductState,
-  ProductCategory,
-  Brand,
-} from '../interfaces';
+import { Product, ProductState, ProductCategory, Brand } from '../interfaces';
 import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
 import { BrandsService } from '../services/brands.service';
@@ -45,7 +49,7 @@ import { BrandQuickCreateComponent } from './brand-quick-create.component';
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ProductCreateModalComponent implements OnChanges {
   @Input() isOpen = false;
@@ -73,7 +77,8 @@ export class ProductCreateModalComponent implements OnChanges {
     private categoriesService: CategoriesService,
     private brandsService: BrandsService,
     private toastService: ToastService,
-    private router: Router
+    private router: Router,
+    private dialogService: DialogService,
   ) {
     this.productForm = this.createForm();
     this.loadCategoriesAndBrands();
@@ -119,7 +124,7 @@ export class ProductCreateModalComponent implements OnChanges {
     this.productForm.reset({
       base_price: 0,
       stock_quantity: 0,
-      state: ProductState.ACTIVE
+      state: ProductState.ACTIVE,
     });
   }
 
@@ -142,7 +147,10 @@ export class ProductCreateModalComponent implements OnChanges {
       base_price: this.product.base_price,
       stock_quantity: this.product.stock_quantity || 0,
       // Try to get category from new structure or legacy if exists
-      category_id: (this.product as any).category_ids?.[0] || (this.product.categories?.[0]?.id) || null,
+      category_id:
+        (this.product as any).category_ids?.[0] ||
+        this.product.categories?.[0]?.id ||
+        null,
       brand_id: this.product.brand_id || null,
       state: this.product.state || ProductState.ACTIVE,
     });
@@ -215,7 +223,7 @@ export class ProductCreateModalComponent implements OnChanges {
       // Map single category to array for backend compat
       category_ids: val.category_id ? [Number(val.category_id)] : [],
       brand_id: val.brand_id,
-      state: val.state
+      state: val.state,
     };
 
     // Remove legacy field if it exists in val but not needed in DTO
@@ -223,7 +231,6 @@ export class ProductCreateModalComponent implements OnChanges {
 
     this.submit.emit(dto);
   }
-
 
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);
@@ -259,7 +266,44 @@ export class ProductCreateModalComponent implements OnChanges {
   onStockAdjustmentClick(): void {
     this.toastService.info(
       'Para ajustar stock, use la edición avanzada del producto o el módulo de Inventario',
-      'Ajuste de Stock'
+      'Ajuste de Stock',
     );
+  }
+
+  // Product states (copiado de order-details)
+  readonly productStateOptions = ['active', 'inactive', 'archived'] as const;
+
+  // Método de actualización (con confirmación como en órdenes)
+  updateProductState(newState: string): void {
+    if (this.productForm.get('state')?.value === newState) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Change Product Status',
+        message: `Are you sure you want to change the product status to "${this.formatStatus(newState)}"? This action cannot be undone and may affect product visibility.`,
+        confirmText: 'Change Status',
+        cancelText: 'Cancel',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.productForm.get('state')?.setValue(newState);
+        }
+      });
+  }
+
+  // Helper methods (copiados de order-details)
+  getStatusColor(status: string): string {
+    const statusColors: { [key: string]: string } = {
+      active: 'bg-green-100 text-green-800',
+      inactive: 'bg-yellow-100 text-yellow-800',
+      archived: 'bg-red-100 text-red-800',
+    };
+    return statusColors[status] || 'bg-gray-100 text-gray-800';
+  }
+
+  formatStatus(status: string | undefined): string {
+    if (!status) return 'Unknown';
+    return status.charAt(0).toUpperCase() + status.slice(1);
   }
 }
