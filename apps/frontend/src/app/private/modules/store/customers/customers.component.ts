@@ -22,7 +22,6 @@ import { ToastService, DialogService } from '../../../../shared/components';
     CustomerModalComponent,
   ],
   template: `
-    <
     <div class="w-full">
       <!-- Stats Grid -->
       <div
@@ -111,7 +110,7 @@ export class CustomersComponent implements OnInit, OnDestroy {
     private customersService: CustomersService,
     private toastService: ToastService,
     private dialogService: DialogService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadStats();
