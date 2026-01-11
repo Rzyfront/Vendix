@@ -1,0 +1,77 @@
+<div class="space-y-2 md:space-y-4">
+  <!-- Stats Cards -->
+  <app-payment-method-stats [stats]="paymentMethodStats"></app-payment-method-stats>
+
+  <!-- Payment Methods List Header -->
+  <div class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
+      <div class="flex-1 min-w-0">
+        <h2 class="text-lg font-semibold text-text-primary">
+          Todos los Métodos de Pago
+        </h2>
+      </div>
+
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+        <!-- Filter by payment method type -->
+        <select
+          class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          [(ngModel)]="filterForm.value.type" (ngModelChange)="filterForm.patchValue({ type: $event })">
+          <option *ngFor="let type of paymentMethodTypes" [value]="type.value">
+            {{ type.label }}
+          </option>
+        </select>
+
+        <!-- Filter by status -->
+        <select
+          class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          [(ngModel)]="filterForm.value.is_active" (ngModelChange)="filterForm.patchValue({ is_active: $event })">
+          <option value="">Todos los estados</option>
+          <option value="true">Activos</option>
+          <option value="false">Inactivos</option>
+        </select>
+
+        <!-- Input de búsqueda compacto -->
+        <app-inputsearch class="w-full sm:w-64" size="sm" placeholder="Buscar métodos..." [debounceTime]="1000"
+          (searchChange)="onSearchChange($event)"></app-inputsearch>
+
+        <div class="flex gap-2 items-center">
+          <app-button variant="outline" size="sm" (clicked)="refreshPaymentMethods()" [disabled]="isLoading"
+            title="Actualizar">
+            <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+          </app-button>
+          <app-button variant="primary" size="sm" (clicked)="createPaymentMethod()" title="Nuevo Método">
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Nuevo Método</span>
+          </app-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <p class="mt-2 text-text-secondary">Cargando métodos de pago...</p>
+    </div>
+
+    <!-- Empty State -->
+    <app-payment-method-empty-state *ngIf="!isLoading && paymentMethods.length === 0" [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()" (actionClick)="createPaymentMethod()">
+    </app-payment-method-empty-state>
+
+    <!-- Payment Methods Table -->
+    <app-table *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods" [columns]="tableColumns"
+      [actions]="tableActions" [loading]="isLoading" [sortable]="true" [hoverable]="true" [striped]="true" size="md"
+      (sort)="onSortChange($event)" (rowClick)="editPaymentMethod($event)">
+    </app-table>
+  </div>
+
+  <!-- Create Payment Method Modal -->
+  <app-payment-method-create-modal [(isOpen)]="showCreateModal"
+    (onPaymentMethodCreated)="onPaymentMethodCreated($event)">
+  </app-payment-method-create-modal>
+
+  <!-- Edit Payment Method Modal -->
+  <app-payment-method-edit-modal [(isOpen)]="showEditModal" [paymentMethod]="currentPaymentMethod"
+    (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)">
+  </app-payment-method-edit-modal>
+</div>
