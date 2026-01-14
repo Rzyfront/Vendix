@@ -8,6 +8,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { AuditModule } from './audit/audit.module';
 import { StoresModule } from './stores/stores.module';
 import { UsersModule } from './users/users.module';
+import { TemplatesModule } from './templates/templates.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { UsersModule } from './users/users.module';
     StoresModule,
     UsersModule,
     AuditModule,
+    TemplatesModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],
