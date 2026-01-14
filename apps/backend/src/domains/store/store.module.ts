@@ -16,6 +16,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
 import { CustomersModule } from './customers/customers.module';
+import { StoreDomainsModule } from './domains/domains.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { CustomersModule } from './customers/customers.module';
     StoreUsersModule,
     SettingsModule,
     CustomersModule,
+    StoreDomainsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

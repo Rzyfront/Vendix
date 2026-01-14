@@ -56,9 +56,9 @@ export class CartService {
     }
 
     private getHeaders(): HttpHeaders {
-        const domain_config = this.domain_service.getCurrentTenantConfig();
+        const storeConfig = this.domain_service.getCurrentStore();
         return new HttpHeaders({
-            'x-store-id': domain_config?.store?.id?.toString() || '',
+            'x-store-id': storeConfig?.id?.toString() || '',
         });
     }
 

@@ -1,0 +1,596 @@
+<div class="w-full max-w-[1600px] mx-auto p-2 md:p-4 space-y-2 md:space-y-4">
+  <!-- Loading State -->
+  <div *ngIf="isLoading" class="flex flex-col items-center justify-center py-20 gap-4">
+    <div class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"></div>
+    <p class="text-[var(--color-text-secondary)]">Cargando configuración...</p>
+  </div>
+
+  <!-- Main Content -->
+  <ng-container *ngIf="!isLoading">
+    <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-4">
+
+      <!-- Page Header -->
+      <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center border border-primary-100 shadow-sm">
+              <app-icon name="shopping-bag" size="24" class="text-primary-600"></app-icon>
+            </div>
+            <div class="flex flex-col">
+              <h1 class="text-xl font-bold text-gray-900 leading-tight">
+                {{ isEditMode ? 'Configuración de E-commerce' : 'Configurar Tienda E-commerce' }}
+              </h1>
+              <p class="text-sm text-gray-500 font-medium">
+                {{ isEditMode
+                  ? 'Administra la configuración de tu tienda en línea'
+                  : 'Configura tu tienda e-commerce con los parámetros básicos para empezar a vender'
+                }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg">
+            <span class="w-2 h-2 rounded-full" [class.bg-green-500]="isEditMode" [class.bg-blue-500]="isSetupMode"></span>
+            <span class="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+              {{ isSetupMode ? 'Configurar' : 'Editar' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Template Selection (Setup Mode Only) -->
+      <div *ngIf="isSetupMode" class="space-y-3">
+        <h2 class="text-lg font-semibold text-gray-900 px-1">Selecciona una Plantilla</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Basic Template Card -->
+          <div class="bg-white rounded-xl border-2 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 p-5"
+               [class.border-primary]="selectedTemplate === 'basic'"
+               [class.border-gray-200]="selectedTemplate !== 'basic'"
+               [class.bg-primary-50]="selectedTemplate === 'basic'"
+               (click)="onTemplateChange('basic')">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-lg font-semibold text-gray-900">Básica</h3>
+              <div *ngIf="selectedTemplate === 'basic'" class="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center">
+                <app-icon name="check" class="text-white text-sm"></app-icon>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Configuración esencial para empezar</p>
+            <ul class="space-y-2 text-sm text-gray-600">
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Catálogo simple (12 productos/página)
+              </li>
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Carrito de compras básico
+              </li>
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Checkout de invitados
+              </li>
+            </ul>
+          </div>
+
+          <!-- Advanced Template Card -->
+          <div class="bg-white rounded-xl border-2 cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 p-5"
+               [class.border-primary]="selectedTemplate === 'advanced'"
+               [class.border-gray-200]="selectedTemplate !== 'advanced'"
+               [class.bg-primary-50]="selectedTemplate === 'advanced'"
+               (click)="onTemplateChange('advanced')">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-lg font-semibold text-gray-900">Avanzada</h3>
+              <div *ngIf="selectedTemplate === 'advanced'" class="w-6 h-6 rounded-full bg-primary-600 flex items-center justify-center">
+                <app-icon name="check" class="text-white text-sm"></app-icon>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500 mb-4">Funcionalidades completas</p>
+            <ul class="space-y-2 text-sm text-gray-600">
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Catálogo extendido (24 productos/página)
+              </li>
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Productos relacionados y filtros
+              </li>
+              <li class="flex items-center gap-2">
+                <app-icon name="check" class="text-primary-600 text-sm"></app-icon>
+                Lista de deseos
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1. Configuración General -->
+      <div formGroupName="general" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="globe" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración General
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <app-selector label="Moneda" formControlName="currency" size="md" [options]="[
+            { value: 'COP', label: 'COP - Peso Colombiano' },
+            { value: 'USD', label: 'USD - Dólar Estadounidense' },
+            { value: 'EUR', label: 'EUR - Euro' },
+            { value: 'MXN', label: 'MXN - Peso Mexicano' }
+          ]"></app-selector>
+
+          <app-selector label="Idioma" formControlName="locale" size="md" [options]="[
+            { value: 'es-CO', label: 'Español (Colombia)' },
+            { value: 'es-ES', label: 'Español (España)' },
+            { value: 'es-MX', label: 'Español (México)' },
+            { value: 'en-US', label: 'English (United States)' },
+            { value: 'pt-BR', label: 'Português (Brasil)' }
+          ]"></app-selector>
+
+          <app-selector label="Zona Horaria" formControlName="timezone" size="md" [options]="[
+            { value: 'America/Bogota', label: 'Bogotá (UTC-5)' },
+            { value: 'America/Mexico_City', label: 'México (UTC-6)' },
+            { value: 'America/Argentina/Buenos_Aires', label: 'Buenos Aires (UTC-3)' },
+            { value: 'America/Lima', label: 'Lima (UTC-5)' },
+            { value: 'America/Santiago', label: 'Santiago (UTC-4)' }
+          ]"></app-selector>
+        </div>
+      </div>
+
+      <!-- 2. Personalización - Colores de la Marca -->
+      <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="palette" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Personalización - Colores de la Marca
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Color Primario</label>
+            <div class="flex items-center gap-2">
+              <input type="color" formControlName="primary_color" class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0">
+              <app-input formControlName="primary_color" placeholder="#3B82F6" customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+            </div>
+          </div>
+
+          <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Color Secundario</label>
+            <div class="flex items-center gap-2">
+              <input type="color" formControlName="secondary_color" class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0">
+              <app-input formControlName="secondary_color" placeholder="#10B981" customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+            </div>
+          </div>
+
+          <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Color de Acento</label>
+            <div class="flex items-center gap-2">
+              <input type="color" formControlName="accent_color" class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0">
+              <app-input formControlName="accent_color" placeholder="#F59E0B" customWrapperClass="!mt-0 flex-1" customInputClass="!font-mono !uppercase"></app-input>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <app-input label="URL del Logo" formControlName="logo_url" placeholder="https://ejemplo.com/logo.png" helperText="Ingresa la URL pública de tu logo (PNG, JPG, SVG)"></app-input>
+        </div>
+      </div>
+
+      <!-- 3. Configuración de Dominio -->
+      <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="globe-2" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración de Dominio
+        </h2>
+
+        <div class="space-y-4">
+          <!-- Current Domain Display -->
+          <div class="p-4 bg-primary-50 border border-primary-200 rounded-lg">
+            <div class="text-sm text-gray-600 mb-1">Dominio actual de tu tienda:</div>
+            <div class="font-mono text-base font-semibold text-gray-900">tu-tienda.vendix.com</div>
+          </div>
+
+          <!-- Custom Domain Toggle -->
+          <div class="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Usar Dominio Personalizado</label>
+              <small class="text-sm text-gray-500">Conecta tu propio dominio a la tienda</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="use_custom_domain" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <!-- Custom Domain Input -->
+          <div *ngIf="settingsForm.get('use_custom_domain')?.value">
+            <app-input label="Dominio Personalizado" formControlName="custom_domain" placeholder="tienda.micomercio.com" helperText="Ingresa tu dominio personalizado (requiere configuración DNS)"></app-input>
+          </div>
+
+          <!-- Subdomain Input -->
+          <div *ngIf="!settingsForm.get('use_custom_domain')?.value" class="space-y-1.5">
+            <label class="block text-sm font-medium text-gray-700">Subdominio Vendix</label>
+            <div class="flex">
+              <input type="text" formControlName="subdomain" placeholder="mi-tienda" class="flex-1 px-3 py-2 rounded-l-lg bg-white border border-gray-300 border-r-0 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none">
+              <span class="px-3 py-2 bg-gray-100 border border-gray-300 border-l-0 rounded-r-lg text-sm text-gray-600 font-mono">.vendix.com</span>
+            </div>
+            <small class="text-xs text-gray-500">Subdominio gratuito proporcionado por Vendix</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Slider Section (Toggleable) -->
+      <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+            </div>
+            Slider Principal
+          </h2>
+          <label class="relative inline-flex cursor-pointer">
+            <input type="checkbox" formControlName="product_slider_enabled" class="sr-only peer">
+            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+          </label>
+        </div>
+
+        <div *ngIf="settingsForm.get('product_slider_enabled')?.value" class="space-y-4">
+          <p class="text-sm text-gray-500">
+            Agrega hasta 5 imágenes para el carrusel principal de tu tienda. Cada imagen puede tener un título y leyenda opcionales.
+          </p>
+
+          <!-- Main Preview -->
+          <div class="aspect-video bg-gray-50 rounded-lg overflow-hidden border border-gray-200 relative">
+            <div *ngIf="sliderImages.length > 0; else emptySlider" class="w-full h-full relative">
+              <img [src]="sliderImages[activeImageIndex]?.url" alt="Slider" class="w-full h-full object-cover">
+              <div *ngIf="sliderImages[activeImageIndex]?.title || sliderImages[activeImageIndex]?.caption" class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent text-white">
+                <h3 *ngIf="sliderImages[activeImageIndex]?.title" class="text-xl font-bold mb-1">{{ sliderImages[activeImageIndex]?.title }}</h3>
+                <p *ngIf="sliderImages[activeImageIndex]?.caption" class="text-base opacity-90">{{ sliderImages[activeImageIndex]?.caption }}</p>
+              </div>
+            </div>
+            <ng-template #emptySlider>
+              <div class="flex flex-col items-center justify-center h-full text-gray-400 gap-2">
+                <app-icon name="image-off" class="text-4xl opacity-50"></app-icon>
+                <p class="text-base font-medium">Sin imágenes</p>
+                <p class="text-sm">Agrega hasta 5 fotos para tu slider</p>
+              </div>
+            </ng-template>
+          </div>
+
+          <!-- Thumbnails -->
+          <div class="flex gap-2 flex-wrap">
+            <div *ngFor="let img of sliderImages; let i = index"
+                 class="relative w-16 h-16 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500"
+                 [class.border-primary-500]="activeImageIndex === i"
+                 [class.border-gray-200]="activeImageIndex !== i"
+                 [class.opacity-60]="img.uploading"
+                 (click)="!img.uploading && setActiveImage(i)">
+              <img [src]="img.url || img.thumbnail" alt="Thumbnail" class="w-full h-full object-cover">
+              <div *ngIf="img.uploading" class="absolute inset-0 flex items-center justify-center bg-white/80">
+                <div class="loader-2 animate-spin text-xl text-primary-600"></div>
+              </div>
+              <button *ngIf="!img.uploading" type="button"
+                      class="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 hover:bg-red-500 rounded text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-xs"
+                      (click)="$event.stopPropagation(); removeSliderImage(i)">
+                ✕
+              </button>
+            </div>
+
+            <div *ngIf="sliderImages.length < 5 && !isUploadingImage"
+                 class="w-16 h-16 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
+                 (click)="triggerFileInput()">
+              <span class="text-xl leading-none">+</span>
+            </div>
+          </div>
+
+          <!-- Image Metadata -->
+          <div *ngIf="sliderImages.length > 0 && sliderImages[activeImageIndex] && !sliderImages[activeImageIndex].uploading"
+               class="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+            <h4 class="text-sm font-semibold text-gray-900 mb-3">Editar información de la imagen</h4>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-700">Título (opcional)</label>
+                <input type="text"
+                       [value]="sliderImages[activeImageIndex].title || ''"
+                       (input)="onTitleInputChange($event)"
+                       placeholder="Ej: Nueva colección de verano"
+                       class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none">
+                <small class="text-xs text-gray-500">Texto principal que aparece sobre la imagen</small>
+              </div>
+
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-700">Leyenda (opcional)</label>
+                <input type="text"
+                       [value]="sliderImages[activeImageIndex].caption || ''"
+                       (input)="onCaptionInputChange($event)"
+                       placeholder="Ej: Descubre los mejores descuentos"
+                       class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none">
+                <small class="text-xs text-gray-500">Texto secundario descriptivo</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Upload Zone -->
+          <div *ngIf="sliderImages.length < 5 && !isUploadingImage"
+               class="p-6 text-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all bg-gray-50"
+               (click)="triggerFileInput()">
+            <app-icon name="upload-cloud" class="text-3xl text-gray-400 mb-2"></app-icon>
+            <p class="text-sm font-medium text-gray-700">Arrastra imágenes aquí o haz clic para subir</p>
+            <p class="text-xs text-gray-500">PNG, JPG, WebP (máx 5MB)</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Configuración del Catálogo -->
+      <div formGroupName="catalog" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="package" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración del Catálogo
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <app-input label="Productos por página" type="number" formControlName="products_per_page" placeholder="12"></app-input>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Mostrar productos sin stock</label>
+              <small class="text-xs text-gray-500">Permite ver productos agotados</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="show_out_of_stock" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Permitir reseñas</label>
+              <small class="text-xs text-gray-500">Los clientes pueden calificar</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="allow_reviews" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Mostrar variantes</label>
+              <small class="text-xs text-gray-500">Opciones de producto</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="show_variants" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Productos relacionados</label>
+              <small class="text-xs text-gray-500">Sugerir productos similares</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="show_related_products" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Habilitar filtros</label>
+              <small class="text-xs text-gray-500">Filtros avanzados</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="enable_filters" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. Configuración del Carrito -->
+      <div formGroupName="cart" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="shopping-cart" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración del Carrito
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Checkout de invitados</label>
+              <small class="text-xs text-gray-500">Comprar sin registro</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="allow_guest_checkout" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <app-input label="Expiración (horas)" type="number" formControlName="cart_expiration_hours" placeholder="24"></app-input>
+
+          <app-input label="Cantidad máxima por item" type="number" formControlName="max_quantity_per_item" placeholder="10"></app-input>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Guardar para después</label>
+              <small class="text-xs text-gray-500">Guardar items del carrito</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="save_for_later" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. Configuración del Checkout -->
+      <div formGroupName="checkout" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="credit-card" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración del Checkout
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Requerir registro</label>
+              <small class="text-xs text-gray-500">Obligar a crear cuenta</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="require_registration" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Email de invitado requerido</label>
+              <small class="text-xs text-gray-500">Pedir email en checkout</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="guest_email_required" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Crear cuenta después del pedido</label>
+              <small class="text-xs text-gray-500">Opción post-compra</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="create_account_after_order" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Términos requeridos</label>
+              <small class="text-xs text-gray-500">Aceptar términos</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="terms_required" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Opt-in newsletter</label>
+              <small class="text-xs text-gray-500">Suscripción al newsletter</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="guest_newsletter_opt_in" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. Configuración de Envíos -->
+      <div formGroupName="shipping" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="truck" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Configuración de Envíos
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <app-input label="Umbral de envío gratis" type="number" formControlName="free_shipping_threshold" placeholder="0" helperText="Dejar vacío para no ofrecer"></app-input>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Impuesto antes del envío</label>
+              <small class="text-xs text-gray-500">Orden de cálculo</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="calculate_tax_before_shipping" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Múltiples direcciones</label>
+              <small class="text-xs text-gray-500">Enviar a varias direcciones</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="multiple_shipping_addresses" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Wishlist Settings -->
+      <div formGroupName="wishlist" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+            <app-icon name="heart" size="18" class="text-primary-600"></app-icon>
+          </div>
+          Lista de Deseos
+        </h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Habilitar lista de deseos</label>
+              <small class="text-xs text-gray-500">Activar funcionalidad</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="enabled" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Lista de deseos pública</label>
+              <small class="text-xs text-gray-500">Permitir compartir</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="public_wishlist" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+            <div class="flex-1">
+              <label class="block text-sm font-medium text-gray-700">Permitir compartir wishlist</label>
+              <small class="text-xs text-gray-500">Generar enlace</small>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="share_wishlist" class="sr-only peer">
+              <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Form Actions -->
+      <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
+        <app-button variant="outline" (clicked)="onReset()">
+          Restablecer
+        </app-button>
+        <app-button variant="primary" (clicked)="onSubmit()" [disabled]="isSaving || settingsForm.pristine" [loading]="isSaving">
+          <ng-container *ngIf="!isSaving" slot="icon">
+            <app-icon name="save" size="16"></app-icon>
+          </ng-container>
+          <span>{{ isSaving ? 'Guardando...' : (isSetupMode ? 'Configurar Tienda' : 'Guardar Cambios') }}</span>
+        </app-button>
+      </div>
+
+    </form>
+  </ng-container>
+</div>

@@ -41,7 +41,6 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   ],
   providers: [ProductsService],
   template: `
-    <
     <div class="w-full">
       <!-- Stats Grid -->
       <div
@@ -153,7 +152,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private tenantFacade: TenantFacade,
     private router: Router, // Inject Router
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadProducts();
