@@ -29,8 +29,6 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-  // Tax configuration (can be made configurable)
-  private readonly TAX_RATE = 0.21; // 21% IVA
 
   constructor() { }
 
@@ -282,11 +280,16 @@ export class PosCartService {
       };
     } else {
       // Add new item
+      const rateSum = request.product.tax_assignments?.reduce((rateSum, assignment) => {
+        const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+        return rateSum + assignmentRate;
+      }, 0) || 0;
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
         unitPrice: request.product.price,
+        taxAmount: (request.product.price * request.quantity) * rateSum,
         totalPrice: request.quantity * request.product.price,
         addedAt: new Date(),
         notes: request.notes,
@@ -325,10 +328,12 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
+    const newTotalPrice = request.quantity * item.unitPrice;
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
-      totalPrice: request.quantity * item.unitPrice,
+      taxAmount: this.calculateItemTax(item.product, request.quantity),
+      totalPrice: newTotalPrice,
       notes: request.notes || item.notes,
     };
 
@@ -424,9 +429,8 @@ export class PosCartService {
       (total, discount) => total + discount.amount,
       0,
     );
-    const taxableAmount = subtotal - discountAmount;
-    const taxAmount = taxableAmount * this.TAX_RATE;
-    const total = taxableAmount + taxAmount;
+    const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
+    const total = subtotal - discountAmount + taxAmount;
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -445,6 +449,17 @@ export class PosCartService {
    */
   private calculateSubtotal(items: CartItem[]): number {
     return items.reduce((sum, item) => sum + item.totalPrice, 0);
+  }
+
+  /**
+   * Calculate tax for a single item
+   */
+  private calculateItemTax(product: any, quantity: number): number {
+    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return (product.price * quantity) * rateSum;
   }
 
   /**

@@ -23,6 +23,7 @@ export interface MenuItem {
   route?: string;
   children?: MenuItem[];
   badge?: string;
+  action?: (item: MenuItem) => void;
 }
 
 @Component({
@@ -132,15 +133,25 @@ export interface MenuItem {
               </button>
               <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
                 <li *ngFor="let child of item.children" class="submenu-item">
-                  <a
-                    [routerLink]="child.route"
-                    routerLinkActive="active"
-                    #rlaChild="routerLinkActive"
-                    [class.active]="rlaChild.isActive"
-                    (click)="onMenuItemClick()"
-                  >
-                    <span>{{ child.label }}</span>
-                  </a>
+                  <ng-container *ngIf="child.action">
+                    <button
+                      (click)="child.action(child); onMenuItemClick()"
+                      class="submenu-item-button"
+                    >
+                      <span>{{ child.label }}</span>
+                    </button>
+                  </ng-container>
+                  <ng-container *ngIf="!child.action">
+                    <a
+                      [routerLink]="child.route"
+                      routerLinkActive="active"
+                      #rlaChild="routerLinkActive"
+                      [class.active]="rlaChild.isActive"
+                      (click)="onMenuItemClick()"
+                    >
+                      <span>{{ child.label }}</span>
+                    </a>
+                  </ng-container>
                 </li>
               </ul>
             </ng-container>

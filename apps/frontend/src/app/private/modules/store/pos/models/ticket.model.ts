@@ -32,6 +32,12 @@ export interface TicketData {
     phone: string;
     email: string;
     taxId: string;
+    id: number;
+    logo?: string;
+  };
+  organization?: {
+    name: string;
+    taxId: string;
   };
   cashier?: string;
   transactionId?: string;

@@ -111,9 +111,16 @@
 
                         <!-- Tax Categories (Multi-select) -->
                         <div class="md:col-span-2">
-                            <app-multi-selector label="Impuestos" [options]="taxCategoryOptions"
-                                formControlName="tax_category_ids"
-                                placeholder="Seleccionar impuestos..."></app-multi-selector>
+                            <div class="flex gap-2 items-end">
+                                <app-multi-selector class="flex-1" label="Impuestos" [options]="taxCategoryOptions"
+                                    formControlName="tax_category_ids"
+                                    placeholder="Seleccionar impuestos..."></app-multi-selector>
+                                <button type="button" (click)="isTaxCategoryCreateOpen = true"
+                                    class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
+                                    style="border-radius: var(--radius-sm);">
+                                    <app-icon name="plus" size="20"></app-icon>
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Categories (Multi-select) -->
@@ -463,6 +470,9 @@
 
 <app-brand-quick-create [(isOpen)]="isBrandCreateOpen"
     (created)="onBrandCreated($event)"></app-brand-quick-create>
+
+<app-tax-quick-create [(isOpen)]="isTaxCategoryCreateOpen"
+    (created)="onTaxCategoryCreated($event)"></app-tax-quick-create>
 
 <!-- Stock Details Modal -->
 <app-modal [isOpen]="isStockDetailsOpen" (closed)="isStockDetailsOpen = false" [title]="'Detalle de Inventario'"

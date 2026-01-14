@@ -13,6 +13,13 @@ import { OnboardingModalComponent } from '../../../shared/components/onboarding-
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
+// Store related imports
+import { OrganizationStoresService } from '../../../private/modules/organization/stores/services/organization-stores.service';
+import { StoreListItem, StoreType } from '../../../private/modules/organization/stores/interfaces/store.interface';
+import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
+import { DialogService } from '../../../shared/components/dialog/dialog.service';
+import { ToastService } from '../../../shared/components/toast/toast.service';
+
 @Component({
   selector: 'app-organization-admin-layout',
   standalone: true,
@@ -91,15 +98,27 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
+  // Stores
+  stores: StoreListItem[] = [];
+  isLoadingStores = false;
+  menuItems: MenuItem[] = [];
+
   constructor(
     private authFacade: AuthFacade,
     private onboardingWizardService: OnboardingWizardService,
+    private storesService: OrganizationStoresService,
+    private environmentSwitchService: EnvironmentSwitchService,
+    private dialogService: DialogService,
+    private toastService: ToastService,
   ) {
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
   }
 
   ngOnInit(): void {
+    // Initialize menu items
+    this.initializeMenuItems();
+
     // Check onboarding status considering both organization state and user role
     this.checkOnboardingWithRoleValidation();
 
@@ -110,6 +129,9 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
         this.needsOnboarding = needsOnboarding;
         this.updateOnboardingModal();
       });
+
+    // Load stores for sidebar
+    this.loadStores();
   }
 
   private checkOnboardingWithRoleValidation(): void {
@@ -150,6 +172,153 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  loadStores(): void {
+    this.isLoadingStores = true;
+
+    this.storesService.getStores().subscribe({
+      next: (response) => {
+        console.log('Stores response:', response);
+        if (response.success && response.data) {
+          this.stores = response.data.map((store: any) => ({
+            id: store.id,
+            name: store.name,
+            slug: store.slug,
+            store_code: store.store_code || '',
+            store_type: store.store_type || StoreType.PHYSICAL,
+            timezone: store.timezone || 'America/Bogota',
+            is_active: store.is_active !== undefined ? store.is_active : true,
+            manager_user_id: store.manager_user_id,
+            organization_id: store.organization_id,
+            created_at: store.created_at || new Date().toISOString(),
+            updated_at: store.updated_at || new Date().toISOString(),
+            onboarding: store.onboarding || false,
+            organizations: store.organizations || {
+              id: store.organization_id,
+              name: 'Unknown',
+              slug: 'unknown',
+            },
+            addresses: store.addresses || [],
+            _count: store._count || { products: 0, orders: 0, store_users: 0 },
+          }));
+          
+        } else {
+          console.warn('Invalid response structure:', response);
+          this.stores = [];
+        }
+        this.isLoadingStores = false;
+        this.updateMenuItems();
+      },
+      error: (error) => {
+        console.error('Error loading stores:', error);
+        this.stores = [];
+        this.isLoadingStores = false;
+        this.updateMenuItems();
+      },
+    });
+  }
+
+  async switchToStoreEnvironment(store: StoreListItem): Promise<void> {
+    try {
+      const confirmed = await this.dialogService.confirm(
+        {
+          title: 'Cambiar al entorno de la tienda',
+          message: `¿Deseas cambiar al entorno de administración de la tienda <strong class="text-lg font-semibold text-[var(--color-primary)]">${store.name}</strong>?<br><br>Serás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
+          confirmText: 'Cambiar de entorno',
+          cancelText: 'Cancelar',
+          confirmVariant: 'primary',
+        },
+        {
+          size: 'md',
+          customClasses: 'store-switch-modal',
+        },
+      );
+
+      if (confirmed) {
+        const success =
+          await this.environmentSwitchService.performEnvironmentSwitch(
+            'STORE_ADMIN',
+            store.slug,
+          );
+
+        if (success) {
+          this.toastService.success(
+            `Cambiado al entorno de la tienda "${store.name}"`,
+          );
+        } else {
+          this.toastService.error('No se pudo cambiar al entorno de la tienda');
+        }
+      }
+    } catch (error) {
+      console.error('Error switching to store environment:', error);
+      this.toastService.error('Error al cambiar al entorno de la tienda');
+    }
+  }
+
+  initializeMenuItems(): void {
+    this.menuItems = [
+      {
+        label: 'Panel Principal',
+        icon: 'home',
+        route: '/admin/dashboard',
+      },
+      {
+        label: 'Tiendas',
+        icon: 'store',
+        children: [
+          {
+            label: 'Ver Todas las Tiendas',
+            icon: '',
+            route: '/admin/stores',
+          },
+        ],
+      },
+      {
+        label: 'Usuarios',
+        icon: 'users',
+        route: '/admin/users',
+      },
+      {
+        label: 'Auditoría y Cumplimiento',
+        icon: 'shield',
+        route: '/admin/audit/logs'
+      },
+      {
+        label: 'Configuración',
+        icon: 'settings',
+        children: [
+          {
+            label: 'Configuración de Aplicación',
+            icon: 'sliders',
+            route: '/admin/config/application',
+          },
+          {
+            label: 'Metodos de pago',
+            icon: 'credit-card',
+            route: '/admin/config/payments-methods',
+          },
+        ],
+      },
+    ];
+  }
+
+  updateMenuItems(): void {
+    const storesMenu = this.menuItems.find(item => item.label === 'Tiendas');
+    if (storesMenu && storesMenu.children) {
+      storesMenu.children = [
+        {
+          label: 'Ver Todas las Tiendas',
+          icon: '',
+          route: '/admin/stores',
+        },
+        ...this.stores.map(store => ({
+          label: store.name,
+          icon: '',
+          action: () => this.switchToStoreEnvironment(store),
+        })),
+      ];
+    }
+  }
+
   breadcrumb = {
     parent: { label: 'Panel Administrativo', url: '/admin' },
     current: { label: 'Panel Principal' },
@@ -160,45 +329,6 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     role: 'Administrador de Organización',
     initials: 'UA',
   };
-
-  menuItems: MenuItem[] = [
-    {
-      label: 'Panel Principal',
-      icon: 'home',
-      route: '/admin/dashboard',
-    },
-    {
-      label: 'Tiendas',
-      icon: 'store',
-      route: '/admin/stores',
-    },
-    {
-      label: 'Usuarios',
-      icon: 'users',
-      route: '/admin/users',
-    },
-    {
-      label: 'Auditoría y Cumplimiento',
-      icon: 'shield',
-      route: '/admin/audit/logs'
-    },
-    {
-      label: 'Configuración',
-      icon: 'settings',
-      children: [
-        {
-          label: 'Configuración de Aplicación',
-          icon: 'sliders',
-          route: '/admin/config/application',
-        },
-        {
-          label: 'Metodos de pago',
-          icon: 'credit-card',
-          route: '/admin/config/payments-methods',
-        },
-      ],
-    },
-  ];
 
   toggleSidebar() {
     // If mobile, delegate to sidebar component
