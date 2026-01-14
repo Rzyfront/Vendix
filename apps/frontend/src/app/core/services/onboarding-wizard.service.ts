@@ -51,7 +51,7 @@ export interface SetupOrganizationData {
   name: string;
   description?: string;
   legal_name?: string;
-  email?: string;
+  email: string;
   phone?: string;
   website?: string;
   tax_id?: string;

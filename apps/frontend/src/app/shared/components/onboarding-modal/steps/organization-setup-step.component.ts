@@ -317,7 +317,7 @@ import { IconComponent } from '../../index';
               <div class="form-field">
                 <label class="field-label">
                   Email de contacto
-                  <span class="field-optional">(opcional)</span>
+                  <span class="field-required">*</span>
                 </label>
                 <input
                   type="email"
