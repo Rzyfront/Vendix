@@ -500,6 +500,105 @@ async function seedDefaultTemplates() {
       is_system: true,
     },
 
+    // ===== USER PANEL UI TEMPLATES =====
+    {
+      template_name: 'user_panel_ui_org_admin',
+      configuration_type: 'user_panel_ui',
+      template_data: {
+        ORG_ADMIN: {
+          dashboard: true,
+          stores: true,
+          users: true,
+          audit: true,
+          settings: true,
+          analytics: true,
+          reports: true,
+          inventory: true,
+          billing: true,
+          ecommerce: true,
+          orders: true,
+        },
+      },
+      description: 'Default panel UI configuration for organization administrators - all 11 modules enabled',
+      is_system: true,
+    },
+    {
+      template_name: 'user_panel_ui_store_admin',
+      configuration_type: 'user_panel_ui',
+      template_data: {
+        STORE_ADMIN: {
+          // Main modules
+          dashboard: true,
+          pos: true,
+          products: true,
+          ecommerce: true,
+
+          // Orders
+          orders: true,
+          orders_sales: true,
+          orders_purchase_orders: true,
+
+          // Inventory
+          inventory: true,
+          inventory_pop: true,
+          inventory_adjustments: true,
+          inventory_locations: true,
+          inventory_suppliers: true,
+
+          // Customers
+          customers: true,
+          customers_all: true,
+          customers_reviews: true,
+
+          // Marketing
+          marketing: true,
+          marketing_promotions: true,
+          marketing_coupons: true,
+
+          // Analytics
+          analytics: true,
+          analytics_sales: true,
+          analytics_traffic: true,
+          analytics_performance: true,
+
+          // Settings
+          settings: true,
+          settings_general: true,
+          settings_payments: true,
+          settings_appearance: true,
+          settings_security: true,
+          settings_domains: true,
+        },
+      },
+      description: 'Default panel UI configuration for store administrators - all 30+ modules including submodules enabled',
+      is_system: true,
+    },
+    {
+      template_name: 'user_panel_ui_ecommerce',
+      configuration_type: 'user_panel_ui',
+      template_data: {
+        STORE_ECOMMERCE: {
+          profile: true,
+          history: true,
+          dashboard: true,
+          favorites: true,
+          orders: true,
+          settings: true,
+        },
+      },
+      description: 'Default panel UI configuration for e-commerce customers',
+      is_system: true,
+    },
+    {
+      template_name: 'user_panel_ui_landing',
+      configuration_type: 'user_panel_ui',
+      template_data: {
+        VENDIX_LANDING: {},
+      },
+      description: 'Default panel UI configuration for landing page customers - no panel UI needed',
+      is_system: true,
+    },
+
     // ===== NOTIFICATIONS TEMPLATES =====
     {
       template_name: 'notifications_customer',

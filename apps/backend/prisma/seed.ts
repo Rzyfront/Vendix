@@ -2168,68 +2168,149 @@ async function main() {
       app = 'ORG_ADMIN';
       panel_ui = {
         ORG_ADMIN: {
+          dashboard: true,
           stores: true,
           users: true,
-          dashboard: true,
-          orders: true,
+          audit: true,
+          settings: true,
           analytics: true,
           reports: true,
           inventory: true,
           billing: true,
           ecommerce: true,
-          audit: true,
-          settings: true,
+          orders: true,
         },
         STORE_ADMIN: {
-          pos: true,
-          users: true,
+          // Main modules - all enabled
           dashboard: true,
-          analytics: true,
-          reports: true,
-          billing: true,
+          pos: true,
+          products: true,
           ecommerce: true,
+          // Orders - ALL enabled (including submodules)
+          orders: true,
+          orders_sales: true,
+          orders_purchase_orders: true,
+          // Inventory - ALL enabled
+          inventory: true,
+          inventory_pop: true,
+          inventory_adjustments: true,
+          inventory_locations: true,
+          inventory_suppliers: true,
+          // Customers - ALL enabled
+          customers: true,
+          customers_all: true,
+          customers_reviews: true,
+          // Marketing - ALL enabled
+          marketing: true,
+          marketing_promotions: true,
+          marketing_coupons: true,
+          // Analytics - ALL enabled
+          analytics: true,
+          analytics_sales: true,
+          analytics_traffic: true,
+          analytics_performance: true,
+          // Settings - ALL enabled
           settings: true,
+          settings_general: true,
+          settings_payments: true,
+          settings_appearance: true,
+          settings_security: true,
+          settings_domains: true,
         }
       };
     } else if (user.roles.includes(adminRole.id)) {
       app = 'ORG_ADMIN';
       panel_ui = {
         ORG_ADMIN: {
+          dashboard: true,
           stores: true,
           users: true,
-          dashboard: true,
-          orders: true,
+          audit: true,
+          settings: true,
           analytics: true,
           reports: true,
           inventory: true,
           billing: true,
           ecommerce: true,
-          audit: true,
-          settings: true,
+          orders: true,
         },
         STORE_ADMIN: {
-          pos: true,
-          users: true,
+          // Main modules - all enabled
           dashboard: true,
-          analytics: true,
-          reports: true,
-          billing: true,
+          pos: true,
+          products: true,
           ecommerce: true,
+          // Orders - ALL enabled (including submodules)
+          orders: true,
+          orders_sales: true,
+          orders_purchase_orders: true,
+          // Inventory - ALL enabled
+          inventory: true,
+          inventory_pop: true,
+          inventory_adjustments: true,
+          inventory_locations: true,
+          inventory_suppliers: true,
+          // Customers - ALL enabled
+          customers: true,
+          customers_all: true,
+          customers_reviews: true,
+          // Marketing - ALL enabled
+          marketing: true,
+          marketing_promotions: true,
+          marketing_coupons: true,
+          // Analytics - ALL enabled
+          analytics: true,
+          analytics_sales: true,
+          analytics_traffic: true,
+          analytics_performance: true,
+          // Settings - ALL enabled
           settings: true,
+          settings_general: true,
+          settings_payments: true,
+          settings_appearance: true,
+          settings_security: true,
+          settings_domains: true,
         }
       };
     } else if (user.roles.includes(managerRole.id)) {
       app = 'STORE_ADMIN';
       panel_ui = {
         STORE_ADMIN: {
-          pos: true,
-          users: true,
+          // Main modules - all enabled
           dashboard: true,
-          analytics: true,
-          reports: true,
-          billing: true,
+          pos: true,
+          products: true,
           ecommerce: true,
+          // Orders - ALL enabled (including submodules)
+          orders: true,
+          orders_sales: true,
+          orders_purchase_orders: true,
+          // Inventory - ALL enabled
+          inventory: true,
+          inventory_pop: true,
+          inventory_adjustments: true,
+          inventory_locations: true,
+          inventory_suppliers: true,
+          // Customers - ALL enabled
+          customers: true,
+          customers_all: true,
+          customers_reviews: true,
+          // Marketing - ALL enabled
+          marketing: true,
+          marketing_promotions: true,
+          marketing_coupons: true,
+          // Analytics - ALL enabled
+          analytics: true,
+          analytics_sales: true,
+          analytics_traffic: true,
+          analytics_performance: true,
+          // Settings - ALL enabled
           settings: true,
+          settings_general: true,
+          settings_payments: true,
+          settings_appearance: true,
+          settings_security: true,
+          settings_domains: true,
         }
       };
     } else if (user.roles.includes(customerRole.id)) {

@@ -390,4 +390,56 @@ export class AuthEffects {
       ),
     { dispatch: false },
   );
+
+  // Update User Settings
+  updateUserSettings$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.updateUserSettings),
+      mergeMap(({ user_settings }) =>
+        this.authService.updateSettings(user_settings).pipe(
+          map((response) => {
+            if (response.success && response.data) {
+              return AuthActions.updateUserSettingsSuccess({
+                user_settings: response.data,
+              });
+            }
+            return AuthActions.updateUserSettingsFailure({
+              error: 'Invalid response from server',
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.updateUserSettingsFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  updateUserSettingsSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.updateUserSettingsSuccess),
+        tap(() => {
+          this.toast.success('Configuración actualizada correctamente');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  updateUserSettingsFailure$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.updateUserSettingsFailure),
+        tap(({ error }) => {
+          const errorMessage =
+            typeof error === 'string' ? error : extractApiErrorMessage(error);
+          this.toast.error(errorMessage, 'Error al actualizar configuración');
+        }),
+      ),
+    { dispatch: false },
+  );
 }

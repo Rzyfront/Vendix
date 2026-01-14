@@ -22,6 +22,7 @@ import {
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { Subject, takeUntil } from 'rxjs';
 
 @Component({
@@ -37,7 +38,7 @@ import { Subject, takeUntil } from 'rxjs';
     <app-modal
       [(isOpen)]="isOpen"
       [size]="'lg'"
-      title="Configuración de Usuario"
+      title=""
       
     >
       <form [formGroup]="configForm" (ngSubmit)="onSubmit()" *ngIf="user">
@@ -159,11 +160,13 @@ import { Subject, takeUntil } from 'rxjs';
         </div>
       </form>
 
-      <div slot="footer" class="flex justify-end gap-3">
+      <div  class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
+        slot="footer">
         <app-button
-          variant="outline"
+          variant="outline-danger"
           (clicked)="onCancel()"
           [disabled]="isSaving"
+          size="sm"
         >
           Cancelar
         </app-button>
@@ -172,6 +175,7 @@ import { Subject, takeUntil } from 'rxjs';
           (clicked)="onSubmit()"
           [disabled]="configForm.invalid || isSaving || !!jsonError"
           [loading]="isSaving"
+          size="sm"
         >
           Guardar Configuración
         </app-button>
@@ -201,7 +205,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
 
   constructor(
     private fb: FormBuilder,
-    private usersService: UsersService
+    private usersService: UsersService,
+    private authFacade: AuthFacade,
   ) {
     this.configForm = this.fb.group({
       app: ['VENDIX_LANDING'],
@@ -244,26 +249,87 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   loadConfiguration(): void {
     if (!this.user) return;
 
+    // Default panel_ui structure with all submodules
+    const defaultPanelUi = {
+      ORG_ADMIN: {
+        dashboard: true,
+        stores: true,
+        users: true,
+        audit: true,
+        settings: true,
+        analytics: true,
+        reports: true,
+        inventory: true,
+        billing: true,
+        ecommerce: true,
+        orders: true,
+      },
+      STORE_ADMIN: {
+        dashboard: true,
+        pos: true,
+        products: true,
+        ecommerce: true,
+        orders: true,
+        orders_sales: true,
+        orders_purchase_orders: false,
+        inventory: true,
+        inventory_pop: true,
+        inventory_adjustments: false,
+        inventory_locations: false,
+        inventory_suppliers: false,
+        customers: true,
+        customers_all: true,
+        customers_reviews: false,
+        marketing: true,
+        marketing_promotions: false,
+        marketing_coupons: false,
+        analytics: true,
+        analytics_sales: true,
+        analytics_traffic: false,
+        analytics_performance: false,
+        settings: true,
+        settings_general: true,
+        settings_payments: true,
+        settings_appearance: false,
+        settings_security: true,
+        settings_domains: false,
+      },
+      STORE_ECOMMERCE: {
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true,
+      },
+    };
+
     // Reset form first
     this.configForm.reset({
       app: 'VENDIX_LANDING',
       rolesInput: '',
       storesInput: '',
-      panelUiInput: '{}'
+      panelUiInput: JSON.stringify(defaultPanelUi, null, 2),
     });
 
     this.usersService.getUserConfiguration(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (config: any) => {
+          // Merge with defaults to ensure all keys exist
+          const mergedPanelUi = {
+            ...defaultPanelUi,
+            ...(config.panel_ui || {}),
+          };
+
           this.configForm.patchValue({
             app: config.app,
             rolesInput: (config.roles || []).join(', '),
             storesInput: (config.store_ids || []).join(', '),
-            panelUiInput: JSON.stringify(config.panel_ui || {}, null, 2)
+            panelUiInput: JSON.stringify(mergedPanelUi, null, 2),
           });
         },
-        error: (err: any) => console.error(err)
+        error: (err: any) => console.error(err),
       });
   }
 
@@ -295,6 +361,24 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       .subscribe({
         next: () => {
           this.isSaving = false;
+
+          // Update auth state if editing current user's configuration
+          const currentUserId = this.authFacade.getUserId();
+          if (this.user && currentUserId === this.user.id) {
+            const currentUserSettings = this.authFacade.getUserSettings();
+            const updatedSettings = {
+              ...currentUserSettings,
+              config: {
+                ...currentUserSettings?.config,
+                panel_ui: {
+                  ...currentUserSettings?.config?.panel_ui,
+                  [payload.app]: payload.panel_ui,
+                },
+              },
+            };
+            this.authFacade.updateUserSettings(updatedSettings);
+          }
+
           this.onSaved.emit();
           this.isOpenChange.emit(false);
         },
