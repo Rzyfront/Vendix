@@ -122,7 +122,7 @@ export interface Brand {
 export interface ProductTaxAssignment {
   product_id: number;
   tax_category_id: number;
-  tax_category?: TaxCategory;
+  tax_categories?: TaxCategory;
 }
 
 export interface TaxCategory {

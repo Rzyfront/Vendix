@@ -31,6 +31,18 @@ export class TaxesService {
         name: createTaxCategoryDto.name,
         description: createTaxCategoryDto.description,
         store_id: store_id,
+        tax_rates: {
+          create: {
+            name: createTaxCategoryDto.name,
+            rate: Number(createTaxCategoryDto.rate) / 100,
+            store_id: store_id,
+            is_compound: createTaxCategoryDto.is_compound || false,
+            priority: createTaxCategoryDto.sort_order || 0,
+          },
+        },
+      },
+      include: {
+        tax_rates: true,
       },
     });
   }
@@ -48,7 +60,7 @@ export class TaxesService {
     // Los usuarios solo pueden ver tax_categories de su store actual
 
     const [taxCategories, total] = await Promise.all([
-      this.prisma.tax_categories.findMany({ where, skip, take: limit }),
+      this.prisma.tax_categories.findMany({ where, skip, take: limit, include: { tax_rates: true } }),
       this.prisma.tax_categories.count({ where }),
     ]);
 
