@@ -10,9 +10,6 @@ import { ToggleComponent } from '../toggle/toggle.component';
 import { IconComponent } from '../icon/icon.component';
 
 // Constant: Configuration of modules per app type
-// TODO(human): The parent-child synchronization logic needs to be implemented
-// in the onParentToggle method below. When a parent module is toggled,
-// all its children should be synchronized to match the parent's state.
 const APP_MODULES = {
   ORG_ADMIN: [
     { key: 'dashboard', label: 'Panel Principal', description: 'Vista general de la organización' },
@@ -405,25 +402,32 @@ export class SettingsModalComponent implements OnInit {
   }
 
   /**
-   * TODO(human): Implement parent-child synchronization logic
+   * Synchronize child module toggles with parent module state
    *
-   * Context: When a parent module toggle is changed, all its children should
-   * be synchronized to match the parent's state. This ensures that:
-   * - When parent is enabled → all children become enabled
-   * - When parent is disabled → all children become disabled
-   *
-   * Guidance:
-   * - The module parameter has a 'children' array containing child module objects
-   * - Each child has a 'key' property that matches the form control name
-   * - Use this.settingsForm.get() to access child controls and setValue() to update them
-   * - Set { emitEvent: false } to prevent triggering additional change events
+   * When a parent module is toggled, all its children should match the parent's state:
+   * - Parent enabled → all children become enabled
+   * - Parent disabled → all children become disabled
    *
    * @param isEnabled - The new state of the parent toggle
    * @param parentModule - The parent module object containing children array
    */
   onParentToggle(isEnabled: boolean, parentModule: any): void {
-    // TODO(human): Implement this method to synchronize child toggles with parent
-    // Hint: Loop through parentModule.children and update each child's form control
+    // Guard: Only process if parent has children
+    if (!parentModule.children || !Array.isArray(parentModule.children)) {
+      return;
+    }
+
+    // Synchronize each child with the parent's state
+    parentModule.children.forEach((child: any) => {
+      const controlPath = `panel_ui.${this.currentAppType}.${child.key}`;
+      const childControl = this.settingsForm.get(controlPath);
+
+      if (childControl) {
+        // Update child value without emitting additional events
+        // This prevents performance issues from multiple validation cycles
+        childControl.setValue(isEnabled, { emitEvent: false });
+      }
+    });
   }
 
   /**
@@ -578,18 +582,19 @@ export class SettingsModalComponent implements OnInit {
       next: (response) => {
         const currentConfig = response.data?.config || response.config || {};
 
-        // Deep merge strategy
+        // 🔧 FIX: NO modificar el campo 'app' - solo actualizar panel_ui del app type actual
+        // El usuario puede estar viendo/editando un app type diferente al que tiene seleccionado
         const configObj = {
-          // Preservar TODOS los campos existentes
+          // Preservar TODOS los campos existentes, incluyendo 'app'
           ...currentConfig,
 
-          // Actualizar solo campos que estamos editando
-          app: formValue.app,
+          // 🔥 NO actualizar 'app' - mantener el valor actual del usuario
+          // app: formValue.app,  // ❌ ESTO CAUSA EL BUG - elimina esta línea
 
-          // Merge panel_ui: preservar app types no editados
+          // Merge panel_ui: preservar app types no editados y actualizar solo el actual
           panel_ui: {
             ...currentConfig.panel_ui,  // Preservar todos los app types existentes
-            [formValue.app]: formValue.panel_ui[formValue.app]  // Actualizar solo el actual
+            [this.currentAppType]: formValue.panel_ui[this.currentAppType]  // ✅ Actualizar solo el app type que se está editando
           },
 
           // Merge preferences: preservar preferencias existentes
@@ -601,6 +606,12 @@ export class SettingsModalComponent implements OnInit {
         };
 
         const dto = { config: configObj };
+
+        console.log('🔧 Debug - Saving settings:');
+        console.log('  - Current app type:', this.currentAppType);
+        console.log('  - User app (preserved):', currentConfig.app);
+        console.log('  - Updating panel_ui for:', this.currentAppType);
+        console.log('  - New config:', configObj);
 
         // Use AuthFacade to update settings through NgRx
         // This ensures the store is updated and the sidebar reacts immediately
