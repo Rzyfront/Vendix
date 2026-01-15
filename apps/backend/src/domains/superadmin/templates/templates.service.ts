@@ -7,10 +7,14 @@ import {
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto';
 import { Prisma, template_config_type_enum } from '@prisma/client';
+import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 
 @Injectable()
 export class TemplatesService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly defaultPanelUIService: DefaultPanelUIService,
+  ) {}
 
   async create(createTemplateDto: CreateTemplateDto) {
     // Check if template_name already exists
@@ -116,14 +120,16 @@ export class TemplatesService {
       throw new NotFoundException('Template not found');
     }
 
-    // Prevent modifying system templates' core fields
-    if (existingTemplate.is_system) {
-      if (
-        (updateTemplateDto as any).configuration_type ||
-        (updateTemplateDto as any).template_name
-      ) {
-        throw new BadRequestException(
-          'Cannot modify configuration_type or template_name of system templates',
+    // Check if template_name is being changed and if it conflicts
+    if ((updateTemplateDto as any).template_name &&
+        (updateTemplateDto as any).template_name !== existingTemplate.template_name) {
+      const nameConflict = await this.prisma.default_templates.findUnique({
+        where: { template_name: (updateTemplateDto as any).template_name },
+      });
+
+      if (nameConflict) {
+        throw new ConflictException(
+          `Template with name '${(updateTemplateDto as any).template_name}' already exists`,
         );
       }
     }
@@ -136,7 +142,8 @@ export class TemplatesService {
       );
     }
 
-    return this.prisma.default_templates.update({
+    // Update template
+    const updatedTemplate = await this.prisma.default_templates.update({
       where: { id },
       data: {
         ...updateTemplateDto,
@@ -144,6 +151,13 @@ export class TemplatesService {
         updated_at: new Date(),
       },
     });
+
+    // Invalidate DefaultPanelUIService cache if user_settings template was updated
+    if (existingTemplate.configuration_type === 'user_settings') {
+      this.defaultPanelUIService.invalidateCache();
+    }
+
+    return updatedTemplate;
   }
 
   async remove(id: number) {
@@ -153,13 +167,6 @@ export class TemplatesService {
 
     if (!existingTemplate) {
       throw new NotFoundException('Template not found');
-    }
-
-    // Prevent deletion of system templates
-    if (existingTemplate.is_system) {
-      throw new BadRequestException(
-        'Cannot delete system templates. System templates are protected.',
-      );
     }
 
     return this.prisma.default_templates.delete({

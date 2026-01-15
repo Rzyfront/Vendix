@@ -30,42 +30,59 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
       (isOpenChange)="onModalChange($event)"
     >
       <div *ngIf="template" class="space-y-6">
-        <!-- Read-only fields for system templates -->
+        <!-- Warning banner for system templates -->
         <div class="warning-banner">
           <div class="flex items-start gap-3">
-            <app-icon name="info" [size]="20" class="text-warning flex-shrink-0"></app-icon>
+            <app-icon name="alert-triangle" [size]="20" class="text-warning flex-shrink-0"></app-icon>
             <div>
               <h4 class="font-semibold text-warning">
                 {{ template.is_system ? 'System Template' : 'Custom Template' }}
               </h4>
               <p class="text-sm text-text-secondary mt-1">
                 {{ template.is_system
-                  ? 'You can only modify the template data and status. Configuration type cannot be changed.'
-                  : 'You can modify all fields except the template name.' }}
+                  ? 'You are modifying a system template. Changes will affect all organizations using this template. This action will be logged for audit purposes.'
+                  : 'You can modify all fields of this custom template.' }}
               </p>
             </div>
           </div>
         </div>
 
         <form [formGroup]="templateForm">
-          <!-- Template Name (Read-only) -->
+          <!-- Template Name -->
           <div class="space-y-2">
             <label class="block text-sm font-medium text-text-primary">
-              Template Name
+              Template Name *
             </label>
-            <div class="w-full px-3 py-2 border border-border rounded-input bg-gray-100 text-text-secondary">
-              {{ template.template_name }}
-            </div>
+            <input
+              type="text"
+              formControlName="template_name"
+              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+              placeholder="Enter template name"
+            />
+            <p class="text-xs text-text-secondary">
+              Must be unique across all templates
+            </p>
           </div>
 
-          <!-- Configuration Type (Read-only) -->
+          <!-- Configuration Type -->
           <div class="space-y-2">
             <label class="block text-sm font-medium text-text-primary">
-              Configuration Type
+              Configuration Type *
             </label>
-            <div class="w-full px-3 py-2 border border-border rounded-input bg-gray-100 text-text-secondary">
-              {{ formatConfigurationType(template.configuration_type) }}
-            </div>
+            <select
+              formControlName="configuration_type"
+              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+            >
+              <option value="domain">Domain</option>
+              <option value="store_settings">Store Settings</option>
+              <option value="ecommerce">E-commerce</option>
+              <option value="payment_methods">Payment Methods</option>
+              <option value="shipping">Shipping</option>
+              <option value="tax">Tax</option>
+              <option value="email">Email</option>
+              <option value="notifications">Notifications</option>
+              <option value="user_panel_ui">User Panel UI</option>
+            </select>
           </div>
 
           <!-- Description -->
@@ -114,8 +131,8 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
 
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-text-secondary">
-          <app-icon name="lock" [size]="12"></app-icon>
-          System templates have limited editing
+          <app-icon name="shield" [size]="12"></app-icon>
+          All changes will be logged for audit purposes
         </div>
         <div class="flex gap-3">
           <app-button variant="outline" (clicked)="onCancel()">
@@ -152,6 +169,8 @@ export class TemplateEditModalComponent {
 
   private initializeForm(): void {
     this.templateForm = this.fb.group({
+      template_name: ['', [Validators.required]],
+      configuration_type: ['', [Validators.required]],
       description: [''],
       template_data: ['{}'],
       is_active: [true],
@@ -165,6 +184,8 @@ export class TemplateEditModalComponent {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['template'] && this.template) {
       this.templateForm.patchValue({
+        template_name: this.template.template_name,
+        configuration_type: this.template.configuration_type,
         description: this.template.description || '',
         template_data: JSON.stringify(this.template.template_data, null, 2),
         is_active: this.template.is_active,
@@ -192,6 +213,8 @@ export class TemplateEditModalComponent {
 
     const formData = this.templateForm.value;
     const templateData: UpdateTemplateDto = {
+      template_name: formData.template_name,
+      configuration_type: formData.configuration_type,
       description: formData.description || undefined,
       template_data: JSON.parse(formData.template_data),
       is_active: formData.is_active,

@@ -5,7 +5,7 @@
  *   module (optional): 'products', 'users', 'organizations', 'permissions', 'templates'
  */
 
-import { clearDatabase, clearModule } from '../database.js';
+import { clearDatabase, clearModule } from '../database';
 
 async function main() {
   const module = process.argv[2];

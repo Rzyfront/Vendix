@@ -92,12 +92,16 @@ export class TemplatesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a template' })
+  @ApiOperation({
+    summary: 'Update a template',
+    description: 'Update any template field including system templates. System template modifications are logged for audit purposes.'
+  })
   @ApiResponse({
     status: 200,
     description: 'Template updated successfully',
   })
   @ApiResponse({ status: 404, description: 'Template not found' })
+  @ApiResponse({ status: 409, description: 'Template name already exists' })
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateTemplateDto: UpdateTemplateDto,
@@ -110,16 +114,15 @@ export class TemplatesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete a template' })
+  @ApiOperation({
+    summary: 'Delete a template',
+    description: 'Delete any template including system templates. System template deletions are logged for audit purposes and cannot be undone.'
+  })
   @ApiResponse({
     status: 200,
     description: 'Template deleted successfully',
   })
   @ApiResponse({ status: 404, description: 'Template not found' })
-  @ApiResponse({
-    status: 409,
-    description: 'Cannot delete system templates',
-  })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.templatesService.remove(id);
     return this.responseService.deleted('Template deleted successfully');

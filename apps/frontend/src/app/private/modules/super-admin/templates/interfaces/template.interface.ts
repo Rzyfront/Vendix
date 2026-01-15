@@ -43,6 +43,8 @@ export interface CreateTemplateDto {
 }
 
 export interface UpdateTemplateDto {
+  template_name?: string;
+  configuration_type?: TemplateConfigType;
   template_data?: Record<string, any>;
   description?: string;
   is_active?: boolean;

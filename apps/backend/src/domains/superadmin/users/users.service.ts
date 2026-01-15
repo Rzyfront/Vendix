@@ -13,10 +13,14 @@ import {
 } from '../../organization/users/dto';
 import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: GlobalPrismaService) { }
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly defaultPanelUIService: DefaultPanelUIService,
+  ) { }
 
   async create(createUserDto: CreateUserDto) {
     // Check if email already exists
@@ -52,6 +56,15 @@ export class UsersService {
             roles: true,
           },
         },
+      },
+    });
+
+    // Create user_settings with default ORG_ADMIN configuration
+    const adminConfig = await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+    await this.prisma.user_settings.create({
+      data: {
+        user_id: user.id,
+        config: adminConfig,
       },
     });
 

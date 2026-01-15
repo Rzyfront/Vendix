@@ -489,89 +489,147 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
       is_system: true,
     },
 
-    // ===== USER PANEL UI TEMPLATES =====
+    // ===== USER SETTINGS TEMPLATES =====
     {
-      template_name: 'user_panel_ui_org_admin',
-      configuration_type: 'user_panel_ui',
+      template_name: 'user_settings_org_admin',
+      configuration_type: 'user_settings',
       template_data: {
-        ORG_ADMIN: {
-          dashboard: true,
-          stores: true,
-          users: true,
-          audit: true,
-          settings: true,
-          analytics: true,
-          reports: true,
-          inventory: true,
-          billing: true,
-          ecommerce: true,
-          orders: true,
+        app: 'ORG_ADMIN',
+        panel_ui: {
+          ORG_ADMIN: {
+            dashboard: true,
+            stores: true,
+            users: true,
+            audit: true,
+            settings: true,
+            analytics: true,
+            reports: true,
+            inventory: true,
+            billing: true,
+            ecommerce: true,
+            orders: true,
+          },
+          STORE_ADMIN: {
+            dashboard: true,
+            pos: true,
+            products: true,
+            ecommerce: true,
+            orders: true,
+            orders_sales: true,
+            orders_purchase_orders: true,
+            inventory: true,
+            inventory_pop: true,
+            inventory_adjustments: true,
+            inventory_locations: true,
+            inventory_suppliers: true,
+            customers: true,
+            customers_all: true,
+            customers_reviews: true,
+            marketing: true,
+            marketing_promotions: true,
+            marketing_coupons: true,
+            analytics: true,
+            analytics_sales: true,
+            analytics_traffic: true,
+            analytics_performance: true,
+            settings: true,
+            settings_general: true,
+            settings_payments: true,
+            settings_appearance: true,
+            settings_security: true,
+            settings_domains: true,
+          }
+        },
+        preferences: {
+          language: 'es',
+          theme: 'default',
         },
       },
-      description: 'Default panel UI configuration for organization administrators - all 11 modules enabled',
+      description: 'Default user settings for organization administrators - all 11 modules enabled',
       is_system: true,
     },
     {
-      template_name: 'user_panel_ui_store_admin',
-      configuration_type: 'user_panel_ui',
+      template_name: 'user_settings_store_admin',
+      configuration_type: 'user_settings',
       template_data: {
-        STORE_ADMIN: {
-          dashboard: true,
-          pos: true,
-          products: true,
-          ecommerce: true,
-          orders: true,
-          orders_sales: true,
-          orders_purchase_orders: true,
-          inventory: true,
-          inventory_pop: true,
-          inventory_adjustments: true,
-          inventory_locations: true,
-          inventory_suppliers: true,
-          customers: true,
-          customers_all: true,
-          customers_reviews: true,
-          marketing: true,
-          marketing_promotions: true,
-          marketing_coupons: true,
-          analytics: true,
-          analytics_sales: true,
-          analytics_traffic: true,
-          analytics_performance: true,
-          settings: true,
-          settings_general: true,
-          settings_payments: true,
-          settings_appearance: true,
-          settings_security: true,
-          settings_domains: true,
+        app: 'STORE_ADMIN',
+        panel_ui: {
+          STORE_ADMIN: {
+            dashboard: true,
+            pos: true,
+            products: true,
+            ecommerce: true,
+            orders: true,
+            orders_sales: true,
+            orders_purchase_orders: true,
+            inventory: true,
+            inventory_pop: true,
+            inventory_adjustments: true,
+            inventory_locations: true,
+            inventory_suppliers: true,
+            customers: true,
+            customers_all: true,
+            customers_reviews: true,
+            marketing: true,
+            marketing_promotions: true,
+            marketing_coupons: true,
+            analytics: true,
+            analytics_sales: true,
+            analytics_traffic: true,
+            analytics_performance: true,
+            settings: true,
+            settings_general: true,
+            settings_payments: true,
+            settings_appearance: true,
+            settings_security: true,
+            settings_domains: true,
+          },
+        },
+        preferences: {
+          language: 'es',
+          theme: 'default',
         },
       },
-      description: 'Default panel UI configuration for store administrators - all 30+ modules including submodules enabled',
+      description: 'Default user settings for store administrators - all 30+ modules including submodules enabled',
       is_system: true,
     },
     {
-      template_name: 'user_panel_ui_ecommerce',
-      configuration_type: 'user_panel_ui',
+      template_name: 'user_settings_ecommerce_customer',
+      configuration_type: 'user_settings',
       template_data: {
-        STORE_ECOMMERCE: {
-          profile: true,
-          history: true,
-          dashboard: true,
-          favorites: true,
-          orders: true,
-          settings: true,
+        app: 'STORE_ECOMMERCE',
+        panel_ui: {
+          STORE_ECOMMERCE: {
+            profile: true,
+            history: true,
+            dashboard: true,
+            favorites: true,
+            orders: true,
+            settings: true,
+          },
+        },
+        preferences: {
+          language: 'es',
+          theme: 'default',
         },
       },
-      description: 'Default panel UI configuration for e-commerce customers',
+      description: 'Default user settings for e-commerce customers',
       is_system: true,
     },
     {
-      template_name: 'user_panel_ui_landing',
-      configuration_type: 'user_panel_ui',
+      template_name: 'user_settings_landing',
+      configuration_type: 'user_settings',
       template_data: {
-        VENDIX_LANDING: {},
+        app: 'VENDIX_LANDING',
+        panel_ui: {
+          VENDIX_LANDING: {},
+        },
+        preferences: {
+          language: 'es',
+          theme: 'default',
+        },
       },
-      description: 'Default panel UI configuration for landing page customers - no panel UI needed',
+      description: 'Default user settings for landing page customers - no panel UI needed',
       is_system: true,
     },
 
@@ -622,52 +680,9 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
   // Crear o actualizar templates
   let created = 0;
   let updated = 0;
-  let skipped = 0;
 
   for (const template of templates) {
-    let result: any;
-
-    // Skip user_panel_ui templates if the enum value doesn't exist in DB
-    if (template.configuration_type === 'user_panel_ui') {
-      try {
-        // Try to upsert, if it fails due to enum, skip it
-        result = await client.default_templates.upsert({
-          where: { template_name: template.template_name },
-          update: {
-            configuration_type: template.configuration_type as any,
-            template_data: template.template_data as any,
-            description: template.description,
-            is_active: true,
-            is_system: template.is_system,
-            updated_at: new Date(),
-          },
-          create: {
-            template_name: template.template_name,
-            configuration_type: template.configuration_type as any,
-            template_data: template.template_data as any,
-            description: template.description,
-            is_active: true,
-            is_system: template.is_system,
-          },
-        });
-
-        if (result.created_at === result.updated_at) {
-          created++;
-        } else {
-          updated++;
-        }
-      } catch (error: any) {
-        // If enum value doesn't exist, skip silently
-        if (error.message?.includes('template_config_type_enum')) {
-          skipped++;
-          continue;
-        }
-        throw error;
-      }
-      continue;
-    }
-
-    result = await client.default_templates.upsert({
+    const result = await client.default_templates.upsert({
       where: { template_name: template.template_name },
       update: {
         configuration_type: template.configuration_type as any,
@@ -694,10 +709,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
     }
   }
 
-  if (skipped > 0) {
-    console.log(`⚠️  Skipped ${skipped} templates (user_panel_ui enum not available in database)`);
-  }
   console.log(`✅ Default templates seeded: ${created} created, ${updated} updated`);
 
-  return { created, updated, skipped };
+  return { created, updated };
 }

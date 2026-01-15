@@ -488,7 +488,7 @@ export class OnboardingWizardService {
       where: { user_id: userId },
     });
 
-    const config = this.defaultPanelUIService.generatePanelUI(setupAppConfigDto.app_type);
+    const config = await this.defaultPanelUIService.generatePanelUI(setupAppConfigDto.app_type);
 
     if (existingSettings) {
       await this.prismaService.user_settings.update({

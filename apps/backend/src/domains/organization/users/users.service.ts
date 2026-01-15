@@ -83,7 +83,7 @@ export class UsersService {
     });
 
     // Crear user_settings con el app indicado usando el servicio centralizado
-    const config = this.defaultPanelUIService.generatePanelUI(app);
+    const config = await this.defaultPanelUIService.generatePanelUI(app);
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,

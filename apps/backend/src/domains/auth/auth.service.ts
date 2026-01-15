@@ -277,7 +277,7 @@ export class AuthService {
         },
       });
       // Crear user_settings para el owner usando el servicio centralizado
-      const ownerConfig = this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+      const ownerConfig = await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
       await tx.user_settings.create({
         data: {
           user_id: user.id,
@@ -509,7 +509,7 @@ export class AuthService {
     });
 
     // Crear user_settings para el usuario customer usando el servicio centralizado
-    const customerConfig = this.defaultPanelUIService.generatePanelUI(app);
+    const customerConfig = await this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
@@ -774,7 +774,7 @@ export class AuthService {
     });
 
     // Crear user_settings para el usuario staff usando el servicio centralizado
-    const staffConfig = this.defaultPanelUIService.generatePanelUI(app);
+    const staffConfig = await this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,

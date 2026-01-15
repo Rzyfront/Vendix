@@ -4,8 +4,8 @@
  * Clears all data and re-seeds
  */
 
-import { clearDatabase } from '../database.js';
-import { seedDatabase } from '../../../seed.js';
+import { clearDatabase } from '../database';
+import { seedDatabase } from '../../../seed';
 
 async function main() {
   try {

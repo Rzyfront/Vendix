@@ -1,5 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { DefaultPanelUIService } from './default-panel-ui.service';
+import { PrismaModule } from '../../prisma/prisma.module';
 
 /**
  * DefaultPanelUIModule
@@ -14,6 +15,7 @@ import { DefaultPanelUIService } from './default-panel-ui.service';
  */
 @Global()
 @Module({
+  imports: [PrismaModule],
   providers: [DefaultPanelUIService],
   exports: [DefaultPanelUIService],
 })

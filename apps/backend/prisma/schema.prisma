@@ -1544,4 +1544,5 @@ enum template_config_type_enum {
   email
   notifications
   user_panel_ui
+  user_settings
 }
