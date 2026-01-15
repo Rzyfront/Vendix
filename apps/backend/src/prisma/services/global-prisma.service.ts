@@ -221,6 +221,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.organizations;
   }
 
+  get currencies() {
+    return this.baseClient.currencies;
+  }
+
   get brands() {
     return this.baseClient.brands;
   }
