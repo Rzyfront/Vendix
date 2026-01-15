@@ -1,19 +1,12 @@
 import { PrismaClient } from '@prisma/client';
-import { PrismaPg } from '@prisma/adapter-pg';
-import * as pg from 'pg';
-
-const connectionString =
-  process.env.DATABASE_URL ||
-  'postgresql://username:password@localhost:5432/vendix_db?schema=public';
-const pool = new pg.Pool({ connectionString });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+import { getPrismaClient } from './shared/client';
 
 /**
  * Default Templates Seed
  * Crea plantillas de configuración por defecto para el sistema
  */
-async function seedDefaultTemplates() {
+export async function seedDefaultTemplates(prisma?: PrismaClient) {
+  const client = prisma || getPrismaClient();
   console.log('🌱 Seeding default templates...');
 
   const templates = [
@@ -209,13 +202,11 @@ async function seedDefaultTemplates() {
       configuration_type: 'ecommerce',
       template_data: {
         app: 'STORE_ECOMMERCE',
-        // Configuración General
         general: {
           currency: 'COP',
           locale: 'es-CO',
           timezone: 'America/Bogota',
         },
-        // Slider Principal
         slider: {
           photos: [
             { url: null, title: '', caption: '' },
@@ -255,13 +246,11 @@ async function seedDefaultTemplates() {
       configuration_type: 'ecommerce',
       template_data: {
         app: 'STORE_ECOMMERCE',
-        // Configuración General
         general: {
           currency: 'COP',
           locale: 'es-CO',
           timezone: 'America/Bogota',
         },
-        // Slider Principal
         slider: {
           photos: [
             { url: null, title: '', caption: '' },
@@ -454,7 +443,7 @@ async function seedDefaultTemplates() {
       template_data: {
         country: 'US',
         tax_included: false,
-        default_rate: null, // Varía por estado
+        default_rate: null,
         categories: [
           {
             name: 'Sales Tax',
@@ -527,41 +516,28 @@ async function seedDefaultTemplates() {
       configuration_type: 'user_panel_ui',
       template_data: {
         STORE_ADMIN: {
-          // Main modules
           dashboard: true,
           pos: true,
           products: true,
           ecommerce: true,
-
-          // Orders
           orders: true,
           orders_sales: true,
           orders_purchase_orders: true,
-
-          // Inventory
           inventory: true,
           inventory_pop: true,
           inventory_adjustments: true,
           inventory_locations: true,
           inventory_suppliers: true,
-
-          // Customers
           customers: true,
           customers_all: true,
           customers_reviews: true,
-
-          // Marketing
           marketing: true,
           marketing_promotions: true,
           marketing_coupons: true,
-
-          // Analytics
           analytics: true,
           analytics_sales: true,
           analytics_traffic: true,
           analytics_performance: true,
-
-          // Settings
           settings: true,
           settings_general: true,
           settings_payments: true,
@@ -646,9 +622,52 @@ async function seedDefaultTemplates() {
   // Crear o actualizar templates
   let created = 0;
   let updated = 0;
+  let skipped = 0;
 
   for (const template of templates) {
-    const result = await prisma.default_templates.upsert({
+    let result: any;
+
+    // Skip user_panel_ui templates if the enum value doesn't exist in DB
+    if (template.configuration_type === 'user_panel_ui') {
+      try {
+        // Try to upsert, if it fails due to enum, skip it
+        result = await client.default_templates.upsert({
+          where: { template_name: template.template_name },
+          update: {
+            configuration_type: template.configuration_type as any,
+            template_data: template.template_data as any,
+            description: template.description,
+            is_active: true,
+            is_system: template.is_system,
+            updated_at: new Date(),
+          },
+          create: {
+            template_name: template.template_name,
+            configuration_type: template.configuration_type as any,
+            template_data: template.template_data as any,
+            description: template.description,
+            is_active: true,
+            is_system: template.is_system,
+          },
+        });
+
+        if (result.created_at === result.updated_at) {
+          created++;
+        } else {
+          updated++;
+        }
+      } catch (error: any) {
+        // If enum value doesn't exist, skip silently
+        if (error.message?.includes('template_config_type_enum')) {
+          skipped++;
+          continue;
+        }
+        throw error;
+      }
+      continue;
+    }
+
+    result = await client.default_templates.upsert({
       where: { template_name: template.template_name },
       update: {
         configuration_type: template.configuration_type as any,
@@ -675,32 +694,10 @@ async function seedDefaultTemplates() {
     }
   }
 
-  console.log(`✅ Default templates seeded: ${created} created, ${updated} updated`);
-}
-
-async function main() {
-  try {
-    await seedDefaultTemplates();
-  } catch (error) {
-    console.error('Error seeding default templates:', error);
-    throw error;
-  } finally {
-    await prisma.$disconnect();
+  if (skipped > 0) {
+    console.log(`⚠️  Skipped ${skipped} templates (user_panel_ui enum not available in database)`);
   }
-}
+  console.log(`✅ Default templates seeded: ${created} created, ${updated} updated`);
 
-// Ejecutar si se llama directamente
-if (require.main === module) {
-  main()
-    .then(() => {
-      console.log('✅ Default templates seed completed successfully');
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error('❌ Default templates seed failed:');
-      console.error(error);
-      process.exit(1);
-    });
+  return { created, updated, skipped };
 }
-
-export { seedDefaultTemplates };
