@@ -116,6 +116,11 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/domains',
     },
     {
+      label: 'Monedas',
+      icon: 'dollar-sign',
+      route: '/super-admin/currencies',
+    },
+    {
       label: 'Auditoría',
       icon: 'eye',
       route: '/super-admin/audit',

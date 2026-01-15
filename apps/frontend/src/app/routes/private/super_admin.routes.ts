@@ -65,6 +65,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.DomainsComponent),
       },
       {
+        path: 'currencies',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/currencies/currencies.component'
+          ).then((c) => c.CurrenciesComponent),
+      },
+      {
         path: 'system/templates',
         loadComponent: () =>
           import(

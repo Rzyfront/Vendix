@@ -9,6 +9,7 @@ import { AuditModule } from './audit/audit.module';
 import { StoresModule } from './stores/stores.module';
 import { UsersModule } from './users/users.module';
 import { TemplatesModule } from './templates/templates.module';
+import { CurrenciesModule } from './currencies/currencies.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { TemplatesModule } from './templates/templates.module';
     UsersModule,
     AuditModule,
     TemplatesModule,
+    CurrenciesModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],
