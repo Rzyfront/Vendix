@@ -13,7 +13,7 @@ import {
 
 @Injectable()
 export class OnboardingService {
-  constructor(private readonly prismaService: OrganizationPrismaService) {}
+  constructor(private readonly prismaService: OrganizationPrismaService) { }
 
   // ===== ORGANIZATION ONBOARDING METHODS =====
 
@@ -76,6 +76,9 @@ export class OnboardingService {
         state: 'active',
       },
     });
+
+    // Setup base payment methods for the organization
+    await this.setupOrganizationPaymentPolicy(organizationId);
 
     return {
       organization_id: organizationId,
@@ -164,6 +167,9 @@ export class OnboardingService {
         onboarding: true,
       },
     });
+
+    // Enable base payment methods for the store
+    await this.setupStorePaymentMethods(storeId, updatedStore.organization_id);
 
     return {
       store_id: storeId,
@@ -436,5 +442,80 @@ export class OnboardingService {
     );
 
     return !isOwner;
+  }
+
+  // ===== PRIVATE SETUP METHODS =====
+
+  private async setupOrganizationPaymentPolicy(organizationId: number) {
+    try {
+      const baseMethods = await this.prismaService.system_payment_methods.findMany({
+        where: {
+          name: { in: ['cash', 'payment_vouchers'] },
+          is_active: true,
+        },
+      });
+
+      if (baseMethods.length === 0) return;
+
+      const methodIds = baseMethods.map((m) => m.id.toString());
+
+      await this.prismaService.organization_payment_policies.upsert({
+        where: { organization_id: organizationId },
+        update: {
+          allowed_methods: methodIds,
+          updated_at: new Date(),
+        },
+        create: {
+          organization_id: organizationId,
+          allowed_methods: methodIds,
+          enforce_policies: false,
+          allow_store_overrides: true,
+        },
+      });
+    } catch (error) {
+      console.error(
+        `Error setting up payment policy for organization ${organizationId}:`,
+        error,
+      );
+    }
+  }
+
+  private async setupStorePaymentMethods(storeId: number, organizationId: number) {
+    try {
+      const baseMethods = await this.prismaService.system_payment_methods.findMany({
+        where: {
+          name: { in: ['cash', 'payment_vouchers'] },
+          is_active: true,
+        },
+      });
+
+      for (const method of baseMethods) {
+        await this.prismaService.store_payment_methods.upsert({
+          where: {
+            store_id_system_payment_method_id: {
+              store_id: storeId,
+              system_payment_method_id: method.id,
+            },
+          },
+          update: {
+            state: 'enabled',
+            updated_at: new Date(),
+          },
+          create: {
+            store_id: storeId,
+            system_payment_method_id: method.id,
+            display_name: method.display_name,
+            custom_config: method.default_config || {},
+            state: 'enabled',
+            display_order: 0,
+          },
+        });
+      }
+    } catch (error) {
+      console.error(
+        `Error setting up payment methods for store ${storeId}:`,
+        error,
+      );
+    }
   }
 }

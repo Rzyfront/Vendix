@@ -98,6 +98,13 @@
             <app-icon name="edit" class="w-4 h-4"></app-icon>
           </button>
 
+          <!-- Config Button -->
+          <button (click)="configUser(item)"
+            class="p-1 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded transition-colors"
+            title="Configurar usuario">
+            <app-icon name="settings" class="w-4 h-4"></app-icon>
+          </button>
+
           <!-- Toggle Status Button -->
           <button (click)="toggleUserStatus(item)" class="p-1 rounded transition-colors" [ngClass]="
                 item.state === 'active'
@@ -137,3 +144,7 @@
 <!-- Edit User Modal -->
 <app-user-edit-modal *ngIf="currentUser" [user]="currentUser" [(isOpen)]="showEditModal"
   (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
+
+<!-- Config User Modal -->
+<app-user-config-modal *ngIf="userForConfig" [user]="userForConfig" [(isOpen)]="showConfigModal"
+  (onSaved)="onUserConfigured()"></app-user-config-modal>

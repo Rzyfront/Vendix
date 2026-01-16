@@ -7,6 +7,7 @@ export interface CartItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  taxAmount: number;
   addedAt: Date;
   notes?: string;
   discounts?: CartDiscount[];

@@ -463,6 +463,15 @@ export class ProductsService {
               },
             },
           },
+          product_tax_assignments: {
+            include: {
+              tax_categories: {
+                include: {
+                  tax_rates: true
+                }
+              }
+            }
+          },
           product_images: {
             where: { is_main: true },
             take: 1,

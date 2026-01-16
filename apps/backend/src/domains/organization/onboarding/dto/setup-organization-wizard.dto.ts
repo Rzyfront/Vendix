@@ -35,14 +35,14 @@ export class SetupOrganizationWizardDto {
   @MaxLength(200)
   legal_name?: string;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'contacto@empresa.com',
     description: 'Organization email',
+    required: true,
   })
-  @IsOptional()
   @IsEmail()
   @MaxLength(255)
-  email?: string;
+  email: string;
 
   @ApiPropertyOptional({
     example: '+52 123 456 7890',

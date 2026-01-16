@@ -221,6 +221,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.organizations;
   }
 
+  get currencies() {
+    return this.baseClient.currencies;
+  }
+
   get brands() {
     return this.baseClient.brands;
   }
@@ -248,5 +252,10 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get wishlist_items() {
     return this.baseClient.wishlist_items;
+  }
+
+  // Default templates
+  get default_templates() {
+    return this.baseClient.default_templates;
   }
 }

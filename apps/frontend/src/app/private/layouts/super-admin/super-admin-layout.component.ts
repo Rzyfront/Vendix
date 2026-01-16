@@ -121,6 +121,11 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/domains',
     },
     {
+      label: 'Monedas',
+      icon: 'dollar-sign',
+      route: '/super-admin/currencies',
+    },
+    {
       label: 'Auditoría',
       icon: 'eye',
       route: '/super-admin/audit',
@@ -165,6 +170,11 @@ export class SuperAdminLayoutComponent {
           label: 'Configuración del Sistema',
           icon: 'circle',
           route: '/super-admin/system/settings',
+        },
+        {
+          label: 'Plantillas',
+          icon: 'circle',
+          route: '/super-admin/system/templates',
         },
         {
           label: 'Registros',

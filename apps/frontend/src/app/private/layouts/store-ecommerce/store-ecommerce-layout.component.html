@@ -29,17 +29,17 @@
         <!-- Cart -->
         <button class="action-btn cart-btn" (click)="goToCart()">
           <i class="pi pi-shopping-cart"></i>
-          @if (cart_count > 0) {
-            <span class="cart-badge">{{ cart_count }}</span>
-          }
+          <ng-container *ngIf="cart_badge$ | async as badge">
+            <span *ngIf="badge.show" class="cart-badge">{{ badge.count }}</span>
+          </ng-container>
         </button>
 
         <!-- User Menu -->
-        @if (is_authenticated) {
+        @if (is_authenticated$ | async) {
           <div class="user-menu-container">
             <button class="user-btn" (click)="toggleUserMenu()">
               <i class="pi pi-user"></i>
-              <span class="user-name">{{ user_name }}</span>
+              <span class="user-name">{{ user_name$ | async }}</span>
               <i class="pi pi-chevron-down"></i>
             </button>
             @if (show_user_menu) {

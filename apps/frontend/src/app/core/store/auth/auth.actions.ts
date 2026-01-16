@@ -176,3 +176,19 @@ export const setOnboardingCompleted = createAction(
   '[Auth] Set Onboarding Completed',
   props<{ completed: boolean }>(),
 );
+
+// Update User Settings Actions
+export const updateUserSettings = createAction(
+  '[Auth] Update User Settings',
+  props<{ user_settings: any }>(),
+);
+
+export const updateUserSettingsSuccess = createAction(
+  '[Auth] Update User Settings Success',
+  props<{ user_settings: any }>(),
+);
+
+export const updateUserSettingsFailure = createAction(
+  '[Auth] Update User Settings Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);

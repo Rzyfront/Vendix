@@ -289,4 +289,34 @@ export const authReducer = createReducer(
     ...state,
     onboarding_completed: completed,
   })),
+
+  // Update User Settings
+  on(AuthActions.updateUserSettings, (state) => ({
+    ...state,
+    loading: true,
+  })),
+
+  on(
+    AuthActions.updateUserSettingsSuccess,
+    (state, { user_settings }) => {
+      const newState = {
+        ...state,
+        user_settings,
+        loading: false,
+        error: null,
+      };
+      // Save to localStorage to persist changes
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
+
+  on(AuthActions.updateUserSettingsFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
 );
