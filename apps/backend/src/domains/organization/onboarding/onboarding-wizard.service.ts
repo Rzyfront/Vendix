@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
@@ -7,6 +8,7 @@ import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
 import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { DomainConfigService } from '@common/config/domain.config';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
 
 interface ColorPalette {
   primary: string;
@@ -31,6 +33,7 @@ export class OnboardingWizardService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly domainGeneratorHelper: DomainGeneratorHelper,
   ) { }
 
   /**
@@ -231,19 +234,59 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
+    // Check if tax_id is already in use by another organization
+    if (setupOrgDto.tax_id) {
+      const existingOrgWithTaxId = await this.prismaService.organizations.findFirst({
+        where: {
+          tax_id: setupOrgDto.tax_id,
+          id: { not: user.organization_id }, // Exclude current organization
+        },
+      });
+
+      if (existingOrgWithTaxId) {
+        throw new ConflictException(
+          `El identificador fiscal (tax_id) '${setupOrgDto.tax_id}' ya está en uso por otra organización. Por favor verifica el RFC o utiliza uno diferente.`,
+        );
+      }
+    }
+
     // Update organization
-    const updatedOrg = await this.prismaService.organizations.update({
-      where: { id: user.organization_id },
-      data: {
-        name: setupOrgDto.name,
-        description: setupOrgDto.description,
-        email: setupOrgDto.email,
-        phone: setupOrgDto.phone,
-        website: setupOrgDto.website,
-        tax_id: setupOrgDto.tax_id,
-        updated_at: new Date(),
-      },
-    });
+    let updatedOrg;
+    try {
+      updatedOrg = await this.prismaService.organizations.update({
+        where: { id: user.organization_id },
+        data: {
+          name: setupOrgDto.name,
+          description: setupOrgDto.description,
+          email: setupOrgDto.email,
+          phone: setupOrgDto.phone,
+          website: setupOrgDto.website,
+          tax_id: setupOrgDto.tax_id,
+          updated_at: new Date(),
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        // Handle unique constraint violations
+        if (error.code === 'P2002') {
+          const target = (error.meta?.target as string[]) || [];
+          if (target.includes('tax_id')) {
+            throw new ConflictException(
+              `El identificador fiscal (tax_id) '${setupOrgDto.tax_id}' ya está en uso. Por favor utiliza un RFC diferente o verifica la información.`,
+            );
+          }
+          if (target.includes('slug')) {
+            throw new ConflictException(
+              `El slug de la organización ya está en uso. Por favor intenta con un nombre diferente.`,
+            );
+          }
+          throw new ConflictException(
+            `Ya existe una organización con alguno de estos datos únicos. Por favor verifica la información proporcionada.`,
+          );
+        }
+      }
+      throw error;
+    }
 
     // Create or update organization address if provided
     if (setupOrgDto.address_line1) {
@@ -289,6 +332,44 @@ export class OnboardingWizardService {
   }
 
   /**
+   * Create a domain for a store
+   * Generates hostname: {slug}-store.vendix.com
+   */
+  private async createStoreDomainInternal(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<void> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prismaService.domain_settings.findMany({
+      select: { hostname: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+
+    // Generate unique hostname for store
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.STORE,
+      existingHostnames,
+    );
+
+    // Create domain settings for the store
+    await this.prismaService.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'store',
+        is_primary: true,
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /**
    * Setup store with address
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
@@ -320,6 +401,9 @@ export class OnboardingWizardService {
         updated_at: new Date(),
       },
     });
+
+    // NOTE: Store domain is NOT created here because we need branding info (colors, app_type)
+    // which is provided later in setupAppConfig. The domain will be created there.
 
     // Create store address if provided
     if (setupStoreDto.address_line1) {
@@ -363,6 +447,15 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
+    // Get the store to create its domain with branding config
+    const store = await this.prismaService.stores.findFirst({
+      where: { organization_id: user.organization_id },
+    });
+
+    if (!store) {
+      throw new BadRequestException('Store not found. Please complete store setup first.');
+    }
+
     // 1. Handle Automatic Subdomain (ALWAYS created/updated as primary initially)
     let autoSubdomain: string;
 
@@ -375,17 +468,69 @@ export class OnboardingWizardService {
     });
 
     if (existingAutoDomain) {
+      // Check if the existing domain has the correct suffix (-org)
+      const hasCorrectSuffix = existingAutoDomain.hostname.includes('-org.');
       autoSubdomain = existingAutoDomain.hostname;
 
-      // Ensure it is set as primary/active
-      await this.prismaService.domain_settings.update({
-        where: { id: existingAutoDomain.id },
-        data: {
-          is_primary: true,
-          status: 'active',
-          updated_at: new Date(),
-        },
-      });
+      if (!hasCorrectSuffix) {
+        // Domain exists but has OLD format (without -org suffix)
+        // Generate new hostname with correct suffix
+        const newHostname = this.domainGeneratorHelper.generate(
+          user.organizations?.slug || 'org',
+          DomainContext.ORGANIZATION,
+        );
+
+        // Check if new hostname is available
+        const newHostnameExists = await this.prismaService.domain_settings.findFirst({
+          where: { hostname: newHostname },
+        });
+
+        if (!newHostnameExists) {
+          // Update existing domain to new format
+          await this.prismaService.domain_settings.update({
+            where: { id: existingAutoDomain.id },
+            data: {
+              hostname: newHostname,
+              is_primary: true,
+              status: 'active',
+              updated_at: new Date(),
+            },
+          });
+          autoSubdomain = newHostname;
+        } else {
+          // New hostname already taken, try with unique
+          const existingDomains = await this.prismaService.domain_settings.findMany({
+            select: { hostname: true },
+          });
+          const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+          const uniqueHostname = this.domainGeneratorHelper.generateUnique(
+            user.organizations?.slug || 'org',
+            DomainContext.ORGANIZATION,
+            existingHostnames,
+          );
+
+          await this.prismaService.domain_settings.update({
+            where: { id: existingAutoDomain.id },
+            data: {
+              hostname: uniqueHostname,
+              is_primary: true,
+              status: 'active',
+              updated_at: new Date(),
+            },
+          });
+          autoSubdomain = uniqueHostname;
+        }
+      } else {
+        // Domain already has correct format, just ensure it's primary/active
+        await this.prismaService.domain_settings.update({
+          where: { id: existingAutoDomain.id },
+          data: {
+            is_primary: true,
+            status: 'active',
+            updated_at: new Date(),
+          },
+        });
+      }
     } else {
       // Generate and create new unique subdomain
       autoSubdomain = await this.generateUniqueSubdomain(
@@ -421,7 +566,78 @@ export class OnboardingWizardService {
       });
     }
 
-    // 2. Handle Custom Domain (Optional)
+    // 3. Create/Update Store Domain with branding config
+    let storeDomainRecord = null;
+    if (store) {
+      const existingStoreDomain = await this.prismaService.domain_settings.findFirst({
+        where: {
+          store_id: store.id,
+          domain_type: 'store',
+          ownership: 'vendix_subdomain',
+        },
+      });
+
+      const palette = this.generateColorPalette(
+        setupAppConfigDto.primary_color,
+        setupAppConfigDto.secondary_color,
+      );
+
+      if (existingStoreDomain) {
+        // Update existing store domain with branding config
+        storeDomainRecord = await this.prismaService.domain_settings.update({
+          where: { id: existingStoreDomain.id },
+          data: {
+            config: {
+              branding: {
+                primaryColor: setupAppConfigDto.primary_color,
+                secondaryColor: setupAppConfigDto.secondary_color,
+                palette: palette,
+              },
+              app_type: 'STORE_ADMIN',
+            },
+            is_primary: true,
+            status: 'active',
+            updated_at: new Date(),
+          },
+        });
+      } else {
+        // Generate new store domain hostname
+        const existingDomains = await this.prismaService.domain_settings.findMany({
+          select: { hostname: true },
+        });
+        const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+        const storeHostname = this.domainGeneratorHelper.generateUnique(
+          store.slug,
+          DomainContext.STORE,
+          existingHostnames,
+        );
+
+        // Create new store domain with branding config
+        storeDomainRecord = await this.prismaService.domain_settings.create({
+          data: {
+            hostname: storeHostname,
+            store_id: store.id,
+            domain_type: 'store',
+            config: {
+              branding: {
+                primaryColor: setupAppConfigDto.primary_color,
+                secondaryColor: setupAppConfigDto.secondary_color,
+                palette: palette,
+              },
+              app_type: 'STORE_ADMIN',
+            },
+            is_primary: true,
+            ownership: 'vendix_subdomain',
+            status: 'active',
+            ssl_status: 'none',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+      }
+    }
+
+    // 4. Handle Custom Domain (Optional)
     let customDomainRecord = null;
     if (setupAppConfigDto.use_custom_domain && setupAppConfigDto.custom_domain) {
       const customDomain = setupAppConfigDto.custom_domain.toLowerCase().trim();
@@ -509,6 +725,7 @@ export class OnboardingWizardService {
 
     return {
       auto_domain: autoSubdomain,
+      store_domain: storeDomainRecord,
       custom_domain: customDomainRecord,
       subdomain: autoSubdomain, // Legacy support
       needs_dns_verification: !!customDomainRecord,
@@ -809,44 +1026,68 @@ export class OnboardingWizardService {
 
   /**
    * Generate unique subdomain with availability check
+   * Uses DomainGeneratorHelper for standardized suffix-based generation
    */
   private async generateUniqueSubdomain(
     orgSlug: string,
     appType?: string,
-    customSuffix?: string,
   ): Promise<string> {
-    const baseName = orgSlug
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
+    // Determine context based on app type
+    // Default to ORGANIZATION context for org domains
+    const context = DomainContext.ORGANIZATION;
 
-    const maxAttempts = 10;
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prismaService.domain_settings.findMany({
+      select: { hostname: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      let subdomain: string;
+    // Generate unique hostname using helper
+    return this.domainGeneratorHelper.generateUnique(
+      orgSlug,
+      context,
+      existingHostnames,
+    );
+  }
 
-      if (attempt === 1) {
-        // First attempt: direct slug using configured base domain
-        subdomain = DomainConfigService.generateSubdomain(baseName, false);
-      } else {
-        // Subsequent attempts: append random string
-        subdomain = DomainConfigService.generateSubdomain(baseName, true);
-      }
+  /**
+   * Create an e-commerce domain for a store
+   * Generates hostname: {slug}-shop.vendix.com
+   */
+  async createEcommerceDomain(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<string> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prismaService.domain_settings.findMany({
+      select: { hostname: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
 
-      // Check if subdomain is available
-      const existing = await this.prismaService.domain_settings.findFirst({
-        where: { hostname: subdomain },
-      });
+    // Generate unique hostname for e-commerce
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.ECOMMERCE,
+      existingHostnames,
+    );
 
-      if (!existing) {
-        return subdomain;
-      }
-    }
+    // Create domain settings for e-commerce
+    await this.prismaService.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'ecommerce',
+        is_primary: false, // E-commerce domains are not primary (store domain is primary)
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
 
-    // Fallback to timestamp-based generation
-    const timestamp = Date.now().toString(36);
-    return `${baseName}-${timestamp}.${DomainConfigService.getBaseDomain()}`;
+    return hostname;
   }
 
   /**

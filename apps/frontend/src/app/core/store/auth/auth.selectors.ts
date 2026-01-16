@@ -267,3 +267,30 @@ export const selectVisibleModules = createSelector(
       .map(([key]) => key);
   },
 );
+
+// Domain settings selector
+// Prioridad: 1) dominio de la tienda, 2) dominio de la organización
+export const selectUserDomainSettings = createSelector(
+  selectUser,
+  (user: any) => {
+    // Primero buscar dominio de la tienda
+    if (user?.store?.domain_settings && user.store.domain_settings.length > 0) {
+      return user.store.domain_settings[0]; // Tomar el primero (is_primary: true)
+    }
+    // Si no hay dominio de tienda, buscar dominio de la organización
+    if (user?.store?.organizations?.domain_settings && user.store.organizations.domain_settings.length > 0) {
+      return user.store.organizations.domain_settings[0]; // Tomar el primero (is_primary: true)
+    }
+    // También verificar en user.organizations directamente (para login de ORG_ADMIN)
+    if (user?.organizations?.domain_settings && user.organizations.domain_settings.length > 0) {
+      return user.organizations.domain_settings[0];
+    }
+    return null;
+  },
+);
+
+// Domain hostname selector (convenience selector)
+export const selectUserDomainHostname = createSelector(
+  selectUserDomainSettings,
+  (domainSettings: any) => domainSettings?.hostname || null,
+);

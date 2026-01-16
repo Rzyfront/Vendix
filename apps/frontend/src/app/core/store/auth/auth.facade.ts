@@ -90,6 +90,14 @@ export class AuthFacade {
   readonly currentAppPanelUi$ = this.store.select(AuthSelectors.selectCurrentAppPanelUi);
   readonly visibleModules$ = this.store.select(AuthSelectors.selectVisibleModules);
 
+  // Domain settings observables
+  readonly userDomainSettings$ = this.store.select(
+    AuthSelectors.selectUserDomainSettings,
+  );
+  readonly userDomainHostname$ = this.store.select(
+    AuthSelectors.selectUserDomainHostname,
+  );
+
   // Actions
   login(
     email: string,

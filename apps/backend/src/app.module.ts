@@ -18,6 +18,7 @@ import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
 import { SecretsModule } from './common/config/secrets.module';
 import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
+import { HelpersModule } from './common/helpers/helpers.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { DefaultPanelUIModule } from './common/services/default-panel-ui.module'
     StorageModule,
     AuditModule, // ✅ Importar AuditModule global (desde common)
     DefaultPanelUIModule, // ✅ Importar DefaultPanelUIModule global (servicio centralizado de panel UI)
+    HelpersModule, // ✅ Importar HelpersModule global (utilidades para generación de dominios)
   ],
   controllers: [AppController],
   providers: [

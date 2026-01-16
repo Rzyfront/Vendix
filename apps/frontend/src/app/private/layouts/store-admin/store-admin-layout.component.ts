@@ -29,9 +29,10 @@ import { takeUntil } from 'rxjs/operators';
       <app-sidebar
         #sidebarRef
         [menuItems]="filteredMenuItems"
-        [title]="(storeName$ | async) || storeName"
+        [title]="(storeName$ | async) || 'Cargando...'"
         subtitle="Administrador de Tienda"
-        [vlink]="(organizationSlug$ | async) || organizationSlug"
+        [vlink]="(organizationSlug$ | async) || 'slug'"
+        [domainHostname]="storeDomainHostname"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"
       >
@@ -79,14 +80,13 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   sidebarCollapsed = false;
   currentPageTitle = 'Store Dashboard';
   currentVlink = 'store-admin';
-  storeName = 'Main Street Store';
-  storeSlug = 'main-street-store';
-  organizationSlug = 'acme-corp';
 
   // Dynamic user data
   storeName$: Observable<string | null>;
   storeSlug$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
+  storeDomainHostname$: Observable<string | null>;
+  storeDomainHostname: string | null = null;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -259,6 +259,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeName$ = this.authFacade.userStoreName$;
     this.storeSlug$ = this.authFacade.userStoreSlug$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
+    this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
   }
 
   ngOnInit(): void {
@@ -279,6 +280,13 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe((items) => {
         this.filteredMenuItems = items;
+      });
+
+    // Subscribe to domain hostname for sidebar vlink
+    this.storeDomainHostname$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((hostname) => {
+        this.storeDomainHostname = hostname;
       });
   }
 
