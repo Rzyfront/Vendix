@@ -39,7 +39,8 @@
             title="Actualizar">
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
           </app-button>
-          <app-button variant="primary" size="sm" (clicked)="createPaymentMethod()" title="Nuevo Método">
+          <app-button variant="primary" size="sm" (clicked)="createPaymentMethod()" [disabled]="isCreatingPaymentMethod"
+            [loading]="isCreatingPaymentMethod" title="Nuevo Método">
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Nuevo Método</span>
           </app-button>

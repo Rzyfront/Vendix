@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -177,6 +177,7 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
     private fb: FormBuilder,
     private dialogService: DialogService,
     private toastService: ToastService,
+    private cdr: ChangeDetectorRef,
   ) {
     this.filterForm = this.fb.group({
       search: [''],
@@ -292,55 +293,56 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
 
   createPaymentMethod(): void {
     this.showCreateModal = true;
+    this.cdr.detectChanges();
   }
 
   onPaymentMethodCreated(paymentMethodData: CreatePaymentMethodDto): void {
-    this.isCreatingPaymentMethod = true;
     this.paymentMethodsService
       .createPaymentMethod(paymentMethodData)
       .subscribe({
         next: () => {
           this.showCreateModal = false;
+          this.cdr.detectChanges();
           this.loadPaymentMethods();
           this.loadPaymentMethodStats();
           this.toastService.success('Método de pago creado exitosamente');
         },
         error: (error) => {
           console.error('Error creating payment method:', error);
+          this.showCreateModal = false;
+          this.cdr.detectChanges();
           this.toastService.error('Error al crear el método de pago');
         },
-      })
-      .add(() => {
-        this.isCreatingPaymentMethod = false;
       });
   }
 
   editPaymentMethod(paymentMethod: PaymentMethod): void {
     this.currentPaymentMethod = paymentMethod;
     this.showEditModal = true;
+    this.cdr.detectChanges();
   }
 
   onPaymentMethodUpdated(paymentMethodData: UpdatePaymentMethodDto): void {
     if (!this.currentPaymentMethod) return;
 
-    this.isUpdatingPaymentMethod = true;
     this.paymentMethodsService
       .updatePaymentMethod(this.currentPaymentMethod.id, paymentMethodData)
       .subscribe({
         next: () => {
           this.showEditModal = false;
           this.currentPaymentMethod = null;
+          this.cdr.detectChanges();
           this.loadPaymentMethods();
           this.loadPaymentMethodStats();
           this.toastService.success('Método de pago actualizado exitosamente');
         },
         error: (error) => {
           console.error('Error updating payment method:', error);
+          this.showEditModal = false;
+          this.currentPaymentMethod = null;
+          this.cdr.detectChanges();
           this.toastService.error('Error al actualizar el método de pago');
         },
-      })
-      .add(() => {
-        this.isUpdatingPaymentMethod = false;
       });
   }
 

@@ -40,7 +40,6 @@ export const orgAdminRoutes: Routes = [
                 '../../private/modules/organization/users/users.component'
               ).then((c) => c.UsersComponent),
           },
-
         ],
       },
       {
@@ -66,9 +65,9 @@ export const orgAdminRoutes: Routes = [
       {
         path: 'audit',
         loadChildren: () =>
-          import(
-            '../../private/modules/organization/audit/audit.routes'
-          ).then((m) => m.AuditRoutingModule),
+          import('../../private/modules/organization/audit/audit.routes').then(
+            (m) => m.AuditRoutingModule,
+          ),
       },
       {
         path: 'config',
@@ -80,6 +79,13 @@ export const orgAdminRoutes: Routes = [
               import(
                 '../../private/modules/organization/config/config.component'
               ).then((c) => c.ConfigComponent),
+          },
+          {
+            path: 'payments-methods',
+            loadComponent: () =>
+              import(
+                '../../private/modules/organization/payment-methods/payment-methods.component'
+              ).then((c) => c.PaymentMethodsComponent),
           },
         ],
       },

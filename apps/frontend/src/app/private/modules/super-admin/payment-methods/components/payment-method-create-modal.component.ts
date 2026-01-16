@@ -5,6 +5,8 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  OnChanges,
+  SimpleChanges,
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -122,6 +124,24 @@ import {
             </label>
           </div>
 
+          <!-- Estado del Método de Pago -->
+          <div class="md:col-span-2 bg-gray-50 rounded-lg p-4">
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Estado del Método de Pago</h3>
+            <div class="flex items-center gap-2 mb-3">
+              <span class="px-3 py-1 rounded-full text-sm font-medium" [class]="paymentMethodForm.get('is_active')?.value ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'">
+                {{ paymentMethodForm.get('is_active')?.value ? 'Activo' : 'Inactivo' }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" (click)="setActive(true)" class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" [class]="paymentMethodForm.get('is_active')?.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'" [disabled]="isSubmitting">
+                Activo
+              </button>
+              <button type="button" (click)="setActive(false)" class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors" [class]="!paymentMethodForm.get('is_active')?.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'" [disabled]="isSubmitting">
+                Inactivo
+              </button>
+            </div>
+          </div>
+
           <!-- Description (full width) -->
           <div class="md:col-span-2">
             <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
@@ -232,7 +252,7 @@ import {
     `,
   ],
 })
-export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
+export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy, OnChanges {
   @Input() isOpen: boolean = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onPaymentMethodCreated = new EventEmitter<CreatePaymentMethodDto>();
@@ -254,6 +274,7 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
       provider: ['', [Validators.required]],
       logo_url: [''],
       requires_config: [false],
+      is_active: [true],
       processing_fee_type: [''],
       processing_fee_value: [null],
       min_amount: [null],
@@ -268,13 +289,19 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
+      this.resetForm();
+    }
+  }
+
   onSubmit(): void {
     if (this.paymentMethodForm.invalid || this.isSubmitting) {
       return;
     }
 
     this.isSubmitting = true;
-    const formData: CreatePaymentMethodDto = this.paymentMethodForm.value;
+    const formData: any = { ...this.paymentMethodForm.value };
 
     // Remove empty fee fields if no fee type is selected
     if (!formData.processing_fee_type) {
@@ -282,12 +309,23 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
       delete formData.processing_fee_value;
     }
 
-    this.onPaymentMethodCreated.emit(formData);
+    // Remove empty optional fields
+    Object.keys(formData).forEach(key => {
+      if (formData[key] === '' || formData[key] === null || formData[key] === undefined) {
+        delete formData[key];
+      }
+    });
+
+    this.onPaymentMethodCreated.emit(formData as CreatePaymentMethodDto);
   }
 
   onCancel(): void {
     this.isOpen = false;
     this.resetForm();
+  }
+
+  setActive(value: boolean): void {
+    this.paymentMethodForm.patchValue({ is_active: value });
   }
 
   private resetForm(): void {
@@ -299,6 +337,7 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
       provider: '',
       logo_url: '',
       requires_config: false,
+      is_active: true,
       processing_fee_type: '',
       processing_fee_value: null,
       min_amount: null,

@@ -1,0 +1,229 @@
+<div class="space-y-2 md:space-y-4">
+  <!-- Stats Cards Grid -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <!-- Total Methods Card -->
+    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600">Total Métodos</p>
+          <p class="text-2xl font-bold text-gray-900">{{ getStats().total }}</p>
+        </div>
+        <div class="p-3 bg-blue-100 rounded-full">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-6 h-6 text-blue-600">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active Methods Card -->
+    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600">En Uso</p>
+          <p class="text-2xl font-bold text-green-600">
+            {{ getStats().current }}
+          </p>
+        </div>
+        <div class="p-3 bg-green-100 rounded-full">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-6 h-6 text-green-600">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Available Methods Card -->
+    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600">Disponibles</p>
+          <p class="text-2xl font-bold text-blue-600">
+            {{ getStats().available }}
+          </p>
+        </div>
+        <div class="p-3 bg-blue-100 rounded-full">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-6 h-6 text-blue-600">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4m8 0v8m0 0h8m-8 0H4">
+            </path>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stores Using Card -->
+    <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-gray-600">Tiendas Usando</p>
+          <p class="text-2xl font-bold text-purple-600">0</p>
+        </div>
+        <div class="p-3 bg-purple-100 rounded-full">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-6 h-6 text-purple-600">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4">
+            </path>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Loading State -->
+  <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
+    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+    <p class="mt-2 text-gray-600">Cargando métodos de pago...</p>
+  </div>
+
+  <!-- Content Tables -->
+  <div *ngIf="!isLoading" class="space-y-6">
+    <!-- Combined Table -->
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div class="p-4 border-b border-gray-200">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
+          <div>
+            <h1 class="text-lg font-semibold text-gray-900">
+              Métodos de Pago de tu Organización
+            </h1>
+            <p class="text-sm text-gray-600 mt-1">
+              Administra los métodos de pago que estarán disponibles para tus
+              tiendas
+            </p>
+          </div>
+
+          <div class="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+            <!-- Stats Display -->
+            <div class="flex items-center gap-4 text-sm text-gray-600 mr-4">
+              <span><strong>{{ getStats().current }}</strong> en uso</span>
+              <span>/</span>
+              <span><strong>{{ getStats().available }}</strong> disponibles</span>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex gap-2 items-center">
+              <app-button variant="outline" size="sm" (clicked)="onResetChanges()" [disabled]="isLoading || isSaving">
+                <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+                Restablecer
+              </app-button>
+              <app-button variant="primary" size="sm" (clicked)="onSaveChanges()" [loading]="isSaving"
+                [disabled]="isLoading || getStats().current === 0">
+                <app-icon name="save" [size]="16" slot="icon"></app-icon>
+                Guardar Cambios
+              </app-button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <app-icon name="credit-card" [size]="20" class="text-blue-600"></app-icon>
+          Métodos de Pago en Uso
+        </h2>
+        <p class="text-sm text-gray-600 mt-1">
+          Estos métodos están actualmente disponibles para tus tiendas
+        </p>
+      </div>
+
+      <!-- Search for Current Methods -->
+      <div class="px-4 pb-4 border-b border-gray-200">
+        <app-inputsearch class="w-full md:w-64" size="sm" placeholder="Buscar métodos en uso..."
+          [formControl]="searchCurrentControl">
+        </app-inputsearch>
+      </div>
+
+      <!-- Current Methods Table -->
+      <div *ngIf="currentMethods.length > 0">
+        <app-table [data]="currentMethods" [columns]="currentTableColumns" [actions]="currentTableActions">
+        </app-table>
+      </div>
+
+      <!-- Empty State for Current Methods -->
+      <div *ngIf="currentMethods.length === 0" class="text-center py-8">
+        <app-icon name="credit-card" [size]="48" class="text-gray-400"></app-icon>
+        <h3 class="mt-4 text-lg font-medium text-gray-900">
+          Sin métodos de pago en uso
+        </h3>
+        <p class="mt-2 text-gray-600">
+          {{
+          searchCurrentTerm
+          ? "No hay métodos que coincidan con tu búsqueda"
+          : "No tienes métodos de pago configurados"
+          }}
+        </p>
+      </div>
+    </div>
+
+    <!-- Available Methods Table -->
+    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div class="p-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+          <app-icon name="plus-circle" [size]="20" class="text-green-600"></app-icon>
+          Métodos Disponibles para Agregar
+        </h2>
+        <p class="text-sm text-gray-600 mt-1">
+          Estos métodos están disponibles pero no activos en tu organización
+        </p>
+      </div>
+
+      <!-- Search for Available Methods -->
+      <div class="px-4 pb-4 border-b border-gray-200">
+        <app-inputsearch class="w-full md:w-64" size="sm" placeholder="Buscar métodos disponibles..."
+          [formControl]="searchAvailableControl">
+        </app-inputsearch>
+      </div>
+
+      <!-- Available Methods Table -->
+      <div *ngIf="availableMethods.length > 0">
+        <app-table [data]="availableMethods" [columns]="availableTableColumns" [actions]="availableTableActions">
+        </app-table>
+      </div>
+
+      <!-- Empty State for Available Methods -->
+      <div *ngIf="availableMethods.length === 0" class="text-center py-8">
+        <app-icon name="check-circle" [size]="48" class="text-green-600"></app-icon>
+        <h3 class="mt-4 text-lg font-medium text-gray-900">
+          ¡Todos los métodos están configurados!
+        </h3>
+        <p class="mt-2 text-gray-600">
+          {{
+          searchAvailableTerm
+          ? "No hay métodos disponibles que coincidan con tu búsqueda"
+          : "Ya tienes todos los métodos de pago disponibles activados"
+          }}
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Helper Info -->
+<div class="p-2 md:px-6 md:py-4 border-t border-gray-200 bg-gray-50 mt-6">
+  <div class="flex items-start gap-3">
+    <app-icon name="info" [size]="20" class="text-blue-600 mt-0.5"></app-icon>
+    <div>
+      <h3 class="font-medium text-gray-900">¿Cómo funciona?</h3>
+      <ul class="mt-2 text-sm text-gray-600 space-y-1">
+        <li>
+          • <strong>Métodos en uso:</strong> Están disponibles y configurados
+          para uso inmediato
+        </li>
+        <li>
+          • <strong>Métodos disponibles:</strong> Puedes agregarlos para que tus
+          tiendas los usen
+        </li>
+        <li>
+          • Usa los botones de acción para agregar o quitar métodos según tus
+          necesidades
+        </li>
+        <li>
+          • Recuerda hacer clic en "Guardar Cambios" para aplicar las
+          modificaciones
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>

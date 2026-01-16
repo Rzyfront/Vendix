@@ -113,6 +113,39 @@ import { Subject, takeUntil } from 'rxjs';
             </label>
           </div>
 
+          <!-- Status Section -->
+          <div class="md:col-span-2 bg-gray-50 rounded-lg p-4">
+            <h3 class="text-sm font-medium text-gray-700 mb-2">Estado del Método de Pago</h3>
+            <div class="flex items-center gap-2 mb-3">
+              <span
+                class="px-3 py-1 rounded-full text-sm font-medium"
+                [ngClass]="paymentMethodForm.get('is_active')?.value ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'"
+              >
+                {{ paymentMethodForm.get('is_active')?.value ? 'Activo' : 'Inactivo' }}
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                [ngClass]="paymentMethodForm.get('is_active')?.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'"
+                [disabled]="isSubmitting"
+                (click)="setStatus(true)"
+              >
+                Activo
+              </button>
+              <button
+                type="button"
+                class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                [ngClass]="!paymentMethodForm.get('is_active')?.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300'"
+                [disabled]="isSubmitting"
+                (click)="setStatus(false)"
+              >
+                Inactivo
+              </button>
+            </div>
+          </div>
+
           <!-- Description (full width) -->
           <div class="md:col-span-2">
             <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
@@ -279,7 +312,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
     }
 
     this.isSubmitting = true;
-    const formData: UpdatePaymentMethodDto = this.paymentMethodForm.value;
+    const formData: any = { ...this.paymentMethodForm.value };
 
     // Remove empty fee fields if no fee type is selected
     if (!formData.processing_fee_type) {
@@ -287,12 +320,23 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
       delete formData.processing_fee_value;
     }
 
-    this.onPaymentMethodUpdated.emit(formData);
+    // Remove empty optional fields
+    Object.keys(formData).forEach(key => {
+      if (formData[key] === '' || formData[key] === null || formData[key] === undefined) {
+        delete formData[key];
+      }
+    });
+
+    this.onPaymentMethodUpdated.emit(formData as UpdatePaymentMethodDto);
   }
 
   onCancel(): void {
     this.isOpen = false;
     this.resetForm();
+  }
+
+  setStatus(isActive: boolean): void {
+    this.paymentMethodForm.patchValue({ is_active: isActive });
   }
 
   private resetForm(): void {

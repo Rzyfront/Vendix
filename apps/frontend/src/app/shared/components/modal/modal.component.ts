@@ -5,6 +5,7 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -111,6 +112,8 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 export class ModalComponent implements OnInit, OnDestroy {
   private _isOpen = false;
 
+  constructor(private cdr: ChangeDetectorRef) { }
+
   @Input()
   set isOpen(value: boolean) {
     if (this._isOpen !== value) {
@@ -128,6 +131,8 @@ export class ModalComponent implements OnInit, OnDestroy {
       } else {
         document.body.style.overflow = '';
       }
+
+      this.cdr.detectChanges();
     }
   }
 
