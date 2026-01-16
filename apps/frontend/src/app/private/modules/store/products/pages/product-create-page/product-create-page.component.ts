@@ -29,12 +29,15 @@ import {
   Brand,
   Product,
   ProductState,
+  TaxCategory,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
 import { CategoriesService } from '../../services/categories.service';
 import { BrandsService } from '../../services/brands.service';
+import { TaxesService } from '../../services/taxes.service';
 import { CategoryQuickCreateComponent } from '../../components/category-quick-create.component';
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
+import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import { CreateAdjustmentDto } from '../../../inventory/interfaces';
@@ -70,6 +73,7 @@ interface GeneratedVariant {
     ModalComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
+    TaxQuickCreateComponent,
     AdjustmentCreateModalComponent,
   ],
   templateUrl: './product-create-page.component.html',
@@ -106,6 +110,7 @@ export class ProductCreatePageComponent implements OnInit {
   // Quick create modals state
   isCategoryCreateOpen = false;
   isBrandCreateOpen = false;
+  isTaxCategoryCreateOpen = false;
   isAdjustmentModalOpen = false;
   isAdjusting = false;
 
@@ -114,6 +119,7 @@ export class ProductCreatePageComponent implements OnInit {
     private productsService: ProductsService,
     private categoriesService: CategoriesService,
     private brandsService: BrandsService,
+    private taxesService: TaxesService,
     private toastService: ToastService,
     private inventoryService: InventoryService,
     private router: Router,
@@ -245,13 +251,20 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   private loadTaxCategories(): void {
-    // TODO: Create tax categories service and endpoint
-    // For now, use placeholder data
-    this.taxCategoryOptions = [
-      { value: 1, label: 'IVA 19%', description: 'Impuesto al valor agregado' },
-      { value: 2, label: 'IVA 5%', description: 'Impuesto reducido' },
-      { value: 3, label: 'Exento', description: 'Sin impuesto' },
-    ];
+    this.taxesService.getTaxCategories().subscribe({
+      next: (taxCategories: TaxCategory[]) => {
+        this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => ({
+          value: cat.id,
+          label: cat.name,
+          description: cat.description,
+        }));
+      },
+      error: (error: any) => {
+        console.error('Error loading tax categories:', error);
+        const message = extractApiErrorMessage(error);
+        this.toastService.error(message, 'Error al cargar categorías de impuestos');
+      },
+    });
   }
 
   private loadBrands(): void {
@@ -398,6 +411,18 @@ export class ProductCreatePageComponent implements OnInit {
       this.productForm.patchValue({ brand_id: brand.id });
     }
     this.isBrandCreateOpen = false;
+  }
+
+  onTaxCategoryCreated(taxCategory: TaxCategory): void {
+    this.loadTaxCategories();
+    // Add to current selection
+    const currentIds = this.productForm.get('tax_category_ids')?.value || [];
+    if (taxCategory && taxCategory.id) {
+      this.productForm.patchValue({
+        tax_category_ids: [...currentIds, taxCategory.id],
+      });
+    }
+    // Keep modal open for creating another
   }
 
   get totalStockOnHand(): number {

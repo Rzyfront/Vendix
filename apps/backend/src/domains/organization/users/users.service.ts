@@ -19,6 +19,7 @@ import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
+import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 
 @Injectable()
 export class UsersService {
@@ -27,6 +28,7 @@ export class UsersService {
     private emailService: EmailService,
     private auditService: AuditService,
     private s3Service: S3Service,
+    private defaultPanelUIService: DefaultPanelUIService,
   ) { }
 
   async create(createUserDto: CreateUserDto) {
@@ -80,47 +82,12 @@ export class UsersService {
       },
     });
 
-    // Crear user_settings con el app indicado
-    let panel_ui = {};
-    if (app === 'ORG_ADMIN') {
-      panel_ui = {
-        stores: true,
-        users: true,
-        dashboard: true,
-        orders: true,
-        analytics: true,
-        reports: true,
-        inventory: true,
-        billing: true,
-        ecommerce: true,
-        audit: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ADMIN') {
-      panel_ui = {
-        pos: true,
-        users: true,
-        dashboard: true,
-        analytics: true,
-        reports: true,
-        billing: true,
-        ecommerce: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ECOMMERCE') {
-      panel_ui = {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true,
-      };
-    }
+    // Crear user_settings con el app indicado usando el servicio centralizado
+    const config = this.defaultPanelUIService.generatePanelUI(app);
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui },
+        config: config,
       },
     });
 

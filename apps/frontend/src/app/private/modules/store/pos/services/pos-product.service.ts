@@ -22,6 +22,34 @@ export interface Product {
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
+  tax_assignments?: ProductTaxAssignment[];
+}
+
+export interface ProductTaxAssignment {
+  product_id: number;
+  tax_category_id: number;
+  tax_categories?: TaxCategory;
+}
+
+export interface TaxCategory {
+  id: number;
+  name: string;
+  description?: string;
+  tax_rates?: TaxRate[];
+  store_id: number;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface TaxRate {
+  id: number;
+  name: string;
+  rate: string;
+  store_id: number;
+  is_compound: boolean;
+  priority: number;
+  created_at: Date;
+  updated_at: Date;
 }
 
 export interface Category {
@@ -253,6 +281,7 @@ export class PosProductService {
         isActive: product.state === 'active',
         createdAt: new Date(product.created_at),
         updatedAt: new Date(product.updated_at),
+        tax_assignments: product.product_tax_assignments || [],
         // Include additional data for debugging
         _rawStockLevels: product.stock_levels,
         _rawStockQuantity: product.stock_quantity,

@@ -152,6 +152,152 @@
   }
 }
 
+// ==================== Nested Module Structure ====================
+.module-toggles-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+// Parent module container with border
+.parent-module-wrapper {
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 1rem;
+  background: var(--color-surface);
+  transition: border-color 0.2s ease;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  // Header of parent (clickable for expand/collapse)
+  .parent-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background: var(--color-primary-light);
+    }
+
+    .parent-toggle {
+      flex: 1;
+
+      app-toggle {
+        width: 100%;
+      }
+    }
+  }
+
+  // Expand icon (chevron)
+  .expand-icon {
+    transition: transform 0.3s ease;
+    color: var(--color-text-secondary);
+    margin-left: 0.75rem;
+    flex-shrink: 0;
+
+    &.rotated {
+      transform: rotate(90deg);
+    }
+  }
+
+  // Description of parent
+  .module-description {
+    padding: 0 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    display: block;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+  }
+
+  // Container for children (nested)
+  .child-modules {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+    opacity: 0;
+    border-top: 1px solid transparent;
+
+    &.expanded {
+      max-height: 1000px; // Adjust based on content
+      opacity: 1;
+      border-top-color: var(--color-border);
+      background: var(--color-background);
+    }
+
+    // Individual child item
+    .child-toggle-item {
+      padding: 0.75rem 1rem 0.75rem 2rem; // Left indentation for visual hierarchy
+      border-bottom: 1px solid var(--color-border);
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      .child-header {
+        display: flex;
+        align-items: center;
+      }
+
+      .child-description {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: var(--fs-sm);
+        color: var(--color-text-muted);
+      }
+
+      // Disabled state for children when parent is off
+      app-toggle {
+        &[disabled] {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+      }
+    }
+  }
+}
+
+// Standalone modules (without children)
+.standalone-module {
+  .toggle-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.25rem;
+    background: var(--color-background);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--color-primary);
+      background: var(--color-primary-light);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .toggle-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+    }
+
+    .module-description {
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+      display: block;
+      width: 100%;
+    }
+  }
+}
+
 // ==================== Section 3: Preferences ====================
 .preference-row {
   display: flex;

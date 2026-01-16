@@ -162,6 +162,11 @@ export class SuperAdminLayoutComponent {
           route: '/super-admin/system/settings',
         },
         {
+          label: 'Plantillas',
+          icon: 'circle',
+          route: '/super-admin/system/templates',
+        },
+        {
           label: 'Registros',
           icon: 'circle',
           route: '/super-admin/system/logs',

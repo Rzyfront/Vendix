@@ -21,6 +21,7 @@ import {
   AuditResource,
 } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
+import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 
 @Injectable()
 export class AuthService {
@@ -31,6 +32,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
+    private readonly defaultPanelUIService: DefaultPanelUIService,
   ) { }
 
   async updateProfile(userId: number, updateProfileDto: any) {
@@ -274,26 +276,12 @@ export class AuthService {
           organization_id: organization.id,
         },
       });
-      // Crear user_settings para el owner con config app ORG_ADMIN
+      // Crear user_settings para el owner usando el servicio centralizado
+      const ownerConfig = this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
       await tx.user_settings.create({
         data: {
           user_id: user.id,
-          config: {
-            app: 'ORG_ADMIN',
-            panel_ui: {
-              stores: true,
-              users: true,
-              dashboard: true,
-              orders: true,
-              analytics: true,
-              reports: true,
-              inventory: true,
-              billing: true,
-              ecommerce: true,
-              audit: true,
-              settings: true,
-            },
-          },
+          config: ownerConfig,
         },
       });
 
@@ -520,47 +508,12 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario customer
-    let panel_ui = {};
-    if (app === 'ORG_ADMIN') {
-      panel_ui = {
-        stores: true,
-        users: true,
-        dashboard: true,
-        orders: true,
-        analytics: true,
-        reports: true,
-        inventory: true,
-        billing: true,
-        ecommerce: true,
-        audit: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ADMIN') {
-      panel_ui = {
-        pos: true,
-        users: true,
-        dashboard: true,
-        analytics: true,
-        reports: true,
-        billing: true,
-        ecommerce: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ECOMMERCE') {
-      panel_ui = {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true,
-      };
-    }
+    // Crear user_settings para el usuario customer usando el servicio centralizado
+    const customerConfig = this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui },
+        config: customerConfig,
       },
     });
 
@@ -820,47 +773,12 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario staff
-    let panel_ui = {};
-    if (app === 'ORG_ADMIN') {
-      panel_ui = {
-        stores: true,
-        users: true,
-        dashboard: true,
-        orders: true,
-        analytics: true,
-        reports: true,
-        inventory: true,
-        billing: true,
-        ecommerce: true,
-        audit: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ADMIN') {
-      panel_ui = {
-        pos: true,
-        users: true,
-        dashboard: true,
-        analytics: true,
-        reports: true,
-        billing: true,
-        ecommerce: true,
-        settings: true,
-      };
-    } else if (app === 'STORE_ECOMMERCE') {
-      panel_ui = {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true,
-      };
-    }
+    // Crear user_settings para el usuario staff usando el servicio centralizado
+    const staffConfig = this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
-        config: { app, panel_ui },
+        config: staffConfig,
       },
     });
 

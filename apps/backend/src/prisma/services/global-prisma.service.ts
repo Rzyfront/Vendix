@@ -249,4 +249,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get wishlist_items() {
     return this.baseClient.wishlist_items;
   }
+
+  // Default templates
+  get default_templates() {
+    return this.baseClient.default_templates;
+  }
 }

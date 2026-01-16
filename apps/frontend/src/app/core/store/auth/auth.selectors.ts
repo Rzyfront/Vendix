@@ -227,3 +227,43 @@ export const selectNeedsOnboarding = createSelector(
   selectOnboardingCompleted,
   (onboardingCompleted: boolean) => !onboardingCompleted,
 );
+
+// Panel UI selectors
+export const selectPanelUiConfig = createSelector(
+  selectUserSettings,
+  (userSettings: any) => userSettings?.config?.panel_ui || {},
+);
+
+export const selectSelectedAppType = createSelector(
+  selectUserSettings,
+  (userSettings: any) => userSettings?.selected_app_type || userSettings?.config?.app || 'ORG_ADMIN',
+);
+
+export const selectCurrentAppPanelUi = createSelector(
+  selectPanelUiConfig,
+  selectSelectedAppType,
+  (panelUi: any, appType: string) => {
+    // Support both new format (nested by app type) and old format (direct)
+    if (panelUi && panelUi[appType]) {
+      return panelUi[appType];
+    }
+    // Fallback to old format for backward compatibility
+    return panelUi || {};
+  },
+);
+
+export const selectIsModuleVisible = (moduleKey: string) =>
+  createSelector(
+    selectCurrentAppPanelUi,
+    (panelUi: any) => panelUi?.[moduleKey] === true,
+  );
+
+export const selectVisibleModules = createSelector(
+  selectCurrentAppPanelUi,
+  (panelUi: any) => {
+    if (!panelUi || typeof panelUi !== 'object') return [];
+    return Object.entries(panelUi)
+      .filter(([_, visible]) => visible === true)
+      .map(([key]) => key);
+  },
+);

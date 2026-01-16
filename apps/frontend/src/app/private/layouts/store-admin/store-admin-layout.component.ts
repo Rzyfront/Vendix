@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -9,6 +9,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
+import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -27,7 +28,7 @@ import { takeUntil } from 'rxjs/operators';
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
-        [menuItems]="menuItems"
+        [menuItems]="filteredMenuItems"
         [title]="(storeName$ | async) || storeName"
         subtitle="Administrador de Tienda"
         [vlink]="(organizationSlug$ | async) || organizationSlug"
@@ -92,79 +93,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   needsOnboarding = false;
   private destroy$ = new Subject<void>();
 
-  constructor(
-    private authFacade: AuthFacade,
-    private onboardingWizardService: OnboardingWizardService,
-  ) {
-    this.storeName$ = this.authFacade.userStoreName$;
-    this.storeSlug$ = this.authFacade.userStoreSlug$;
-    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
-  }
+  // Panel UI menu filtering
+  private menuFilterService = inject(MenuFilterService);
 
-  ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.checkOnboardingWithRoleValidation();
-
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
-        // this.needsOnboarding = needsOnboarding;
-        this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
-        this.updateOnboardingModal();
-      });
-  }
-
-  private checkOnboardingWithRoleValidation(): void {
-    // Only proceed with onboarding logic if user is owner
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.needsOnboarding = false;
-      this.showOnboardingModal = false;
-      return;
-    }
-
-    // Check actual onboarding status from persistent data
-    const currentUser = this.authFacade.getCurrentUser();
-    const storeOnboarding = currentUser?.stores?.onboarding;
-
-    // this.needsOnboarding = !storeOnboarding;
-    this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
-    this.updateOnboardingModal();
-  }
-
-  private updateOnboardingModal(): void {
-    // Double-check owner role before showing modal
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.showOnboardingModal = false;
-      return;
-    }
-
-    // Verify onboarding status from current user data
-    const currentUser = this.authFacade.getCurrentUser();
-    const storeOnboarding = currentUser?.stores?.onboarding;
-    const actuallyNeedsOnboarding = !storeOnboarding;
-
-    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
-  }
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  breadcrumb = {
-    parent: 'Tienda',
-    current: 'Panel Principal',
-  };
-
-  user = {
-    name: 'Jane Smith',
-    role: 'Administrador de Tienda',
-    initials: 'JS',
-  };
-
-  menuItems: MenuItem[] = [
+  // ALL possible menu items (constant)
+  private allMenuItems: MenuItem[] = [
     {
       label: 'Panel Principal',
       icon: 'home',
@@ -200,7 +133,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       label: 'Inventario',
       icon: 'warehouse',
       children: [
-
         {
           label: 'Punto de Compra',
           icon: 'circle',
@@ -313,6 +245,91 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       ],
     },
   ];
+
+  // Reactive menu items
+  menuItems$: Observable<MenuItem[]> = this.menuFilterService.filterMenuItems(
+    this.allMenuItems,
+  );
+  filteredMenuItems: MenuItem[] = [];
+
+  constructor(
+    private authFacade: AuthFacade,
+    private onboardingWizardService: OnboardingWizardService,
+  ) {
+    this.storeName$ = this.authFacade.userStoreName$;
+    this.storeSlug$ = this.authFacade.userStoreSlug$;
+    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
+  }
+
+  ngOnInit(): void {
+    // Check onboarding status when component initializes
+    this.checkOnboardingWithRoleValidation();
+
+    // Subscribe to onboarding needs and show modal instead of redirecting
+    this.authFacade.needsOnboarding$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((needsOnboarding: any) => {
+        // this.needsOnboarding = needsOnboarding;
+        this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+        this.updateOnboardingModal();
+      });
+
+    // Subscribe to filtered menu items based on panel_ui configuration
+    this.menuItems$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((items) => {
+        this.filteredMenuItems = items;
+      });
+  }
+
+  private checkOnboardingWithRoleValidation(): void {
+    // Only proceed with onboarding logic if user is owner
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.needsOnboarding = false;
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Check actual onboarding status from persistent data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+
+    // this.needsOnboarding = !storeOnboarding;
+    this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+    this.updateOnboardingModal();
+  }
+
+  private updateOnboardingModal(): void {
+    // Double-check owner role before showing modal
+    const isOwner = this.authFacade.isOwner();
+    if (!isOwner) {
+      this.showOnboardingModal = false;
+      return;
+    }
+
+    // Verify onboarding status from current user data
+    const currentUser = this.authFacade.getCurrentUser();
+    const storeOnboarding = currentUser?.stores?.onboarding;
+    const actuallyNeedsOnboarding = !storeOnboarding;
+
+    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
+  }
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  breadcrumb = {
+    parent: 'Tienda',
+    current: 'Panel Principal',
+  };
+
+  user = {
+    name: 'Jane Smith',
+    role: 'Administrador de Tienda',
+    initials: 'JS',
+  };
 
   toggleSidebar() {
     // If mobile, delegate to sidebar component

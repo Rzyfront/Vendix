@@ -64,6 +64,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/domains/domains.component'
           ).then((c) => c.DomainsComponent),
       },
+      {
+        path: 'system/templates',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/templates/templates.component'
+          ).then((c) => c.TemplatesComponent),
+      },
     ],
   },
 ];

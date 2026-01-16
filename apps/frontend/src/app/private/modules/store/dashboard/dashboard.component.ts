@@ -23,7 +23,6 @@ import { StatsComponent } from '../../../../shared/components';
 
       <div *ngIf="!loading">
         <!-- Stats Cards -->
-        <
         <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-6">
           <app-stats
             title="Total de Productos"
@@ -146,7 +145,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   constructor(
     private route: ActivatedRoute,
     private storeDashboardService: StoreDashboardService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     const id = this.route.parent?.snapshot.paramMap.get('id');
