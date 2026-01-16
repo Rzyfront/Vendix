@@ -24,6 +24,7 @@ import {
   StoreEmptyStateComponent,
   StoreCreateModalComponent,
   StoreEditModalComponent,
+  StoreDeleteConfirmationComponent,
 } from './components/index';
 
 import { StoreSettingsModalComponent } from './components/store-settings-modal/store-settings-modal.component';
@@ -65,6 +66,7 @@ interface StatItem {
     StoreEmptyStateComponent,
     StoreCreateModalComponent,
     StoreEditModalComponent,
+    StoreDeleteConfirmationComponent,
     StoreSettingsModalComponent,
     InputsearchComponent,
     IconComponent,
@@ -226,6 +228,15 @@ interface StatItem {
         (submit)="updateStoreSettings($event)"
         (cancel)="onSettingsModalCancel()"
       ></app-store-settings-modal>
+
+      <!-- Delete Store Confirmation Modal -->
+      <app-store-delete-confirmation
+        [isOpen]="isDeleteModalOpen"
+        [store]="selectedStoreForDelete"
+        (openChange)="onDeleteModalChange($event)"
+        (confirm)="confirmDeleteStore()"
+        (cancel)="onDeleteModalCancel()"
+      ></app-store-delete-confirmation>
     </div>
   `,
   styles: [
@@ -353,6 +364,10 @@ export class StoresComponent implements OnInit, OnDestroy {
   isSettingsModalOpen = false;
   isUpdatingSettings = false;
   selectedStoreForSettings?: StoreListItem;
+
+  // Delete Confirmation Modal state
+  isDeleteModalOpen = false;
+  selectedStoreForDelete: StoreListItem | null = null;
 
   private destroy$ = new Subject<void>();
 
@@ -742,26 +757,49 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   deleteStore(store: StoreListItem): void {
-    if (
-      confirm(
-        `¿Está seguro de que desea eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
-      )
-    ) {
-      this.storesService
-        .deleteStore(store.id)
-        .pipe(takeUntil(this.destroy$))
-        .subscribe({
-          next: () => {
-            this.stores = this.stores.filter((s) => s.id !== store.id);
-            this.loadStats();
-            this.toastService.success('Store deleted successfully');
-          },
-          error: (error) => {
-            console.error('Error deleting store:', error);
-            this.toastService.error('Failed to delete store');
-          },
-        });
+    this.selectedStoreForDelete = store;
+    this.isDeleteModalOpen = true;
+  }
+
+  onDeleteModalChange(isOpen: boolean | Event): void {
+    this.isDeleteModalOpen = isOpen as boolean;
+    if (!isOpen) {
+      this.selectedStoreForDelete = null;
     }
+  }
+
+  onDeleteModalCancel(): void {
+    this.isDeleteModalOpen = false;
+    this.selectedStoreForDelete = null;
+  }
+
+  confirmDeleteStore(): void {
+    if (!this.selectedStoreForDelete) return;
+
+    this.storesService
+      .deleteStore(this.selectedStoreForDelete.id)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.stores = this.stores.filter(
+              (s) => s.id !== this.selectedStoreForDelete!.id,
+            );
+            this.loadStats();
+            this.toastService.success('Tienda eliminada exitosamente');
+            this.isDeleteModalOpen = false;
+            this.selectedStoreForDelete = null;
+          } else {
+            this.toastService.error(
+              'Respuesta inválida al eliminar la tienda',
+            );
+          }
+        },
+        error: (error) => {
+          console.error('Error deleting store:', error);
+          this.toastService.error('Error al eliminar la tienda');
+        },
+      });
   }
 
   openSettingsModal(store: StoreListItem): void {

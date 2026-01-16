@@ -1,0 +1,58 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  (isOpenChange)="onOpenChange($event)"
+  [title]="'Eliminar Tienda'"
+  [size]="'md'"
+  [showCloseButton]="true"
+  [customClasses]="'delete-confirmation-modal'"
+>
+  <div class="modal-body">
+    <p class="confirmation-message">
+      Está a punto de eliminar la tienda
+      <strong class="text-primary">{{ store?.name }}</strong
+      >. Esta acción no se puede deshacer.
+    </p>
+
+    <div class="slug-confirmation-box">
+      <p class="slug-label">Para confirmar, escribe el slug de la tienda:</p>
+      <code class="slug-display">{{ store?.slug }}</code>
+    </div>
+
+    <div class="input-group">
+      <input
+        id="slug-input"
+        type="text"
+        [formControl]="slugInput"
+        [placeholder]="placeholderText"
+        class="slug-input"
+        [class.input-error]="showError"
+      />
+      <div *ngIf="showError" class="error-message">
+        <app-icon name="x-circle" [size]="16"></app-icon>
+        <span>El texto ingresado no coincide con el slug de la tienda</span>
+      </div>
+    </div>
+
+    <div class="warning-box">
+      <app-icon name="alert-triangle" [size]="16" class="warning-icon"></app-icon>
+      <p class="warning-text">
+        Esta acción eliminará permanentemente la tienda y todos sus datos
+        asociados.
+      </p>
+    </div>
+  </div>
+
+  <div slot="footer" class="modal-footer">
+    <app-button variant="outline" (clicked)="onCancel()">
+      Cancelar
+    </app-button>
+    <app-button
+      variant="danger"
+      [disabled]="!isSlugValid"
+      (clicked)="onConfirm()"
+    >
+      <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
+      Eliminar Tienda
+    </app-button>
+  </div>
+</app-modal>

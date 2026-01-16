@@ -98,7 +98,8 @@ export class StoresService {
         ],
       }),
       ...(store_type && { store_type }),
-      ...(is_active !== undefined && { is_active }),
+      // Default to only active stores if is_active is not specified
+      ...(is_active !== undefined ? { is_active } : { is_active: true }),
     };
 
     const [stores, total] = await Promise.all([
@@ -183,12 +184,16 @@ export class StoresService {
       throw new BadRequestException('Cannot delete store with active orders');
     }
 
-    // Eliminar registros relacionados que podrían causar violación de FK
-    await this.prisma.login_attempts.deleteMany({
-      where: { store_id: id },
+    // Soft delete: Deactivate the store instead of physically deleting it
+    // This preserves all relationships and data integrity
+    return this.prisma.stores.update({
+      where: { id },
+      data: {
+        is_active: false,
+        updated_at: new Date(),
+      },
+      include: { organizations: true, addresses: true, store_settings: true },
     });
-
-    return this.prisma.stores.delete({ where: { id } });
   }
 
   async updateStoreSettings(
@@ -365,7 +370,7 @@ export class StoresService {
   }
 
   async getGlobalDashboard() {
-    // Get all stores counts by status
+    // Get all stores counts by status (only active stores count for metrics)
     const [
       totalStores,
       activeStores,
@@ -376,8 +381,10 @@ export class StoresService {
       totalOrders,
       totalProducts,
     ] = await Promise.all([
-      // Total stores count
-      this.prisma.stores.count(),
+      // Total stores count - only active stores
+      this.prisma.stores.count({
+        where: { is_active: true },
+      }),
 
       // Active stores count
       this.prisma.stores.count({
@@ -407,25 +414,28 @@ export class StoresService {
         },
       }),
 
-      // Total revenue from all finished orders
+      // Total revenue from all finished orders (only from active stores)
       this.prisma.orders.aggregate({
         where: {
           state: 'finished',
+          stores: { is_active: true },
         },
         _sum: { grand_total: true },
       }),
 
-      // Total orders count (excluding cancelled)
+      // Total orders count (excluding cancelled, only from active stores)
       this.prisma.orders.count({
         where: {
           state: { not: 'cancelled' },
+          stores: { is_active: true },
         },
       }),
 
-      // Total products count (active products)
+      // Total products count (active products from active stores)
       this.prisma.products.count({
         where: {
           state: 'active',
+          stores: { is_active: true },
         },
       }),
     ]);
