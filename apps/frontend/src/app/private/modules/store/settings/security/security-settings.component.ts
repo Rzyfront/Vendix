@@ -8,8 +8,8 @@ import { CommonModule } from '@angular/common';
   template: `
     <div class="w-full">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">Security Settings</h1>
-        <p class="text-gray-600">Manage security policies and access control</p>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Configuración de seguridad</h1>
+        <p class="text-gray-600">Gestionar políticas de seguridad y control de acceso</p>
       </div>
 
       <div class="bg-white rounded-lg shadow-sm border p-8">
@@ -32,11 +32,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Security Configuration
+            Configuración de seguridad
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Security settings configuration is under development. You will be
-            able to manage security policies here.
+            La configuración de seguridad está en desarrollo. 
+            Podrás gestionar políticas de seguridad y control de acceso aquí.
           </p>
         </div>
       </div>
