@@ -13,6 +13,7 @@ import { UsersService } from './services/users.service';
 import {
   UserCreateModalComponent,
   UserEditModalComponent,
+  UserConfigModalComponent,
   UserEmptyStateComponent,
   UserCardComponent,
 } from './components/index';
@@ -54,6 +55,7 @@ interface StatItem {
     ReactiveFormsModule,
     UserCreateModalComponent,
     UserEditModalComponent,
+    UserConfigModalComponent,
     UserEmptyStateComponent,
     UserCardComponent,
     TableComponent,
@@ -73,6 +75,8 @@ export class UsersComponent implements OnInit, OnDestroy {
   currentUser: User | null = null;
   showCreateModal = false;
   showEditModal = false;
+  showConfigModal = false;
+  userForConfig: User | null = null;
   userToDelete: User | null = null;
   showDeleteModal = false;
   searchSubject = new Subject<string>();
@@ -408,6 +412,18 @@ export class UsersComponent implements OnInit, OnDestroy {
   onUserUpdated(): void {
     this.showEditModal = false;
     this.currentUser = null;
+    this.loadUsers();
+    this.loadUserStats();
+  }
+
+  configUser(user: User): void {
+    this.userForConfig = user;
+    this.showConfigModal = true;
+  }
+
+  onUserConfigured(): void {
+    this.showConfigModal = false;
+    this.userForConfig = null;
     this.loadUsers();
     this.loadUserStats();
   }

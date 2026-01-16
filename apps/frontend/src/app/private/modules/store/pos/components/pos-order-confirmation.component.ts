@@ -18,6 +18,7 @@ import {
   ToastService,
 } from '../../../../../shared/components';
 import { PosPaymentService } from '../services/pos-payment.service';
+import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 @Component({
@@ -256,6 +257,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   cashierName = '';
   customerName = '';
   customerEmail = '';
+  customerTaxId = '';
   orderItems: any[] = [];
   orderSubtotal = 0;
   orderDiscount = 0;
@@ -266,6 +268,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   private destroy$ = new Subject<void>();
   private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
+  private ticketService = inject(PosTicketService);
 
   ngOnInit(): void {
     const user = this.authFacade.getCurrentUser();
@@ -291,13 +294,26 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
 
     this.customerName = this.orderData.customer_name || '';
     this.customerEmail = this.orderData.customer_email || '';
+    this.customerTaxId = this.orderData.customer_tax_id || this.orderData.customer?.tax_id || this.orderData.customer?.document_number || '';
 
-    this.orderItems = (this.orderData.items || []).map((item: any) => ({
-      name: item.product_name || item.name || 'Producto',
-      quantity: item.quantity,
-      unitPrice: Number(item.unit_price || item.unitPrice || 0),
-      totalPrice: Number(item.total_price || item.totalPrice || 0),
-    }));
+    console.log('Order data customer:', this.orderData.customer);
+    console.log('Customer tax_id:', this.customerTaxId);
+
+    this.orderItems = (this.orderData.items || []).map((item: any) => {
+      const unitPrice = Number(item.unit_price || item.unitPrice || 0);
+      const quantity = Number(item.quantity || 0);
+      const totalPrice = Number(item.total_price || item.totalPrice || 0);
+      const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
+      return {
+        name: item.product_name || item.name || 'Producto',
+        quantity,
+        unitPrice,
+        totalPrice,
+        tax,
+      };
+    });
+
+    console.log('Order items with tax:', this.orderItems);
 
     this.orderSubtotal = Number(this.orderData.subtotal || 0);
     this.orderDiscount = Number(this.orderData.discount_amount || this.orderData.discount || 0);
@@ -322,14 +338,69 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   printReceipt(): void {
-    this.printing = true;
-    // Basic browser print for now, ideally this would use a thermal printer service
-    window.print();
+    if (!this.orderData) return;
 
-    setTimeout(() => {
-      this.printing = false;
-      this.toastService.success('Ticket enviado a impresión');
-    }, 500);
+    this.printing = true;
+
+    // Create TicketData from orderData
+    const ticketData: any = {
+      id: this.orderNumber,
+      date: new Date(this.orderData.created_at || new Date()),
+      items: this.orderItems.map(item => ({
+        id: item.id || item.name,
+        name: item.name,
+        sku: item.sku || '',
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+        discount: 0,
+        tax: item.tax,
+      })),
+      subtotal: this.orderSubtotal,
+      tax: this.orderTax,
+      discount: this.orderDiscount,
+      total: this.orderTotal,
+      paymentMethod: this.paymentInfo?.method || 'Pago',
+      cashReceived: this.paymentInfo?.amount,
+      change: 0,
+      customer: this.customerName ? {
+        name: this.customerName,
+        email: this.customerEmail,
+        phone: '',
+        taxId: this.customerTaxId,
+      } : undefined,
+      store: {
+        name: 'Vendix Store',
+        address: '123 Main St, City, State 12345',
+        phone: '+1 (555) 123-4567',
+        email: 'info@vendix.com',
+        taxId: 'TAX-123456789',
+        id: 1,
+        logo: '',
+      },
+      organization: {
+        name: 'Vendix',
+        taxId: 'ORG-123',
+      },
+      cashier: this.cashierName,
+      transactionId: this.orderNumber,
+    };
+
+    this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
+      next: (success: boolean) => {
+        this.printing = false;
+        if (success) {
+          this.toastService.success('Ticket enviado a impresión');
+        } else {
+          this.toastService.error('Error al imprimir ticket');
+        }
+      },
+      error: (error: any) => {
+        this.printing = false;
+        console.error('Error al imprimir ticket:', error);
+        this.toastService.error('Error al imprimir ticket');
+      },
+    });
   }
 
   emailReceipt(): void {

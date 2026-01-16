@@ -211,4 +211,8 @@ export class OrganizationPrismaService extends BasePrismaService {
   get order_items() {
     return this.baseClient.order_items;
   }
+
+  get store_payment_methods() {
+    return this.baseClient.store_payment_methods;
+  }
 }

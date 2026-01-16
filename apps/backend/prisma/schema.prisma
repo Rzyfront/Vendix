@@ -1217,6 +1217,24 @@ model wishlist_items {
   @@index([wishlist_id])
 }
 
+// ===== DEFAULT TEMPLATES =====
+
+model default_templates {
+  id                Int                    @id @default(autoincrement())
+  template_name     String                 @unique @db.VarChar(255)
+  configuration_type template_config_type_enum
+  template_data     Json
+  description       String?                @db.Text
+  is_active         Boolean                @default(true)
+  is_system         Boolean                @default(false)
+  created_at        DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?              @default(now()) @db.Timestamp(6)
+
+  @@index([configuration_type])
+  @@index([is_active])
+  @@index([is_system])
+}
+
 enum address_type_enum {
   billing
   shipping
@@ -1514,4 +1532,17 @@ enum partner_type_enum {
 enum item_condition_enum {
   good
   damaged
+}
+
+enum template_config_type_enum {
+  domain
+  store_settings
+  ecommerce
+  payment_methods
+  shipping
+  tax
+  email
+  notifications
+  user_panel_ui
+  user_settings
 }

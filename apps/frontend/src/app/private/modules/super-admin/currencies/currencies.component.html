@@ -1,0 +1,104 @@
+<div class="space-y-2 md:space-y-4">
+  <!-- Stats Cards -->
+  <app-currency-stats [stats]="currencyStats"></app-currency-stats>
+
+  <!-- Lista de Currencies -->
+  <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
+    <div class="p-2 md:px-6 md:py-4 border-b border-border">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-semibold text-text-primary">
+            Todas las Monedas ({{ currencies.length }})
+          </h2>
+        </div>
+
+        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <!-- Filter by state -->
+          <select
+            class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            (change)="onStateChange($event)">
+            <option *ngFor="let filter of stateFilters" [value]="filter.value">
+              {{ filter.label }}
+            </option>
+          </select>
+
+          <!-- Search input -->
+          <app-inputsearch
+            class="w-full sm:w-64 flex-shrink-0"
+            size="sm"
+            placeholder="Buscar monedas..."
+            [debounceTime]="1000"
+            (searchChange)="onSearchChange($event)">
+          </app-inputsearch>
+
+          <!-- Action buttons -->
+          <div class="flex gap-2 items-center ml-auto">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshCurrencies()"
+              [disabled]="isLoading"
+              title="Actualizar">
+              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+            </app-button>
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="openCreateCurrencyModal()"
+              title="Nueva Moneda">
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <span class="hidden sm:inline">Nueva Moneda</span>
+            </app-button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Estado de Carga -->
+    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      <p class="mt-2 text-text-secondary">Cargando monedas...</p>
+    </div>
+
+    <!-- Estado Vacío -->
+    <app-currency-empty-state
+      *ngIf="!isLoading && currencies.length === 0"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      (actionClick)="openCreateCurrencyModal()">
+    </app-currency-empty-state>
+
+    <!-- Tabla de Currencies -->
+    <div *ngIf="!isLoading && currencies.length > 0" class="p-2 md:p-4">
+      <app-table
+        [data]="currencies"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [loading]="isLoading"
+        [sortable]="true"
+        [hoverable]="true"
+        [striped]="true"
+        size="md"
+        (sort)="onSortChange($event)"
+        (rowClick)="editCurrency($event)">
+      </app-table>
+    </div>
+  </div>
+</div>
+
+<!-- Create Currency Modal -->
+<app-currency-create-modal
+  [isOpen]="isCreateModalOpen"
+  [isSubmitting]="isCreatingCurrency"
+  (submit)="createCurrency($event)"
+  (cancel)="onCreateModalCancel()">
+</app-currency-create-modal>
+
+<!-- Edit Currency Modal -->
+<app-currency-edit-modal
+  [isOpen]="isEditModalOpen"
+  [isSubmitting]="isUpdatingCurrency"
+  [currency]="selectedCurrency"
+  (submit)="updateCurrency($event)"
+  (cancel)="onEditModalCancel()">
+</app-currency-edit-modal>

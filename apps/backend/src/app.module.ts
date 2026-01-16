@@ -17,6 +17,7 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
 import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
 import { SecretsModule } from './common/config/secrets.module';
+import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { SecretsModule } from './common/config/secrets.module';
     DomainsModule, // ✅ Módulo de dominios (público y privado)
     StorageModule,
     AuditModule, // ✅ Importar AuditModule global (desde common)
+    DefaultPanelUIModule, // ✅ Importar DefaultPanelUIModule global (servicio centralizado de panel UI)
   ],
   controllers: [AppController],
   providers: [

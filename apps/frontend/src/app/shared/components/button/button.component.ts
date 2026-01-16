@@ -43,7 +43,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
             fill="currentColor"
             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
           ></path>
-        </svg><ng-content select="[slot=icon]"></ng-content><span *ngIf="!loading || showTextWhileLoading"><ng-content></ng-content></span>
+        </svg><ng-content select="[slot=icon]"></ng-content><ng-container *ngIf="!loading || showTextWhileLoading"><ng-content></ng-content></ng-container>
       </div>
     </button>
   `,
@@ -51,10 +51,6 @@ export type ButtonSize = 'sm' | 'md' | 'lg';
     `
       :host {
         display: inline-block;
-      }
-      /* Hide empty text span to prevent gap spacing issues */
-      span:empty {
-        display: none;
       }
 
       /* Asegurar alturas exactas para consistencia */
