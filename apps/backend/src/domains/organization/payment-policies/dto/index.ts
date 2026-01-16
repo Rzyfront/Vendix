@@ -6,6 +6,7 @@ import {
   IsNumber,
   Min,
   Max,
+  IsString,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -65,3 +66,6 @@ export class UpdatePaymentPoliciesDto {
   @Min(0)
   max_order_amount?: number;
 }
+
+export { UpdatePaymentMethodsDto } from './update-payment-methods.dto';
+export { PaymentMethodDto } from './payment-method.dto';
