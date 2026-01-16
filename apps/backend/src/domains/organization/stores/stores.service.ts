@@ -484,7 +484,7 @@ export class StoresService {
         ownership: 'vendix_subdomain',
         status: 'active',
         ssl_status: 'none',
-        config: brandingConfig ? { branding: brandingConfig, app_type: 'STORE_ADMIN' } : {},
+        config: brandingConfig ? { app: 'STORE_LANDING', branding: brandingConfig } : {},
         created_at: new Date(),
         updated_at: new Date(),
       },

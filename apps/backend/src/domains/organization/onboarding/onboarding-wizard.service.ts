@@ -549,12 +549,12 @@ export class OnboardingWizardService {
           hostname: autoSubdomain,
           organization_id: user.organization_id,
           config: {
+            app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
             branding: {
               primaryColor: setupAppConfigDto.primary_color,
               secondaryColor: setupAppConfigDto.secondary_color,
               palette: palette,
             },
-            app_type: setupAppConfigDto.app_type,
           },
           domain_type: 'organization',
           is_primary: true, // Auto domain is primary by default until custom is verified
@@ -588,12 +588,12 @@ export class OnboardingWizardService {
           where: { id: existingStoreDomain.id },
           data: {
             config: {
+              app: 'STORE_LANDING',
               branding: {
                 primaryColor: setupAppConfigDto.primary_color,
                 secondaryColor: setupAppConfigDto.secondary_color,
                 palette: palette,
               },
-              app_type: 'STORE_ADMIN',
             },
             is_primary: true,
             status: 'active',
@@ -619,12 +619,12 @@ export class OnboardingWizardService {
             store_id: store.id,
             domain_type: 'store',
             config: {
+              app: 'STORE_LANDING',
               branding: {
                 primaryColor: setupAppConfigDto.primary_color,
                 secondaryColor: setupAppConfigDto.secondary_color,
                 palette: palette,
               },
-              app_type: 'STORE_ADMIN',
             },
             is_primary: true,
             ownership: 'vendix_subdomain',
@@ -667,7 +667,7 @@ export class OnboardingWizardService {
                 secondaryColor: setupAppConfigDto.secondary_color,
                 palette: palette,
               },
-              app_type: setupAppConfigDto.app_type,
+              app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
             },
             is_primary: false, // Custom domain starts as non-primary (pending)
             status: 'pending_dns',
@@ -686,7 +686,7 @@ export class OnboardingWizardService {
                 secondaryColor: setupAppConfigDto.secondary_color,
                 palette: palette,
               },
-              app_type: setupAppConfigDto.app_type,
+              app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
             },
             domain_type: 'organization',
             is_primary: false,
