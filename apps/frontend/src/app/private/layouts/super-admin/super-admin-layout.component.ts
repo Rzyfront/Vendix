@@ -111,6 +111,11 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/roles',
     },
     {
+      label: 'Métodos de Pago',
+      icon: 'credit-card',
+      route: '/super-admin/payment-methods',
+    },
+    {
       label: 'Dominios',
       icon: 'globe-2',
       route: '/super-admin/domains',

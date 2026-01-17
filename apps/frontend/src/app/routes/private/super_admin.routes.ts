@@ -44,6 +44,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.RolesComponent),
       },
       {
+        path: 'payment-methods',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/payment-methods/payment-methods.component'
+          ).then((c) => c.PaymentMethodsComponent),
+      },
+      {
         path: 'stores',
         loadComponent: () =>
           import(
