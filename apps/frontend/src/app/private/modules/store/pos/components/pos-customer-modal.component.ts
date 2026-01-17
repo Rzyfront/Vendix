@@ -278,6 +278,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 [size]="'md'"
                 [error]="getFieldError('documentNumber')"
                 (blur)="onFieldBlur('documentNumber')"
+                customWrapperClass="mt-0"
               >
               </app-input>
             </div>

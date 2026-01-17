@@ -25,7 +25,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
       [isOpen]="isOpen"
       [size]="'md'"
       (closed)="onClose()"
-      [title]="customer ? 'Edit Customer' : 'New Customer'"
+      [title]="customer ? 'Editar cliente' : 'Nuevo cliente'"
     >
       <div class="p-6">
         <form [formGroup]="form" class="space-y-4">
@@ -43,7 +43,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
           <div class="grid grid-cols-2 gap-4">
             <app-input
               formControlName="first_name"
-              label="First Name *"
+              label="Nombre *"
               placeholder="John"
               [error]="getFieldError('first_name')"
               (blur)="onFieldBlur('first_name')"
@@ -51,8 +51,8 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 
             <app-input
               formControlName="last_name"
-              label="Last Name *"
-              placeholder="Doe"
+              label="Apellido*"
+              placeholder="Rodriguez"
               [error]="getFieldError('last_name')"
               (blur)="onFieldBlur('last_name')"
             ></app-input>
@@ -61,8 +61,8 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
           <!-- Phone -->
           <app-input
             formControlName="phone"
-            label="Phone"
-            placeholder="+1 234 567 890"
+            label="Telefono"
+            placeholder="+57 300 567 8900"
             [error]="getFieldError('phone')"
             (blur)="onFieldBlur('phone')"
           ></app-input>
@@ -71,17 +71,18 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
           <div class="grid grid-cols-2 gap-4">
             <app-selector
               formControlName="document_type"
-              label="ID Type"
-              placeholder="Select Type"
+              label="Tipo de identificación"
+              placeholder="Seleccionar tipo"
               [options]="documentTypes"
             ></app-selector>
 
             <app-input
               formControlName="document_number"
-              label="ID Number"
+              label="Número de identificación"
               placeholder="12345678"
               [error]="getFieldError('document_number')"
               (blur)="onFieldBlur('document_number')"
+              customWrapperClass="mt-0"
             ></app-input>
           </div>
         </form>

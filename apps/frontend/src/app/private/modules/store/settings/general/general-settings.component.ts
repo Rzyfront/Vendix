@@ -8,9 +8,9 @@ import { CommonModule } from '@angular/common';
   template: `
     <div class="w-full">
       <div class="mb-6">
-        <h1 class="text-3xl font-bold text-gray-900 mb-2">General Settings</h1>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">Configuraciones generales</h1>
         <p class="text-gray-600">
-          Configure basic store information and preferences
+         Configurar la información básica y las preferencias de la tienda
         </p>
       </div>
 
@@ -43,8 +43,8 @@ import { CommonModule } from '@angular/common';
             General Configuration
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            General settings configuration is under development. You will be
-            able to configure store preferences here.
+            La configuración general está en desarrollo. 
+            Podrás configurar las preferencias de la tienda aquí.
           </p>
         </div>
       </div>

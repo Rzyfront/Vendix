@@ -9,10 +9,10 @@ import { CommonModule } from '@angular/common';
     <div class="w-full">
       <div class="mb-6">
         <h1 class="text-3xl font-bold text-gray-900 mb-2">
-          Appearance Settings
+          Configuración de apariencia
         </h1>
         <p class="text-gray-600">
-          Customize store theme, colors, and visual design
+          Personaliza el tema, colores y diseño visual de la tienda
         </p>
       </div>
 
@@ -36,11 +36,11 @@ import { CommonModule } from '@angular/common';
             </svg>
           </div>
           <h2 class="text-xl font-semibold text-gray-900 mb-2">
-            Appearance Configuration
+            Configuración de apariencia
           </h2>
           <p class="text-gray-600 max-w-md mx-auto">
-            Appearance settings configuration is under development. You will be
-            able to customize store theme and design here.
+            La configuración de apariencia está en desarrollo. 
+            Podrás personalizar el tema, colores y diseño visual de la tienda aquí.
           </p>
         </div>
       </div>
