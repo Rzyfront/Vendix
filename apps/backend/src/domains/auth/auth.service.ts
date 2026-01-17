@@ -862,9 +862,37 @@ export class AuthService {
             roles: true,
           },
         },
-        organizations: true,
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
         addresses: true, // Agregar direcciones para consistencia con switch environment
-        main_store: true,
+        main_store: {
+          include: {
+            organizations: {
+              include: {
+                domain_settings: {
+                  where: {
+                    is_primary: true,
+                    status: 'active',
+                  },
+                },
+              },
+            },
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
       },
     });
 
@@ -1110,7 +1138,22 @@ export class AuthService {
         include: {
           store: {
             include: {
-              organizations: true,
+              organizations: {
+                include: {
+                  domain_settings: {
+                    where: {
+                      is_primary: true,
+                      status: 'active',
+                    },
+                  },
+                },
+              },
+              domain_settings: {
+                where: {
+                  is_primary: true,
+                  status: 'active',
+                },
+              },
             },
           },
         },
@@ -1205,6 +1248,7 @@ export class AuthService {
     });
 
     // Remover password del response
+    // Nota: domain_settings ya viene incluido en la relación de store.organizations
     const { password: _, ...userWithRolesAndPassword } = {
       ...userWithRolesArray,
       store: active_store || user.main_store,
@@ -2552,6 +2596,7 @@ export class AuthService {
       .filter(Boolean);
 
     let store_id: number | null = null;
+    let store: any = null; // Declarar en scope más amplio para usarlo más adelante
     if (targetEnvironment === 'STORE_ADMIN') {
       const hasStoreRole =
         userRoles.includes('store_admin') ||
@@ -2565,13 +2610,28 @@ export class AuthService {
       }
 
       // Verificar que la tienda exista y el usuario tenga acceso
-      const store = await this.prismaService.stores.findFirst({
+      store = await this.prismaService.stores.findFirst({
         where: {
           slug: storeSlug,
           organization_id: user.organization_id,
         },
         include: {
-          organizations: true,
+          organizations: {
+            include: {
+              domain_settings: {
+                where: {
+                  is_primary: true,
+                  status: 'active',
+                },
+              },
+            },
+          },
+          domain_settings: {
+            where: {
+              is_primary: true,
+              status: 'active',
+            },
+          },
         },
       });
 
@@ -2606,15 +2666,30 @@ export class AuthService {
     // Generar tokens con el MISMO formato que el JwtStrategy espera
     // Usar el MISMO formato que generateTokens para consistencia total
     let organization_id: number;
+    let activeStore: any = null;
+    let organizations: any = null;
+
     if (store_id) {
       // Switch a STORE_ADMIN: usar la org del store seleccionado
-      const store = await this.prismaService.stores.findUnique({
-        where: { id: store_id },
-        select: { organization_id: true },
-      });
-      organization_id = store?.organization_id || user.organization_id;
+      // Ya tenemos el store con todas las relaciones del query anterior
+      activeStore = store; // Ya incluye domain_settings
+      organizations = store.organizations; // Ya incluye domain_settings
+      organization_id = store.organization_id;
     } else {
       // Switch a ORG_ADMIN: volver a la org original del usuario
+      // Necesitamos obtener la organización con sus domain_settings
+      const org = await this.prismaService.organizations.findUnique({
+        where: { id: user.organization_id },
+        include: {
+          domain_settings: {
+            where: {
+              is_primary: true,
+              status: 'active',
+            },
+          },
+        },
+      });
+      organizations = org;
       organization_id = user.organization_id;
     }
 
@@ -2653,15 +2728,15 @@ export class AuthService {
       },
     });
 
+    // Construir el usuario completo con la misma estructura que el login
+    const userWithEnvironment = {
+      ...user,
+      store: activeStore, // Store con domain_settings incluido
+      organizations: organizations, // Organization con domain_settings incluido
+    };
+
     return {
-      user: {
-        id: user.id,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name,
-        roles,
-        permissions,
-      },
+      user: userWithEnvironment,
       tokens,
       permissions,
       roles,

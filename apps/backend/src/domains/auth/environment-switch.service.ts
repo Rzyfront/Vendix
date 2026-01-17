@@ -162,7 +162,22 @@ export class EnvironmentSwitchService {
           organization_id: user.organization_id,
         },
         include: {
-          organizations: true,
+          organizations: {
+            include: {
+              domain_settings: {
+                where: {
+                  is_primary: true,
+                  status: 'active',
+                },
+              },
+            },
+          },
+          domain_settings: {
+            where: {
+              is_primary: true,
+              status: 'active',
+            },
+          },
           store_users: {
             where: {
               user_id: userId,
@@ -292,7 +307,16 @@ export class EnvironmentSwitchService {
             roles: true,
           },
         },
-        organizations: true,
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
         addresses: true,
       },
     });

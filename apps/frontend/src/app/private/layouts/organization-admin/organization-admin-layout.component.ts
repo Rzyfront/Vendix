@@ -37,9 +37,10 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
       <app-sidebar
         #sidebarRef
         [menuItems]="filteredMenuItems"
-        [title]="(organizationName$ | async) || organizationName"
+        [title]="(organizationName$ | async) || 'Cargando...'"
         subtitle="Administrador de Organización"
-        [vlink]="(organizationSlug$ | async) || organizationSlug"
+        [vlink]="(organizationSlug$ | async) || 'slug'"
+        [domainHostname]="organizationDomainHostname"
         [collapsed]="sidebarCollapsed"
         (expandSidebar)="toggleSidebar()"
       >
@@ -87,12 +88,12 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
 
   sidebarCollapsed = false;
   currentVlink = 'organization-admin';
-  organizationName = 'Acme Corporation';
-  organizationSlug = 'acme-corp';
 
   // Dynamic user data
   organizationName$: Observable<string | null>;
   organizationSlug$: Observable<string | null>;
+  organizationDomainHostname$: Observable<string | null>;
+  organizationDomainHostname: string | null = null;
 
   // Onboarding Modal
   showOnboardingModal = false;
@@ -169,6 +170,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   ) {
     this.organizationName$ = this.authFacade.userOrganizationName$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
+    this.organizationDomainHostname$ = this.authFacade.userDomainHostname$;
   }
 
   ngOnInit(): void {
@@ -189,6 +191,13 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       .subscribe((needsOnboarding: boolean) => {
         this.needsOnboarding = needsOnboarding;
         this.updateOnboardingModal();
+      });
+
+    // Subscribe to domain hostname for sidebar vlink
+    this.organizationDomainHostname$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((hostname) => {
+        this.organizationDomainHostname = hostname;
       });
 
     // Load stores for sidebar

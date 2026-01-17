@@ -15,10 +15,14 @@ import {
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
+import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
 
 @Injectable()
 export class StoresService {
-  constructor(private prisma: OrganizationPrismaService) { }
+  constructor(
+    private prisma: OrganizationPrismaService,
+    private domainGeneratorHelper: DomainGeneratorHelper,
+  ) { }
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -59,6 +63,9 @@ export class StoresService {
         _count: { select: { products: true, orders: true, store_users: true } },
       },
     });
+
+    // Create store domain (STORE_ADMIN context: {slug}-store.vendix.com)
+    await this.createStoreDomain(store.id, store.slug);
 
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
@@ -440,5 +447,87 @@ export class StoresService {
       total_orders: totalOrders,
       total_products: totalProducts,
     };
+  }
+
+  /**
+   * Create a domain for a store
+   * Generates hostname: {slug}-store.vendix.com
+   */
+  private async createStoreDomain(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<void> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prisma.domain_settings.findMany({
+      select: { hostname: true, config: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+
+    // Generate unique hostname for store
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.STORE,
+      existingHostnames,
+    );
+
+    // Get branding config from organization domain if exists
+    const orgDomain = existingDomains.find(d => d.config && typeof d.config === 'object' && 'branding' in d.config);
+    const brandingConfig = orgDomain?.config?.branding || null;
+
+    // Create domain settings for the store with branding from org
+    await this.prisma.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'store',
+        is_primary: true,
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: brandingConfig ? { app: 'STORE_LANDING', branding: brandingConfig } : {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Create an e-commerce domain for a store
+   * Generates hostname: {slug}-shop.vendix.com
+   */
+  async createEcommerceDomain(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<string> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prisma.domain_settings.findMany({
+      select: { hostname: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+
+    // Generate unique hostname for e-commerce
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.ECOMMERCE,
+      existingHostnames,
+    );
+
+    // Create domain settings for e-commerce
+    await this.prisma.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'ecommerce',
+        is_primary: false, // E-commerce domains are not primary (store domain is primary)
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: {},
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    return hostname;
   }
 }
