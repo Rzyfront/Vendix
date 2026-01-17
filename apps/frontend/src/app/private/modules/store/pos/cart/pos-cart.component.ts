@@ -18,11 +18,12 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent, IconComponent, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -189,32 +190,15 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
               <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
                 Cantidad
               </span>
-              <div
-                class="flex items-center bg-muted/50 border border-border/50 rounded-md h-7 overflow-hidden"
-              >
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity - 1)"
-                  [disabled]="(loading$ | async) ?? false"
-                >
-                  <app-icon name="minus" [size]="12"></app-icon>
-                </button>
-                <span
-                  class="min-w-[28px] text-center text-xs font-bold text-text-primary"
-                >
-                  {{ item.quantity }}
-                </span>
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity + 1)"
-                  [disabled]="
-                    ((loading$ | async) ?? false) ||
-                    item.quantity >= item.product.stock
-                  "
-                >
-                  <app-icon name="plus" [size]="12"></app-icon>
-                </button>
-              </div>
+              <app-quantity-control
+                [value]="item.quantity"
+                [min]="1"
+                [max]="item.product.stock"
+                [editable]="true"
+                [disabled]="(loading$ | async) ?? false"
+                [size]="'sm'"
+                (valueChange)="updateQuantity(item.id, $event)"
+              ></app-quantity-control>
             </div>
           </div>
         </div>

@@ -19,6 +19,7 @@ export { TooltipComponent } from './tooltip/tooltip.component';
 export { SelectorComponent } from './selector/selector.component';
 export { MultiSelectorComponent } from './multi-selector/multi-selector.component';
 export { TextareaComponent } from './textarea/textarea.component';
+export { QuantityControlComponent } from './quantity-control/quantity-control.component';
 export {
   OnboardingModalComponent,
   EmailVerificationStepComponent,
@@ -55,6 +56,7 @@ export type {
   MultiSelectorOption,
   MultiSelectorSize,
 } from './multi-selector/multi-selector.component';
+export type { QuantityControlSize } from './quantity-control/quantity-control.component';
 export type {
   ExtendedChartType,
   ChartTheme,

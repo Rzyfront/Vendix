@@ -22,11 +22,12 @@ import { DialogService } from '../../../../../../shared/components/dialog/dialog
 import { FormsModule } from '@angular/forms';
 
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
 
 @Component({
   selector: 'app-pop-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, InputComponent, FormsModule],
+  imports: [CommonModule, ButtonComponent, IconComponent, InputComponent, FormsModule, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -216,32 +217,14 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
               <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
                 Cantidad
               </span>
-              <div
-                class="flex items-center bg-muted/50 border border-border/50 rounded-md h-7 overflow-hidden"
-              >
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity - 1)"
-                  [disabled]="(loading$ | async) ?? false"
-                >
-                  <app-icon name="minus" [size]="12"></app-icon>
-                </button>
-                <input
-                  class="w-12 text-center text-xs font-bold text-text-primary bg-transparent border-0 outline-none p-0 h-full focus:ring-0"
-                  type="number"
-                  min="1"
-                  [ngModel]="item.quantity"
-                  (ngModelChange)="updateQuantity(item.id, $event)"
-                  [disabled]="(loading$ | async) ?? false"
-                />
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity + 1)"
-                  [disabled]="(loading$ | async) ?? false"
-                >
-                  <app-icon name="plus" [size]="12"></app-icon>
-                </button>
-              </div>
+              <app-quantity-control
+                [value]="item.quantity"
+                [min]="1"
+                [editable]="true"
+                [disabled]="(loading$ | async) ?? false"
+                [size]="'sm'"
+                (valueChange)="updateQuantity(item.id, $event)"
+              ></app-quantity-control>
             </div>
             
             <!-- Lot Info Trigger -->
