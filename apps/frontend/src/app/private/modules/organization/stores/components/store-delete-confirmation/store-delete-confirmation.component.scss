@@ -1,0 +1,160 @@
+:host {
+  display: block;
+}
+
+// Delete confirmation modal styles
+.delete-confirmation-modal {
+  .modal-content {
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .modal-header {
+    border-bottom: 1px solid var(--color-border);
+    padding: 1.5rem;
+    background-color: var(--color-background);
+
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+  }
+
+  .modal-footer {
+    border-top: 1px solid var(--color-border);
+    padding: 1rem 1.5rem;
+    background-color: var(--color-background-secondary);
+  }
+}
+
+// Confirmation message
+.confirmation-message {
+  color: var(--color-text-secondary);
+  margin-bottom: 1.5rem;
+  line-height: 1.6;
+}
+
+.text-primary {
+  color: var(--color-primary);
+  font-weight: 600;
+}
+
+// Slug confirmation box
+.slug-confirmation-box {
+  background-color: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.slug-label {
+  color: #92400e;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin: 0 0 0.5rem 0;
+}
+
+.slug-display {
+  background-color: #fef3c7;
+  color: #92400e;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.875rem;
+  font-weight: 600;
+  display: block;
+  user-select: all;
+  word-break: break-all;
+}
+
+// Input group
+.input-group {
+  margin-bottom: 1.5rem;
+}
+
+.input-label {
+  display: block;
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.slug-input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-danger);
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+  }
+
+  &::placeholder {
+    color: var(--color-text-tertiary);
+  }
+
+  &.input-error {
+    border-color: var(--color-danger);
+    animation: shake 0.3s ease-in-out;
+  }
+}
+
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--color-danger);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+
+// Warning box
+.warning-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background-color: #fee2e2;
+  border: 1px solid #ef4444;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.warning-icon {
+  color: #dc2626;
+  flex-shrink: 0;
+  margin-top: 0.125rem;
+}
+
+.warning-text {
+  color: #991b1b;
+  font-size: 0.8125rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
+// Modal footer buttons
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+
+  app-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// Shake animation for error state
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
