@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../../environments/environment';
 
 export interface PaymentMethod {
     id: number;
@@ -40,7 +41,7 @@ export interface CheckoutResponse {
     providedIn: 'root',
 })
 export class CheckoutService {
-    private api_url = '/api/ecommerce/checkout';
+    private api_url = `${environment.apiUrl}/ecommerce/checkout`;
 
     constructor(
         private http: HttpClient,
@@ -48,9 +49,10 @@ export class CheckoutService {
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const storeConfig = this.domain_service.getCurrentStore();
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
         return new HttpHeaders({
-            'x-store-id': storeConfig?.id?.toString() || '',
+            'x-store-id': storeId?.toString() || '',
         });
     }
 

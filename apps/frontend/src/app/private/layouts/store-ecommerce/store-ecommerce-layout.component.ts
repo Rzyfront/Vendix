@@ -5,11 +5,12 @@ import { map } from 'rxjs/operators';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
+import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 
 @Component({
     selector: 'app-store-ecommerce-layout',
     standalone: true,
-    imports: [CommonModule, RouterModule],
+    imports: [CommonModule, RouterModule, SearchAutocompleteComponent],
     templateUrl: './store-ecommerce-layout.component.html',
     styleUrls: ['./store-ecommerce-layout.component.scss'],
 })

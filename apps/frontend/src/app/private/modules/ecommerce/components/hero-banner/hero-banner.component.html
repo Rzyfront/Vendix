@@ -1,0 +1,18 @@
+<section class="hero-banner" [class]="class" [style.background-color]="banner_config.background_color">
+  @if (banner_config.image_url) {
+  <div class="hero-background" [style.background-image]="'url(' + banner_config.image_url + ')'"></div>
+  }
+
+  @if (banner_config.show_overlay) {
+  <div class="hero-overlay"></div>
+  }
+
+  <div class="hero-content" [style.color]="banner_config.text_color">
+    <h1 class="hero-title">{{ banner_config.title }}</h1>
+    <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
+    <button class="hero-cta" (click)="onCtaClick()">
+      {{ banner_config.cta_text }}
+      <i class="pi pi-arrow-right"></i>
+    </button>
+  </div>
+</section>

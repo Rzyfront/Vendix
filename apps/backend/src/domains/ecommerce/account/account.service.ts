@@ -1,13 +1,22 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto } from './dto/account.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AccountService {
-    constructor(private readonly prisma: GlobalPrismaService) { }
+    constructor(private readonly prisma: EcommercePrismaService) { }
 
-    async getProfile(user_id: number) {
+    async getProfile() {
+        // user_id se obtiene del contexto del JWT
+        const context = RequestContextService.getContext();
+        const user_id = context?.user_id;
+
+        if (!user_id) {
+            throw new BadRequestException('User context required');
+        }
+
         const user = await this.prisma.users.findUnique({
             where: { id: user_id },
             select: {
@@ -30,7 +39,15 @@ export class AccountService {
         return user;
     }
 
-    async updateProfile(user_id: number, dto: UpdateProfileDto) {
+    async updateProfile(dto: UpdateProfileDto) {
+        // user_id se obtiene del contexto del JWT
+        const context = RequestContextService.getContext();
+        const user_id = context?.user_id;
+
+        if (!user_id) {
+            throw new BadRequestException('User context required');
+        }
+
         const user = await this.prisma.users.findUnique({
             where: { id: user_id },
         });
@@ -62,7 +79,15 @@ export class AccountService {
         });
     }
 
-    async changePassword(user_id: number, dto: ChangePasswordDto) {
+    async changePassword(dto: ChangePasswordDto) {
+        // user_id se obtiene del contexto del JWT
+        const context = RequestContextService.getContext();
+        const user_id = context?.user_id;
+
+        if (!user_id) {
+            throw new BadRequestException('User context required');
+        }
+
         const user = await this.prisma.users.findUnique({
             where: { id: user_id },
         });
@@ -86,15 +111,13 @@ export class AccountService {
         return { message: 'Password changed successfully' };
     }
 
-    async getOrders(store_id: number, user_id: number, page = 1, limit = 10) {
+    async getOrders(page = 1, limit = 10) {
+        // store_id y user_id se aplican automáticamente por EcommercePrismaService
         const skip = (page - 1) * limit;
 
         const [data, total] = await Promise.all([
             this.prisma.orders.findMany({
-                where: {
-                    store_id,
-                    customer_id: user_id,
-                },
+                where: {}, // store_id y customer_id se aplican automáticamente
                 skip,
                 take: Number(limit),
                 orderBy: { created_at: 'desc' },
@@ -113,10 +136,7 @@ export class AccountService {
                 },
             }),
             this.prisma.orders.count({
-                where: {
-                    store_id,
-                    customer_id: user_id,
-                },
+                where: {}, // store_id y customer_id se aplican automáticamente
             }),
         ]);
 
@@ -134,12 +154,12 @@ export class AccountService {
         };
     }
 
-    async getOrderDetail(store_id: number, user_id: number, order_id: number) {
+    async getOrderDetail(order_id: number) {
+        // store_id y user_id se aplican automáticamente por EcommercePrismaService
         const order = await this.prisma.orders.findFirst({
             where: {
                 id: order_id,
-                store_id,
-                customer_id: user_id,
+                // store_id y customer_id se aplican automáticamente
             },
             include: {
                 order_items: {
@@ -206,25 +226,34 @@ export class AccountService {
         };
     }
 
-    async getAddresses(user_id: number) {
+    async getAddresses() {
+        // user_id se aplica automáticamente por EcommercePrismaService
         return this.prisma.addresses.findMany({
-            where: { user_id },
+            where: {}, // user_id se aplica automáticamente
             orderBy: { is_primary: 'desc' },
         });
     }
 
-    async createAddress(user_id: number, dto: CreateAddressDto) {
-        // If is_primary, unset other primary addresses
+    async createAddress(dto: CreateAddressDto) {
+        // user_id se obtiene del contexto del JWT
+        const context = RequestContextService.getContext();
+        const user_id = context?.user_id;
+
+        if (!user_id) {
+            throw new BadRequestException('User context required');
+        }
+
+        // If is_primary, unset other primary addresses (user_id se aplica automáticamente)
         if (dto.is_primary) {
             await this.prisma.addresses.updateMany({
-                where: { user_id, is_primary: true },
+                where: { is_primary: true }, // user_id se aplica automáticamente
                 data: { is_primary: false },
             });
         }
 
+        // user_id se inyecta automáticamente
         return this.prisma.addresses.create({
             data: {
-                user_id,
                 address_line1: dto.address_line1,
                 address_line2: dto.address_line2,
                 city: dto.city,
@@ -238,9 +267,13 @@ export class AccountService {
         });
     }
 
-    async deleteAddress(user_id: number, address_id: number) {
+    async deleteAddress(address_id: number) {
+        // user_id se aplica automáticamente por EcommercePrismaService
         const address = await this.prisma.addresses.findFirst({
-            where: { id: address_id, user_id },
+            where: {
+                id: address_id,
+                // user_id se aplica automáticamente
+            },
         });
 
         if (!address) {

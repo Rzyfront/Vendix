@@ -3,9 +3,7 @@ import {
     Get,
     Post,
     Body,
-    Headers,
     UseGuards,
-    Request,
 } from '@nestjs/common';
 import { CheckoutService } from './checkout.service';
 import { CheckoutDto } from './dto/checkout.dto';
@@ -17,21 +15,16 @@ export class CheckoutController {
     constructor(private readonly checkout_service: CheckoutService) { }
 
     @Get('payment-methods')
-    async getPaymentMethods(@Headers('x-store-id') store_id_header: string) {
-        const store_id = parseInt(store_id_header, 10);
-        const data = await this.checkout_service.getPaymentMethods(store_id);
+    async getPaymentMethods() {
+        // store_id se resuelve automáticamente desde el dominio
+        const data = await this.checkout_service.getPaymentMethods();
         return { success: true, data };
     }
 
     @Post()
-    async checkout(
-        @Headers('x-store-id') store_id_header: string,
-        @Request() req: any,
-        @Body() dto: CheckoutDto,
-    ) {
-        const store_id = parseInt(store_id_header, 10);
-        const user_id = req.user.id;
-        const data = await this.checkout_service.checkout(store_id, user_id, dto);
+    async checkout(@Body() dto: CheckoutDto) {
+        // store_id y user_id se resuelven automáticamente
+        const data = await this.checkout_service.checkout(dto);
         return { success: true, data };
     }
 }

@@ -7,9 +7,7 @@ import {
     Body,
     Param,
     Query,
-    Headers,
     UseGuards,
-    Request,
 } from '@nestjs/common';
 import { AccountService } from './account.service';
 import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto } from './dto/account.dto';
@@ -21,34 +19,33 @@ export class AccountController {
     constructor(private readonly account_service: AccountService) { }
 
     @Get()
-    async getProfile(@Request() req: any) {
-        const data = await this.account_service.getProfile(req.user.id);
+    async getProfile() {
+        // user_id se resuelve automáticamente desde el JWT
+        const data = await this.account_service.getProfile();
         return { success: true, data };
     }
 
     @Put()
-    async updateProfile(@Request() req: any, @Body() dto: UpdateProfileDto) {
-        const data = await this.account_service.updateProfile(req.user.id, dto);
+    async updateProfile(@Body() dto: UpdateProfileDto) {
+        // user_id se resuelve automáticamente desde el JWT
+        const data = await this.account_service.updateProfile(dto);
         return { success: true, data };
     }
 
     @Post('change-password')
-    async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
-        const data = await this.account_service.changePassword(req.user.id, dto);
+    async changePassword(@Body() dto: ChangePasswordDto) {
+        // user_id se resuelve automáticamente desde el JWT
+        const data = await this.account_service.changePassword(dto);
         return { success: true, data };
     }
 
     @Get('orders')
     async getOrders(
-        @Headers('x-store-id') store_id_header: string,
-        @Request() req: any,
         @Query('page') page?: string,
         @Query('limit') limit?: string,
     ) {
-        const store_id = parseInt(store_id_header, 10);
+        // store_id y user_id se resuelven automáticamente
         const data = await this.account_service.getOrders(
-            store_id,
-            req.user.id,
             page ? parseInt(page, 10) : 1,
             limit ? parseInt(limit, 10) : 10,
         );
@@ -56,36 +53,32 @@ export class AccountController {
     }
 
     @Get('orders/:id')
-    async getOrderDetail(
-        @Headers('x-store-id') store_id_header: string,
-        @Request() req: any,
-        @Param('id') order_id: string,
-    ) {
-        const store_id = parseInt(store_id_header, 10);
+    async getOrderDetail(@Param('id') order_id: string) {
+        // store_id y user_id se resuelven automáticamente
         const data = await this.account_service.getOrderDetail(
-            store_id,
-            req.user.id,
             parseInt(order_id, 10),
         );
         return { success: true, data };
     }
 
     @Get('addresses')
-    async getAddresses(@Request() req: any) {
-        const data = await this.account_service.getAddresses(req.user.id);
+    async getAddresses() {
+        // user_id se resuelve automáticamente desde el JWT
+        const data = await this.account_service.getAddresses();
         return { success: true, data };
     }
 
     @Post('addresses')
-    async createAddress(@Request() req: any, @Body() dto: CreateAddressDto) {
-        const data = await this.account_service.createAddress(req.user.id, dto);
+    async createAddress(@Body() dto: CreateAddressDto) {
+        // user_id se resuelve automáticamente desde el JWT
+        const data = await this.account_service.createAddress(dto);
         return { success: true, data };
     }
 
     @Delete('addresses/:id')
-    async deleteAddress(@Request() req: any, @Param('id') address_id: string) {
+    async deleteAddress(@Param('id') address_id: string) {
+        // user_id se resuelve automáticamente desde el JWT
         const data = await this.account_service.deleteAddress(
-            req.user.id,
             parseInt(address_id, 10),
         );
         return { success: true, data };

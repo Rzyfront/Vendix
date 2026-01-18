@@ -1,0 +1,47 @@
+<section class="products-scroll" [class]="class">
+  @if (show_header) {
+  <div class="products-header">
+    <h2 class="products-title">{{ title }}</h2>
+    @if (show_see_all) {
+    <a routerLink="/catalog" class="see-all-link">
+      Ver todos
+      <i class="pi pi-arrow-right"></i>
+    </a>
+    }
+  </div>
+  }
+
+  <div class="products-grid">
+    @for (product of products; track product.id) {
+    <app-product-card
+      [product]="product"
+      (add_to_cart)="onAddToCart($event)"
+      (toggle_wishlist)="onToggleWishlist($event)"
+    />
+    }
+  </div>
+
+  @if (is_loading) {
+  <div class="loading-container">
+    <div class="loading-grid">
+      @for (i of [1,2,3,4]; track i) {
+      <div class="skeleton-card">
+        <div class="skeleton-image"></div>
+        <div class="skeleton-text"></div>
+        <div class="skeleton-text short"></div>
+        <div class="skeleton-button"></div>
+      </div>
+      }
+    </div>
+  </div>
+  }
+
+  @if (!has_more && products.length > 0) {
+  <div class="end-message">
+    <span>No hay más productos</span>
+  </div>
+  }
+
+  <!-- Sentinel element for Intersection Observer -->
+  <div class="scroll-sentinel"></div>
+</section>

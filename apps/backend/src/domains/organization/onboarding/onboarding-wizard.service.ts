@@ -9,19 +9,7 @@ import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { DomainConfigService } from '@common/config/domain.config';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
-
-interface ColorPalette {
-  primary: string;
-  secondary: string;
-  primaryLight: string;
-  primaryDark: string;
-  secondaryLight: string;
-  secondaryDark: string;
-  accent: string;
-  background: string;
-  text: string;
-  border: string;
-}
+import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 
 interface WizardValidation {
   isValid: boolean;
@@ -34,6 +22,7 @@ export class OnboardingWizardService {
     private readonly prismaService: OrganizationPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
+    private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
   ) { }
 
   /**
@@ -538,11 +527,13 @@ export class OnboardingWizardService {
         setupAppConfigDto.app_type,
       );
 
-      // Create new domain config
-      const palette = this.generateColorPalette(
-        setupAppConfigDto.primary_color,
-        setupAppConfigDto.secondary_color,
-      );
+      // Generate standardized branding config
+      const branding = this.brandingGeneratorHelper.generateBranding({
+        name: user.organizations?.name || 'Organization',
+        primaryColor: setupAppConfigDto.primary_color,
+        secondaryColor: setupAppConfigDto.secondary_color,
+        theme: 'light',
+      });
 
       await this.prismaService.domain_settings.create({
         data: {
@@ -550,11 +541,7 @@ export class OnboardingWizardService {
           organization_id: user.organization_id,
           config: {
             app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
-            branding: {
-              primaryColor: setupAppConfigDto.primary_color,
-              secondaryColor: setupAppConfigDto.secondary_color,
-              palette: palette,
-            },
+            branding: branding,
           },
           domain_type: 'organization',
           is_primary: true, // Auto domain is primary by default until custom is verified
@@ -577,10 +564,13 @@ export class OnboardingWizardService {
         },
       });
 
-      const palette = this.generateColorPalette(
-        setupAppConfigDto.primary_color,
-        setupAppConfigDto.secondary_color,
-      );
+      // Generate standardized branding config for store
+      const storeBranding = this.brandingGeneratorHelper.generateBranding({
+        name: store.name,
+        primaryColor: setupAppConfigDto.primary_color,
+        secondaryColor: setupAppConfigDto.secondary_color,
+        theme: 'light',
+      });
 
       if (existingStoreDomain) {
         // Update existing store domain with branding config
@@ -589,11 +579,7 @@ export class OnboardingWizardService {
           data: {
             config: {
               app: 'STORE_LANDING',
-              branding: {
-                primaryColor: setupAppConfigDto.primary_color,
-                secondaryColor: setupAppConfigDto.secondary_color,
-                palette: palette,
-              },
+              branding: storeBranding,
             },
             is_primary: true,
             status: 'active',
@@ -620,11 +606,7 @@ export class OnboardingWizardService {
             domain_type: 'store',
             config: {
               app: 'STORE_LANDING',
-              branding: {
-                primaryColor: setupAppConfigDto.primary_color,
-                secondaryColor: setupAppConfigDto.secondary_color,
-                palette: palette,
-              },
+              branding: storeBranding,
             },
             is_primary: true,
             ownership: 'vendix_subdomain',
@@ -651,10 +633,13 @@ export class OnboardingWizardService {
         throw new ConflictException(`The domain ${customDomain} is already in use by another organization.`);
       }
 
-      const palette = this.generateColorPalette(
-        setupAppConfigDto.primary_color,
-        setupAppConfigDto.secondary_color,
-      );
+      // Generate standardized branding config for custom domain
+      const customBranding = this.brandingGeneratorHelper.generateBranding({
+        name: user.organizations?.name || 'Organization',
+        primaryColor: setupAppConfigDto.primary_color,
+        secondaryColor: setupAppConfigDto.secondary_color,
+        theme: 'light',
+      });
 
       if (existingCustom) {
         // Update existing record for this org
@@ -662,11 +647,7 @@ export class OnboardingWizardService {
           where: { id: existingCustom.id },
           data: {
             config: {
-              branding: {
-                primaryColor: setupAppConfigDto.primary_color,
-                secondaryColor: setupAppConfigDto.secondary_color,
-                palette: palette,
-              },
+              branding: customBranding,
               app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
             },
             is_primary: false, // Custom domain starts as non-primary (pending)
@@ -681,11 +662,7 @@ export class OnboardingWizardService {
             hostname: customDomain,
             organization_id: user.organization_id,
             config: {
-              branding: {
-                primaryColor: setupAppConfigDto.primary_color,
-                secondaryColor: setupAppConfigDto.secondary_color,
-                palette: palette,
-              },
+              branding: customBranding,
               app: setupAppConfigDto.app_type === 'ORG_ADMIN' ? 'ORG_LANDING' : 'STORE_LANDING',
             },
             domain_type: 'organization',
@@ -1004,27 +981,6 @@ export class OnboardingWizardService {
   }
 
   /**
-   * Generate color palette from primary and secondary colors
-   */
-  private generateColorPalette(
-    primary: string,
-    secondary: string,
-  ): ColorPalette {
-    return {
-      primary,
-      secondary,
-      primaryLight: this.lightenColor(primary, 20),
-      primaryDark: this.darkenColor(primary, 20),
-      secondaryLight: this.lightenColor(secondary, 20),
-      secondaryDark: this.darkenColor(secondary, 20),
-      accent: this.generateAccentColor(primary, secondary),
-      background: '#FFFFFF',
-      text: '#1F2937',
-      border: '#E5E7EB',
-    };
-  }
-
-  /**
    * Generate unique subdomain with availability check
    * Uses DomainGeneratorHelper for standardized suffix-based generation
    */
@@ -1163,54 +1119,6 @@ export class OnboardingWizardService {
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
-  }
-
-  /**
-   * Lighten a hex color
-   */
-  private lightenColor(color: string, percent: number): string {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) + amt;
-    const G = ((num >> 8) & 0x00ff) + amt;
-    const B = (num & 0x0000ff) + amt;
-    return `#${(
-      0x1000000 +
-      (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-      (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-      (B < 255 ? (B < 1 ? 0 : B) : 255)
-    )
-      .toString(16)
-      .slice(1)
-      .toUpperCase()}`;
-  }
-
-  /**
-   * Darken a hex color
-   */
-  private darkenColor(color: string, percent: number): string {
-    const num = parseInt(color.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = (num >> 16) - amt;
-    const G = ((num >> 8) & 0x00ff) - amt;
-    const B = (num & 0x0000ff) - amt;
-    return `#${(
-      0x1000000 +
-      (R > 0 ? R : 0) * 0x10000 +
-      (G > 0 ? G : 0) * 0x100 +
-      (B > 0 ? B : 0)
-    )
-      .toString(16)
-      .slice(1)
-      .toUpperCase()}`;
-  }
-
-  /**
-   * Generate accent color from primary and secondary
-   */
-  private generateAccentColor(primary: string, secondary: string): string {
-    // Simple blend - in production you might want a more sophisticated algorithm
-    return secondary;
   }
 
   /**

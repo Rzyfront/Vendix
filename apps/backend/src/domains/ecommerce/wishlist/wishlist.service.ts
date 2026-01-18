@@ -1,16 +1,14 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToWishlistDto } from './dto/wishlist.dto';
 
 @Injectable()
 export class WishlistService {
-    constructor(private readonly prisma: GlobalPrismaService) { }
+    constructor(private readonly prisma: EcommercePrismaService) { }
 
-    async getWishlist(store_id: number, user_id: number) {
-        let wishlist = await this.prisma.wishlists.findUnique({
-            where: {
-                store_id_user_id: { store_id, user_id },
-            },
+    async getWishlist() {
+        // store_id y user_id se aplican automáticamente por EcommercePrismaService
+        let wishlist = await this.prisma.wishlists.findFirst({
             include: {
                 wishlist_items: {
                     include: {
@@ -29,8 +27,9 @@ export class WishlistService {
         });
 
         if (!wishlist) {
+            // store_id y user_id se inyectan automáticamente
             wishlist = await this.prisma.wishlists.create({
-                data: { store_id, user_id },
+                data: {},
                 include: {
                     wishlist_items: {
                         include: {
@@ -52,12 +51,12 @@ export class WishlistService {
         return this.mapWishlistToResponse(wishlist);
     }
 
-    async addItem(store_id: number, user_id: number, dto: AddToWishlistDto) {
+    async addItem(dto: AddToWishlistDto) {
+        // store_id se aplica automáticamente al buscar productos
         // Validate product exists and is available for ecommerce
         const product = await this.prisma.products.findFirst({
             where: {
                 id: dto.product_id,
-                store_id,
                 state: 'active',
                 available_for_ecommerce: true,
             },
@@ -67,14 +66,13 @@ export class WishlistService {
             throw new NotFoundException('Product not available');
         }
 
-        // Get or create wishlist
-        let wishlist = await this.prisma.wishlists.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+        // Get or create wishlist (store_id y user_id se aplican automáticamente)
+        let wishlist = await this.prisma.wishlists.findFirst({});
 
         if (!wishlist) {
+            // store_id y user_id se inyectan automáticamente
             wishlist = await this.prisma.wishlists.create({
-                data: { store_id, user_id },
+                data: {},
             });
         }
 
@@ -109,13 +107,12 @@ export class WishlistService {
             },
         });
 
-        return this.getWishlist(store_id, user_id);
+        return this.getWishlist();
     }
 
-    async removeItem(store_id: number, user_id: number, product_id: number) {
-        const wishlist = await this.prisma.wishlists.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+    async removeItem(product_id: number) {
+        // store_id y user_id se aplican automáticamente
+        const wishlist = await this.prisma.wishlists.findFirst({});
 
         if (!wishlist) {
             throw new NotFoundException('Wishlist not found');
@@ -136,13 +133,12 @@ export class WishlistService {
             where: { id: item.id },
         });
 
-        return this.getWishlist(store_id, user_id);
+        return this.getWishlist();
     }
 
-    async checkInWishlist(store_id: number, user_id: number, product_id: number) {
-        const wishlist = await this.prisma.wishlists.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+    async checkInWishlist(product_id: number) {
+        // store_id y user_id se aplican automáticamente
+        const wishlist = await this.prisma.wishlists.findFirst({});
 
         if (!wishlist) {
             return { in_wishlist: false };

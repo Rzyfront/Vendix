@@ -1,16 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
 
 @Injectable()
 export class CartService {
-    constructor(private readonly prisma: GlobalPrismaService) { }
+    constructor(private readonly prisma: EcommercePrismaService) { }
 
-    async getCart(store_id: number, user_id: number) {
-        let cart = await this.prisma.carts.findUnique({
-            where: {
-                store_id_user_id: { store_id, user_id },
-            },
+    async getCart() {
+        // store_id y user_id se aplican automáticamente por EcommercePrismaService
+        let cart = await this.prisma.carts.findFirst({
             include: {
                 cart_items: {
                     include: {
@@ -31,9 +29,8 @@ export class CartService {
         if (!cart) {
             cart = await this.prisma.carts.create({
                 data: {
-                    store_id,
-                    user_id,
                     currency: 'USD',
+                    // store_id y user_id se inyectan automáticamente
                 },
                 include: {
                     cart_items: {
@@ -56,11 +53,12 @@ export class CartService {
         return this.mapCartToResponse(cart);
     }
 
-    async addItem(store_id: number, user_id: number, dto: AddToCartDto) {
+    async addItem(dto: AddToCartDto) {
+        // Verificar que el producto existe y está disponible
+        // store_id se aplica automáticamente
         const product = await this.prisma.products.findFirst({
             where: {
                 id: dto.product_id,
-                store_id,
                 state: 'active',
                 available_for_ecommerce: true,
             },
@@ -90,13 +88,12 @@ export class CartService {
             throw new BadRequestException(`Only ${available_stock} units available`);
         }
 
-        let cart = await this.prisma.carts.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+        // Buscar o crear el cart del usuario (store_id y user_id se aplican automáticamente)
+        let cart = await this.prisma.carts.findFirst({});
 
         if (!cart) {
             cart = await this.prisma.carts.create({
-                data: { store_id, user_id, currency: 'USD' },
+                data: { currency: 'USD' },
             });
         }
 
@@ -141,13 +138,11 @@ export class CartService {
         }
 
         await this.updateCartSubtotal(cart.id);
-        return this.getCart(store_id, user_id);
+        return this.getCart();
     }
 
-    async updateItem(store_id: number, user_id: number, item_id: number, dto: UpdateCartItemDto) {
-        const cart = await this.prisma.carts.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+    async updateItem(item_id: number, dto: UpdateCartItemDto) {
+        const cart = await this.prisma.carts.findFirst({});
 
         if (!cart) {
             throw new NotFoundException('Cart not found');
@@ -173,13 +168,11 @@ export class CartService {
         });
 
         await this.updateCartSubtotal(cart.id);
-        return this.getCart(store_id, user_id);
+        return this.getCart();
     }
 
-    async removeItem(store_id: number, user_id: number, item_id: number) {
-        const cart = await this.prisma.carts.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+    async removeItem(item_id: number) {
+        const cart = await this.prisma.carts.findFirst({});
 
         if (!cart) {
             throw new NotFoundException('Cart not found');
@@ -198,13 +191,11 @@ export class CartService {
         });
 
         await this.updateCartSubtotal(cart.id);
-        return this.getCart(store_id, user_id);
+        return this.getCart();
     }
 
-    async clearCart(store_id: number, user_id: number) {
-        const cart = await this.prisma.carts.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
-        });
+    async clearCart() {
+        const cart = await this.prisma.carts.findFirst({});
 
         if (cart) {
             await this.prisma.cart_items.deleteMany({
@@ -220,12 +211,12 @@ export class CartService {
         return { success: true, message: 'Cart cleared' };
     }
 
-    async syncFromLocalStorage(store_id: number, user_id: number, dto: SyncCartDto) {
-        await this.clearCart(store_id, user_id);
+    async syncFromLocalStorage(dto: SyncCartDto) {
+        await this.clearCart();
 
         for (const item of dto.items) {
             try {
-                await this.addItem(store_id, user_id, {
+                await this.addItem({
                     product_id: item.product_id,
                     product_variant_id: item.product_variant_id,
                     quantity: item.quantity,
@@ -235,7 +226,7 @@ export class CartService {
             }
         }
 
-        return this.getCart(store_id, user_id);
+        return this.getCart();
     }
 
     private async updateCartSubtotal(cart_id: number) {

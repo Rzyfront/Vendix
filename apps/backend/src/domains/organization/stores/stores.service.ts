@@ -16,13 +16,18 @@ import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
+import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 
 @Injectable()
 export class StoresService {
   constructor(
     private prisma: OrganizationPrismaService,
     private domainGeneratorHelper: DomainGeneratorHelper,
+    private brandingGeneratorHelper: BrandingGeneratorHelper,
   ) { }
+
+  // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
+
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -481,10 +486,20 @@ export class StoresService {
     );
 
     // Get branding config from organization domain if exists
-    const orgDomain = existingDomains.find(d => d.config && typeof d.config === 'object' && 'branding' in d.config);
-    const brandingConfig = orgDomain?.config?.branding || null;
+    const orgDomain = existingDomains.find(d => d.config && typeof d.config === 'object' && 'branding' in (d.config as any));
+    const orgBranding = (orgDomain?.config as any)?.branding || null;
 
-    // Create domain settings for the store with branding from org
+    // Generate standardized branding
+    const branding = this.brandingGeneratorHelper.generateBranding({
+      name: orgBranding?.name || 'Vendix Store', // Default name if not found
+      primaryColor: orgBranding?.primary_color,
+      secondaryColor: orgBranding?.secondary_color,
+      theme: orgBranding?.theme || 'light',
+      logoUrl: orgBranding?.logo_url,
+      faviconUrl: orgBranding?.favicon_url,
+    });
+
+    // Create domain settings for the store with standardized branding
     await this.prisma.domain_settings.create({
       data: {
         hostname,
@@ -494,7 +509,10 @@ export class StoresService {
         ownership: 'vendix_subdomain',
         status: 'active',
         ssl_status: 'none',
-        config: brandingConfig ? { app: 'STORE_LANDING', branding: brandingConfig } : {},
+        config: {
+          app: 'STORE_LANDING',
+          branding: branding,
+        },
         created_at: new Date(),
         updated_at: new Date(),
       },
@@ -522,6 +540,36 @@ export class StoresService {
       existingHostnames,
     );
 
+    // Get store to get the name for branding
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { name: true, organization_id: true }
+    });
+
+    // Get branding from org domain to maintain consistency
+    // We need to fetch it again or pass it, but effectively fetching from all domains is expensive if we just want one.
+    // However, we already fetched `existingDomains` locally (only hostname).
+    // Let's fetch the org branding explicitly for better accuracy.
+    const orgDomain = await this.prisma.domain_settings.findFirst({
+      where: {
+        organization_id: store?.organization_id,
+        ownership: 'vendix_subdomain',
+        domain_type: 'organization'
+      }
+    });
+
+    const orgBranding = (orgDomain?.config as any)?.branding || null;
+
+    // Generate standardized branding for ecommerce
+    const branding = this.brandingGeneratorHelper.generateBranding({
+      name: store?.name || 'Vendix Shop',
+      primaryColor: orgBranding?.primary_color,
+      secondaryColor: orgBranding?.secondary_color,
+      theme: orgBranding?.theme || 'light',
+      logoUrl: orgBranding?.logo_url,
+      faviconUrl: orgBranding?.favicon_url,
+    });
+
     // Create domain settings for e-commerce
     await this.prisma.domain_settings.create({
       data: {
@@ -532,7 +580,10 @@ export class StoresService {
         ownership: 'vendix_subdomain',
         status: 'active',
         ssl_status: 'none',
-        config: {},
+        config: {
+          app: 'STORE_ECOMMERCE',
+          branding: branding,
+        },
         created_at: new Date(),
         updated_at: new Date(),
       },

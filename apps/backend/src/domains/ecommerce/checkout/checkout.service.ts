@@ -1,19 +1,20 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
 import { CheckoutDto } from './dto/checkout.dto';
 
 @Injectable()
 export class CheckoutService {
     constructor(
-        private readonly prisma: GlobalPrismaService,
+        private readonly prisma: EcommercePrismaService,
         private readonly cart_service: CartService,
     ) { }
 
-    async getPaymentMethods(store_id: number) {
+    async getPaymentMethods() {
+        // store_id se aplica automáticamente por EcommercePrismaService
         const methods = await this.prisma.store_payment_methods.findMany({
             where: {
-                store_id,
                 state: 'enabled',
             },
             include: {
@@ -33,9 +34,9 @@ export class CheckoutService {
         }));
     }
 
-    async checkout(store_id: number, user_id: number, dto: CheckoutDto) {
-        const cart = await this.prisma.carts.findUnique({
-            where: { store_id_user_id: { store_id, user_id } },
+    async checkout(dto: CheckoutDto) {
+        // store_id y user_id se aplican automáticamente por EcommercePrismaService
+        const cart = await this.prisma.carts.findFirst({
             include: {
                 cart_items: {
                     include: {
@@ -50,10 +51,10 @@ export class CheckoutService {
             throw new BadRequestException('Cart is empty');
         }
 
+        // store_id se aplica automáticamente
         const payment_method = await this.prisma.store_payment_methods.findFirst({
             where: {
                 id: dto.payment_method_id,
-                store_id,
                 state: 'enabled',
             },
             include: { system_payment_method: true },
@@ -76,9 +77,9 @@ export class CheckoutService {
         let shipping_address_snapshot: any = null;
 
         if (dto.shipping_address && !shipping_address_id) {
+            // user_id se inyecta automáticamente
             const new_address = await this.prisma.addresses.create({
                 data: {
-                    user_id,
                     address_line1: dto.shipping_address.address_line1,
                     address_line2: dto.shipping_address.address_line2,
                     city: dto.shipping_address.city,
@@ -108,16 +109,15 @@ export class CheckoutService {
             }
         }
 
-        const order_number = await this.generateOrderNumber(store_id);
+        const order_number = await this.generateOrderNumber();
 
         const subtotal = cart.cart_items.reduce((sum, item) => {
             return sum + Number(item.unit_price) * item.quantity;
         }, 0);
 
+        // store_id y customer_id (user_id) se inyectan automáticamente
         const order = await this.prisma.orders.create({
             data: {
-                store_id,
-                customer_id: user_id,
                 order_number,
                 currency: cart.currency,
                 subtotal_amount: subtotal,
@@ -147,10 +147,10 @@ export class CheckoutService {
             },
         });
 
+        // store_id y customer_id se inyectan automáticamente
         await this.prisma.payments.create({
             data: {
                 order_id: order.id,
-                customer_id: user_id,
                 amount: subtotal,
                 currency: cart.currency,
                 state: 'pending',
@@ -176,7 +176,8 @@ export class CheckoutService {
             }
         }
 
-        await this.cart_service.clearCart(store_id, user_id);
+        // store_id y user_id se resuelven automáticamente
+        await this.cart_service.clearCart();
 
         return {
             order_id: order.id,
@@ -187,7 +188,15 @@ export class CheckoutService {
         };
     }
 
-    private async generateOrderNumber(store_id: number): Promise<string> {
+    private async generateOrderNumber(): Promise<string> {
+        // Obtener store_id del contexto
+        const domain_context = RequestContextService.getDomainContext();
+        const store_id = domain_context?.store_id;
+
+        if (!store_id) {
+            throw new BadRequestException('Store context required');
+        }
+
         const store = await this.prisma.stores.findUnique({
             where: { id: store_id },
             select: { store_code: true },
@@ -202,9 +211,9 @@ export class CheckoutService {
         const end_of_day = new Date(date);
         end_of_day.setHours(23, 59, 59, 999);
 
+        // store_id se aplica automáticamente
         const count = await this.prisma.orders.count({
             where: {
-                store_id,
                 created_at: {
                     gte: start_of_day,
                     lte: end_of_day,

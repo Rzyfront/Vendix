@@ -1,50 +1,57 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { CatalogService, Product, Category } from '../../services/catalog.service';
+import { CatalogService, Product } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
+import { HeroBannerComponent } from '../../components/hero-banner';
+import { CategoriesShowcaseComponent } from '../../components/categories-showcase';
+import { ProductsScrollComponent } from '../../components/products-scroll';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
     selector: 'app-home',
     standalone: true,
-    imports: [CommonModule, RouterModule, ProductCardComponent],
+    imports: [
+        CommonModule,
+        RouterModule,
+        ProductCardComponent,
+        HeroBannerComponent,
+        CategoriesShowcaseComponent,
+        ProductsScrollComponent,
+    ],
     templateUrl: './home.component.html',
     styleUrls: ['./home.component.scss'],
 })
 export class HomeComponent implements OnInit {
     featured_products: Product[] = [];
-    categories: Category[] = [];
-    is_loading = true;
+    is_loading_featured = true;
+    thirty_days_ago: string;
+
+    private destroy_ref = inject(DestroyRef);
 
     constructor(
         private catalog_service: CatalogService,
         private cart_service: CartService,
-    ) { }
+    ) {
+        // Calculate once in constructor to avoid expression changed errors
+        this.thirty_days_ago = this.getThirtyDaysAgo();
+    }
 
     ngOnInit(): void {
         this.loadFeaturedProducts();
-        this.loadCategories();
     }
 
     loadFeaturedProducts(): void {
-        this.catalog_service.getProducts({ limit: 8, sort_by: 'newest' }).subscribe({
+        this.catalog_service.getProducts({ limit: 8, sort_by: 'newest' }).pipe(
+            takeUntilDestroyed(this.destroy_ref)
+        ).subscribe({
             next: (response) => {
                 this.featured_products = response.data;
-                this.is_loading = false;
+                this.is_loading_featured = false;
             },
             error: () => {
-                this.is_loading = false;
-            },
-        });
-    }
-
-    loadCategories(): void {
-        this.catalog_service.getCategories().subscribe({
-            next: (response) => {
-                if (response.success) {
-                    this.categories = response.data.slice(0, 6); // Show only 6 categories
-                }
+                this.is_loading_featured = false;
             },
         });
     }
@@ -55,5 +62,11 @@ export class HomeComponent implements OnInit {
 
     onToggleWishlist(product: Product): void {
         // TODO: Implement wishlist toggle
+    }
+
+    getThirtyDaysAgo(): string {
+        const date = new Date();
+        date.setDate(date.getDate() - 30);
+        return date.toISOString();
     }
 }

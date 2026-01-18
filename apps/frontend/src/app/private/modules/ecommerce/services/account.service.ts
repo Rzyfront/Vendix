@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { TenantConfig } from '../../../../core/models/tenant-config.interface';
 import { TenantFacade } from '../../../../core/store';
+import { environment } from '../../../../../environments/environment';
 
 export interface UserProfile {
     id: number;
@@ -69,7 +70,7 @@ export interface OrderDetail extends Order {
     providedIn: 'root',
 })
 export class AccountService {
-    private api_url = '/api/ecommerce/account';
+    private api_url = `${environment.apiUrl}/ecommerce/account`;
 
     constructor(
         private http: HttpClient,
@@ -77,9 +78,10 @@ export class AccountService {
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const storeConfig = this.domain_service.getCurrentStore();
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
         return new HttpHeaders({
-            'x-store-id': storeConfig?.id?.toString() || '',
+            'x-store-id': storeId?.toString() || '',
         });
     }
 

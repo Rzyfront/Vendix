@@ -1,36 +1,9 @@
 <div class="home-page">
     <!-- Hero Section -->
-    <section class="hero">
-        <div class="hero-content">
-            <h1>Bienvenido a nuestra tienda</h1>
-            <p>Encuentra los mejores productos al mejor precio</p>
-            <a routerLink="/catalog" class="hero-btn">Ver productos</a>
-        </div>
-    </section>
+    <app-hero-banner />
 
     <!-- Categories Section -->
-    @if (categories.length > 0) {
-    <section class="categories-section">
-        <div class="section-header">
-            <h2>Categorías</h2>
-            <a routerLink="/catalog" class="see-all">Ver todas</a>
-        </div>
-        <div class="categories-grid">
-            @for (cat of categories; track cat.id) {
-            <a [routerLink]="['/catalog']" [queryParams]="{category: cat.id}" class="category-card">
-                @if (cat.image_url) {
-                <img [src]="cat.image_url" [alt]="cat.name">
-                } @else {
-                <div class="category-placeholder">
-                    <i class="pi pi-th-large"></i>
-                </div>
-                }
-                <span>{{ cat.name }}</span>
-            </a>
-            }
-        </div>
-    </section>
-    }
+    <app-categories-showcase />
 
     <!-- Featured Products -->
     <section class="products-section">
@@ -39,7 +12,7 @@
             <a routerLink="/catalog" class="see-all">Ver todos</a>
         </div>
 
-        @if (is_loading) {
+        @if (is_loading_featured) {
         <div class="loading-grid">
             @for (i of [1,2,3,4]; track i) {
             <div class="skeleton-card">
@@ -58,6 +31,33 @@
         </div>
         }
     </section>
+
+    <!-- New Products (Novedades) -->
+    <app-products-scroll
+        title="Novedades"
+        [query]="{ limit: 12, sort_by: 'newest', created_after: thirty_days_ago }"
+        [initial_products]="[]"
+        (add_to_cart)="onAddToCart($event)"
+        (toggle_wishlist)="onToggleWishlist($event)"
+    />
+
+    <!-- Offers (Ofertas) -->
+    <app-products-scroll
+        title="Ofertas"
+        [query]="{ limit: 12, sort_by: 'price_asc', has_discount: true }"
+        [initial_products]="[]"
+        (add_to_cart)="onAddToCart($event)"
+        (toggle_wishlist)="onToggleWishlist($event)"
+    />
+
+    <!-- More Products with Infinite Scroll -->
+    <app-products-scroll
+        [show_header]="false"
+        [query]="{ limit: 12, sort_by: 'newest' }"
+        [initial_products]="featured_products"
+        (add_to_cart)="onAddToCart($event)"
+        (toggle_wishlist)="onToggleWishlist($event)"
+    />
 
     <!-- Features Section -->
     <section class="features-section">

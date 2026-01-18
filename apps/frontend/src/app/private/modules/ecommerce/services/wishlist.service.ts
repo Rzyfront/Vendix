@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../../environments/environment';
 
 export interface WishlistItem {
     id: number;
@@ -36,7 +37,7 @@ export interface Wishlist {
     providedIn: 'root',
 })
 export class WishlistService {
-    private api_url = '/api/ecommerce/wishlist';
+    private api_url = `${environment.apiUrl}/ecommerce/wishlist`;
 
     private wishlist_subject = new BehaviorSubject<Wishlist | null>(null);
     wishlist$ = this.wishlist_subject.asObservable();
@@ -47,9 +48,10 @@ export class WishlistService {
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const storeConfig = this.domain_service.getCurrentStore();
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
         return new HttpHeaders({
-            'x-store-id': storeConfig?.id?.toString() || '',
+            'x-store-id': storeId?.toString() || '',
         });
     }
 

@@ -1,12 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 
 @Injectable()
 export class CatalogService {
-    constructor(private readonly prisma: GlobalPrismaService) { }
+    constructor(private readonly prisma: EcommercePrismaService) { }
 
-    async getProducts(store_id: number, query: CatalogQueryDto) {
+    async getProducts(query: CatalogQueryDto) {
         const {
             search,
             category_id,
@@ -21,9 +21,9 @@ export class CatalogService {
         const skip = (page - 1) * limit;
 
         const where: any = {
-            store_id,
             state: 'active',
             available_for_ecommerce: true,
+            // store_id se aplica automáticamente por EcommercePrismaService
         };
 
         if (search) {
@@ -104,13 +104,13 @@ export class CatalogService {
         };
     }
 
-    async getProductBySlug(store_id: number, slug: string) {
+    async getProductBySlug(slug: string) {
         const product = await this.prisma.products.findFirst({
             where: {
-                store_id,
                 slug,
                 state: 'active',
                 available_for_ecommerce: true,
+                // store_id se aplica automáticamente por EcommercePrismaService
             },
             include: {
                 product_images: {
@@ -145,11 +145,11 @@ export class CatalogService {
         return this.mapProductDetailToResponse(product);
     }
 
-    async getCategories(store_id: number) {
+    async getCategories() {
         const categories = await this.prisma.categories.findMany({
             where: {
-                store_id,
                 state: 'active',
+                // store_id se aplica automáticamente por EcommercePrismaService
             },
             orderBy: { name: 'asc' },
             select: {
@@ -170,15 +170,15 @@ export class CatalogService {
         }));
     }
 
-    async getBrands(store_id: number) {
+    async getBrands() {
         const brands = await this.prisma.brands.findMany({
             where: {
                 state: 'active',
                 products: {
                     some: {
-                        store_id,
                         state: 'active',
                         available_for_ecommerce: true,
+                        // store_id se aplica automáticamente por EcommercePrismaService en products
                     },
                 },
             },

@@ -34,6 +34,28 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.ProductDetailComponent),
       },
       {
+        path: 'novedades',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+        data: {
+          title: 'Novedades',
+          defaultFilters: { created_after: 'thirty-days-ago', sort_by: 'newest' }
+        },
+      },
+      {
+        path: 'ofertas',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+        data: {
+          title: 'Ofertas',
+          defaultFilters: { has_discount: true, sort_by: 'price_asc' }
+        },
+      },
+      {
         path: 'cart',
         loadComponent: () =>
           import(

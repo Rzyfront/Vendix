@@ -3,6 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../../environments/environment';
 
 export interface CartItem {
     id: number;
@@ -42,7 +43,7 @@ interface LocalCartItem {
     providedIn: 'root',
 })
 export class CartService {
-    private api_url = '/api/ecommerce/cart';
+    private api_url = `${environment.apiUrl}/ecommerce/cart`;
     private local_storage_key = 'vendix_cart';
 
     private cart_subject = new BehaviorSubject<Cart | null>(null);
@@ -56,9 +57,10 @@ export class CartService {
     }
 
     private getHeaders(): HttpHeaders {
-        const storeConfig = this.domain_service.getCurrentStore();
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
         return new HttpHeaders({
-            'x-store-id': storeConfig?.id?.toString() || '',
+            'x-store-id': storeId?.toString() || '',
         });
     }
 

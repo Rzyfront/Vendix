@@ -1,65 +1,37 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ConfigFacade } from '../../../../core/store/config';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
-import { CardComponent } from '../../../../shared/components/card/card.component';
+import { ThemeService } from '../../../../core/services';
+import { LandingLayoutComponent } from '../../../../shared/components/layouts/landing-layout/landing-layout.component';
+import { LandingHeroComponent } from '../../components/shared/landing-hero/landing-hero.component';
+import { LandingFeaturesComponent } from '../../components/shared/landing-features/landing-features.component';
 
 @Component({
   selector: 'app-org-landing',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, CardComponent],
+  imports: [
+    CommonModule,
+    LandingLayoutComponent,
+    LandingHeroComponent,
+    LandingFeaturesComponent
+  ],
   template: `
-    <div
-      class="org-landing-container"
-      [style.background]="branding?.background"
-    >
-      <header class="org-header">
-        <div class="org-logo">
-          <img
-            *ngIf="branding?.logo"
-            [src]="branding.logo"
-            [alt]="organizationName + ' Logo'"
-            class="logo-image"
-          />
-          <h1 *ngIf="!branding?.logo">{{ organizationName }}</h1>
-        </div>
-        <nav class="org-nav">
-          <button class="nav-button" (click)="navigateToLogin()">
-            Iniciar Sesión
-          </button>
-          <button class="nav-button primary" (click)="navigateToShop()">
-            Ir a Tienda
-          </button>
-        </nav>
-      </header>
+    <app-landing-layout 
+      [brandName]="organizationName" 
+      [logoUrl]="branding?.logo?.url">
+      
+      <app-landing-hero
+        [title]="organizationName"
+        [description]="organizationDescription"
+        [ctaText]="'Explorar Tienda'">
+      </app-landing-hero>
 
-      <main class="org-main">
-        <section class="hero-section">
-          <h2>{{ organizationName }}</h2>
-          <p *ngIf="organizationDescription" class="org-description">
-            {{ organizationDescription }}
-          </p>
-          <div class="cta-buttons">
-            <app-button (click)="navigateToShop()" variant="primary">
-              Explorar Tienda
-            </app-button>
-            <app-button (click)="navigateToLogin()" variant="secondary">
-              Acceso Miembros
-            </app-button>
-          </div>
-        </section>
+      <app-landing-features 
+        *ngIf="features.length" 
+        [features]="features">
+      </app-landing-features>
 
-        <section *ngIf="features?.length" class="features-section">
-          <h3>Características</h3>
-          <div class="features-grid">
-            <app-card *ngFor="let feature of features" class="feature-card">
-              <h4>{{ feature.title }}</h4>
-              <p>{{ feature.description }}</p>
-            </app-card>
-          </div>
-        </section>
-      </main>
-    </div>
+    </app-landing-layout>
   `,
   styleUrls: ['./org-landing.component.scss'],
 })
@@ -70,6 +42,7 @@ export class OrgLandingComponent implements OnInit {
   features: any[] = [];
 
   private configFacade = inject(ConfigFacade);
+  private themeService = inject(ThemeService);
 
   ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
@@ -89,6 +62,11 @@ export class OrgLandingComponent implements OnInit {
     this.features = this.mapFeatures(
       appConfig.domainConfig.customConfig?.features || {},
     );
+
+    // Apply domain branding colors to CSS variables
+    if (appConfig.branding) {
+      this.themeService.applyBranding(appConfig.branding);
+    }
   }
 
   private loadDefaultData() {
@@ -132,12 +110,5 @@ export class OrgLandingComponent implements OnInit {
       .filter(([key, enabled]) => enabled && featureMap[key])
       .map(([key]) => featureMap[key]);
   }
-
-  navigateToLogin() {
-    window.location.href = '/auth/login';
-  }
-
-  navigateToShop() {
-    window.location.href = '/shop';
-  }
 }
+

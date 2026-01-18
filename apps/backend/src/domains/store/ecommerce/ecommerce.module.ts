@@ -4,6 +4,8 @@ import { EcommerceController } from './ecommerce.controller';
 import { EcommerceService } from './ecommerce.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
+import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
+import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.helper';
 
 @Module({
   imports: [
@@ -12,7 +14,11 @@ import { ResponseModule } from '@common/responses/response.module';
     MulterModule.register(),
   ],
   controllers: [EcommerceController],
-  providers: [EcommerceService],
+  providers: [
+    EcommerceService,
+    BrandingGeneratorHelper,
+    DomainGeneratorHelper,
+  ],
   exports: [EcommerceService],
 })
-export class StoreEcommerceModule {}
+export class StoreEcommerceModule { }

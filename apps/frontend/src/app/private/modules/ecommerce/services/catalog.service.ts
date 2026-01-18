@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { environment } from '../../../../../environments/environment';
 
 export interface Product {
     id: number;
@@ -47,6 +48,8 @@ export interface CatalogQuery {
     sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest';
     page?: number;
     limit?: number;
+    created_after?: string;
+    has_discount?: boolean;
 }
 
 export interface PaginatedResponse<T> {
@@ -64,7 +67,7 @@ export interface PaginatedResponse<T> {
     providedIn: 'root',
 })
 export class CatalogService {
-    private api_url = '/api/ecommerce/catalog';
+    private api_url = `${environment.apiUrl}/ecommerce/catalog`;
 
     constructor(
         private http: HttpClient,
@@ -72,9 +75,10 @@ export class CatalogService {
     ) { }
 
     private getHeaders(): HttpHeaders {
-        const storeConfig = this.domain_service.getCurrentStore();
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
         return new HttpHeaders({
-            'x-store-id': storeConfig?.id?.toString() || '',
+            'x-store-id': storeId?.toString() || '',
         });
     }
 
@@ -89,6 +93,8 @@ export class CatalogService {
         if (query.sort_by) params = params.set('sort_by', query.sort_by);
         if (query.page) params = params.set('page', query.page.toString());
         if (query.limit) params = params.set('limit', query.limit.toString());
+        if (query.created_after) params = params.set('created_after', query.created_after);
+        if (query.has_discount !== undefined) params = params.set('has_discount', query.has_discount.toString());
 
         return this.http.get<PaginatedResponse<Product>>(this.api_url, {
             headers: this.getHeaders(),
