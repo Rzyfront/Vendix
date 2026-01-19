@@ -27,7 +27,35 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.CatalogComponent),
       },
       {
+        path: 'products',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+      },
+      {
+        path: 'productos',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+      },
+      {
         path: 'catalog/:slug',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/product-detail/product-detail.component'
+          ).then((c) => c.ProductDetailComponent),
+      },
+      {
+        path: 'products/:slug',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/product-detail/product-detail.component'
+          ).then((c) => c.ProductDetailComponent),
+      },
+      {
+        path: 'productos/:slug',
         loadComponent: () =>
           import(
             '../../private/modules/ecommerce/pages/product-detail/product-detail.component'
@@ -41,7 +69,18 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.CatalogComponent),
         data: {
           title: 'Novedades',
-          defaultFilters: { created_after: 'thirty-days-ago', sort_by: 'newest' }
+          defaultFilters: { sort_by: 'newest' },
+        },
+      },
+      {
+        path: 'new',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+        data: {
+          title: 'Novedades',
+          defaultFilters: { sort_by: 'newest' },
         },
       },
       {
@@ -52,7 +91,18 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.CatalogComponent),
         data: {
           title: 'Ofertas',
-          defaultFilters: { has_discount: true, sort_by: 'price_asc' }
+          defaultFilters: { has_discount: true, sort_by: 'price_asc' },
+        },
+      },
+      {
+        path: 'sale',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/catalog/catalog.component'
+          ).then((c) => c.CatalogComponent),
+        data: {
+          title: 'Ofertas',
+          defaultFilters: { has_discount: true, sort_by: 'price_asc' },
         },
       },
       {

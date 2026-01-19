@@ -68,6 +68,11 @@ export class AuthEffects {
       this.actions$.pipe(
         ofType(AuthActions.loginSuccess),
         tap(async ({ roles, message, updated_environment }) => {
+          // CRITICAL: Clear the logout flag on successful login
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem('vendix_logged_out_recently');
+          }
+
           if (message) this.toast.success(message);
           try {
             const currentConfig = this.configFacade.getCurrentConfig();
@@ -160,6 +165,9 @@ export class AuthEffects {
       this.actions$.pipe(
         ofType(AuthActions.logoutSuccess),
         tap(() => {
+          // CRITICAL: Clear store state FIRST before clearing localStorage
+          this.store.dispatch(AuthActions.clearAuthState());
+
           // Limpiar específicamente todas las claves de autenticación
           if (typeof localStorage !== 'undefined') {
             // Eliminar todas las claves de autenticación específicas
@@ -183,9 +191,10 @@ export class AuthEffects {
               Date.now().toString(),
             );
 
-            // Limpiar estado del store completamente
-            this.store.dispatch(AuthActions.clearAuthState());
+            console.log('[LOGOUT] All auth data cleared from localStorage');
           }
+
+          // Navigate AFTER everything is cleared
           this.router.navigateByUrl('/auth/login');
         }),
       ),

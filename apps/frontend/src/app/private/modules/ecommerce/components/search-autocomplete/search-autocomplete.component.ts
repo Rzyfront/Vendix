@@ -31,7 +31,7 @@ export class SearchAutocompleteComponent {
     this.search_subject
       .pipe(
         debounceTime(300),
-        switchMap(query => {
+        switchMap((query) => {
           if (query.length < 2) {
             this.show_dropdown = false;
             this.search_results = [];
@@ -43,7 +43,7 @@ export class SearchAutocompleteComponent {
         takeUntil(this.destroy$),
       )
       .subscribe({
-        next: response => {
+        next: (response) => {
           this.search_results = response.data;
           this.show_dropdown = this.search_results.length > 0;
           this.is_loading = false;
@@ -63,13 +63,15 @@ export class SearchAutocompleteComponent {
   }
 
   onProductSelect(product: Product): void {
-    this.router.navigate(['/catalog', product.slug]);
+    this.router.navigate(['/productos', product.slug]);
     this.closeDropdown();
   }
 
   onSubmit(): void {
     if (this.search_query.trim()) {
-      this.router.navigate(['/catalog'], { queryParams: { search: this.search_query } });
+      this.router.navigate(['/productos'], {
+        queryParams: { search: this.search_query },
+      });
       this.closeDropdown();
     }
   }
@@ -86,7 +88,10 @@ export class SearchAutocompleteComponent {
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
-        this.selected_index = Math.min(this.selected_index + 1, this.search_results.length - 1);
+        this.selected_index = Math.min(
+          this.selected_index + 1,
+          this.search_results.length - 1,
+        );
         break;
       case 'ArrowUp':
         event.preventDefault();

@@ -56,8 +56,10 @@ import {
   Megaphone,
   Circle,
   UserPlus,
+  UserCheck,
   Barcode,
   Save,
+  Star,
   Maximize,
   Minimize,
   ArrowLeft,
@@ -100,6 +102,7 @@ import {
   UploadCloud,
   LucideIconData,
   Heart,
+  ExternalLink,
 } from 'lucide-angular';
 
 /**
@@ -107,6 +110,7 @@ import {
  */
 export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // Basic UI icons
+  'external-link': ExternalLink,
   menu: Menu,
   chevron: ChevronDown,
   'chevron-down': ChevronDown,
@@ -121,6 +125,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   edit: Pencil,
   delete: Trash2,
   'trash-2': Trash2,
+  trash: Trash2,
   info: Info,
   warning: TriangleAlert,
   user: User,
@@ -168,12 +173,14 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // User action icons
   'user-plus': UserPlus,
+  'user-check': UserCheck,
 
   // POS and product icons
   barcode: Barcode,
 
   // Action icons
   save: Save,
+  star: Star,
 
   // Fullscreen icons
   maximize: Maximize,

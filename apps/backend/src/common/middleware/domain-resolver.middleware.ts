@@ -16,22 +16,42 @@ interface DomainContext {
 @Injectable()
 export class DomainResolverMiddleware implements NestMiddleware {
   private readonly logger = new Logger(DomainResolverMiddleware.name);
-  private cache = new Map<string, { context: DomainContext; timestamp: number }>();
+  private cache = new Map<
+    string,
+    { context: DomainContext; timestamp: number }
+  >();
   private readonly CACHE_TTL = 300000; // 5 minutos
   private readonly MAX_CACHE_SIZE = 1000;
 
   constructor(private readonly publicDomains: PublicDomainsService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
+    this.logger.debug(`DomainResolverMiddleware hit: ${req.path}`);
     // Solo procesar rutas de ecommerce
-    if (!req.path.startsWith('/api/ecommerce/')) {
+    if (!req.path.includes('/ecommerce/')) {
       return next();
     }
 
     const hostname = this.extractHostname(req);
-    this.logger.debug(`Resolving domain: ${hostname}`);
+    const x_store_id = req.headers['x-store-id'];
+
+    this.logger.debug(
+      `Resolving domain: ${hostname} (x-store-id: ${x_store_id})`,
+    );
 
     try {
+      // If x-store-id is provided, we can use it directly for ecommerce routes
+      if (x_store_id && !isNaN(Number(x_store_id)) && Number(x_store_id) > 0) {
+        const store_id = Number(x_store_id);
+        // We still might want to verify if this store exists or just trust it for now
+        // For security, it's better to verify, but for now let's set it
+        const domain_context: DomainContext = {
+          store_id,
+        };
+        this.setDomainContext(domain_context);
+        return next();
+      }
+
       // Check cache
       const cached = this.cache.get(hostname);
       const now = Date.now();

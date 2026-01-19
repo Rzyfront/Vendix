@@ -123,10 +123,10 @@ export class DefaultPanelUIService {
    * Mapeo de app_type a template_name en la base de datos
    */
   private readonly TEMPLATE_NAME_MAP: Record<string, string> = {
-    'ORG_ADMIN': 'user_settings_org_admin',
-    'STORE_ADMIN': 'user_settings_store_admin',
-    'STORE_ECOMMERCE': 'user_settings_ecommerce_customer',
-    'VENDIX_LANDING': 'user_settings_landing',
+    ORG_ADMIN: 'user_settings_org_admin',
+    STORE_ADMIN: 'user_settings_store_admin',
+    STORE_ECOMMERCE: 'user_settings_ecommerce_customer',
+    VENDIX_LANDING: 'user_settings_landing',
   };
 
   constructor(private readonly prisma: GlobalPrismaService) {}
@@ -142,7 +142,9 @@ export class DefaultPanelUIService {
    * @param app_type - Tipo de aplicación (ORG_ADMIN, STORE_ADMIN, etc.)
    * @returns Objeto con la configuración de módulos del panel UI
    */
-  private async getDefaultPanelUI(app_type: string): Promise<Record<string, boolean>> {
+  private async getDefaultPanelUI(
+    app_type: string,
+  ): Promise<Record<string, boolean>> {
     // Try cache first
     const cacheKey = `user_settings_${app_type}`;
     if (this.cache[cacheKey] && Date.now() < this.cacheExpiry[cacheKey]) {
@@ -174,11 +176,17 @@ export class DefaultPanelUIService {
         return templateData.panel_ui[app_type];
       }
     } catch (error: any) {
-      console.warn(`Failed to load template for ${app_type} from DB:`, error.message);
+      console.warn(
+        `Failed to load template for ${app_type} from DB:`,
+        error.message,
+      );
     }
 
     // Fallback to hardcoded configs
-    return this.PANEL_UI_CONFIGS[app_type as keyof typeof this.PANEL_UI_CONFIGS] || {};
+    return (
+      this.PANEL_UI_CONFIGS[app_type as keyof typeof this.PANEL_UI_CONFIGS] ||
+      {}
+    );
   }
 
   /**
@@ -211,11 +219,20 @@ export class DefaultPanelUIService {
   }> {
     const panelUI = await this.getDefaultPanelUI(app_type);
 
+    const panel_ui_result: Record<string, Record<string, boolean>> = {
+      [app_type]: panelUI,
+    };
+
+    // Special handling: ORG_ADMIN should also have STORE_ADMIN config by default
+    if (app_type === 'ORG_ADMIN') {
+      // Fetch STORE_ADMIN defaults (either from its own template or fallback)
+      panel_ui_result['STORE_ADMIN'] =
+        await this.getDefaultPanelUI('STORE_ADMIN');
+    }
+
     return {
       app: app_type,
-      panel_ui: {
-        [app_type]: panelUI,
-      },
+      panel_ui: panel_ui_result,
       preferences: {
         language: 'es',
         theme: 'default',
@@ -239,7 +256,7 @@ export class DefaultPanelUIService {
    */
   async generatePanelUIMulti(
     app_types: string[],
-    primary_app?: string
+    primary_app?: string,
   ): Promise<{
     app: string;
     panel_ui: Record<string, Record<string, boolean>>;

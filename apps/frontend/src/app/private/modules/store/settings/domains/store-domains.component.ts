@@ -1,4 +1,11 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  ViewChild,
+  TemplateRef,
+  AfterViewInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
@@ -42,11 +49,7 @@ import {
             Administra los dominios de tu tienda
           </p>
         </div>
-        <app-button
-          variant="primary"
-          size="md"
-          (clicked)="openCreateModal()"
-        >
+        <app-button variant="primary" size="md" (clicked)="openCreateModal()">
           <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
           Nuevo Dominio
         </app-button>
@@ -54,7 +57,9 @@ import {
 
       <!-- Loading State -->
       <div *ngIf="is_loading" class="flex justify-center items-center py-12">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div
+          class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
+        ></div>
       </div>
 
       <!-- Empty State -->
@@ -62,7 +67,11 @@ import {
         *ngIf="!is_loading && domains.length === 0"
         class="text-center py-12 bg-white rounded-lg border border-gray-200"
       >
-        <app-icon name="globe" [size]="48" class="mx-auto text-gray-400 mb-4"></app-icon>
+        <app-icon
+          name="globe"
+          [size]="48"
+          class="mx-auto text-gray-400 mb-4"
+        ></app-icon>
         <h3 class="text-lg font-medium text-gray-900 mb-2">Sin dominios</h3>
         <p class="text-gray-500 mb-6">
           Aún no tienes dominios configurados para tu tienda.
@@ -74,7 +83,10 @@ import {
       </div>
 
       <!-- Domains Table -->
-      <div *ngIf="!is_loading && domains.length > 0" class="bg-white rounded-lg border border-gray-200">
+      <div
+        *ngIf="!is_loading && domains.length > 0"
+        class="bg-white rounded-lg border border-gray-200"
+      >
         <app-table
           [columns]="table_columns"
           [data]="domains"
@@ -83,6 +95,21 @@ import {
         >
         </app-table>
       </div>
+
+      <!-- Templates -->
+      <ng-template #hostnameTemplate let-item>
+        <div class="flex items-center space-x-2">
+          <span class="text-gray-900">{{ item.hostname }}</span>
+          <a
+            [href]="'https://' + item.hostname"
+            target="_blank"
+            class="text-gray-400 hover:text-blue-500 transition-colors"
+            title="Abrir en nueva pestaña"
+          >
+            <app-icon name="external-link" [size]="14"></app-icon>
+          </a>
+        </div>
+      </ng-template>
 
       <!-- Create/Edit Modal -->
       <app-modal
@@ -170,9 +197,12 @@ import {
       >
         <p class="text-gray-600">
           ¿Estás seguro de que deseas eliminar el dominio
-          <strong>{{ domain_to_delete?.hostname }}</strong>?
+          <strong>{{ domain_to_delete?.hostname }}</strong
+          >?
         </p>
-        <p class="text-red-500 text-sm mt-2">Esta acción no se puede deshacer.</p>
+        <p class="text-red-500 text-sm mt-2">
+          Esta acción no se puede deshacer.
+        </p>
 
         <div modal-footer class="flex justify-end space-x-3 mt-6 pt-4 border-t">
           <app-button variant="outline" (clicked)="closeDeleteModal()">
@@ -200,7 +230,9 @@ import {
     `,
   ],
 })
-export class StoreDomainsComponent implements OnInit, OnDestroy {
+export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
+  @ViewChild('hostnameTemplate') hostnameTemplate!: TemplateRef<any>;
+
   private destroy$ = new Subject<void>();
 
   domains: StoreDomain[] = [];
@@ -282,7 +314,7 @@ export class StoreDomainsComponent implements OnInit, OnDestroy {
   constructor(
     private domains_service: StoreDomainsService,
     private toast_service: ToastService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadDomains();
@@ -290,6 +322,18 @@ export class StoreDomainsComponent implements OnInit, OnDestroy {
     this.domains_service.is_loading$
       .pipe(takeUntil(this.destroy$))
       .subscribe((loading) => (this.is_loading = loading));
+  }
+
+  ngAfterViewInit(): void {
+    if (this.hostnameTemplate) {
+      // Asignar el template a la columna de hostname
+      const hostnameCol = this.table_columns.find(
+        (col) => col.key === 'hostname',
+      );
+      if (hostnameCol) {
+        hostnameCol.template = this.hostnameTemplate;
+      }
+    }
   }
 
   ngOnDestroy(): void {
@@ -394,8 +438,6 @@ export class StoreDomainsComponent implements OnInit, OnDestroy {
     }
   }
 
-
-
   setAsPrimary(domain: StoreDomain): void {
     this.domains_service
       .setAsPrimary(domain.id)
@@ -406,7 +448,9 @@ export class StoreDomainsComponent implements OnInit, OnDestroy {
           this.loadDomains();
         },
         error: () => {
-          this.toast_service.error('Error al establecer dominio como principal');
+          this.toast_service.error(
+            'Error al establecer dominio como principal',
+          );
         },
       });
   }

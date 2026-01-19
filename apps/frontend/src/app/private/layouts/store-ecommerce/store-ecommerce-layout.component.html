@@ -2,17 +2,32 @@
   <!-- Header -->
   <header class="ecommerce-header">
     <div class="header-container">
-      <!-- Logo -->
-      <a routerLink="/" class="logo">
-        @if (store_logo) {
-          <img [src]="store_logo" [alt]="store_name" class="logo-img">
-        } @else {
-          <span class="logo-text">{{ store_name }}</span>
-        }
-      </a>
+      <div class="header-left">
+        <!-- Logo -->
+        <a routerLink="/products" class="logo">
+          @if (store_logo) {
+            <img [src]="store_logo" [alt]="store_name" class="logo-img" />
+          } @else {
+            <span class="logo-text">{{ store_name }}</span>
+          }
+        </a>
+
+        <!-- Navigation -->
+        <nav class="main-nav" [class.open]="show_mobile_menu">
+          <a
+            routerLink="/"
+            routerLinkActive="active"
+            [routerLinkActiveOptions]="{ exact: true }"
+            >Inicio</a
+          >
+          <a routerLink="/products" routerLinkActive="active">Productos</a>
+          <a routerLink="/new" routerLinkActive="active">Novedades</a>
+          <a routerLink="/sale" routerLinkActive="active">Ofertas</a>
+        </nav>
+      </div>
 
       <!-- Search Autocomplete -->
-      <app-search-autocomplete />
+      <app-search-autocomplete class="header-search" />
 
       <!-- Actions -->
       <div class="header-actions">
@@ -32,34 +47,41 @@
         </button>
 
         <!-- User Menu -->
-        @if (is_authenticated$ | async; as authenticated) {
-          <div class="user-menu-container">
-            <button class="user-btn" (click)="toggleUserMenu()">
-              <i class="pi pi-user"></i>
+        <div class="user-menu-container">
+          <button class="user-btn" (click)="toggleUserMenu()">
+            <i class="pi pi-user"></i>
+            @if (is_authenticated$ | async) {
               <span class="user-name">{{ user_name$ | async }}</span>
-              <i class="pi pi-chevron-down"></i>
-            </button>
-            @if (show_user_menu) {
-              <div class="user-dropdown">
+            }
+            <i class="pi pi-chevron-down"></i>
+          </button>
+          @if (show_user_menu) {
+            <div class="user-dropdown">
+              @if (is_authenticated$ | async) {
                 <a (click)="goToAccount()">
-                  <i class="pi pi-user"></i> Mi Cuenta
+                  <i class="pi pi-user"></i> Ver Perfil
+                </a>
+                <a (click)="goToWishlist()">
+                  <i class="pi pi-heart"></i> Favoritos
                 </a>
                 <a (click)="goToOrders()">
-                  <i class="pi pi-list"></i> Mis Pedidos
+                  <i class="pi pi-list"></i> Ordenes
                 </a>
-                <hr>
+                <hr />
                 <a (click)="logout()" class="logout-link">
                   <i class="pi pi-sign-out"></i> Cerrar Sesión
                 </a>
-              </div>
-            }
-          </div>
-        } @else {
-          <div class="auth-buttons">
-            <button class="btn-login" (click)="login()">Iniciar Sesión</button>
-            <button class="btn-register" (click)="register()">Registrarse</button>
-          </div>
-        }
+              } @else {
+                <a (click)="login()">
+                  <i class="pi pi-sign-in"></i> Iniciar Sesión
+                </a>
+                <a (click)="register()">
+                  <i class="pi pi-user-plus"></i> Registrarse
+                </a>
+              }
+            </div>
+          }
+        </div>
 
         <!-- Mobile Menu Toggle -->
         <button class="mobile-menu-btn" (click)="toggleMobileMenu()">
@@ -67,14 +89,6 @@
         </button>
       </div>
     </div>
-
-    <!-- Navigation -->
-    <nav class="main-nav" [class.open]="show_mobile_menu">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">Inicio</a>
-      <a routerLink="/catalog" routerLinkActive="active">Productos</a>
-      <a routerLink="/novedades" routerLinkActive="active">Novedades</a>
-      <a routerLink="/ofertas" routerLinkActive="active">Ofertas</a>
-    </nav>
   </header>
 
   <!-- Main Content -->

@@ -33,10 +33,17 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async updateProfile(userId: number, updateProfileDto: any) {
-    const { first_name, last_name, phone, address, document_type, document_number } = updateProfileDto;
+    const {
+      first_name,
+      last_name,
+      phone,
+      address,
+      document_type,
+      document_number,
+    } = updateProfileDto;
 
     // 1. Actualizar datos básicos del usuario
     const updateData: any = {};
@@ -44,7 +51,8 @@ export class AuthService {
     if (last_name) updateData.last_name = last_name;
     if (phone !== undefined) updateData.phone = phone;
     if (document_type !== undefined) updateData.document_type = document_type;
-    if (document_number !== undefined) updateData.document_number = document_number;
+    if (document_number !== undefined)
+      updateData.document_number = document_number;
 
     let user = await this.prismaService.users.update({
       where: { id: userId },
@@ -69,7 +77,9 @@ export class AuthService {
           postal_code: address.postal_code,
           state_province: address.state,
           latitude: address.latitude ? parseFloat(address.latitude) : undefined,
-          longitude: address.longitude ? parseFloat(address.longitude) : undefined,
+          longitude: address.longitude
+            ? parseFloat(address.longitude)
+            : undefined,
         };
 
         await this.prismaService.addresses.update({
@@ -277,7 +287,8 @@ export class AuthService {
         },
       });
       // Crear user_settings para el owner usando el servicio centralizado
-      const ownerConfig = await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+      const ownerConfig =
+        await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
       await tx.user_settings.create({
         data: {
           user_id: user.id,
@@ -317,7 +328,7 @@ export class AuthService {
             },
           },
         },
-        // organization_users removed in schema; use organization_id on users
+        organizations: true,
       },
     });
 
@@ -509,7 +520,8 @@ export class AuthService {
     });
 
     // Crear user_settings para el usuario customer usando el servicio centralizado
-    const customerConfig = await this.defaultPanelUIService.generatePanelUI(app);
+    const customerConfig =
+      await this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
@@ -1004,14 +1016,15 @@ export class AuthService {
             // Verificar si pertenece a la misma organización
             if (main_store.organization_id === user.organization_id) {
               // Verificar acceso o si es High Privilege
-              const has_access = await this.prismaService.store_users.findUnique({
-                where: {
-                  store_id_user_id: {
-                    store_id: main_store.id,
-                    user_id: user.id
-                  }
-                }
-              });
+              const has_access =
+                await this.prismaService.store_users.findUnique({
+                  where: {
+                    store_id_user_id: {
+                      store_id: main_store.id,
+                      user_id: user.id,
+                    },
+                  },
+                });
 
               if (has_access || hasHighPrivilege) {
                 effective_organization_slug = undefined;
@@ -1023,8 +1036,8 @@ export class AuthService {
                   await this.prismaService.store_users.create({
                     data: {
                       store_id: main_store.id,
-                      user_id: user.id
-                    }
+                      user_id: user.id,
+                    },
                   });
                 }
               }
@@ -1034,15 +1047,16 @@ export class AuthService {
 
         // Estrategia 2: Si no hay Main Store o no se pudo seleccionar, buscar la primera tienda disponible donde YA tiene acceso
         if (!effective_store_slug) {
-          const first_store_user = await this.prismaService.store_users.findFirst({
-            where: {
-              user_id: user.id,
-              store: {
-                organization_id: user.organization_id // Asegurar que sea de la misma org
-              }
-            },
-            include: { store: true }
-          });
+          const first_store_user =
+            await this.prismaService.store_users.findFirst({
+              where: {
+                user_id: user.id,
+                store: {
+                  organization_id: user.organization_id, // Asegurar que sea de la misma org
+                },
+              },
+              include: { store: true },
+            });
 
           if (first_store_user && first_store_user.store) {
             effective_organization_slug = undefined;
@@ -1053,7 +1067,7 @@ export class AuthService {
         // Estrategia 3: High Privilege Fallback - Buscar CUALQUIER tienda de la org
         if (!effective_store_slug && hasHighPrivilege) {
           const first_org_store = await this.prismaService.stores.findFirst({
-            where: { organization_id: user.organization_id }
+            where: { organization_id: user.organization_id },
           });
 
           if (first_org_store) {
@@ -1064,8 +1078,8 @@ export class AuthService {
             await this.prismaService.store_users.create({
               data: {
                 store_id: first_org_store.id,
-                user_id: user.id
-              }
+                user_id: user.id,
+              },
             });
           }
         }
@@ -1446,8 +1460,6 @@ export class AuthService {
         all_tokens_invalidated: true,
       });
 
-
-
       return {
         message: `Todas las sesiones han sido cerradas por seguridad.`,
         data: {
@@ -1502,8 +1514,6 @@ export class AuthService {
           total_sessions_revoked: totalRevoked,
           security_level: 'enhanced',
         });
-
-
 
         return {
           message:

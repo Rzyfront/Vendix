@@ -63,6 +63,6 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
       .apply(DomainResolverMiddleware)
-      .forRoutes('api/ecommerce/(.*)');
+      .forRoutes('ecommerce/(.*)', 'api/ecommerce/(.*)');
   }
 }

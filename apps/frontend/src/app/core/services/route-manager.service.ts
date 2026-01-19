@@ -5,6 +5,7 @@ import { takeUntil, tap } from 'rxjs/operators';
 import { ReplaySubject, Subject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
+import { NotFoundGuard } from '../guards/not-found.guard';
 
 @Injectable({
   providedIn: 'root',
@@ -51,6 +52,7 @@ export class RouteManagerService implements OnDestroy {
       ...dynamicAppRoutes,
       {
         path: '**',
+        canActivate: [NotFoundGuard],
         loadComponent: () =>
           import(
             '../../shared/components/development-placeholder/development-placeholder.component'

@@ -1,85 +1,36 @@
 <div class="home-page">
-    <!-- Hero Section -->
-    <app-hero-banner />
+  <!-- Hero Section -->
+  <app-hero-banner [slides]="slider_config?.photos || []" />
 
-    <!-- Categories Section -->
-    <app-categories-showcase />
+  <!-- Featured Products -->
+  <section class="products-section">
+    <div class="section-header">
+      <h2>Productos destacados</h2>
+    </div>
 
-    <!-- Featured Products -->
-    <section class="products-section">
-        <div class="section-header">
-            <h2>Productos destacados</h2>
-            <a routerLink="/catalog" class="see-all">Ver todos</a>
-        </div>
-
-        @if (is_loading_featured) {
-        <div class="loading-grid">
-            @for (i of [1,2,3,4]; track i) {
-            <div class="skeleton-card">
-                <div class="skeleton-image"></div>
-                <div class="skeleton-text"></div>
-                <div class="skeleton-text short"></div>
-            </div>
-            }
-        </div>
-        } @else {
-        <div class="products-grid">
-            @for (product of featured_products; track product.id) {
-            <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
-                (toggle_wishlist)="onToggleWishlist($event)" />
-            }
-        </div>
+    @if (is_loading_featured) {
+      <div class="loading-grid">
+        @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+          <div class="skeleton-card">
+            <div class="skeleton-image"></div>
+            <div class="skeleton-text"></div>
+            <div class="skeleton-text short"></div>
+          </div>
         }
-    </section>
-
-    <!-- New Products (Novedades) -->
-    <app-products-scroll
-        title="Novedades"
-        [query]="{ limit: 12, sort_by: 'newest', created_after: thirty_days_ago }"
-        [initial_products]="[]"
-        (add_to_cart)="onAddToCart($event)"
-        (toggle_wishlist)="onToggleWishlist($event)"
-    />
-
-    <!-- Offers (Ofertas) -->
-    <app-products-scroll
-        title="Ofertas"
-        [query]="{ limit: 12, sort_by: 'price_asc', has_discount: true }"
-        [initial_products]="[]"
-        (add_to_cart)="onAddToCart($event)"
-        (toggle_wishlist)="onToggleWishlist($event)"
-    />
-
-    <!-- More Products with Infinite Scroll -->
-    <app-products-scroll
-        [show_header]="false"
-        [query]="{ limit: 12, sort_by: 'newest' }"
-        [initial_products]="featured_products"
-        (add_to_cart)="onAddToCart($event)"
-        (toggle_wishlist)="onToggleWishlist($event)"
-    />
-
-    <!-- Features Section -->
-    <section class="features-section">
-        <div class="feature">
-            <i class="pi pi-truck"></i>
-            <h3>Envío gratis</h3>
-            <p>En compras mayores a $50</p>
-        </div>
-        <div class="feature">
-            <i class="pi pi-refresh"></i>
-            <h3>Devoluciones</h3>
-            <p>30 días para devolver</p>
-        </div>
-        <div class="feature">
-            <i class="pi pi-shield"></i>
-            <h3>Pago seguro</h3>
-            <p>Tus datos protegidos</p>
-        </div>
-        <div class="feature">
-            <i class="pi pi-headphones"></i>
-            <h3>Soporte 24/7</h3>
-            <p>Estamos para ayudarte</p>
-        </div>
-    </section>
+      </div>
+    } @else {
+      <div class="products-grid">
+        @for (product of featured_products; track product.id) {
+          <app-product-card
+            [product]="product"
+            (add_to_cart)="onAddToCart($event)"
+            (toggle_wishlist)="onToggleWishlist($event)"
+          />
+        }
+      </div>
+      <div class="view-more-container">
+        <button class="btn-view-more" routerLink="/products">Ver más</button>
+      </div>
+    }
+  </section>
 </div>

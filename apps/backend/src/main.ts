@@ -73,6 +73,7 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
+      'x-store-id',
     ],
     exposedHeaders: ['Authorization'],
   });

@@ -20,11 +20,10 @@ export interface DomainContext {
 export class RequestContextService {
   public static asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
   private static currentContext: RequestContext | undefined;
-  private static domainContext?: DomainContext;
+  private static _domainContext?: DomainContext;
 
   /**
    * Ejecuta un callback dentro de un contexto de request
-   * Soporta tanto callbacks síncronos como asíncronos
    */
   static run<T>(context: RequestContext, callback: () => T): T {
     this.currentContext = context; // For debugging
@@ -42,42 +41,50 @@ export class RequestContextService {
    * Establece el contexto de dominio (llamado por DomainResolverMiddleware)
    */
   static setDomainContext(store_id?: number, organization_id?: number) {
-    this.domainContext = { store_id, organization_id };
+    const store = this.asyncLocalStorage.getStore();
+    if (store) {
+      store.store_id = store_id;
+      store.organization_id = organization_id;
+    }
+    this._domainContext = { store_id, organization_id };
   }
 
   /**
    * Obtiene el contexto de dominio
    */
   static getDomainContext(): DomainContext | undefined {
-    return this.domainContext;
+    const store = this.asyncLocalStorage.getStore();
+    if (store?.store_id) {
+      return {
+        store_id: store.store_id,
+        organization_id: store.organization_id,
+      };
+    }
+    return this._domainContext;
   }
 
   /**
    * Limpia el contexto de dominio
    */
   static clearDomainContext() {
-    this.domainContext = undefined;
+    this._domainContext = undefined;
   }
 
   /**
    * Obtiene el ID de la organización actual
-   * Prioridad: Auth context > Domain context
    */
   static getOrganizationId(): number | undefined {
     return (
-      this.getContext()?.organization_id || this.domainContext?.organization_id
+      this.getContext()?.organization_id ||
+      this.getDomainContext()?.organization_id
     );
   }
 
   /**
    * Obtiene el ID de la tienda actual
-   * Para ecommerce: store_id siempre viene del dominio
-   * Para admin: store_id viene del JWT
    */
   static getStoreId(): number | undefined {
-    // En ecommerce: store_id siempre viene del dominio
-    // En admin: store_id viene del JWT
-    return this.domainContext?.store_id || this.getContext()?.store_id;
+    return this.getDomainContext()?.store_id || this.getContext()?.store_id;
   }
 
   /**
@@ -98,7 +105,7 @@ export class RequestContextService {
    * Verifica si el contexto está basado en dominio
    */
   static isDomainBased(): boolean {
-    return !!this.domainContext?.store_id;
+    return !!this.getDomainContext()?.store_id;
   }
 
   /**
@@ -134,10 +141,9 @@ export class RequestContextService {
    * Valida que el usuario tenga acceso a la tienda del dominio
    */
   static validateStoreAccess(userStoreId?: number): boolean {
-    const domainStoreId = this.domainContext?.store_id;
+    const domainStoreId = this.getDomainContext()?.store_id;
     if (!domainStoreId) return false;
 
-    // Si el usuario tiene un store_id en su JWT, debe coincidir con el dominio
     if (userStoreId && userStoreId !== domainStoreId) {
       return false;
     }

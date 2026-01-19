@@ -5,68 +5,68 @@ import { CatalogService, Product } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { HeroBannerComponent } from '../../components/hero-banner';
-import { CategoriesShowcaseComponent } from '../../components/categories-showcase';
-import { ProductsScrollComponent } from '../../components/products-scroll';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
-    selector: 'app-home',
-    standalone: true,
-    imports: [
-        CommonModule,
-        RouterModule,
-        ProductCardComponent,
-        HeroBannerComponent,
-        CategoriesShowcaseComponent,
-        ProductsScrollComponent,
-    ],
-    templateUrl: './home.component.html',
-    styleUrls: ['./home.component.scss'],
+  selector: 'app-home',
+  standalone: true,
+  imports: [
+    CommonModule,
+    RouterModule,
+    ProductCardComponent,
+    HeroBannerComponent,
+  ],
+  templateUrl: './home.component.html',
+  styleUrls: ['./home.component.scss'],
 })
 export class HomeComponent implements OnInit {
-    featured_products: Product[] = [];
-    is_loading_featured = true;
-    thirty_days_ago: string;
+  featured_products: Product[] = [];
+  is_loading_featured = true;
+  slider_config: any = null;
 
-    private destroy_ref = inject(DestroyRef);
+  private destroy_ref = inject(DestroyRef);
 
-    constructor(
-        private catalog_service: CatalogService,
-        private cart_service: CartService,
-    ) {
-        // Calculate once in constructor to avoid expression changed errors
-        this.thirty_days_ago = this.getThirtyDaysAgo();
-    }
+  constructor(
+    private catalog_service: CatalogService,
+    private cart_service: CartService,
+  ) {}
 
-    ngOnInit(): void {
-        this.loadFeaturedProducts();
-    }
+  ngOnInit(): void {
+    this.loadFeaturedProducts();
+    this.loadPublicConfig();
+  }
 
-    loadFeaturedProducts(): void {
-        this.catalog_service.getProducts({ limit: 8, sort_by: 'newest' }).pipe(
-            takeUntilDestroyed(this.destroy_ref)
-        ).subscribe({
-            next: (response) => {
-                this.featured_products = response.data;
-                this.is_loading_featured = false;
-            },
-            error: () => {
-                this.is_loading_featured = false;
-            },
-        });
-    }
+  loadFeaturedProducts(): void {
+    this.catalog_service
+      .getProducts({ limit: 30, sort_by: 'newest' })
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response) => {
+          this.featured_products = response.data;
+          this.is_loading_featured = false;
+        },
+        error: () => {
+          this.is_loading_featured = false;
+        },
+      });
+  }
 
-    onAddToCart(product: Product): void {
-        this.cart_service.addToLocalCart(product.id, 1);
-    }
+  loadPublicConfig(): void {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response) => {
+          this.slider_config = response.data?.slider || null;
+        },
+      });
+  }
 
-    onToggleWishlist(product: Product): void {
-        // TODO: Implement wishlist toggle
-    }
+  onAddToCart(product: Product): void {
+    this.cart_service.addToLocalCart(product.id, 1);
+  }
 
-    getThirtyDaysAgo(): string {
-        const date = new Date();
-        date.setDate(date.getDate() - 30);
-        return date.toISOString();
-    }
+  onToggleWishlist(product: Product): void {
+    // TODO: Implement wishlist toggle
+  }
 }
