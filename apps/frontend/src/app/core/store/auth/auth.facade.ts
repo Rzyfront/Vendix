@@ -84,6 +84,20 @@ export class AuthFacade {
     AuthSelectors.selectUserStoreSlug,
   );
 
+  // Panel UI observables
+  readonly panelUiConfig$ = this.store.select(AuthSelectors.selectPanelUiConfig);
+  readonly selectedAppType$ = this.store.select(AuthSelectors.selectSelectedAppType);
+  readonly currentAppPanelUi$ = this.store.select(AuthSelectors.selectCurrentAppPanelUi);
+  readonly visibleModules$ = this.store.select(AuthSelectors.selectVisibleModules);
+
+  // Domain settings observables
+  readonly userDomainSettings$ = this.store.select(
+    AuthSelectors.selectUserDomainSettings,
+  );
+  readonly userDomainHostname$ = this.store.select(
+    AuthSelectors.selectUserDomainHostname,
+  );
+
   // Actions
   login(
     email: string,
@@ -314,6 +328,30 @@ export class AuthFacade {
   needsOnboarding(): boolean {
     let result = false;
     this.needsOnboarding$.pipe(take(1)).subscribe((needs) => (result = needs));
+    return result;
+  }
+
+  // Panel UI methods
+  isModuleVisible(moduleKey: string): boolean {
+    let result = false;
+    this.store
+      .select(AuthSelectors.selectIsModuleVisible(moduleKey))
+      .pipe(take(1))
+      .subscribe((visible) => (result = visible));
+    return result;
+  }
+
+  getVisibleModules$(): Observable<string[]> {
+    return this.visibleModules$;
+  }
+
+  updateUserSettings(userSettings: any): void {
+    this.store.dispatch(AuthActions.updateUserSettings({ user_settings: userSettings }));
+  }
+
+  getUserId(): number | null {
+    let result: number | null = null;
+    this.userId$.pipe(take(1)).subscribe((id) => (result = id));
     return result;
   }
 }

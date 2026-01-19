@@ -18,11 +18,12 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent, IconComponent, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -52,14 +53,14 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
         </div>
 
         <!-- Totals Row (High Contrast) -->
-        <div class="px-5 py-4 bg-muted/20">
+        <div class="px-3 py-3 bg-muted/20">
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
               <span class="font-medium">{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
-              <span>IVA (21%)</span>
+              <span>Impuestos</span>
               <span class="font-medium">{{ formatCurrency((summary$ | async)?.taxAmount || 0) }}</span>
             </div>
             <div class="pt-2 border-t border-border/50 flex justify-between items-center">
@@ -71,13 +72,13 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
           </div>
 
           <!-- Checkout Actions -->
-          <div class="flex items-center justify-between gap-4">
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
             <app-button
               variant="outline"
               size="md"
               (clicked)="saveCart()"
               [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
-              class="!h-10 text-sm font-medium px-5"
+              class="!h-10 text-sm font-medium px-3"
             >
               <app-icon name="save" [size]="16" slot="icon"></app-icon>
               Guardar
@@ -87,7 +88,7 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
               size="md"
               (clicked)="proceedToPayment()"
               [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
-              class="!h-10 text-sm font-bold px-10"
+              class="!h-10 text-sm font-bold px-6"
             >
               <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
               Cobrar
@@ -154,9 +155,9 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 
               <!-- Item Info -->
               <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2">
+                <div class="flex justify-between items-start gap-2 mb-0.5">
                   <h4
-                    class="text-sm font-semibold text-text-primary truncate leading-tight mb-0.5"
+                    class="text-sm font-semibold text-text-primary truncate leading-tight"
                   >
                     {{ item.product.name }}
                   </h4>
@@ -167,6 +168,9 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
                   >
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
+                </div>
+                <div *ngIf="getItemTaxAmount(item) > 0" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit">
+                  Imp {{ formatCurrency(getItemTaxAmount(item)) }}
                 </div>
                 <div class="flex justify-between items-end">
                   <span class="text-xs font-medium text-text-secondary">
@@ -186,32 +190,15 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
               <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
                 Cantidad
               </span>
-              <div
-                class="flex items-center bg-muted/50 border border-border/50 rounded-md h-7 overflow-hidden"
-              >
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity - 1)"
-                  [disabled]="(loading$ | async) ?? false"
-                >
-                  <app-icon name="minus" [size]="12"></app-icon>
-                </button>
-                <span
-                  class="min-w-[28px] text-center text-xs font-bold text-text-primary"
-                >
-                  {{ item.quantity }}
-                </span>
-                <button
-                  class="px-2.5 hover:bg-muted h-full flex items-center text-text-secondary transition-colors"
-                  (click)="updateQuantity(item.id, item.quantity + 1)"
-                  [disabled]="
-                    ((loading$ | async) ?? false) ||
-                    item.quantity >= item.product.stock
-                  "
-                >
-                  <app-icon name="plus" [size]="12"></app-icon>
-                </button>
-              </div>
+              <app-quantity-control
+                [value]="item.quantity"
+                [min]="1"
+                [max]="item.product.stock"
+                [editable]="true"
+                [disabled]="(loading$ | async) ?? false"
+                [size]="'sm'"
+                (valueChange)="updateQuantity(item.id, $event)"
+              ></app-quantity-control>
             </div>
           </div>
         </div>
@@ -342,6 +329,18 @@ export class PosCartComponent implements OnInit, OnDestroy {
       style: 'currency',
       currency: 'ARS',
     }).format(amount);
+  }
+  
+  getItemTaxRate(item: CartItem): number {
+    const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return rate;
+  }
+
+  getItemTaxAmount(item: CartItem): number {
+    return item.taxAmount;
   }
 
   handleImageError(event: any): void {

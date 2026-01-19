@@ -21,7 +21,8 @@ Thumbs.db
 # Documentation
 docs/
 .claude/
-
+.agent/
+.opencode/
 # Production keys and sensitive docs
 vendix-production-key.pem
 *_PRODUCTION_INFO.md

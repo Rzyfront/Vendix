@@ -51,6 +51,8 @@ model users {
   user_roles                user_roles[]
   user_sessions             user_sessions[]
   user_settings             user_settings?
+  carts                     carts[]
+  wishlists                 wishlists[]
   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
@@ -322,6 +324,8 @@ model stores {
   organizations         organizations           @relation(fields: [organization_id], references: [id])
   tax_categories        tax_categories[]
   tax_rates             tax_rates[]
+  carts                 carts[]
+  wishlists             wishlists[]
   main_store_users      users[]                 @relation("main_store")
 
   @@unique([organization_id, slug])
@@ -485,7 +489,7 @@ model orders {
   billing_address_id                              Int?
   shipping_address_snapshot                       Json?
   billing_address_snapshot                        Json?
-  currency                                        String           @db.VarChar(10)
+  currency                                        String?          @db.VarChar(10)
   subtotal_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
   discount_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
   tax_amount                                      Decimal          @default(0.00) @db.Decimal(12, 2)
@@ -555,7 +559,7 @@ model payments {
   order_id                Int
   customer_id             Int?
   amount                  Decimal                @db.Decimal(12, 2)
-  currency                String                 @db.VarChar(10)
+  currency                String?                @db.VarChar(10)
   state                   payments_state_enum
   transaction_id          String?                @unique @db.VarChar(255)
   gateway_response        Json?
@@ -604,6 +608,10 @@ model product_variants {
   sku                      String                     @db.VarChar(100)
   name                     String?                    @db.VarChar(255)
   price_override           Decimal?                   @db.Decimal(12, 2)
+  cost_price               Decimal?                   @db.Decimal(12, 2)
+  profit_margin            Decimal?                   @db.Decimal(5, 2)
+  is_on_sale               Boolean                    @default(false)
+  sale_price               Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
   attributes               Json?
   image_id                 Int?
@@ -624,6 +632,8 @@ model product_variants {
   stock_reservations       stock_reservations[]
   stock_transfer_items     stock_transfer_items[]
   supplier_products        supplier_products[]        @relation("product_variantsTosupplier_products")
+  cart_items               cart_items[]
+  wishlist_items           wishlist_items[]
 
   @@unique([product_id, sku])
 }
@@ -636,9 +646,14 @@ model products {
   slug                     String                     @db.VarChar(255)
   description              String?
   base_price               Decimal                    @db.Decimal(12, 2)
+  cost_price               Decimal?                   @db.Decimal(12, 2)
+  profit_margin            Decimal?                   @db.Decimal(5, 2)
   sku                      String?                    @db.VarChar(100)
   stock_quantity           Int?                       @default(0)
   state                    product_state_enum         @default(inactive)
+  available_for_ecommerce  Boolean                    @default(false)
+  is_on_sale               Boolean                    @default(false)
+  sale_price               Decimal?                   @db.Decimal(12, 2)
   created_at               DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
   inventory_adjustments    inventory_adjustments[]
@@ -661,6 +676,8 @@ model products {
   stock_reservations       stock_reservations[]
   stock_transfer_items     stock_transfer_items[]
   supplier_products        supplier_products[]
+  cart_items               cart_items[]
+  wishlist_items           wishlist_items[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -685,7 +702,7 @@ model refunds {
   payment_id            Int?
   customer_id           Int?
   amount                Decimal            @db.Decimal(12, 2)
-  currency              String             @db.VarChar(10)
+  currency              String?            @db.VarChar(10)
   reason                String?
   state                 refunds_state_enum
   refund_method         String?            @db.VarChar(100)
@@ -716,11 +733,13 @@ model reviews {
 model tax_categories {
   id                      Int                       @id @default(autoincrement())
   store_id                Int?
-  name                    String                    @unique @db.VarChar(100)
+  name                    String                    @db.VarChar(100)
   description             String?
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
+
+  @@unique([store_id, name], name: "store_id_name")
 }
 
 model tax_rates {
@@ -1143,6 +1162,89 @@ model return_order_items {
   @@index([return_order_id, product_id])
 }
 
+// ===== ECOMMERCE MODELS =====
+
+model carts {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  user_id    Int
+  currency   String?   @db.VarChar(10)
+  subtotal   Decimal   @default(0.00) @db.Decimal(12, 2)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  cart_items cart_items[]
+  store      stores       @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  user       users        @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, user_id])
+  @@index([user_id])
+}
+
+model cart_items {
+  id                 Int       @id @default(autoincrement())
+  cart_id            Int
+  product_id         Int
+  product_variant_id Int?
+  quantity           Int
+  unit_price         Decimal   @db.Decimal(12, 2)
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  cart            carts             @relation(fields: [cart_id], references: [id], onDelete: Cascade)
+  product         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
+
+  @@unique([cart_id, product_id, product_variant_id])
+  @@index([cart_id])
+}
+
+model wishlists {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  user_id    Int
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  wishlist_items wishlist_items[]
+  store          stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  user           users            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, user_id])
+  @@index([user_id])
+}
+
+model wishlist_items {
+  id                 Int       @id @default(autoincrement())
+  wishlist_id        Int
+  product_id         Int
+  product_variant_id Int?
+  added_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  wishlist        wishlists         @relation(fields: [wishlist_id], references: [id], onDelete: Cascade)
+  product         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
+
+  @@unique([wishlist_id, product_id, product_variant_id])
+  @@index([wishlist_id])
+}
+
+// ===== DEFAULT TEMPLATES =====
+
+model default_templates {
+  id                Int                    @id @default(autoincrement())
+  template_name     String                 @unique @db.VarChar(255)
+  configuration_type template_config_type_enum
+  template_data     Json
+  description       String?                @db.Text
+  is_active         Boolean                @default(true)
+  is_system         Boolean                @default(false)
+  created_at        DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?              @default(now()) @db.Timestamp(6)
+
+  @@index([configuration_type])
+  @@index([is_active])
+  @@index([is_system])
+}
+
 enum address_type_enum {
   billing
   shipping
@@ -1440,4 +1542,17 @@ enum partner_type_enum {
 enum item_condition_enum {
   good
   damaged
+}
+
+enum template_config_type_enum {
+  domain
+  store_settings
+  ecommerce
+  payment_methods
+  shipping
+  tax
+  email
+  notifications
+  user_panel_ui
+  user_settings
 }

@@ -1,0 +1,248 @@
+<div class="checkout-page">
+    <h1>Finalizar Compra</h1>
+
+    <!-- Steps indicator -->
+    <div class="steps">
+        <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
+            <span class="step-number">1</span>
+            <span class="step-label">Dirección</span>
+        </div>
+        <div class="step-line" [class.completed]="step > 1"></div>
+        <div class="step" [class.active]="step >= 2" [class.completed]="step > 2">
+            <span class="step-number">2</span>
+            <span class="step-label">Pago</span>
+        </div>
+        <div class="step-line" [class.completed]="step > 2"></div>
+        <div class="step" [class.active]="step >= 3">
+            <span class="step-number">3</span>
+            <span class="step-label">Confirmar</span>
+        </div>
+    </div>
+
+    @if (is_loading) {
+    <div class="loading">
+        <div class="spinner"></div>
+        <p>Cargando...</p>
+    </div>
+    } @else {
+    <div class="checkout-content">
+        <div class="checkout-main">
+            <!-- Step 1: Address -->
+            @if (step === 1) {
+            <div class="checkout-section">
+                <h2>Dirección de Envío</h2>
+
+                @if (addresses.length > 0) {
+                <div class="address-list">
+                    @for (addr of addresses; track addr.id) {
+                    <div class="address-card" [class.selected]="selected_address_id === addr.id && !use_new_address"
+                        (click)="selectAddress(addr.id)">
+                        <div class="address-radio">
+                            <span class="radio"
+                                [class.checked]="selected_address_id === addr.id && !use_new_address"></span>
+                        </div>
+                        <div class="address-info">
+                            <p class="address-line">{{ addr.address_line1 }}</p>
+                            @if (addr.address_line2) {
+                            <p class="address-line">{{ addr.address_line2 }}</p>
+                            }
+                            <p class="address-city">{{ addr.city }}, {{ addr.state_province }}</p>
+                            <p class="address-phone">Tel: {{ addr.phone_number }}</p>
+                        </div>
+                    </div>
+                    }
+
+                    <div class="address-card new" [class.selected]="use_new_address" (click)="selectNewAddress()">
+                        <div class="address-radio">
+                            <span class="radio" [class.checked]="use_new_address"></span>
+                        </div>
+                        <div class="address-info">
+                            <i class="pi pi-plus"></i>
+                            <span>Agregar nueva dirección</span>
+                        </div>
+                    </div>
+                </div>
+                }
+
+                @if (use_new_address) {
+                <form [formGroup]="address_form" class="address-form">
+                    <div class="form-row">
+                        <div class="form-group full">
+                            <label>Dirección *</label>
+                            <input type="text" formControlName="address_line1" placeholder="Calle y número">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group full">
+                            <label>Apartamento, oficina, etc. (opcional)</label>
+                            <input type="text" formControlName="address_line2" placeholder="Apto, piso, oficina">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Ciudad *</label>
+                            <input type="text" formControlName="city" placeholder="Ciudad">
+                        </div>
+                        <div class="form-group">
+                            <label>Departamento/Estado</label>
+                            <input type="text" formControlName="state_province" placeholder="Departamento">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Código Postal</label>
+                            <input type="text" formControlName="postal_code" placeholder="Código postal">
+                        </div>
+                        <div class="form-group">
+                            <label>Teléfono *</label>
+                            <input type="tel" formControlName="phone_number" placeholder="Teléfono de contacto">
+                        </div>
+                    </div>
+                </form>
+                }
+            </div>
+            }
+
+            <!-- Step 2: Payment -->
+            @if (step === 2) {
+            <div class="checkout-section">
+                <h2>Método de Pago</h2>
+
+                <div class="payment-list">
+                    @for (method of payment_methods; track method.id) {
+                    <div class="payment-card" [class.selected]="selected_payment_method_id === method.id"
+                        (click)="selectPaymentMethod(method.id)">
+                        <div class="payment-radio">
+                            <span class="radio" [class.checked]="selected_payment_method_id === method.id"></span>
+                        </div>
+                        @if (method.logo_url) {
+                        <img [src]="method.logo_url" [alt]="method.name" class="payment-logo">
+                        }
+                        <div class="payment-info">
+                            <span class="payment-name">{{ method.name }}</span>
+                            <span class="payment-type">{{ method.type }}</span>
+                        </div>
+                    </div>
+                    }
+                </div>
+            </div>
+            }
+
+            <!-- Step 3: Confirm -->
+            @if (step === 3) {
+            <div class="checkout-section">
+                <h2>Confirmar Pedido</h2>
+
+                <div class="confirm-details">
+                    <div class="confirm-block">
+                        <h3>Dirección de Envío</h3>
+                        @if (use_new_address) {
+                        <p>{{ address_form.value.address_line1 }}</p>
+                        <p>{{ address_form.value.city }}, {{ address_form.value.state_province }}</p>
+                        <p>Tel: {{ address_form.value.phone_number }}</p>
+                        } @else {
+                        @for (addr of addresses; track addr.id) {
+                        @if (addr.id === selected_address_id) {
+                        <p>{{ addr.address_line1 }}</p>
+                        <p>{{ addr.city }}, {{ addr.state_province }}</p>
+                        <p>Tel: {{ addr.phone_number }}</p>
+                        }
+                        }
+                        }
+                    </div>
+
+                    <div class="confirm-block">
+                        <h3>Método de Pago</h3>
+                        @for (method of payment_methods; track method.id) {
+                        @if (method.id === selected_payment_method_id) {
+                        <p>{{ method.name }}</p>
+                        }
+                        }
+                    </div>
+
+                    <div class="notes-section">
+                        <label>Notas del pedido (opcional)</label>
+                        <textarea [(ngModel)]="notes"
+                            placeholder="Instrucciones especiales para la entrega..."></textarea>
+                    </div>
+                </div>
+            </div>
+            }
+
+            @if (error_message) {
+            <div class="error-message">
+                <i class="pi pi-exclamation-circle"></i>
+                {{ error_message }}
+            </div>
+            }
+
+            <div class="checkout-actions">
+                @if (step > 1) {
+                <button class="back-btn" (click)="prevStep()">
+                    <i class="pi pi-arrow-left"></i>
+                    Anterior
+                </button>
+                } @else {
+                <button class="back-btn" (click)="goToCart()">
+                    <i class="pi pi-arrow-left"></i>
+                    Volver al carrito
+                </button>
+                }
+
+                @if (step < 3) { <button class="next-btn" (click)="nextStep()">
+                    Continuar
+                    <i class="pi pi-arrow-right"></i>
+                    </button>
+                    } @else {
+                    <button class="place-order-btn" (click)="placeOrder()" [disabled]="is_submitting">
+                        @if (is_submitting) {
+                        <span class="spinner-small"></span>
+                        Procesando...
+                        } @else {
+                        <i class="pi pi-check"></i>
+                        Confirmar Pedido
+                        }
+                    </button>
+                    }
+            </div>
+        </div>
+
+        <!-- Order Summary -->
+        <div class="checkout-summary">
+            <div class="summary-card">
+                <h3>Resumen</h3>
+
+                @if (cart) {
+                <div class="summary-items">
+                    @for (item of cart.items; track item.id) {
+                    <div class="summary-item">
+                        <span class="item-qty">{{ item.quantity }}x</span>
+                        <span class="item-name">{{ item.product.name }}</span>
+                        <span class="item-price">{{ item.total_price | currency }}</span>
+                    </div>
+                    }
+                </div>
+
+                <hr>
+
+                <div class="summary-row">
+                    <span>Subtotal</span>
+                    <span>{{ cart.subtotal | currency }}</span>
+                </div>
+                <div class="summary-row">
+                    <span>Envío</span>
+                    <span>Por calcular</span>
+                </div>
+
+                <hr>
+
+                <div class="summary-row total">
+                    <span>Total</span>
+                    <span>{{ cart.subtotal | currency }}</span>
+                </div>
+                }
+            </div>
+        </div>
+    </div>
+    }
+</div>

@@ -18,5 +18,6 @@ import { PrismaModule } from '../../../prisma/prisma.module';
   ],
   controllers: [PublicDomainsController],
   providers: [PublicDomainsService],
+  exports: [PublicDomainsService], // Export for use in DomainResolverMiddleware
 })
 export class PublicDomainsModule {}

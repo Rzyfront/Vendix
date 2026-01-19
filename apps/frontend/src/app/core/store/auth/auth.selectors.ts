@@ -227,3 +227,70 @@ export const selectNeedsOnboarding = createSelector(
   selectOnboardingCompleted,
   (onboardingCompleted: boolean) => !onboardingCompleted,
 );
+
+// Panel UI selectors
+export const selectPanelUiConfig = createSelector(
+  selectUserSettings,
+  (userSettings: any) => userSettings?.config?.panel_ui || {},
+);
+
+export const selectSelectedAppType = createSelector(
+  selectUserSettings,
+  (userSettings: any) => userSettings?.selected_app_type || userSettings?.config?.app || 'ORG_ADMIN',
+);
+
+export const selectCurrentAppPanelUi = createSelector(
+  selectPanelUiConfig,
+  selectSelectedAppType,
+  (panelUi: any, appType: string) => {
+    // Support both new format (nested by app type) and old format (direct)
+    if (panelUi && panelUi[appType]) {
+      return panelUi[appType];
+    }
+    // Fallback to old format for backward compatibility
+    return panelUi || {};
+  },
+);
+
+export const selectIsModuleVisible = (moduleKey: string) =>
+  createSelector(
+    selectCurrentAppPanelUi,
+    (panelUi: any) => panelUi?.[moduleKey] === true,
+  );
+
+export const selectVisibleModules = createSelector(
+  selectCurrentAppPanelUi,
+  (panelUi: any) => {
+    if (!panelUi || typeof panelUi !== 'object') return [];
+    return Object.entries(panelUi)
+      .filter(([_, visible]) => visible === true)
+      .map(([key]) => key);
+  },
+);
+
+// Domain settings selector
+// Prioridad: 1) dominio de la tienda, 2) dominio de la organización
+export const selectUserDomainSettings = createSelector(
+  selectUser,
+  (user: any) => {
+    // Primero buscar dominio de la tienda
+    if (user?.store?.domain_settings && user.store.domain_settings.length > 0) {
+      return user.store.domain_settings[0]; // Tomar el primero (is_primary: true)
+    }
+    // Si no hay dominio de tienda, buscar dominio de la organización
+    if (user?.store?.organizations?.domain_settings && user.store.organizations.domain_settings.length > 0) {
+      return user.store.organizations.domain_settings[0]; // Tomar el primero (is_primary: true)
+    }
+    // También verificar en user.organizations directamente (para login de ORG_ADMIN)
+    if (user?.organizations?.domain_settings && user.organizations.domain_settings.length > 0) {
+      return user.organizations.domain_settings[0];
+    }
+    return null;
+  },
+);
+
+// Domain hostname selector (convenience selector)
+export const selectUserDomainHostname = createSelector(
+  selectUserDomainSettings,
+  (domainSettings: any) => domainSettings?.hostname || null,
+);

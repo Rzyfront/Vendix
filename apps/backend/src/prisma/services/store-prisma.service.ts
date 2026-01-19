@@ -19,6 +19,7 @@ export class StorePrismaService extends BasePrismaService {
     'orders',
     'store_payment_methods',
     'addresses',
+    'domain_settings',
   ];
 
   constructor() {
@@ -373,6 +374,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get domain_settings() {
     return this.scoped_client.domain_settings;
+  }
+
+  // Global tables (no store scoping)
+  get default_templates() {
+    return this.baseClient.default_templates;
   }
 
   override $transaction(arg: any, options?: any) {

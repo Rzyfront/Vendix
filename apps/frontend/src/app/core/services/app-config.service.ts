@@ -13,16 +13,15 @@ import { superAdminRoutes } from '../../routes/private/super_admin.routes';
 import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.public.routes';
 import { orgLandingPublicRoutes } from '../../routes/public/org_landing.public.routes';
 import { storeEcommercePublicRoutes } from '../../routes/public/store_ecommerce.public.routes';
+import { storeLandingPublicRoutes } from '../../routes/public/store_landing.public.routes';
 import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
 import { orgAdminRoutes } from '../../routes/private/org_admin.routes';
 import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
-import {
-  TenantConfig,
-  BrandingConfig,
-} from '../models/tenant-config.interface';
+import { BrandingConfig } from '../models/tenant-config.interface';
 import { environment } from '../../../environments/environment';
 import { Routes } from '@angular/router';
+import { ThemeService } from './theme.service';
 
 export interface LayoutConfig {
   name: string;
@@ -41,6 +40,7 @@ export interface AppConfig {
 @Injectable({ providedIn: 'root' })
 export class AppConfigService {
   private http = inject(HttpClient);
+  private themeService = inject(ThemeService);
 
   async setupConfig(): Promise<AppConfig> {
     // 1. Detectar la configuración base del dominio.
@@ -81,7 +81,7 @@ export class AppConfigService {
       domainConfig,
       routes: this.resolveRoutes(domainConfig),
       layouts: [],
-      branding: this.transformBrandingFromApi(
+      branding: this.themeService.transformBrandingFromApi(
         domainConfig.customConfig?.branding || {},
       ),
     };
@@ -101,6 +101,8 @@ export class AppConfigService {
         return orgLandingPublicRoutes;
       case AppEnvironment.STORE_ECOMMERCE:
         return storeEcommercePublicRoutes;
+      case AppEnvironment.STORE_LANDING:
+        return storeLandingPublicRoutes;
       default:
         return defaultPublicRoutes;
     }
@@ -119,28 +121,6 @@ export class AppConfigService {
       default:
         return [];
     }
-  }
-
-  private transformBrandingFromApi(apiBranding: any): BrandingConfig {
-    return {
-      logo: {
-        url: apiBranding.logo_url || 'assets/images/logo.png',
-        alt: apiBranding.name || 'Logo',
-      },
-      colors: {
-        primary: apiBranding.primary_color || '#7ED7A5',
-        secondary: apiBranding.secondary_color || '#2F6F4E',
-        accent: apiBranding.accent_color || '#FFFFFF',
-        background: apiBranding.background_color || '#F4F4F4',
-        surface: apiBranding.surface_color || '#FFFFFF',
-        text: {
-          primary: apiBranding.text_color || '#222222',
-          secondary: '#555555',
-          muted: '#AAAAAA',
-        },
-      },
-      fonts: { primary: 'Inter, sans-serif' },
-    };
   }
 
   private async detectDomain(hostname?: string): Promise<DomainConfig> {
@@ -183,6 +163,8 @@ export class AppConfigService {
       environment: domainInfo.config.app as AppEnvironment,
       organization_slug: domainInfo.organization_slug,
       store_slug: domainInfo.store_slug,
+      organization_id: domainInfo.organization_id,
+      store_id: domainInfo.store_id,
       customConfig: domainInfo.config,
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
     };
@@ -220,12 +202,12 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_user_environment', env);
-    } catch (e) {}
+    } catch (e) { }
   }
   private cacheAppConfig(config: AppConfig): void {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_app_config', JSON.stringify(config));
-    } catch (e) {}
+    } catch (e) { }
   }
 }

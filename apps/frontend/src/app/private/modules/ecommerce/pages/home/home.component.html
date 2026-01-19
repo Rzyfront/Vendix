@@ -1,0 +1,36 @@
+<div class="home-page">
+  <!-- Hero Section -->
+  <app-hero-banner [slides]="slider_config?.photos || []" />
+
+  <!-- Featured Products -->
+  <section class="products-section">
+    <div class="section-header">
+      <h2>Productos destacados</h2>
+    </div>
+
+    @if (is_loading_featured) {
+      <div class="loading-grid">
+        @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+          <div class="skeleton-card">
+            <div class="skeleton-image"></div>
+            <div class="skeleton-text"></div>
+            <div class="skeleton-text short"></div>
+          </div>
+        }
+      </div>
+    } @else {
+      <div class="products-grid">
+        @for (product of featured_products; track product.id) {
+          <app-product-card
+            [product]="product"
+            (add_to_cart)="onAddToCart($event)"
+            (toggle_wishlist)="onToggleWishlist($event)"
+          />
+        }
+      </div>
+      <div class="view-more-container">
+        <button class="btn-view-more" routerLink="/products">Ver más</button>
+      </div>
+    }
+  </section>
+</div>

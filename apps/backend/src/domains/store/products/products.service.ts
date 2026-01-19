@@ -35,7 +35,7 @@ export class ProductsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
-  ) { }
+  ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -45,13 +45,17 @@ export class ProductsService {
       const store_id = context?.store_id;
 
       if (!store_id) {
-        throw new ForbiddenException('Store context required for this operation');
+        throw new ForbiddenException(
+          'Store context required for this operation',
+        );
       }
 
       // Verify user context for audit
       const user_id = context?.user_id;
       if (!user_id) {
-        throw new ForbiddenException('User context required for stock operations');
+        throw new ForbiddenException(
+          'User context required for stock operations',
+        );
       }
 
       // Generar slug si no se proporciona
@@ -80,7 +84,7 @@ export class ProductsService {
 
         if (existingSku) {
           throw new ConflictException(
-            `El SKU '${createProductDto.sku}' ya está en uso en esta tienda. Use un SKU diferente o deje el campo vacío.`
+            `El SKU '${createProductDto.sku}' ya está en uso en esta tienda. Use un SKU diferente o deje el campo vacío.`,
           );
         }
       }
@@ -97,7 +101,7 @@ export class ProductsService {
         if (!brand) {
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-            `Please check available brands in the system.`,
+              `Please check available brands in the system.`,
           );
         }
       } else {
@@ -112,123 +116,151 @@ export class ProductsService {
         images,
         stock_quantity,
         stock_by_location,
-        cost_price, // Exclude from productData as it's not in products table
-        weight,     // Exclude from productData as it's not in products table
         variants,
         ...productData
       } = createProductDto;
 
-      const result = await this.prisma.$transaction(async (prisma) => {
-        // Crear producto usando scoped client para asegurar isolation
-        const product = await prisma.products.create({
-          data: {
-            ...productData,
-            store_id: store_id, // Agregar el store_id del contexto
-            slug: slug,
-            stock_quantity: 0, // Se inicializará via stock_levels
-            updated_at: new Date(),
-          },
-        });
-
-        if (category_ids && category_ids.length > 0) {
-          await prisma.product_categories.createMany({
-            data: category_ids.map((categoryId) => ({
-              product_id: product.id,
-              category_id: categoryId,
-            })),
-          });
-        }
-
-        // Crear variantes si se proporcionan
-        if (variants && variants.length > 0) {
-          for (const variantData of variants) {
-            await this.productVariantService.createVariant(product.id, {
-              ...variantData,
-              stock_quantity: variantData.stock_quantity || 0,
-            }, prisma);
-          }
-        }
-
-        // Asignar categorías de impuestos si se proporcionan
-        if (tax_category_ids && tax_category_ids.length > 0) {
-          // Obtener contexto para validación
-          const current_context = RequestContextService.getContext();
-
-          // Validar que las categorías de impuestos existan y estén dentro del scope
-          const tax_categories = await prisma.tax_categories.findMany({
-            where: {
-              id: { in: tax_category_ids },
-              ...(current_context?.is_super_admin
-                ? {}
-                : {
-                  OR: [
-                    { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
-                    { store_id: null }, // Categorías globales
-                  ],
-                }),
-            },
+      const result = await this.prisma.$transaction(
+        async (prisma) => {
+          // Crear producto usando scoped client para asegurar isolation
+          const product = await prisma.products.create({
+            data: {
+              ...productData,
+              store_id: store_id, // Agregar el store_id del contexto
+              slug: slug,
+              stock_quantity: 0, // Se inicializará via stock_levels
+              updated_at: new Date(),
+            } as any,
           });
 
-          if (tax_categories.length !== tax_category_ids.length) {
-            const found_ids = tax_categories.map((tc) => tc.id);
-            const missing_ids = tax_category_ids.filter(
-              (id) => !found_ids.includes(id),
-            );
-            throw new BadRequestException(
-              `Tax categories not found or out of scope: ${missing_ids.join(', ')}`,
-            );
+          if (category_ids && category_ids.length > 0) {
+            await prisma.product_categories.createMany({
+              data: category_ids.map((categoryId) => ({
+                product_id: product.id,
+                category_id: categoryId,
+              })),
+            });
           }
 
-          await prisma.product_tax_assignments.createMany({
-            data: tax_categories.map((tax_category) => ({
-              product_id: product.id,
-              tax_category_id: tax_category.id,
-            })),
-          });
-        }
+          // Crear variantes si se proporcionan
+          if (variants && variants.length > 0) {
+            for (const variantData of variants) {
+              await this.productVariantService.createVariant(
+                product.id,
+                {
+                  ...variantData,
+                  stock_quantity: variantData.stock_quantity || 0,
+                },
+                prisma,
+              );
+            }
+          }
 
-        // Manejar imágenes (combinar image_urls legacy con images structured)
-        const finalImages: any[] = [];
+          // Asignar categorías de impuestos si se proporcionan
+          if (tax_category_ids && tax_category_ids.length > 0) {
+            // Obtener contexto para validación
+            const current_context = RequestContextService.getContext();
 
-        // 1. Procesar image_urls (legacy)
-        if (image_urls && image_urls.length > 0) {
-          finalImages.push(...image_urls.map((url, index) => ({
-            product_id: product.id,
-            image_url: url,
-            is_main: index === 0
-          })));
-        }
+            // Validar que las categorías de impuestos existan y estén dentro del scope
+            const tax_categories = await prisma.tax_categories.findMany({
+              where: {
+                id: { in: tax_category_ids },
+                ...(current_context?.is_super_admin
+                  ? {}
+                  : {
+                      OR: [
+                        { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
+                        { store_id: null }, // Categorías globales
+                      ],
+                    }),
+              },
+            });
 
-        // 2. Procesar images (structured with possible base64)
-        if (images && images.length > 0) {
-          const uploadedImages = await this.handleImageUploads(images, slug);
-          finalImages.push(...uploadedImages.map(img => ({
-            ...img,
-            product_id: product.id
-          })));
-        }
+            if (tax_categories.length !== tax_category_ids.length) {
+              const found_ids = tax_categories.map((tc) => tc.id);
+              const missing_ids = tax_category_ids.filter(
+                (id) => !found_ids.includes(id),
+              );
+              throw new BadRequestException(
+                `Tax categories not found or out of scope: ${missing_ids.join(', ')}`,
+              );
+            }
 
-        if (finalImages.length > 0) {
-          // Asegurar que solo haya un is_main
-          const mainExists = finalImages.some(img => img.is_main);
-          if (!mainExists) finalImages[0].is_main = true;
+            await prisma.product_tax_assignments.createMany({
+              data: tax_categories.map((tax_category) => ({
+                product_id: product.id,
+                tax_category_id: tax_category.id,
+              })),
+            });
+          }
 
-          await prisma.product_images.createMany({
-            data: finalImages
-          });
-        }
+          // Manejar imágenes (combinar image_urls legacy con images structured)
+          const finalImages: any[] = [];
 
-        // Inicializar stock levels para múltiples ubicaciones
-        if (stock_by_location && stock_by_location.length > 0) {
-          // Usar las ubicaciones especificadas en el DTO
-          for (const stockLocation of stock_by_location) {
+          // 1. Procesar image_urls (legacy)
+          if (image_urls && image_urls.length > 0) {
+            finalImages.push(
+              ...image_urls.map((url, index) => ({
+                product_id: product.id,
+                image_url: url,
+                is_main: index === 0,
+              })),
+            );
+          }
+
+          // 2. Procesar images (structured with possible base64)
+          if (images && images.length > 0) {
+            const uploadedImages = await this.handleImageUploads(images, slug);
+            finalImages.push(
+              ...uploadedImages.map((img) => ({
+                ...img,
+                product_id: product.id,
+              })),
+            );
+          }
+
+          if (finalImages.length > 0) {
+            // Asegurar que solo haya un is_main
+            const mainExists = finalImages.some((img) => img.is_main);
+            if (!mainExists) finalImages[0].is_main = true;
+
+            await prisma.product_images.createMany({
+              data: finalImages,
+            });
+          }
+
+          // Inicializar stock levels para múltiples ubicaciones
+          if (stock_by_location && stock_by_location.length > 0) {
+            // Usar las ubicaciones especificadas en el DTO
+            for (const stockLocation of stock_by_location) {
+              await this.stockLevelManager.updateStock(
+                {
+                  product_id: product.id,
+                  location_id: stockLocation.location_id,
+                  quantity_change: stockLocation.quantity,
+                  movement_type: 'initial',
+                  reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                  user_id: user_id,
+                  create_movement: true,
+                  validate_availability: false,
+                },
+                prisma,
+              );
+            }
+          } else if (stock_quantity && stock_quantity > 0) {
+            // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
+            const defaultLocation =
+              await this.inventoryLocationsService.getDefaultLocation(
+                product.store_id,
+              );
+
             await this.stockLevelManager.updateStock(
               {
                 product_id: product.id,
-                location_id: stockLocation.location_id,
-                quantity_change: stockLocation.quantity,
+                location_id: defaultLocation.id,
+                quantity_change: stock_quantity,
                 movement_type: 'initial',
-                reason: `Initial stock on product creation${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                reason: 'Initial stock on product creation (legacy)',
                 user_id: user_id,
                 create_movement: true,
                 validate_availability: false,
@@ -236,143 +268,124 @@ export class ProductsService {
               prisma,
             );
           }
-        } else if (stock_quantity && stock_quantity > 0) {
-          // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
-          const defaultLocation =
-            await this.inventoryLocationsService.getDefaultLocation(
-              product.store_id,
+
+          // Inicializar stock levels para todas las ubicaciones de la organización
+          // Obtenemos el organization_id del contexto
+          const orgContext = RequestContextService.getContext();
+          if (orgContext?.organization_id) {
+            await this.stockLevelManager.initializeStockLevelsForProduct(
+              product.id,
+              orgContext.organization_id,
+              prisma,
             );
+          }
 
-          await this.stockLevelManager.updateStock(
-            {
-              product_id: product.id,
-              location_id: defaultLocation.id,
-              quantity_change: stock_quantity,
-              movement_type: 'initial',
-              reason: 'Initial stock on product creation (legacy)',
-              user_id: user_id,
-              create_movement: true,
-              validate_availability: false,
-            },
-            prisma,
-          );
-        }
-
-        // Inicializar stock levels para todas las ubicaciones de la organización
-        // Obtenemos el organization_id del contexto
-        const orgContext = RequestContextService.getContext();
-        if (orgContext?.organization_id) {
-          await this.stockLevelManager.initializeStockLevelsForProduct(
-            product.id,
-            orgContext.organization_id,
-            prisma,
-          );
-        }
-
-        // Obtener el producto completo con todas las relaciones para retornar
-        const completeProduct = await prisma.products.findUnique({
-          where: { id: product.id },
-          include: {
-            stores: {
-              select: {
-                id: true,
-                name: true,
-                slug: true,
-                organization_id: true,
+          // Obtener el producto completo con todas las relaciones para retornar
+          const completeProduct = await prisma.products.findUnique({
+            where: { id: product.id },
+            include: {
+              stores: {
+                select: {
+                  id: true,
+                  name: true,
+                  slug: true,
+                  organization_id: true,
+                },
               },
-            },
-            brands: true,
-            product_categories: {
-              include: {
-                categories: true,
+              brands: true,
+              product_categories: {
+                include: {
+                  categories: true,
+                },
               },
-            },
-            product_tax_assignments: {
-              include: {
-                tax_categories: true,
+              product_tax_assignments: {
+                include: {
+                  tax_categories: true,
+                },
               },
-            },
-            product_images: {
-              orderBy: { is_main: 'desc' },
-            },
-            product_variants: {
-              include: {
-                product_images: true,
+              product_images: {
+                orderBy: { is_main: 'desc' },
               },
-            },
-            reviews: {
-              where: { state: 'approved' },
-              include: {
-                users: {
-                  select: {
-                    id: true,
-                    first_name: true,
-                    last_name: true,
+              product_variants: {
+                include: {
+                  product_images: true,
+                },
+              },
+              reviews: {
+                where: { state: 'approved' },
+                include: {
+                  users: {
+                    select: {
+                      id: true,
+                      first_name: true,
+                      last_name: true,
+                    },
+                  },
+                },
+                orderBy: { created_at: 'desc' },
+                take: 10,
+              },
+              stock_levels: {
+                select: {
+                  quantity_available: true,
+                  quantity_reserved: true,
+                  reorder_point: true,
+                  inventory_locations: {
+                    select: {
+                      id: true,
+                      name: true,
+                      type: true,
+                    },
                   },
                 },
               },
-              orderBy: { created_at: 'desc' },
-              take: 10,
-            },
-            stock_levels: {
-              select: {
-                quantity_available: true,
-                quantity_reserved: true,
-                reorder_point: true,
-                inventory_locations: {
-                  select: {
-                    id: true,
-                    name: true,
-                    type: true,
-                  },
+              _count: {
+                select: {
+                  product_variants: true,
+                  product_images: true,
+                  reviews: true,
                 },
               },
             },
-            _count: {
-              select: {
-                product_variants: true,
-                product_images: true,
-                reviews: true,
-              },
-            },
-          },
-        });
+          });
 
-        // Calcular stock totals dinámicamente
-        const totalStockAvailable = completeProduct.stock_levels.reduce(
-          (sum, stock) => sum + stock.quantity_available,
-          0,
-        );
-        const totalStockReserved = completeProduct.stock_levels.reduce(
-          (sum, stock) => sum + stock.quantity_reserved,
-          0,
-        );
+          // Calcular stock totals dinámicamente
+          const totalStockAvailable = completeProduct.stock_levels.reduce(
+            (sum, stock) => sum + stock.quantity_available,
+            0,
+          );
+          const totalStockReserved = completeProduct.stock_levels.reduce(
+            (sum, stock) => sum + stock.quantity_reserved,
+            0,
+          );
 
-        // Retornar producto con información de stock enriquecida
-        const mainImage = completeProduct.product_images[0];
-        let imageUrl = mainImage?.image_url;
-        if (imageUrl && !imageUrl.startsWith('http')) {
-          imageUrl = await this.s3Service.getPresignedUrl(imageUrl);
-        }
+          // Retornar producto con información de stock enriquecida
+          const mainImage = completeProduct.product_images[0];
+          let imageUrl = mainImage?.image_url;
+          if (imageUrl && !imageUrl.startsWith('http')) {
+            imageUrl = await this.s3Service.getPresignedUrl(imageUrl);
+          }
 
-        return {
-          ...completeProduct,
-          image_url: imageUrl,
-          // Mantener compatibilidad con el campo existente pero basado en stock_levels
-          stock_quantity: totalStockAvailable,
-          // Nuevos campos agregados para mayor claridad
-          total_stock_available: totalStockAvailable,
-          total_stock_reserved: totalStockReserved,
-          stock_by_location: completeProduct.stock_levels.map((stock) => ({
-            location_id: stock.inventory_locations.id,
-            location_name: stock.inventory_locations.name,
-            location_type: stock.inventory_locations.type,
-            available: stock.quantity_available,
-            reserved: stock.quantity_reserved,
-            reorder_point: stock.reorder_point,
-          })),
-        };
-      }, { timeout: 30000 });
+          return {
+            ...completeProduct,
+            image_url: imageUrl,
+            // Mantener compatibilidad con el campo existente pero basado en stock_levels
+            stock_quantity: totalStockAvailable,
+            // Nuevos campos agregados para mayor claridad
+            total_stock_available: totalStockAvailable,
+            total_stock_reserved: totalStockReserved,
+            stock_by_location: completeProduct.stock_levels.map((stock) => ({
+              location_id: stock.inventory_locations.id,
+              location_name: stock.inventory_locations.name,
+              location_type: stock.inventory_locations.type,
+              available: stock.quantity_available,
+              reserved: stock.quantity_reserved,
+              reorder_point: stock.reorder_point,
+            })),
+          };
+        },
+        { timeout: 30000 },
+      );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -419,12 +432,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -459,6 +472,15 @@ export class ProductsService {
                 select: {
                   id: true,
                   name: true,
+                },
+              },
+            },
+          },
+          product_tax_assignments: {
+            include: {
+              tax_categories: {
+                include: {
+                  tax_rates: true,
                 },
               },
             },
@@ -529,36 +551,38 @@ export class ProductsService {
     }
 
     // Calcular stock totals dinámicamente para cada producto
-    const productsWithStock = await Promise.all(products.map(async (product) => {
-      const totalStockAvailable =
-        product.stock_levels?.reduce(
-          (sum, stock) => sum + stock.quantity_available,
-          0,
-        ) || 0;
-      const totalStockReserved =
-        product.stock_levels?.reduce(
-          (sum, stock) => sum + stock.quantity_reserved,
-          0,
-        ) || 0;
+    const productsWithStock = await Promise.all(
+      products.map(async (product) => {
+        const totalStockAvailable =
+          product.stock_levels?.reduce(
+            (sum, stock) => sum + stock.quantity_available,
+            0,
+          ) || 0;
+        const totalStockReserved =
+          product.stock_levels?.reduce(
+            (sum, stock) => sum + stock.quantity_reserved,
+            0,
+          ) || 0;
 
-      return {
-        ...product,
-        image_url: await this.signProductImage(product, true),
-        // Mantener compatibilidad con el campo existente pero basado en stock_levels
-        stock_quantity: totalStockAvailable,
-        // Nuevos campos agregados para mayor claridad
-        total_stock_available: totalStockAvailable,
-        total_stock_reserved: totalStockReserved,
-        stock_by_location:
-          product.stock_levels?.map((stock) => ({
-            location_id: stock.inventory_locations.id,
-            location_name: stock.inventory_locations.name,
-            location_type: stock.inventory_locations.type,
-            available: stock.quantity_available,
-            reserved: stock.quantity_reserved,
-          })) || [],
-      };
-    }));
+        return {
+          ...product,
+          image_url: await this.signProductImage(product, true),
+          // Mantener compatibilidad con el campo existente pero basado en stock_levels
+          stock_quantity: totalStockAvailable,
+          // Nuevos campos agregados para mayor claridad
+          total_stock_available: totalStockAvailable,
+          total_stock_reserved: totalStockReserved,
+          stock_by_location:
+            product.stock_levels?.map((stock) => ({
+              location_id: stock.inventory_locations.id,
+              location_name: stock.inventory_locations.name,
+              location_type: stock.inventory_locations.type,
+              available: stock.quantity_available,
+              reserved: stock.quantity_reserved,
+            })) || [],
+        };
+      }),
+    );
 
     return {
       data: productsWithStock,
@@ -693,7 +717,7 @@ export class ProductsService {
   }
 
   async findBySlug(storeId: number, slug: string) {
-    // storeId param is redundant if forced by context, but we can keep it if needed. 
+    // storeId param is redundant if forced by context, but we can keep it if needed.
     // However, StorePrismaService filters by context.store_id.
     const product = await this.prisma.products.findFirst({
       where: {
@@ -759,7 +783,9 @@ export class ProductsService {
         });
 
         if (existingSku) {
-          throw new ConflictException(`El SKU '${updateProductDto.sku}' ya está en uso en esta tienda`);
+          throw new ConflictException(
+            `El SKU '${updateProductDto.sku}' ya está en uso en esta tienda`,
+          );
         }
       }
 
@@ -767,8 +793,15 @@ export class ProductsService {
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
 
-      if (!user_id && (updateProductDto.stock_quantity !== undefined || (updateProductDto.stock_by_location && updateProductDto.stock_by_location.length > 0))) {
-        throw new ForbiddenException('User context required for stock operations');
+      if (
+        !user_id &&
+        (updateProductDto.stock_quantity !== undefined ||
+          (updateProductDto.stock_by_location &&
+            updateProductDto.stock_by_location.length > 0))
+      ) {
+        throw new ForbiddenException(
+          'User context required for stock operations',
+        );
       }
 
       const {
@@ -779,142 +812,184 @@ export class ProductsService {
         stock_quantity,
         stock_by_location,
         variants,
+        price, // Exclude as it's not in DB
         ...productData
       } = updateProductDto;
 
-      const result = await this.prisma.$transaction(async (prisma) => {
-        // Actualizar producto
-        const product = await prisma.products.update({
-          where: { id },
-          data: {
-            ...productData,
-            updated_at: new Date(),
-          },
-        });
+      console.log('Product update data:', productData);
 
-        // Actualizar categorías si se proporcionan
-        if (category_ids !== undefined) {
-          await prisma.product_categories.deleteMany({
-            where: { product_id: id },
+      const result = await this.prisma.$transaction(
+        async (prisma) => {
+          // Actualizar producto
+          const product = await prisma.products.update({
+            where: { id },
+            data: {
+              ...productData,
+              updated_at: new Date(),
+            } as any,
           });
 
-          if (category_ids.length > 0) {
-            await prisma.product_categories.createMany({
-              data: category_ids.map((categoryId) => ({
-                product_id: id,
-                category_id: categoryId,
-              })),
-            });
-          }
-        }
-
-        // Actualizar categorías de impuestos si se proporcionan
-        if (tax_category_ids !== undefined) {
-          await prisma.product_tax_assignments.deleteMany({
-            where: { product_id: id },
-          });
-
-          if (tax_category_ids.length > 0) {
-            await prisma.product_tax_assignments.createMany({
-              data: tax_category_ids.map((tax_category_id) => ({
-                product_id: id,
-                tax_category_id: tax_category_id,
-              })),
-            });
-          }
-        }
-
-        // Actualizar imágenes si se proporcionan
-        if (image_urls !== undefined || images !== undefined) {
-          await prisma.product_images.deleteMany({
-            where: { product_id: id },
-          });
-
-          const finalImages: any[] = [];
-
-          // 1. Procesar image_urls (legacy)
-          if (image_urls && image_urls.length > 0) {
-            finalImages.push(...image_urls.map((url, index) => ({
-              product_id: id,
-              image_url: url,
-              is_main: index === 0
-            })));
-          }
-
-          // 2. Procesar images (structured with possible base64)
-          if (images && images.length > 0) {
-            const uploadedImages = await this.handleImageUploads(images, product.slug);
-            finalImages.push(...uploadedImages.map(img => ({
-              ...img,
-              product_id: id
-            })));
-          }
-
-          if (finalImages.length > 0) {
-            // Asegurar que solo haya un is_main
-            const mainExists = finalImages.some(img => img.is_main);
-            if (!mainExists) finalImages[0].is_main = true;
-
-            await prisma.product_images.createMany({
-              data: finalImages
-            });
-          }
-        }
-
-        // Sincronizar variantes si se proporcionan
-        if (variants !== undefined) {
-          for (const variantData of variants) {
-            // Buscar si la variante ya existe por SKU
-            const existingVariant = await prisma.product_variants.findFirst({
-              where: {
-                product_id: id,
-                sku: variantData.sku,
-              },
+          // Actualizar categorías si se proporcionan
+          if (category_ids !== undefined) {
+            await prisma.product_categories.deleteMany({
+              where: { product_id: id },
             });
 
-            if (existingVariant) {
-              // Actualizar variante existente
-              await this.productVariantService.updateVariant(
-                existingVariant.id,
-                variantData,
-                prisma,
-              );
-            } else {
-              // Crear nueva variante
-              await this.productVariantService.createVariant(id, {
-                ...variantData,
-                stock_quantity: variantData.stock_quantity || 0,
-              }, prisma);
+            if (category_ids.length > 0) {
+              await prisma.product_categories.createMany({
+                data: category_ids.map((categoryId) => ({
+                  product_id: id,
+                  category_id: categoryId,
+                })),
+              });
             }
           }
-        }
 
-        // Actualizar stock levels para múltiples ubicaciones
-        if (stock_by_location !== undefined && stock_by_location.length > 0) {
-          // Actualizar stock en las ubicaciones especificadas
-          for (const stockLocation of stock_by_location) {
-            // Obtener stock actual en esta ubicación
-            const currentStockLevel = await prisma.stock_levels.findUnique({
-              where: {
-                product_id_location_id_product_variant_id: {
-                  product_id: id,
-                  location_id: stockLocation.location_id,
-                  product_variant_id: null,
-                },
-              },
+          // Actualizar categorías de impuestos si se proporcionan
+          if (tax_category_ids !== undefined) {
+            await prisma.product_tax_assignments.deleteMany({
+              where: { product_id: id },
             });
 
-            const currentQuantity = currentStockLevel?.quantity_available || 0;
-            const quantityChange = stockLocation.quantity - currentQuantity;
+            if (tax_category_ids.length > 0) {
+              await prisma.product_tax_assignments.createMany({
+                data: tax_category_ids.map((tax_category_id) => ({
+                  product_id: id,
+                  tax_category_id: tax_category_id,
+                })),
+              });
+            }
+          }
 
-            if (quantityChange !== 0) {
+          // Actualizar imágenes si se proporcionan
+          if (image_urls !== undefined || images !== undefined) {
+            await prisma.product_images.deleteMany({
+              where: { product_id: id },
+            });
+
+            const finalImages: any[] = [];
+
+            // 1. Procesar image_urls (legacy)
+            if (image_urls && image_urls.length > 0) {
+              finalImages.push(
+                ...image_urls.map((url, index) => ({
+                  product_id: id,
+                  image_url: url,
+                  is_main: index === 0,
+                })),
+              );
+            }
+
+            // 2. Procesar images (structured with possible base64)
+            if (images && images.length > 0) {
+              const uploadedImages = await this.handleImageUploads(
+                images,
+                product.slug,
+              );
+              finalImages.push(
+                ...uploadedImages.map((img) => ({
+                  ...img,
+                  product_id: id,
+                })),
+              );
+            }
+
+            if (finalImages.length > 0) {
+              // Asegurar que solo haya un is_main
+              const mainExists = finalImages.some((img) => img.is_main);
+              if (!mainExists) finalImages[0].is_main = true;
+
+              await prisma.product_images.createMany({
+                data: finalImages,
+              });
+            }
+          }
+
+          // Sincronizar variantes si se proporcionan
+          if (variants !== undefined) {
+            for (const variantData of variants) {
+              // Buscar si la variante ya existe por SKU
+              const existingVariant = await prisma.product_variants.findFirst({
+                where: {
+                  product_id: id,
+                  sku: variantData.sku,
+                },
+              });
+
+              if (existingVariant) {
+                // Actualizar variante existente
+                await this.productVariantService.updateVariant(
+                  existingVariant.id,
+                  variantData,
+                  prisma,
+                );
+              } else {
+                // Crear nueva variante
+                await this.productVariantService.createVariant(
+                  id,
+                  {
+                    ...variantData,
+                    stock_quantity: variantData.stock_quantity || 0,
+                  },
+                  prisma,
+                );
+              }
+            }
+          }
+
+          // Actualizar stock levels para múltiples ubicaciones
+          if (stock_by_location !== undefined && stock_by_location.length > 0) {
+            // Actualizar stock en las ubicaciones especificadas
+            for (const stockLocation of stock_by_location) {
+              // Obtener stock actual en esta ubicación
+              const currentStockLevel = await prisma.stock_levels.findUnique({
+                where: {
+                  product_id_location_id_product_variant_id: {
+                    product_id: id,
+                    location_id: stockLocation.location_id,
+                    product_variant_id: null,
+                  },
+                },
+              });
+
+              const currentQuantity =
+                currentStockLevel?.quantity_available || 0;
+              const quantityChange = stockLocation.quantity - currentQuantity;
+
+              if (quantityChange !== 0) {
+                await this.stockLevelManager.updateStock(
+                  {
+                    product_id: id,
+                    location_id: stockLocation.location_id,
+                    quantity_change: quantityChange,
+                    movement_type: 'adjustment',
+                    reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                    user_id: user_id!, // Non-null assertion safe because we checked above
+                    create_movement: true,
+                    validate_availability: false,
+                  },
+                  prisma,
+                );
+              }
+            }
+          } else if (stock_quantity !== undefined) {
+            // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
+            const stockDifference =
+              stock_quantity - existingProduct.stock_quantity;
+
+            if (stockDifference !== 0) {
+              const defaultLocation =
+                await this.inventoryLocationsService.getDefaultLocation(
+                  product.store_id,
+                );
+
               await this.stockLevelManager.updateStock(
                 {
                   product_id: id,
-                  location_id: stockLocation.location_id,
-                  quantity_change: quantityChange,
+                  location_id: defaultLocation.id,
+                  quantity_change: stockDifference,
                   movement_type: 'adjustment',
-                  reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+                  reason: 'Stock quantity updated from product edit (legacy)',
                   user_id: user_id!, // Non-null assertion safe because we checked above
                   create_movement: true,
                   validate_availability: false,
@@ -923,35 +998,11 @@ export class ProductsService {
               );
             }
           }
-        } else if (stock_quantity !== undefined) {
-          // Mantener compatibilidad con el campo stock_quantity (usa ubicación default)
-          const stockDifference =
-            stock_quantity - existingProduct.stock_quantity;
 
-          if (stockDifference !== 0) {
-            const defaultLocation =
-              await this.inventoryLocationsService.getDefaultLocation(
-                product.store_id,
-              );
-
-            await this.stockLevelManager.updateStock(
-              {
-                product_id: id,
-                location_id: defaultLocation.id,
-                quantity_change: stockDifference,
-                movement_type: 'adjustment',
-                reason: 'Stock quantity updated from product edit (legacy)',
-                user_id: user_id!, // Non-null assertion safe because we checked above
-                create_movement: true,
-                validate_availability: false,
-              },
-              prisma,
-            );
-          }
-        }
-
-        return product;
-      }, { timeout: 30000 });
+          return product;
+        },
+        { timeout: 30000 },
+      );
 
       return await this.findOne(result.id);
     } catch (error) {
@@ -1050,37 +1101,38 @@ export class ProductsService {
     });
 
     // Calcular stock totals y firmar imágenes
-    return await Promise.all(products.map(async (product) => {
-      const totalStockAvailable = product.stock_levels.reduce(
-        (sum, stock) => sum + stock.quantity_available,
-        0,
-      );
-      const totalStockReserved = product.stock_levels.reduce(
-        (sum, stock) => sum + stock.quantity_reserved,
-        0,
-      );
+    return await Promise.all(
+      products.map(async (product) => {
+        const totalStockAvailable = product.stock_levels.reduce(
+          (sum, stock) => sum + stock.quantity_available,
+          0,
+        );
+        const totalStockReserved = product.stock_levels.reduce(
+          (sum, stock) => sum + stock.quantity_reserved,
+          0,
+        );
 
-      return {
-        ...product,
-        image_url: await this.signProductImage(product, true),
-        // Mantener compatibilidad con el campo existente pero basado en stock_levels
-        stock_quantity: totalStockAvailable,
-        // Nuevos campos agregados para mayor claridad
-        total_stock_available: totalStockAvailable,
-        total_stock_reserved: totalStockReserved,
-        stock_by_location: product.stock_levels.map((stock) => ({
-          location_id: stock.inventory_locations.id,
-          location_name: stock.inventory_locations.name,
-          location_type: stock.inventory_locations.type,
-          available: stock.quantity_available,
-          reserved: stock.quantity_reserved,
-        })),
-      };
-    }));
+        return {
+          ...product,
+          image_url: await this.signProductImage(product, true),
+          // Mantener compatibilidad con el campo existente pero basado en stock_levels
+          stock_quantity: totalStockAvailable,
+          // Nuevos campos agregados para mayor claridad
+          total_stock_available: totalStockAvailable,
+          total_stock_reserved: totalStockReserved,
+          stock_by_location: product.stock_levels.map((stock) => ({
+            location_id: stock.inventory_locations.id,
+            location_name: stock.inventory_locations.name,
+            location_type: stock.inventory_locations.type,
+            available: stock.quantity_available,
+            reserved: stock.quantity_reserved,
+          })),
+        };
+      }),
+    );
   }
 
   // Gestión de variantes
-
 
   // Gestión de imágenes
   async addImage(productId: number, imageDto: ProductImageDto) {
@@ -1220,10 +1272,16 @@ export class ProductsService {
     productId: number,
     createVariantDto: CreateProductVariantDto,
   ) {
-    return this.productVariantService.createVariant(productId, createVariantDto);
+    return this.productVariantService.createVariant(
+      productId,
+      createVariantDto,
+    );
   }
 
-  private async handleImageUploads(images: ProductImageDto[], productSlug: string): Promise<any[]> {
+  private async handleImageUploads(
+    images: ProductImageDto[],
+    productSlug: string,
+  ): Promise<any[]> {
     const processedImages: any[] = [];
     for (const [index, image] of images.entries()) {
       let imageUrl = image.image_url;
@@ -1232,7 +1290,7 @@ export class ProductsService {
           imageUrl,
           `products/${productSlug}-${Date.now()}-${index}`,
           undefined,
-          { generateThumbnail: true }
+          { generateThumbnail: true },
         );
         imageUrl = result.key;
       }
@@ -1246,8 +1304,13 @@ export class ProductsService {
     return processedImages;
   }
 
-  private async signProductImage(product: any, useThumbnail = false): Promise<string | undefined> {
-    const mainImage = product.product_images?.find(img => img.is_main) || product.product_images?.[0];
+  private async signProductImage(
+    product: any,
+    useThumbnail = false,
+  ): Promise<string | undefined> {
+    const mainImage =
+      product.product_images?.find((img) => img.is_main) ||
+      product.product_images?.[0];
     return this.s3Service.signUrl(mainImage?.image_url, useThumbnail);
   }
 
@@ -1261,7 +1324,9 @@ export class ProductsService {
     if (product.product_variants) {
       for (const variant of product.product_variants) {
         if (variant.product_images) {
-          variant.product_images.image_url = await this.s3Service.signUrl(variant.product_images.image_url);
+          variant.product_images.image_url = await this.s3Service.signUrl(
+            variant.product_images.image_url,
+          );
         }
       }
     }

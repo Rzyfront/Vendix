@@ -1,0 +1,446 @@
+// Settings Modal Styles
+:host {
+  display: block;
+}
+
+// Main form container
+.settings-form {
+  max-width: 100%;
+  margin: 0;
+}
+
+// ==================== Section Styling ====================
+.settings-section {
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.section-title {
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+// ==================== Section 1: App Type Selection ====================
+.app-type-selection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+
+  &.read-only {
+    pointer-events: none;
+    opacity: 0.8;
+  }
+}
+
+.app-type-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(.read-only) {
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+
+  &.selected {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+    box-shadow: 0 0 0 3px rgba(126, 215, 165, 0.1);
+  }
+
+  &.read-only {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .card-content {
+    flex: 1;
+
+    h3 {
+      margin: 0 0 0.25rem 0;
+      font-size: var(--fs-base);
+      font-weight: var(--fw-semibold);
+      color: var(--color-text-primary);
+    }
+
+    p {
+      margin: 0;
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+    }
+  }
+
+  .badge {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    border-radius: var(--radius-pill);
+  }
+}
+
+.read-only-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-warning-light);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--fs-sm);
+
+  app-icon {
+    color: var(--color-warning);
+  }
+}
+
+// ==================== Section 2: Panel UI Configuration ====================
+.toggles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.25rem;
+}
+
+.toggle-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  background: var(--color-background);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .toggle-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .module-description {
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    display: block;
+    width: 100%;
+  }
+}
+
+// ==================== Nested Module Structure ====================
+.module-toggles-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+// Parent module container with border
+.parent-module-wrapper {
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 1rem;
+  background: var(--color-surface);
+  transition: border-color 0.2s ease;
+
+  &:hover {
+    border-color: var(--color-primary);
+  }
+
+  // Header of parent (clickable for expand/collapse)
+  .parent-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background: var(--color-primary-light);
+    }
+
+    .parent-toggle {
+      flex: 1;
+
+      app-toggle {
+        width: 100%;
+      }
+    }
+  }
+
+  // Expand icon (chevron)
+  .expand-icon {
+    transition: transform 0.3s ease;
+    color: var(--color-text-secondary);
+    margin-left: 0.75rem;
+    flex-shrink: 0;
+
+    &.rotated {
+      transform: rotate(90deg);
+    }
+  }
+
+  // Description of parent
+  .module-description {
+    padding: 0 1rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    display: block;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+  }
+
+  // Container for children (nested)
+  .child-modules {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-in-out, opacity 0.3s ease-in-out;
+    opacity: 0;
+    border-top: 1px solid transparent;
+
+    &.expanded {
+      max-height: 1000px; // Adjust based on content
+      opacity: 1;
+      border-top-color: var(--color-border);
+      background: var(--color-background);
+    }
+
+    // Individual child item
+    .child-toggle-item {
+      padding: 0.75rem 1rem 0.75rem 2rem; // Left indentation for visual hierarchy
+      border-bottom: 1px solid var(--color-border);
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      .child-header {
+        display: flex;
+        align-items: center;
+      }
+
+      .child-description {
+        display: block;
+        margin-top: 0.25rem;
+        font-size: var(--fs-sm);
+        color: var(--color-text-muted);
+      }
+
+      // Disabled state for children when parent is off
+      app-toggle {
+        &[disabled] {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+      }
+    }
+  }
+}
+
+// Standalone modules (without children)
+.standalone-module {
+  .toggle-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1.25rem;
+    background: var(--color-background);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    transition: all 0.2s ease;
+
+    &:hover {
+      border-color: var(--color-primary);
+      background: var(--color-primary-light);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .toggle-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+    }
+
+    .module-description {
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+      display: block;
+      width: 100%;
+    }
+  }
+}
+
+// ==================== Section 3: Preferences ====================
+.preference-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+
+  label {
+    font-size: var(--fs-base);
+    font-weight: var(--fw-medium);
+    color: var(--color-text-primary);
+  }
+
+  small {
+    font-size: var(--fs-sm);
+    color: var(--color-text-muted);
+  }
+}
+
+.disabled-select {
+  padding: 0.625rem 0.75rem;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: var(--fs-base);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.theme-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--color-background);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  &.selected {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+    box-shadow: 0 0 0 3px rgba(126, 215, 165, 0.1);
+  }
+
+  app-icon {
+    color: var(--color-primary);
+    flex-shrink: 0;
+  }
+
+  .theme-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+
+    .theme-name {
+      font-size: var(--fs-base);
+      font-weight: var(--fw-semibold);
+      color: var(--color-text-primary);
+    }
+
+    .theme-description {
+      font-size: var(--fs-sm);
+      color: var(--color-text-secondary);
+    }
+  }
+}
+
+.theme-preview {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+
+  &.aura-theme {
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+  }
+
+  &.default-theme {
+    background: linear-gradient(135deg, #3B82F6 0%, #1E40AF 100%);
+  }
+}
+
+// ==================== Modal Footer ====================
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+// ==================== Responsive Design ====================
+@media (max-width: 768px) {
+  .app-type-selection {
+    grid-template-columns: 1fr;
+  }
+
+  .toggles-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-selector {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .settings-section {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .theme-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .toggle-item {
+    padding: 0.75rem;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+
+    app-button {
+      width: 100%;
+    }
+  }
+}

@@ -250,7 +250,48 @@ export class AuthService {
   }
 
   getSettings(): Observable<any> {
-    return this.http.get(`${this.API_URL}/settings`);
+    return this.http.get(`${this.API_URL}/settings`).pipe(
+      map((response: any) => {
+        const settings = response.data || response;
+        const config = settings?.config;
+
+        // Backward compatibility: Transform old format to new format
+        if (config?.panel_ui && !config.panel_ui.ORG_ADMIN && !config.panel_ui.STORE_ADMIN) {
+          // Old format detected - panel_ui is not nested by app type
+          const appType = config.app || 'ORG_ADMIN';
+
+          return {
+            ...settings,
+            config: {
+              ...config,
+              panel_ui: {
+                [appType]: config.panel_ui
+              },
+              preferences: config.preferences || {
+                language: 'es',
+                theme: 'aura'
+              }
+            }
+          };
+        }
+
+        // Add preferences if missing (for newer formats without preferences)
+        if (config && !config.preferences) {
+          return {
+            ...settings,
+            config: {
+              ...config,
+              preferences: {
+                language: 'es',
+                theme: 'aura'
+              }
+            }
+          };
+        }
+
+        return response;
+      })
+    );
   }
 
   updateSettings(data: any): Observable<any> {

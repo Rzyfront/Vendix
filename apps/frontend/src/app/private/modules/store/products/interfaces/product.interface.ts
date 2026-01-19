@@ -13,6 +13,11 @@ export interface Product {
   slug: string;
   description?: string;
   base_price: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
   state: ProductState;
@@ -78,6 +83,10 @@ export interface ProductVariant {
   product_id: number;
   sku: string;
   price_override?: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
   stock_quantity: number;
   image_id?: number;
   created_at: Date;
@@ -122,14 +131,15 @@ export interface Brand {
 export interface ProductTaxAssignment {
   product_id: number;
   tax_category_id: number;
-  tax_category?: TaxCategory;
+  tax_categories?: TaxCategory;
 }
 
 export interface TaxCategory {
   id: number;
   name: string;
   description?: string;
-  rate: number;
+  rate?: number; // Keep it as optional if some APIs provide it
+  tax_rates?: any[]; // Add this to match the API response
   store_id: number;
   created_at: Date;
   updated_at: Date;
@@ -141,6 +151,11 @@ export interface CreateProductDto {
   slug?: string;
   description?: string;
   base_price: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;
@@ -171,6 +186,10 @@ export interface CreateProductVariantDto {
   name?: string;
   price_override?: number;
   price?: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
   stock_quantity: number;
   image_id?: number;
   attributes?: Record<string, any>;
@@ -240,6 +259,10 @@ export interface ProductVariantManagement {
   name?: string;
   price_override?: number;
   price?: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
   stock_quantity: number;
   image_id?: number;
   image_url?: string;
@@ -257,6 +280,11 @@ export interface ProductManagement {
   slug?: string;
   description?: string;
   base_price: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;
@@ -298,6 +326,11 @@ export interface ProductVariantManagementDto {
   slug?: string;
   description?: string;
   base_price: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;

@@ -18,7 +18,6 @@ export class RequestContextService {
 
   /**
    * Ejecuta un callback dentro de un contexto de request
-   * Soporta tanto callbacks síncronos como asíncronos
    */
   static run<T>(context: RequestContext, callback: () => T): T {
     this.currentContext = context; // For debugging
@@ -30,6 +29,17 @@ export class RequestContextService {
    */
   static getContext(): RequestContext | undefined {
     return this.asyncLocalStorage.getStore() || this.currentContext;
+  }
+
+  /**
+   * Establece el contexto de dominio (ahora es un alias para actualizar el store actual)
+   */
+  static setDomainContext(store_id?: number, organization_id?: number) {
+    const store = this.asyncLocalStorage.getStore();
+    if (store) {
+      if (store_id) store.store_id = store_id;
+      if (organization_id) store.organization_id = organization_id;
+    }
   }
 
   /**
@@ -51,6 +61,20 @@ export class RequestContextService {
    */
   static getUserId(): number | undefined {
     return this.getContext()?.user_id;
+  }
+
+  /**
+   * Verifica si hay contexto de autenticación
+   */
+  static hasAuthContext(): boolean {
+    return !!this.getContext()?.user_id;
+  }
+
+  /**
+   * Verifica si hay un store_id en el contexto
+   */
+  static isDomainBased(): boolean {
+    return !!this.getContext()?.store_id;
   }
 
   /**
@@ -80,5 +104,19 @@ export class RequestContextService {
    */
   static getRoles(): string[] {
     return this.getContext()?.roles || [];
+  }
+
+  /**
+   * Valida que el usuario tenga acceso a la tienda
+   */
+  static validateStoreAccess(userStoreId?: number): boolean {
+    const contextStoreId = this.getStoreId();
+    if (!contextStoreId) return false;
+
+    if (userStoreId && userStoreId !== contextStoreId) {
+      return false;
+    }
+
+    return true;
   }
 }

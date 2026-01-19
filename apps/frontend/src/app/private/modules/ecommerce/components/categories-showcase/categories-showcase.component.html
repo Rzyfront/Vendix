@@ -1,0 +1,39 @@
+<section class="categories-showcase" [class]="class">
+  <div class="categories-header">
+    <h2 class="categories-title">Categorías</h2>
+    @if (show_all_link && categories.length > 0) {
+    <button class="see-all-btn" (click)="viewAllCategories()">
+      Ver todas
+      <i class="pi pi-arrow-right"></i>
+    </button>
+    }
+  </div>
+
+  @if (is_loading) {
+  <div class="categories-grid skeleton-grid">
+    @for (i of [1,2,3,4,5,6]; track i) {
+    <div class="category-skeleton">
+      <div class="skeleton-image"></div>
+      <div class="skeleton-text"></div>
+    </div>
+    }
+  </div>
+  } @else if (categories.length > 0) {
+  <div class="categories-grid">
+    @for (category of categories; track category.id) {
+    <div class="category-card" (click)="onCategoryClick(category)">
+      @if (category.image_url) {
+      <img [src]="category.image_url" [alt]="category.name" class="category-image" />
+      } @else {
+      <div class="category-placeholder">
+        <i class="pi pi-th-large"></i>
+      </div>
+      }
+      <div class="category-overlay">
+        <span class="category-name">{{ category.name }}</span>
+      </div>
+    </div>
+    }
+  </div>
+  }
+</section>

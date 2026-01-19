@@ -6,7 +6,11 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { CreateProductVariantDto, UpdateProductVariantDto, ProductState } from '../dto';
+import {
+  CreateProductVariantDto,
+  UpdateProductVariantDto,
+  ProductState,
+} from '../dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { Prisma } from '@prisma/client';
 import { LocationsService } from '../../inventory/locations/locations.service';
@@ -18,7 +22,7 @@ export class ProductVariantService {
     private readonly prisma: StorePrismaService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
-  ) { }
+  ) {}
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
     const variant = await this.prisma.product_variants.findFirst({
@@ -61,8 +65,14 @@ export class ProductVariantService {
     try {
       // Verify user context for audit
       const user_id = context?.user_id;
-      if (!user_id && createVariantDto.stock_quantity && createVariantDto.stock_quantity > 0) {
-        throw new ForbiddenException('User context required for stock operations');
+      if (
+        !user_id &&
+        createVariantDto.stock_quantity &&
+        createVariantDto.stock_quantity > 0
+      ) {
+        throw new ForbiddenException(
+          'User context required for stock operations',
+        );
       }
 
       // Verificar que el producto existe y está activo
@@ -81,7 +91,7 @@ export class ProductVariantService {
       // Verificar que el SKU sea único dentro de la tienda (auto-scoped por StorePrismaService)
       const existingSku = await prisma.product_variants.findFirst({
         where: {
-          sku: createVariantDto.sku
+          sku: createVariantDto.sku,
         },
       });
 
@@ -90,7 +100,12 @@ export class ProductVariantService {
       }
 
       if (tx) {
-        return this.executeCreateVariant(tx, product, createVariantDto, user_id);
+        return this.executeCreateVariant(
+          tx,
+          product,
+          createVariantDto,
+          user_id,
+        );
       }
 
       return await this.prisma.$transaction(async (p) => {
@@ -121,9 +136,13 @@ export class ProductVariantService {
         attributes: createVariantDto.attributes,
         price_override:
           createVariantDto.price_override || createVariantDto.price,
+        cost_price: createVariantDto.cost_price,
+        profit_margin: createVariantDto.profit_margin,
+        is_on_sale: createVariantDto.is_on_sale,
+        sale_price: createVariantDto.sale_price,
         created_at: new Date(),
         updated_at: new Date(),
-      },
+      } as any,
     });
 
     // Inicializar stock levels para la variante si se proporciona stock
@@ -164,7 +183,9 @@ export class ProductVariantService {
     const user_id = context?.user_id;
 
     if (!user_id && updateVariantDto.stock_quantity !== undefined) {
-      throw new ForbiddenException('User context required for stock operations');
+      throw new ForbiddenException(
+        'User context required for stock operations',
+      );
     }
 
     try {
@@ -194,11 +215,23 @@ export class ProductVariantService {
       }
 
       if (tx) {
-        return this.executeUpdateVariant(tx, variantId, updateVariantDto, existingVariant, user_id);
+        return this.executeUpdateVariant(
+          tx,
+          variantId,
+          updateVariantDto,
+          existingVariant,
+          user_id,
+        );
       }
 
       return await this.prisma.$transaction(async (p) => {
-        return this.executeUpdateVariant(p, variantId, updateVariantDto, existingVariant, user_id);
+        return this.executeUpdateVariant(
+          p,
+          variantId,
+          updateVariantDto,
+          existingVariant,
+          user_id,
+        );
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -224,15 +257,15 @@ export class ProductVariantService {
       where: { id: variantId },
       data: {
         ...variantData,
+        price_override: variantData.price_override || updateVariantDto.price,
         attributes: attributes !== undefined ? attributes : undefined,
         updated_at: new Date(),
-      },
+      } as any,
     });
 
     // Si cambió el stock, actualizar stock levels
     if (stock_quantity !== undefined) {
-      const stockDifference =
-        stock_quantity - existingVariant.stock_quantity;
+      const stockDifference = stock_quantity - existingVariant.stock_quantity;
 
       if (stockDifference !== 0) {
         const defaultLocation =

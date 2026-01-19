@@ -111,9 +111,19 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/roles',
     },
     {
+      label: 'Métodos de Pago',
+      icon: 'credit-card',
+      route: '/super-admin/payment-methods',
+    },
+    {
       label: 'Dominios',
       icon: 'globe-2',
       route: '/super-admin/domains',
+    },
+    {
+      label: 'Monedas',
+      icon: 'dollar-sign',
+      route: '/super-admin/currencies',
     },
     {
       label: 'Auditoría',
@@ -160,6 +170,11 @@ export class SuperAdminLayoutComponent {
           label: 'Configuración del Sistema',
           icon: 'circle',
           route: '/super-admin/system/settings',
+        },
+        {
+          label: 'Plantillas',
+          icon: 'circle',
+          route: '/super-admin/system/templates',
         },
         {
           label: 'Registros',

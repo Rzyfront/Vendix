@@ -12,6 +12,7 @@ export enum AppEnvironment {
   ORG_ADMIN = 'ORG_ADMIN',
   STORE_ADMIN = 'STORE_ADMIN',
   STORE_ECOMMERCE = 'STORE_ECOMMERCE',
+  STORE_LANDING = 'STORE_LANDING',
 }
 
 export interface DomainConfig {
@@ -19,6 +20,8 @@ export interface DomainConfig {
   environment: AppEnvironment;
   organization_slug?: string;
   store_slug?: string;
+  organization_id?: number;
+  store_id?: number;
   customConfig?: any;
   isVendixDomain: boolean;
   hostname: string;
@@ -34,6 +37,7 @@ export interface DomainResolution {
   id: number;
   hostname: string;
   organization_id: number;
+  store_id?: number;
   config: {
     app: string;
     branding?: any;
@@ -49,5 +53,6 @@ export interface DomainResolution {
   ssl_status: string;
   is_primary: boolean;
   store_slug?: string;
+  store_name?: string;
   ownership?: string;
 }

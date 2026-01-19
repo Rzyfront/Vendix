@@ -45,6 +45,7 @@ export enum AuditResource {
     TAXES = 'taxes',
     DOMAINS = 'domains',
     SETTINGS = 'settings',
+    TEMPLATES = 'templates',
     CUSTOM = 'custom', // ✅ Recurso genérico para eventos personalizados
 }
 

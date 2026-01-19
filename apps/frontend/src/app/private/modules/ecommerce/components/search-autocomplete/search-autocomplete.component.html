@@ -1,0 +1,59 @@
+<div class="search-autocomplete" [class.active]="show_dropdown">
+  <div class="search-input-wrapper">
+    <i class="pi pi-search search-icon"></i>
+    <input
+      type="text"
+      class="search-input"
+      placeholder="Buscar..."
+      [value]="search_query"
+      (input)="onSearchInput($event)"
+      (keydown)="onKeyDown($event)"
+      (focus)="onFocus()"
+    />
+    @if (is_loading) {
+      <i class="pi pi-spin pi-spinner loading-icon"></i>
+    }
+  </div>
+
+  @if (show_dropdown && search_results.length > 0) {
+    <div class="search-dropdown">
+      <div class="search-results">
+        @for (product of search_results; track product.id; let i = $index) {
+          <div
+            class="search-result-item"
+            [class.selected]="i === selected_index"
+            (click)="onProductSelect(product)"
+            (mouseenter)="selected_index = i"
+          >
+            @if (product.image_url) {
+              <img
+                [src]="product.image_url"
+                [alt]="product.name"
+                class="result-image"
+              />
+            } @else {
+              <div class="result-image-placeholder">
+                <i class="pi pi-image"></i>
+              </div>
+            }
+            <div class="result-info">
+              <span class="result-name">{{ product.name }}</span>
+              <span class="result-price">{{
+                product.base_price | currency
+              }}</span>
+            </div>
+          </div>
+        }
+      </div>
+      <div class="search-footer" (click)="onSubmit()">
+        <span>Ver todos los resultados</span>
+        <i class="pi pi-arrow-right"></i>
+      </div>
+    </div>
+  }
+
+  <!-- Overlay to close dropdown when clicking outside -->
+  @if (show_dropdown) {
+    <div class="dropdown-overlay" (click)="closeDropdown()"></div>
+  }
+</div>

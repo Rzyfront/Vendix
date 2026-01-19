@@ -13,7 +13,7 @@ export class ThemeService {
   private loadedFonts = new Set<string>();
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
 
-  constructor(@Inject(DOCUMENT) private document: Document) {}
+  constructor(@Inject(DOCUMENT) private document: Document) { }
 
   /**
    * Aplica la configuración completa de la app (theme, branding, seo)

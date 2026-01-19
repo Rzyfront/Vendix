@@ -1,4 +1,9 @@
-import { Module } from '@nestjs/common';
+import {
+  Module,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -8,6 +13,7 @@ import { UsersModule } from './domains/organization/users/users.module';
 import { TestModule } from './test/test.module';
 import { DomainsModule } from './domains/domains.module';
 import { StorageModule } from './storage.module';
+import { PublicDomainsModule } from './domains/public/domains/public-domains.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
@@ -17,10 +23,13 @@ import { RequestContextInterceptor } from '@common/interceptors/request-context.
 import { AuditModule } from './common/audit/audit.module';
 import { AuditInterceptor } from './common/audit/audit.interceptor';
 import { SecretsModule } from './common/config/secrets.module';
+import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
+import { HelpersModule } from './common/helpers/helpers.module';
+import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
 
 @Module({
   imports: [
-    SecretsModule, // Load secrets from AWS before ConfigModule
+    SecretsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -29,14 +38,17 @@ import { SecretsModule } from './common/config/secrets.module';
     PrismaModule,
     UsersModule,
     TestModule,
-    DomainsModule, // ✅ Módulo de dominios (público y privado)
+    DomainsModule,
+    PublicDomainsModule,
     StorageModule,
-    AuditModule, // ✅ Importar AuditModule global (desde common)
+    AuditModule,
+    DefaultPanelUIModule,
+    HelpersModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    RequestContextService, // ✅ Servicio de contexto con AsyncLocalStorage
+    RequestContextService,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -47,8 +59,14 @@ import { SecretsModule } from './common/config/secrets.module';
     },
     {
       provide: APP_INTERCEPTOR,
-      useClass: AuditInterceptor, // ✅ Registrar AuditInterceptor globalmente
+      useClass: AuditInterceptor,
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(DomainResolverMiddleware)
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
+  }
+}

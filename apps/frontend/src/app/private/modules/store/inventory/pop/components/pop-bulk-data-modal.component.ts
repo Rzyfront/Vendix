@@ -1,6 +1,7 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import * as XLSX from 'xlsx';
+import { ProductsService } from '../../../products/services/products.service';
 import {
   ModalComponent,
   ButtonComponent,
@@ -20,48 +21,88 @@ import {
       (closed)="onCancel()"
     >
       <div class="space-y-6">
-        <!-- Instructions -->
-        <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
-          <div class="flex items-start">
-            <app-icon
-              name="info"
-              [size]="20"
-              class="text-blue-500 mt-0.5 mr-3"
-            ></app-icon>
-            <div>
-              <h4 class="text-sm font-medium text-blue-900">
-                Instrucciones
-              </h4>
-              <p class="text-sm text-blue-700 mt-1">
-                Sube un archivo Excel o CSV con los productos que deseas agregar a la orden.
-                <br>
-                Columnas requeridas: <strong>Nombre, SKU/Código, Costo, Cantidad</strong>.
+        <!-- Template Download Section -->
+        <div>
+          <h4 class="text-sm font-medium text-gray-700 mb-3">
+            1. Descarga una plantilla
+          </h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Plantilla Rápida -->
+            <div
+              class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+              (click)="downloadTemplate('quick')"
+            >
+              <div class="flex items-center mb-2">
+                <div
+                  class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors"
+                >
+                  <app-icon name="check-circle" [size]="20"></app-icon>
+                </div>
+                <h4 class="font-bold text-indigo-900">Plantilla Rápida</h4>
+              </div>
+              <p class="text-xs text-indigo-700 mb-3 leading-relaxed h-12">
+                Solo campos indispensables: Nombre, SKU, Precio, Costo y
+                Cantidad.
               </p>
-              <button
-                (click)="downloadTemplate()"
-                class="mt-3 text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center"
+              <div
+                class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800"
               >
-                <app-icon name="download" [size]="16" class="mr-1"></app-icon>
-                Descargar plantilla de ejemplo
-              </button>
+                <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+                DESCARGAR EXCEL
+              </div>
+            </div>
+
+            <!-- Plantilla Completa -->
+            <div
+              class="border-2 border-teal-100 hover:border-teal-500 bg-teal-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+              (click)="downloadTemplate('complete')"
+            >
+              <div class="flex items-center mb-2">
+                <div
+                  class="p-2 bg-teal-100 rounded-full text-teal-600 mr-3 group-hover:bg-teal-600 group-hover:text-white transition-colors"
+                >
+                  <app-icon name="file-text" [size]="20"></app-icon>
+                </div>
+                <h4 class="font-bold text-teal-900">Plantilla Completa</h4>
+              </div>
+              <p class="text-xs text-teal-700 mb-3 leading-relaxed h-12">
+                Todos los datos: Descripción, Marca, Categorías, Peso, Ofertas,
+                etc.
+              </p>
+              <div
+                class="flex items-center text-xs font-bold text-teal-600 group-hover:text-teal-800"
+              >
+                <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+                DESCARGAR EXCEL
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Persistence Warning -->
-        <div class="bg-amber-50 p-4 rounded-lg border border-amber-100 flex items-start">
-           <app-icon name="alert-triangle" [size]="20" class="text-amber-600 mt-0.5 mr-3"></app-icon>
-           <div>
-              <h4 class="text-sm font-medium text-amber-900">Información Importante</h4>
-              <p class="text-sm text-amber-800 mt-1">
-                 Los datos cargados aquí <strong>NO se guardarán en el catálogo del comercio</strong> hasta que confirmes la orden.
-                 Estos productos se tratan como ítems temporales o nuevos hasta la finalización del proceso.
-              </p>
-           </div>
+        <div
+          class="bg-amber-50 p-4 rounded-lg border border-amber-100 flex items-start"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="20"
+            class="text-amber-600 mt-0.5 mr-3"
+          ></app-icon>
+          <div>
+            <h4 class="text-sm font-medium text-amber-900">
+              Información Importante
+            </h4>
+            <p class="text-sm text-amber-800 mt-1">
+              Los productos se cargarán temporalmente en la orden. Si contienen
+              nuevas marcas o categorías, estas se crearán automáticamente al
+              confirmar.
+            </p>
+          </div>
         </div>
 
         <!-- File Upload Area -->
-        <div *ngIf="!parsedData"
+        <div
+          *ngIf="!parsedData"
           class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
           (dragover)="onDragOver($event)"
           (dragleave)="onDragLeave($event)"
@@ -86,68 +127,105 @@ import {
               [class.text-blue-500]="isDragging"
             ></app-icon>
             <p class="text-gray-900 font-medium">
-              Arrastra tu archivo aquí
+              Arrastra tu archivo Excel aquí
             </p>
             <p class="text-gray-500 text-sm mt-1">
-              o haz clic para seleccionar (CSV, Excel)
+              o haz clic para seleccionar
             </p>
           </div>
 
           <div *ngIf="selectedFile">
-             <div class="animate-pulse flex flex-col items-center">
-                <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-                <p class="text-sm text-gray-500">Procesando archivo...</p>
-             </div>
+            <div class="animate-pulse flex flex-col items-center">
+              <app-icon
+                name="loader"
+                [size]="48"
+                class="text-primary mb-4 animate-spin"
+              ></app-icon>
+              <p class="text-sm text-gray-500">Procesando archivo...</p>
+            </div>
           </div>
         </div>
 
         <!-- Preview / Summary -->
         <div *ngIf="parsedData" class="space-y-4">
-           <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
-              <div class="flex items-center">
-                 <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
-                 <div>
-                    <h4 class="text-sm font-medium text-green-900">Archivo procesado correctamente</h4>
-                    <p class="text-sm text-green-700">Se encontraron {{ parsedData.length }} productos válidos.</p>
-                 </div>
+          <div
+            class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between"
+          >
+            <div class="flex items-center">
+              <app-icon
+                name="check-circle"
+                [size]="24"
+                class="text-green-500 mr-3"
+              ></app-icon>
+              <div>
+                <h4 class="text-sm font-medium text-green-900">
+                  Archivo procesado correctamente
+                </h4>
+                <p class="text-sm text-green-700">
+                  Se encontraron {{ parsedData.length }} productos válidos.
+                </p>
               </div>
-              <button (click)="resetState()" class="text-sm text-red-500 hover:text-red-700 font-medium">
-                 Cambiar archivo
-              </button>
-           </div>
-           
-           <!-- Simple Preview Table (First 5 items) -->
-           <div class="border rounded-md overflow-hidden" *ngIf="parsedData.length > 0">
-              <table class="min-w-full divide-y divide-gray-200 text-sm">
-                 <thead class="bg-gray-50">
-                    <tr>
-                       <th class="px-3 py-2 text-left font-medium text-gray-500">Producto</th>
-                       <th class="px-3 py-2 text-right font-medium text-gray-500">Cantidad</th>
-                       <th class="px-3 py-2 text-right font-medium text-gray-500">Costo</th>
-                    </tr>
-                 </thead>
-                 <tbody class="bg-white divide-y divide-gray-200">
-                    <tr *ngFor="let item of parsedData.slice(0, 5)">
-                       <td class="px-3 py-2 text-gray-900">{{ item['name'] || item['Nombre'] || '-' }}</td>
-                       <td class="px-3 py-2 text-right text-gray-700">{{ item['quantity'] || item['qty'] || item['cantidad'] || 0 }}</td>
-                       <td class="px-3 py-2 text-right text-gray-700">{{ item['unit_cost'] || item['costo'] || item['cost'] || 0 }}</td>
-                    </tr>
-                 </tbody>
-              </table>
-              <div class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center" *ngIf="parsedData.length > 5">
-                 ... y {{ parsedData.length - 5 }} más
-              </div>
-           </div>
-        </div>
+            </div>
+            <button
+              (click)="resetState()"
+              class="text-sm text-red-500 hover:text-red-700 font-medium"
+            >
+              Cambiar archivo
+            </button>
+          </div>
 
+          <!-- Simple Preview Table (First 5 items) -->
+          <div
+            class="border rounded-md overflow-hidden"
+            *ngIf="parsedData.length > 0"
+          >
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">
+                    Producto
+                  </th>
+                  <th class="px-3 py-2 text-right font-medium text-gray-500">
+                    Cantidad
+                  </th>
+                  <th class="px-3 py-2 text-right font-medium text-gray-500">
+                    Costo
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr *ngFor="let item of parsedData.slice(0, 5)">
+                  <td class="px-3 py-2 text-gray-900">
+                    {{ item['name'] || item['Nombre'] || '-' }}
+                  </td>
+                  <td class="px-3 py-2 text-right text-gray-700">
+                    {{
+                      item['quantity'] || item['qty'] || item['cantidad'] || 0
+                    }}
+                  </td>
+                  <td class="px-3 py-2 text-right text-gray-700">
+                    {{
+                      item['unit_cost'] || item['costo'] || item['cost'] || 0
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div
+              class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center"
+              *ngIf="parsedData.length > 5"
+            >
+              ... y {{ parsedData.length - 5 }} más
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Actions -->
-      <div class="flex justify-end space-x-3 pt-6 border-t border-gray-200 mt-6">
-        <app-button
-          variant="outline"
-          (clicked)="onCancel()"
-        >
+      <div
+        class="flex justify-end space-x-3 pt-6 border-t border-gray-200 mt-6"
+      >
+        <app-button variant="outline" (clicked)="onCancel()">
           Cancelar
         </app-button>
         <app-button
@@ -161,9 +239,13 @@ import {
       </div>
     </app-modal>
   `,
-  styles: [`
-    :host { display: block; }
-  `]
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class PopBulkDataModalComponent {
   @Input() isOpen = false;
@@ -174,7 +256,8 @@ export class PopBulkDataModalComponent {
   isDragging = false;
   parsedData: any[] | null = null;
 
-  constructor(private toastService: ToastService) { }
+  private productsService = inject(ProductsService);
+  private toastService = inject(ToastService);
 
   onCancel() {
     this.close.emit();
@@ -185,6 +268,23 @@ export class PopBulkDataModalComponent {
     this.selectedFile = null;
     this.parsedData = null;
     this.isDragging = false;
+  }
+
+  downloadTemplate(type: 'quick' | 'complete') {
+    this.productsService.getBulkUploadTemplate(type).subscribe({
+      next: (blob: Blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `plantilla-pedido-${type}.xlsx`;
+        link.click();
+        window.URL.revokeObjectURL(url);
+      },
+      error: (error: any) => {
+        this.toastService.error('Error al descargar la plantilla');
+        console.error(error);
+      },
+    });
   }
 
   onDragOver(event: DragEvent) {
@@ -229,17 +329,47 @@ export class PopBulkDataModalComponent {
         const data = XLSX.utils.sheet_to_json(ws);
 
         if (!data || data.length === 0) {
-          this.toastService.error('El archivo está vacío o tiene un formato incorrecto');
+          this.toastService.error(
+            'El archivo está vacío o tiene un formato incorrecto',
+          );
           this.resetState();
           return;
         }
 
-        // Basic validation or normalization could happen here
-        this.parsedData = data;
+        // Normalizar claves de español a inglés para POP
+        this.parsedData = data
+          .map((item: any) => {
+            // Claves en español de la plantilla oficial
+            const name = item['Nombre'] || item['name'];
+            const sku = item['SKU'] || item['sku'];
+            // En POP usamos 'unit_cost' y 'quantity'
+            const cost = parseFloat(
+              item['Costo'] || item['cost_price'] || item['unit_cost'] || 0,
+            );
+            // 'Cantidad Inicial' es para carga de producto, 'Cantidad' es genérico. Aceptamos ambos.
+            const qty = parseFloat(
+              item['Cantidad'] ||
+                item['Cantidad Inicial'] ||
+                item['stock_quantity'] ||
+                item['quantity'] ||
+                0,
+            );
 
+            // Preservar otros campos para creación de producto si es 'complete'
+            return {
+              ...item,
+              name,
+              sku,
+              unit_cost: isNaN(cost) ? 0 : cost,
+              quantity: isNaN(qty) ? 0 : qty,
+            };
+          })
+          .filter((item) => item.name || item.sku);
       } catch (err) {
         console.error('Error parsing file:', err);
-        this.toastService.error('Error al procesar el archivo. Verifica el formato.');
+        this.toastService.error(
+          'Error al procesar el archivo. Verifica el formato.',
+        );
         this.resetState();
       }
     };
@@ -252,24 +382,5 @@ export class PopBulkDataModalComponent {
       this.dataLoaded.emit(this.parsedData);
       this.onCancel();
     }
-  }
-
-  downloadTemplate() {
-    // Simple client-side CSV generation
-    const headers = ['Nombre', 'SKU', 'Costo', 'Cantidad', 'Notas'];
-    const example = ['Producto Ejemplo', 'SKU-123', '10.50', '5', 'Nota opcional'];
-
-    const csvContent =
-      headers.join(',') + '\n' +
-      example.join(',');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", "plantilla_importacion_orden.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   }
 }

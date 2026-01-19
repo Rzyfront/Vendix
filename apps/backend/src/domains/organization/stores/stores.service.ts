@@ -15,10 +15,19 @@ import {
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
+import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
+import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 
 @Injectable()
 export class StoresService {
-  constructor(private prisma: OrganizationPrismaService) { }
+  constructor(
+    private prisma: OrganizationPrismaService,
+    private domainGeneratorHelper: DomainGeneratorHelper,
+    private brandingGeneratorHelper: BrandingGeneratorHelper,
+  ) { }
+
+  // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
+
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -60,6 +69,9 @@ export class StoresService {
       },
     });
 
+    // Create store domain (STORE_ADMIN context: {slug}-store.vendix.com)
+    await this.createStoreDomain(store.id, store.slug);
+
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
       await this.prisma.store_settings.create({
@@ -98,7 +110,8 @@ export class StoresService {
         ],
       }),
       ...(store_type && { store_type }),
-      ...(is_active !== undefined && { is_active }),
+      // Default to only active stores if is_active is not specified
+      ...(is_active !== undefined ? { is_active } : { is_active: true }),
     };
 
     const [stores, total] = await Promise.all([
@@ -183,12 +196,16 @@ export class StoresService {
       throw new BadRequestException('Cannot delete store with active orders');
     }
 
-    // Eliminar registros relacionados que podrían causar violación de FK
-    await this.prisma.login_attempts.deleteMany({
-      where: { store_id: id },
+    // Soft delete: Deactivate the store instead of physically deleting it
+    // This preserves all relationships and data integrity
+    return this.prisma.stores.update({
+      where: { id },
+      data: {
+        is_active: false,
+        updated_at: new Date(),
+      },
+      include: { organizations: true, addresses: true, store_settings: true },
     });
-
-    return this.prisma.stores.delete({ where: { id } });
   }
 
   async updateStoreSettings(
@@ -365,7 +382,7 @@ export class StoresService {
   }
 
   async getGlobalDashboard() {
-    // Get all stores counts by status
+    // Get all stores counts by status (only active stores count for metrics)
     const [
       totalStores,
       activeStores,
@@ -376,8 +393,10 @@ export class StoresService {
       totalOrders,
       totalProducts,
     ] = await Promise.all([
-      // Total stores count
-      this.prisma.stores.count(),
+      // Total stores count - only active stores
+      this.prisma.stores.count({
+        where: { is_active: true },
+      }),
 
       // Active stores count
       this.prisma.stores.count({
@@ -407,25 +426,28 @@ export class StoresService {
         },
       }),
 
-      // Total revenue from all finished orders
+      // Total revenue from all finished orders (only from active stores)
       this.prisma.orders.aggregate({
         where: {
           state: 'finished',
+          stores: { is_active: true },
         },
         _sum: { grand_total: true },
       }),
 
-      // Total orders count (excluding cancelled)
+      // Total orders count (excluding cancelled, only from active stores)
       this.prisma.orders.count({
         where: {
           state: { not: 'cancelled' },
+          stores: { is_active: true },
         },
       }),
 
-      // Total products count (active products)
+      // Total products count (active products from active stores)
       this.prisma.products.count({
         where: {
           state: 'active',
+          stores: { is_active: true },
         },
       }),
     ]);
@@ -440,5 +462,133 @@ export class StoresService {
       total_orders: totalOrders,
       total_products: totalProducts,
     };
+  }
+
+  /**
+   * Create a domain for a store
+   * Generates hostname: {slug}-store.vendix.com
+   */
+  private async createStoreDomain(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<void> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prisma.domain_settings.findMany({
+      select: { hostname: true, config: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+
+    // Generate unique hostname for store
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.STORE,
+      existingHostnames,
+    );
+
+    // Get branding config from organization domain if exists
+    const orgDomain = existingDomains.find(d => d.config && typeof d.config === 'object' && 'branding' in (d.config as any));
+    const orgBranding = (orgDomain?.config as any)?.branding || null;
+
+    // Generate standardized branding
+    const branding = this.brandingGeneratorHelper.generateBranding({
+      name: orgBranding?.name || 'Vendix Store', // Default name if not found
+      primaryColor: orgBranding?.primary_color,
+      secondaryColor: orgBranding?.secondary_color,
+      theme: orgBranding?.theme || 'light',
+      logoUrl: orgBranding?.logo_url,
+      faviconUrl: orgBranding?.favicon_url,
+    });
+
+    // Create domain settings for the store with standardized branding
+    await this.prisma.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'store',
+        is_primary: true,
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: {
+          app: 'STORE_LANDING',
+          branding: branding,
+        },
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Create an e-commerce domain for a store
+   * Generates hostname: {slug}-shop.vendix.com
+   */
+  async createEcommerceDomain(
+    storeId: number,
+    storeSlug: string,
+  ): Promise<string> {
+    // Get all existing hostnames to check for uniqueness
+    const existingDomains = await this.prisma.domain_settings.findMany({
+      select: { hostname: true },
+    });
+    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+
+    // Generate unique hostname for e-commerce
+    const hostname = this.domainGeneratorHelper.generateUnique(
+      storeSlug,
+      DomainContext.ECOMMERCE,
+      existingHostnames,
+    );
+
+    // Get store to get the name for branding
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { name: true, organization_id: true }
+    });
+
+    // Get branding from org domain to maintain consistency
+    // We need to fetch it again or pass it, but effectively fetching from all domains is expensive if we just want one.
+    // However, we already fetched `existingDomains` locally (only hostname).
+    // Let's fetch the org branding explicitly for better accuracy.
+    const orgDomain = await this.prisma.domain_settings.findFirst({
+      where: {
+        organization_id: store?.organization_id,
+        ownership: 'vendix_subdomain',
+        domain_type: 'organization'
+      }
+    });
+
+    const orgBranding = (orgDomain?.config as any)?.branding || null;
+
+    // Generate standardized branding for ecommerce
+    const branding = this.brandingGeneratorHelper.generateBranding({
+      name: store?.name || 'Vendix Shop',
+      primaryColor: orgBranding?.primary_color,
+      secondaryColor: orgBranding?.secondary_color,
+      theme: orgBranding?.theme || 'light',
+      logoUrl: orgBranding?.logo_url,
+      faviconUrl: orgBranding?.favicon_url,
+    });
+
+    // Create domain settings for e-commerce
+    await this.prisma.domain_settings.create({
+      data: {
+        hostname,
+        store_id: storeId,
+        domain_type: 'ecommerce',
+        is_primary: false, // E-commerce domains are not primary (store domain is primary)
+        ownership: 'vendix_subdomain',
+        status: 'active',
+        ssl_status: 'none',
+        config: {
+          app: 'STORE_ECOMMERCE',
+          branding: branding,
+        },
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    return hostname;
   }
 }

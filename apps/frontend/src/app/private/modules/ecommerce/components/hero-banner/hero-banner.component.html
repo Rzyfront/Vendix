@@ -1,0 +1,45 @@
+<section
+  class="hero-banner"
+  [class]="class"
+  [style.background-color]="banner_config.background_color"
+>
+  @if (banner_config.image_url) {
+    <div
+      class="hero-background"
+      [style.background-image]="'url(' + banner_config.image_url + ')'"
+    ></div>
+  }
+
+  @if (banner_config.show_overlay) {
+    <div class="hero-overlay"></div>
+  }
+
+  <div class="hero-content" [style.color]="banner_config.text_color">
+    <h1 class="hero-title">{{ banner_config.title }}</h1>
+    <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
+    <button class="hero-cta" (click)="onCtaClick()">
+      {{ banner_config.cta_text }}
+      <i class="pi pi-arrow-right"></i>
+    </button>
+  </div>
+
+  @if (slides.length > 1) {
+    <div class="slider-controls">
+      <button class="control-btn prev" (click)="prevSlide()">
+        <i class="pi pi-chevron-left"></i>
+      </button>
+      <button class="control-btn next" (click)="nextSlide()">
+        <i class="pi pi-chevron-right"></i>
+      </button>
+    </div>
+    <div class="slider-indicators">
+      @for (slide of slides; track $index) {
+        <button
+          class="indicator"
+          [class.active]="$index === current_slide_index"
+          (click)="setSlide($index)"
+        ></button>
+      }
+    </div>
+  }
+</section>

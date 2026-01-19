@@ -1,0 +1,59 @@
+meta {
+  name: Register Owner
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/auth/register-owner
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "organization_name": "Test Org {{timestamp}}",
+    "email": "owner{{timestamp}}@example.com",
+    "password": "TestPass123!",
+    "first_name": "Test",
+    "last_name": "Owner",
+    "phone": "+1234567890"
+  }
+}
+
+script:pre-request {
+  const timestamp = new Date().getTime();
+  bru.setVar("timestamp", timestamp);
+}
+
+vars:post-response {
+  owner_token: res.body.data.access_token
+  owner_org_id: res.body.data.user.organization_id
+}
+
+tests {
+  test("Register successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.message).to.contain('Bienvenido');
+  });
+  
+  test("Data structure is valid", function() {
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('access_token');
+    expect(res.body.data).to.have.property('user');
+  });
+  
+  test("User data is correct", function() {
+    const user = res.body.data.user;
+    expect(user).to.have.property('email');
+    expect(user.email).to.contain('owner');
+    expect(user).to.have.property('roles');
+    expect(user.roles).to.include('organization_admin');
+    expect(user.roles).to.include('store_admin');
+  });
+  
+  test("No sensitive data", function() {
+    expect(res.body.data.user).to.not.have.property('password');
+  });
+}

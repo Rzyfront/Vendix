@@ -23,6 +23,8 @@ export interface MenuItem {
   route?: string;
   children?: MenuItem[];
   badge?: string;
+  action?: (item: MenuItem) => void;
+  alwaysVisible?: boolean; // If true, skip panel_ui filtering (for dynamic data like stores)
 }
 
 @Component({
@@ -72,7 +74,7 @@ export interface MenuItem {
           <h1 class="org-name">{{ title }}</h1>
           <div class="vlink-container">
             <a
-              [href]="'/' + vlink"
+              [href]="vlinkUrl"
               target="_blank"
               rel="noopener noreferrer"
               class="vlink"
@@ -132,15 +134,25 @@ export interface MenuItem {
               </button>
               <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
                 <li *ngFor="let child of item.children" class="submenu-item">
-                  <a
-                    [routerLink]="child.route"
-                    routerLinkActive="active"
-                    #rlaChild="routerLinkActive"
-                    [class.active]="rlaChild.isActive"
-                    (click)="onMenuItemClick()"
-                  >
-                    <span>{{ child.label }}</span>
-                  </a>
+                  <ng-container *ngIf="child.action">
+                    <button
+                      (click)="child.action(child); onMenuItemClick()"
+                      class="submenu-item-button"
+                    >
+                      <span>{{ child.label }}</span>
+                    </button>
+                  </ng-container>
+                  <ng-container *ngIf="!child.action">
+                    <a
+                      [routerLink]="child.route"
+                      routerLinkActive="active"
+                      #rlaChild="routerLinkActive"
+                      [class.active]="rlaChild.isActive"
+                      (click)="onMenuItemClick()"
+                    >
+                      <span>{{ child.label }}</span>
+                    </a>
+                  </ng-container>
                 </li>
               </ul>
             </ng-container>
@@ -155,6 +167,7 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() menuItems: MenuItem[] = [];
   @Input() title: string = 'Vendix Corp';
   @Input() vlink: string = 'vlink-slug';
+  @Input() domainHostname: string | null = null; // Nuevo input para el hostname del dominio
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
   @Output() expandSidebar = new EventEmitter<void>();
@@ -166,6 +179,17 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   private documentClickListener?: () => void;
   private keydownListener?: () => void;
   private focusableElements: HTMLElement[] = [];
+
+  // Getter para construir la URL del vlink
+  get vlinkUrl(): string {
+    if (this.domainHostname) {
+      // Si tenemos un hostname de dominio, construir la URL completa
+      const protocol = window.location.protocol; // http: o https:
+      return `${protocol}//${this.domainHostname}`;
+    }
+    // Fallback a la ruta relativa original
+    return '/' + this.vlink;
+  }
 
   constructor(
     private renderer: Renderer2,

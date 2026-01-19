@@ -9,7 +9,6 @@ import {
 } from '@nestjs/common';
 import { AppService } from './app.service';
 import { Public } from './domains/auth/decorators/public.decorator';
-import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -19,7 +18,6 @@ const execPromise = promisify(exec);
 export class AppController {
   constructor(
     private readonly appService: AppService,
-    private readonly prisma: GlobalPrismaService,
   ) { }
 
   @Public()
@@ -65,31 +63,33 @@ export class AppController {
   @Public()
   @Post('clean')
   @HttpCode(HttpStatus.OK)
-  async runClean(@Body() body: { secretKey: string }) {
+  async runClean(@Body() body: { secretKey: string; module?: string }) {
     if (body.secretKey !== 'vendix-dangerous-clean') {
       throw new ForbiddenException('Invalid secret key');
     }
 
     try {
-
-
-      const { stdout, stderr } = await execPromise('node prisma/clean.js', {
+      // Ejecutar script con argumento de módulo opcional
+      const moduleArg = body.module ? ` ${body.module}` : '';
+      const { stdout, stderr } = await execPromise(`node prisma/seeds/shared/database-scripts/clean.js${moduleArg}`, {
         cwd: '/app/dist',
         env: { ...process.env },
       });
 
-      if (stderr) { }
-
       return {
         success: true,
-        message: 'Base de datos limpiada exitosamente',
+        message: body.module
+          ? `Módulo '${body.module}' limpiado exitosamente`
+          : 'Base de datos limpiada exitosamente',
         output: stdout,
         errors: stderr || null,
       };
     } catch (error) {
       return {
         success: false,
-        message: 'Error limpiando base de datos',
+        message: body.module
+          ? `Error limpiando módulo '${body.module}'`
+          : 'Error limpiando base de datos',
         error: error.message,
       };
     }
@@ -104,38 +104,49 @@ export class AppController {
     }
 
     try {
-
-
-      // 1. Ejecutar Clean
-
-      const cleanResult = await execPromise('node prisma/clean.js', {
+      const { stdout, stderr } = await execPromise('node prisma/seeds/shared/database-scripts/reset.js', {
         cwd: '/app/dist',
         env: { ...process.env },
       });
-      if (cleanResult.stderr) { }
-
-      // 2. Ejecutar Seed
-
-      const seedResult = await execPromise('node prisma/seed.js', {
-        cwd: '/app/dist',
-        env: { ...process.env },
-      });
-      if (seedResult.stderr) { }
 
       return {
         success: true,
         message: 'Reset completado exitosamente',
-        clean_output: cleanResult.stdout,
-        seed_output: seedResult.stdout,
-        errors: {
-          clean: cleanResult.stderr || null,
-          seed: seedResult.stderr || null,
-        },
+        output: stdout,
+        errors: stderr || null,
       };
     } catch (error) {
       return {
         success: false,
         message: 'Error durante el reset de base de datos',
+        error: error.message,
+      };
+    }
+  }
+
+  @Public()
+  @Post('db-stats')
+  @HttpCode(HttpStatus.OK)
+  async getDbStats(@Body() body: { secretKey: string }) {
+    if (body.secretKey !== 'vendix-stats-query') {
+      throw new ForbiddenException('Invalid secret key');
+    }
+
+    try {
+      const { stdout, stderr } = await execPromise('node prisma/seeds/shared/database-scripts/stats.js', {
+        cwd: '/app/dist',
+        env: { ...process.env },
+      });
+
+      return {
+        success: true,
+        stats: stdout,
+        errors: stderr || null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Error obteniendo estadísticas',
         error: error.message,
       };
     }

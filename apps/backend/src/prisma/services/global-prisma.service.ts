@@ -221,6 +221,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.organizations;
   }
 
+  get currencies() {
+    return this.baseClient.currencies;
+  }
+
   get brands() {
     return this.baseClient.brands;
   }
@@ -231,5 +235,27 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get organization_payment_policies() {
     return this.baseClient.organization_payment_policies;
+  }
+
+  // Ecommerce models
+  get carts() {
+    return this.baseClient.carts;
+  }
+
+  get cart_items() {
+    return this.baseClient.cart_items;
+  }
+
+  get wishlists() {
+    return this.baseClient.wishlists;
+  }
+
+  get wishlist_items() {
+    return this.baseClient.wishlist_items;
+  }
+
+  // Default templates
+  get default_templates() {
+    return this.baseClient.default_templates;
   }
 }

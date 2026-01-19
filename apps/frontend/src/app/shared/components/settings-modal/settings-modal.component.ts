@@ -3,156 +3,631 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ModalComponent } from '../modal/modal.component';
 import { AuthService } from '../../../core/services/auth.service';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
+import { ToggleComponent } from '../toggle/toggle.component';
+import { IconComponent } from '../icon/icon.component';
+
+// Constant: Configuration of modules per app type
+const APP_MODULES = {
+  ORG_ADMIN: [
+    { key: 'dashboard', label: 'Panel Principal', description: 'Vista general de la organización' },
+    { key: 'stores', label: 'Tiendas', description: 'Gestionar tiendas de la organización' },
+    { key: 'users', label: 'Usuarios', description: 'Gestionar usuarios y permisos' },
+    { key: 'audit', label: 'Auditoría', description: 'Logs de auditoría del sistema' },
+    { key: 'settings', label: 'Configuración', description: 'Ajustes de la organización' },
+    { key: 'analytics', label: 'Analíticas', description: 'Métricas y estadísticas' },
+    { key: 'reports', label: 'Reportes', description: 'Reportes detallados por tienda' },
+    { key: 'inventory', label: 'Inventario', description: 'Gestión de inventario consolidado' },
+    { key: 'billing', label: 'Facturación', description: 'Facturas y pagos' },
+    { key: 'ecommerce', label: 'E-commerce', description: 'Ventas online consolidadas' },
+    { key: 'orders', label: 'Órdenes', description: 'Gestionar órdenes de todas las tiendas' },
+  ],
+  STORE_ADMIN: [
+    // Módulos principales (standalone - sin hijos)
+    { key: 'dashboard', label: 'Panel Principal', description: 'Vista general de la tienda' },
+    { key: 'pos', label: 'Punto de Venta', description: 'Ventas en tienda física' },
+    { key: 'products', label: 'Productos', description: 'Gestionar catálogo de productos' },
+    { key: 'ecommerce', label: 'E-commerce', description: 'Ventas online de la tienda' },
+
+    // Órdenes (padre con hijos)
+    {
+      key: 'orders',
+      label: 'Órdenes',
+      description: 'Sección de órdenes',
+      isParent: true,
+      children: [
+        { key: 'orders_sales', label: 'Órdenes de Venta', description: 'Órdenes de venta' },
+        { key: 'orders_purchase_orders', label: 'Órdenes de Compra', description: 'Órdenes de compra a proveedores' },
+      ]
+    },
+
+    // Inventario (padre con hijos)
+    {
+      key: 'inventory',
+      label: 'Inventario',
+      description: 'Sección de inventario',
+      isParent: true,
+      children: [
+        { key: 'inventory_pop', label: 'Punto de Compra', description: 'Punto de compra a proveedores' },
+        { key: 'inventory_adjustments', label: 'Ajustes de Stock', description: 'Ajustes manuales de inventario' },
+        { key: 'inventory_locations', label: 'Ubicaciones', description: 'Ubicaciones de almacenamiento' },
+        { key: 'inventory_suppliers', label: 'Proveedores', description: 'Directorio de proveedores' },
+      ]
+    },
+
+    // Clientes (padre con hijos)
+    {
+      key: 'customers',
+      label: 'Clientes',
+      description: 'Sección de clientes',
+      isParent: true,
+      children: [
+        { key: 'customers_all', label: 'Todos los Clientes', description: 'Directorio completo de clientes' },
+        { key: 'customers_reviews', label: 'Reseñas', description: 'Reseñas de clientes' },
+      ]
+    },
+
+    // Marketing (padre con hijos)
+    {
+      key: 'marketing',
+      label: 'Marketing',
+      description: 'Sección de marketing',
+      isParent: true,
+      children: [
+        { key: 'marketing_promotions', label: 'Promociones', description: 'Promociones y descuentos' },
+        { key: 'marketing_coupons', label: 'Cupones', description: 'Cupones de descuento' },
+      ]
+    },
+
+    // Analíticas (padre con hijos)
+    {
+      key: 'analytics',
+      label: 'Analíticas',
+      description: 'Sección de analíticas',
+      isParent: true,
+      children: [
+        { key: 'analytics_sales', label: 'Ventas', description: 'Métricas de ventas' },
+        { key: 'analytics_traffic', label: 'Tráfico', description: 'Análisis de tráfico web' },
+        { key: 'analytics_performance', label: 'Rendimiento', description: 'KPIs de rendimiento' },
+      ]
+    },
+
+    // Configuración (padre con hijos)
+    {
+      key: 'settings',
+      label: 'Configuración',
+      description: 'Sección de configuración',
+      isParent: true,
+      children: [
+        { key: 'settings_general', label: 'General', description: 'Configuración general de la tienda' },
+        { key: 'settings_payments', label: 'Métodos de Pago', description: 'Métodos de pago aceptados' },
+        { key: 'settings_appearance', label: 'Apariencia', description: 'Personalización visual' },
+        { key: 'settings_security', label: 'Seguridad', description: 'Configuración de seguridad' },
+        { key: 'settings_domains', label: 'Dominios', description: 'Dominios de la tienda online' },
+      ]
+    },
+  ]
+};
 
 @Component({
-    selector: 'app-settings-modal',
-    standalone: true,
-    imports: [CommonModule, ReactiveFormsModule, ModalComponent, ButtonComponent],
-    template: `
+  selector: 'app-settings-modal',
+  standalone: true,
+  imports: [CommonModule, ReactiveFormsModule, ModalComponent, ButtonComponent, ToggleComponent, IconComponent],
+  template: `
     <app-modal
       [(isOpen)]="isOpen"
       [title]="'Configuración de Usuario'"
-      [subtitle]="'Administra tus preferencias de usuario (JSON)'"
+      [subtitle]="'Personaliza tu experiencia en la plataforma'"
       [size]="'lg'"
       (closed)="onClose()"
       (opened)="onOpen()"
     >
-      <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-6">
-        <!-- Config JSON -->
-        <div>
-          <h4 class="text-lg font-medium text-gray-900 mb-4">Configuración JSON</h4>
-          <div class="grid grid-cols-1 gap-4">
-             <div class="flex flex-col gap-1">
-                <label class="text-sm font-medium text-gray-700">Config (JSON)</label>
-                <textarea
-                    formControlName="configJson"
-                    class="w-full h-64 p-3 border border-gray-300 rounded-md font-mono text-sm focus:ring-blue-500 focus:border-blue-500"
-                    [class.border-red-500]="getError('configJson')"
-                    placeholder='{"theme": "dark", ...}'
-                ></textarea>
-                <div *ngIf="getError('configJson')" class="text-xs text-red-500 mt-1">
-                    {{ getError('configJson') }}
-                </div>
-                <div class="text-xs text-gray-500 mt-1">
-                    Edita el JSON de configuración directamente.
-                </div>
-             </div>
+      <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-6" *ngIf="!loading; else loadingTemplate">
+        <!-- Section 1: App Type Selection -->
+        <div class="app-type-section">
+          <h4 class="text-lg font-medium text-gray-900 mb-4">Tipo de Aplicación</h4>
+          <div class="app-type-selection" [class.read-only]="!canChangeAppType">
+            <div
+              class="app-type-card"
+              [class.selected]="currentAppType === 'ORG_ADMIN'"
+              [class.read-only]="!canChangeAppType"
+              (click)="selectAppType('ORG_ADMIN')">
+              <app-icon name="building" [size]="32"></app-icon>
+              <div class="card-content">
+                <h3>Administración de Organización</h3>
+                <p>Gestión completa de múltiples tiendas</p>
+              </div>
+              <div class="badge" *ngIf="currentAppType === 'ORG_ADMIN'">✓ Actual</div>
+            </div>
+
+            <div
+              class="app-type-card"
+              [class.selected]="currentAppType === 'STORE_ADMIN'"
+              [class.read-only]="!canChangeAppType"
+              (click)="selectAppType('STORE_ADMIN')">
+              <app-icon name="store" [size]="32"></app-icon>
+              <div class="card-content">
+                <h3>Administración de Tienda</h3>
+                <p>Gestión de operaciones de una tienda</p>
+              </div>
+              <div class="badge" *ngIf="currentAppType === 'STORE_ADMIN'">✓ Actual</div>
+            </div>
+          </div>
+          <div class="read-only-badge" *ngIf="!canChangeAppType">
+            <app-icon name="lock" [size]="16"></app-icon>
+            Solo administradores pueden cambiar el tipo de aplicación
           </div>
         </div>
 
+        <!-- Section 2: Panel UI Configuration -->
+        <div class="panel-ui-config">
+          <h4 class="text-lg font-medium text-gray-900 mb-4">
+            Módulos del Panel para {{ getAppTypeLabel(currentAppType) }}
+          </h4>
+
+          <div formGroupName="panel_ui">
+            <div [formGroupName]="currentAppType">
+              <div class="module-toggles-container">
+                <!-- Parent modules with children -->
+                <div *ngFor="let module of getParentModules(currentAppType)" class="parent-module" [class.has-children]="module.isParent">
+                  <div *ngIf="module.isParent" class="parent-module-wrapper">
+                    <!-- Parent header with expand/collapse -->
+                    <div class="parent-header" (click)="toggleModuleExpansion(module.key)">
+                      <div class="parent-toggle">
+                        <app-toggle
+                          [formControlName]="module.key"
+                          [label]="module.label"
+                          (changed)="onParentToggle($event, module)">
+                        </app-toggle>
+                      </div>
+                      <app-icon
+                        name="chevron-right"
+                        [size]="16"
+                        class="expand-icon"
+                        [class.rotated]="isExpanded(module.key)">
+                      </app-icon>
+                    </div>
+                    <span class="module-description">{{ module.description }}</span>
+
+                    <!-- Children modules (nested) -->
+                    <div class="child-modules" [class.expanded]="isExpanded(module.key)">
+                      <div *ngFor="let child of module.children" class="child-toggle-item">
+                        <div class="child-header">
+                          <app-toggle
+                            [formControlName]="child.key"
+                            [label]="child.label"
+                            [disabled]="!isParentModuleEnabled(module.key)">
+                          </app-toggle>
+                        </div>
+                        <span class="module-description child-description">{{ child.description }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Standalone modules (without children) -->
+                <div *ngFor="let module of getParentModules(currentAppType)" class="standalone-module" [class.standalone]="!module.isParent">
+                  <div *ngIf="!module.isParent" class="toggle-item">
+                    <div class="toggle-header">
+                      <app-toggle
+                        [formControlName]="module.key"
+                        [label]="module.label">
+                      </app-toggle>
+                    </div>
+                    <span class="module-description">{{ module.description }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div *ngIf="hasModuleError()" class="text-sm text-red-500 mt-2">
+            Debes habilitar al menos un módulo
+          </div>
+        </div>
+
+        <!-- Section 3: Preferences -->
+        <div formGroupName="preferences" class="preferences-section">
+          <h4 class="text-lg font-medium text-gray-900 mb-4">Preferencias</h4>
+
+          <!-- Language (disabled) -->
+          <div class="preference-row">
+            <label>Idioma</label>
+            <select formControlName="language" [disabled]="true" class="disabled-select">
+              <option value="es">Español</option>
+            </select>
+            <small class="text-gray-500">Español es el único idioma disponible actualmente</small>
+          </div>
+
+          <!-- Theme -->
+          <div class="preference-row">
+            <label>Tema de la aplicación</label>
+            <div class="theme-selector">
+              <div
+                class="theme-option"
+                [class.selected]="settingsForm.get('preferences.theme')?.value === 'default'"
+                (click)="selectTheme('default')">
+                <app-icon name="circle" [size]="32"></app-icon>
+                <div class="theme-info">
+                  <span class="theme-name">Default</span>
+                  <span class="theme-description">Tema por defecto del sistema</span>
+                </div>
+              </div>
+              <div
+                class="theme-option"
+                [class.selected]="settingsForm.get('preferences.theme')?.value === 'aura'"
+                (click)="selectTheme('aura')">
+                <app-icon name="sparkles" [size]="32"></app-icon>
+                <div class="theme-info">
+                  <span class="theme-name">Aura</span>
+                  <span class="theme-description">Estilo alternativo</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </form>
+
+      <ng-template #loadingTemplate>
+        <div class="flex items-center justify-center py-12">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
+        </div>
+      </ng-template>
 
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
-          variant="secondary"
-          (click)="isOpen = false"
-          label="Cancelar"
-        ></app-button>
+          variant="outline-danger"
+          (clicked)="isOpen = false"
+        >Cancelar</app-button>
         <app-button
           variant="primary"
-          (click)="onSubmit()"
+          (clicked)="onSubmit()"
           [loading]="saving"
-          [disabled]="settingsForm.invalid || settingsForm.pristine"
-          label="Guardar Configuración"
-        ></app-button>
+          [disabled]="settingsForm.invalid"
+        >Guardar Cambios</app-button>
       </div>
     </app-modal>
-  `
+  `,
+  styleUrls: ['./settings-modal.component.scss']
 })
 export class SettingsModalComponent implements OnInit {
-    @Input() isOpen = false;
-    @Output() isOpenChange = new EventEmitter<boolean>();
+  @Input() isOpen = false;
+  @Output() isOpenChange = new EventEmitter<boolean>();
 
-    private fb = inject(FormBuilder);
-    private authService = inject(AuthService);
+  private fb = inject(FormBuilder);
+  private authService = inject(AuthService);
+  private authFacade = inject(AuthFacade);
 
-    settingsForm: FormGroup;
-    loading = false;
-    saving = false;
+  settingsForm: FormGroup;
+  loading = false;
+  saving = false;
+  currentSettings: any = null;
+  currentAppType: string = 'ORG_ADMIN';
+  canChangeAppType: boolean = false;
 
-    constructor() {
-        this.settingsForm = this.fb.group({
-            configJson: ['', [Validators.required, this.jsonValidator]]
+  // Nested module state
+  private expandedModules: Set<string> = new Set();
+
+  constructor() {
+    // Initialize panel_ui controls for ORG_ADMIN
+    const orgAdminControls: any = {};
+    APP_MODULES.ORG_ADMIN.forEach(module => {
+      orgAdminControls[module.key] = [true]; // Default to true
+    });
+
+    // Initialize panel_ui controls for STORE_ADMIN (all modules including submodules)
+    const storeAdminControls: any = {};
+    APP_MODULES.STORE_ADMIN.forEach(module => {
+      // For parent modules, initialize with true
+      // For child modules, also initialize with true (all enabled by default now)
+      storeAdminControls[module.key] = [true];
+      // Also initialize children if they exist
+      if (module.isParent && module.children) {
+        module.children.forEach(child => {
+          storeAdminControls[child.key] = [true];
         });
+      }
+    });
+
+    this.settingsForm = this.fb.group({
+      app: ['ORG_ADMIN', Validators.required],
+      panel_ui: this.fb.group({
+        ORG_ADMIN: this.fb.group(orgAdminControls),
+        STORE_ADMIN: this.fb.group(storeAdminControls)
+      }),
+      preferences: this.fb.group({
+        language: ['es'],
+        theme: ['default']
+      })
+    });
+
+    // Check permissions synchronously
+    this.checkPermissions();
+  }
+
+  ngOnInit() { }
+
+  onOpen() {
+    this.loadSettings();
+  }
+
+  onClose() {
+    this.closeModal();
+  }
+
+  closeModal() {
+    this.isOpen = false;
+    this.isOpenChange.emit(false);
+    this.settingsForm.reset();
+  }
+
+  checkPermissions() {
+    // Use synchronous methods from AuthFacade
+    this.canChangeAppType = this.authFacade.isOwner() || this.authFacade.isAdmin();
+  }
+
+  // ===== Nested Module Methods =====
+
+  /**
+   * Toggle expansion of a parent module section
+   * @param moduleKey - The key of the module to expand/collapse
+   */
+  toggleModuleExpansion(moduleKey: string): void {
+    if (this.expandedModules.has(moduleKey)) {
+      this.expandedModules.delete(moduleKey);
+    } else {
+      this.expandedModules.add(moduleKey);
+    }
+  }
+
+  /**
+   * Check if a module is currently expanded
+   * @param moduleKey - The key of the module to check
+   * @returns true if the module is expanded
+   */
+  isExpanded(moduleKey: string): boolean {
+    return this.expandedModules.has(moduleKey);
+  }
+
+  /**
+   * Check if a parent module is enabled (used to disable children when parent is off)
+   * @param parentKey - The key of the parent module
+   * @returns true if the parent module is enabled
+   */
+  isParentModuleEnabled(parentKey: string): boolean {
+    const control = this.settingsForm.get(`panel_ui.${this.currentAppType}.${parentKey}`);
+    return control?.value ?? false;
+  }
+
+  /**
+   * Synchronize child module toggles with parent module state
+   *
+   * When a parent module is toggled, all its children should match the parent's state:
+   * - Parent enabled → all children become enabled
+   * - Parent disabled → all children become disabled
+   *
+   * @param isEnabled - The new state of the parent toggle
+   * @param parentModule - The parent module object containing children array
+   */
+  onParentToggle(isEnabled: boolean, parentModule: any): void {
+    // Guard: Only process if parent has children
+    if (!parentModule.children || !Array.isArray(parentModule.children)) {
+      return;
     }
 
-    ngOnInit() { }
+    // Synchronize each child with the parent's state
+    parentModule.children.forEach((child: any) => {
+      const controlPath = `panel_ui.${this.currentAppType}.${child.key}`;
+      const childControl = this.settingsForm.get(controlPath);
 
-    onOpen() {
-        this.loadSettings();
-    }
+      if (childControl) {
+        // Update child value without emitting additional events
+        // This prevents performance issues from multiple validation cycles
+        childControl.setValue(isEnabled, { emitEvent: false });
+      }
+    });
+  }
 
-    onClose() {
-        this.isOpenChange.emit(false);
-        this.settingsForm.reset();
-    }
+  /**
+   * Get all modules for an app type (flattened for backward compatibility)
+   * @param appType - The app type to get modules for
+   * @returns Array of all modules including children
+   */
+  getAllModulesForAppType(appType: string): any[] {
+    const modules: any[] = [];
+    const appModules = APP_MODULES[appType as keyof typeof APP_MODULES] || [];
 
-    loadSettings() {
-        this.loading = true;
-        this.authService.getSettings()
-            .pipe(finalize(() => this.loading = false))
-            .subscribe({
-                next: (response) => {
-                    const settings = response.data || response;
-                    // Format JSON for display
-                    const configFormatted = JSON.stringify(settings.config || {}, null, 2);
+    appModules.forEach((module: any) => {
+      modules.push(module);
+      // Add children if they exist
+      if (module.isParent && module.children) {
+        modules.push(...module.children);
+      }
+    });
 
-                    this.settingsForm.patchValue({
-                        configJson: configFormatted
-                    });
-                },
-                error: (err) => console.error('Error loading settings', err)
-            });
-    }
+    return modules;
+  }
 
-    onSubmit() {
-        if (this.settingsForm.invalid) return;
+  /**
+   * Get parent modules (modules with isParent flag) plus standalone modules
+   * @param appType - The app type to get modules for
+   * @returns Array of parent and standalone modules
+   */
+  getParentModules(appType: string): any[] {
+    return APP_MODULES[appType as keyof typeof APP_MODULES] || [];
+  }
 
-        this.saving = true;
-        const formValue = this.settingsForm.getRawValue();
+  loadSettings() {
+    this.loading = true;
+    this.authService.getSettings()
+      .pipe(finalize(() => this.loading = false))
+      .subscribe({
+        next: (response) => {
+          const settings = response.data || response;
+          this.currentSettings = settings;
+          this.currentAppType = settings.config?.app || 'ORG_ADMIN';
 
-        let configObj = {};
-        try {
-            configObj = JSON.parse(formValue.configJson);
-        } catch (e) {
-            console.error('Invalid JSON', e);
-            this.saving = false;
-            return;
+          console.log('🔍 Settings loaded:', settings);
+          console.log('🔍 Config:', settings.config);
+          console.log('🔍 Panel UI:', settings.config?.panel_ui);
+
+          this.initializeForm(settings.config || {});
+        },
+        error: (err) => {
+          console.error('Error loading settings', err);
+          // Initialize with defaults even on error
+          this.currentAppType = 'ORG_ADMIN';
+          this.initializeForm({});
         }
+      });
+  }
 
-        const dto = {
-            config: configObj
+  initializeForm(config: any) {
+    console.log('🔧 Updating form with config:', config);
+
+    // Build patch object efficiently
+    const patchObj: any = {
+      app: this.currentAppType,
+      panel_ui: {
+        ORG_ADMIN: {},
+        STORE_ADMIN: {}
+      },
+      preferences: {
+        language: 'es',
+        theme: 'default'
+      }
+    };
+
+    // Update ORG_ADMIN modules
+    APP_MODULES.ORG_ADMIN.forEach(module => {
+      const currentValue = config.panel_ui?.ORG_ADMIN?.[module.key] ??
+        config.panel_ui?.[module.key] ??
+        true;
+      patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
+    });
+
+    // Update STORE_ADMIN modules (including children)
+    APP_MODULES.STORE_ADMIN.forEach((module: any) => {
+      const currentValue = config.panel_ui?.STORE_ADMIN?.[module.key] ??
+        config.panel_ui?.[module.key] ??
+        true;
+      patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
+
+      // Also handle children if they exist
+      if (module.isParent && module.children) {
+        module.children.forEach((child: any) => {
+          const childValue = config.panel_ui?.STORE_ADMIN?.[child.key] ??
+            config.panel_ui?.[child.key] ??
+            true;
+          patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
+        });
+      }
+    });
+
+    // Update preferences
+    const prefs = config.preferences || { language: 'es', theme: 'default' };
+    patchObj.preferences.language = prefs.language;
+    patchObj.preferences.theme = prefs.theme || 'default';
+
+    // Apply all patches at once
+    this.settingsForm.patchValue(patchObj);
+
+    console.log('✅ Form updated:', this.settingsForm.value);
+  }
+
+  getModulesForAppType(appType: string): any[] {
+    return APP_MODULES[appType as keyof typeof APP_MODULES] || [];
+  }
+
+  getAppTypeLabel(appType: string): string {
+    const labels: Record<string, string> = {
+      'ORG_ADMIN': 'Organización',
+      'STORE_ADMIN': 'Tienda'
+    };
+    return labels[appType] || appType;
+  }
+
+  selectAppType(appType: string) {
+    if (!this.canChangeAppType) return;
+
+    this.currentAppType = appType;
+    this.settingsForm.patchValue({ app: appType });
+  }
+
+  selectTheme(theme: string) {
+    this.settingsForm.patchValue({
+      preferences: { theme }
+    });
+  }
+
+  hasModuleError(): boolean {
+    const panelUiGroup = this.settingsForm.get('panel_ui.' + this.currentAppType);
+    if (!panelUiGroup) return false;
+
+    const values = Object.values(panelUiGroup.value);
+    const hasEnabled = values.some((v: any) => v === true);
+    return !hasEnabled && panelUiGroup.touched;
+  }
+
+  onSubmit() {
+    if (this.settingsForm.invalid) return;
+
+    this.saving = true;
+    const formValue = this.settingsForm.getRawValue();
+
+    // 🔥 CRÍTICO: Preservar datos existentes con deep merge
+    this.authService.getSettings().subscribe({
+      next: (response) => {
+        const currentConfig = response.data?.config || response.config || {};
+
+        // 🔧 FIX: NO modificar el campo 'app' - solo actualizar panel_ui del app type actual
+        // El usuario puede estar viendo/editando un app type diferente al que tiene seleccionado
+        const configObj = {
+          // Preservar TODOS los campos existentes, incluyendo 'app'
+          ...currentConfig,
+
+          // 🔥 NO actualizar 'app' - mantener el valor actual del usuario
+          // app: formValue.app,  // ❌ ESTO CAUSA EL BUG - elimina esta línea
+
+          // Merge panel_ui: preservar app types no editados y actualizar solo el actual
+          panel_ui: {
+            ...currentConfig.panel_ui,  // Preservar todos los app types existentes
+            [this.currentAppType]: formValue.panel_ui[this.currentAppType]  // ✅ Actualizar solo el app type que se está editando
+          },
+
+          // Merge preferences: preservar preferencias existentes
+          preferences: {
+            ...currentConfig.preferences,  // Preservar otras preferencias
+            language: formValue.preferences.language,
+            theme: formValue.preferences.theme
+          }
         };
 
-        this.authService.updateSettings(dto)
-            .pipe(finalize(() => this.saving = false))
-            .subscribe({
-                next: () => {
-                    this.isOpen = false;
-                    this.isOpenChange.emit(false);
-                },
-                error: (err) => console.error('Error saving settings', err)
-            });
-    }
+        const dto = { config: configObj };
 
-    jsonValidator(control: any) {
-        if (!control.value) return null;
-        try {
-            JSON.parse(control.value);
-            return null;
-        } catch (e) {
-            return { invalidJson: true };
-        }
-    }
+        console.log('🔧 Debug - Saving settings:');
+        console.log('  - Current app type:', this.currentAppType);
+        console.log('  - User app (preserved):', currentConfig.app);
+        console.log('  - Updating panel_ui for:', this.currentAppType);
+        console.log('  - New config:', configObj);
 
-    getError(controlName: string): string {
-        const control = this.settingsForm.get(controlName);
-        if (control?.touched && control?.errors) {
-            if (control.errors['required']) return 'Este campo es requerido';
-            if (control.errors['invalidJson']) return 'Formato JSON inválido';
-        }
-        return '';
-    }
+        // Use AuthFacade to update settings through NgRx
+        // This ensures the store is updated and the sidebar reacts immediately
+        this.authFacade.updateUserSettings(dto);
+        this.saving = false;
+
+        // Close modal after a short delay to allow the store to update
+        setTimeout(() => {
+          this.isOpen = false;
+          this.isOpenChange.emit(false);
+        }, 100);
+      },
+      error: (err) => {
+        console.error('Error loading current config for merge', err);
+        this.saving = false;
+      }
+    });
+  }
 }

@@ -44,6 +44,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.RolesComponent),
       },
       {
+        path: 'payment-methods',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/payment-methods/payment-methods.component'
+          ).then((c) => c.PaymentMethodsComponent),
+      },
+      {
         path: 'stores',
         loadComponent: () =>
           import(
@@ -63,6 +70,20 @@ export const superAdminRoutes: Routes = [
           import(
             '../../private/modules/super-admin/domains/domains.component'
           ).then((c) => c.DomainsComponent),
+      },
+      {
+        path: 'currencies',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/currencies/currencies.component'
+          ).then((c) => c.CurrenciesComponent),
+      },
+      {
+        path: 'system/templates',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/templates/templates.component'
+          ).then((c) => c.TemplatesComponent),
       },
     ],
   },

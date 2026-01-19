@@ -134,7 +134,7 @@ import {
         </button>
         <button
           class="btn btn-primary"
-          (click)="printTicket()"
+          (click)="printOrder()"
           [disabled]="printing"
           type="button"
         >
@@ -375,6 +375,27 @@ import {
           justify-content: center;
         }
       }
+
+      @media print {
+         .printer-header,
+         .printer-selection,
+         .print-options,
+         .printer-actions,
+         .ticket-preview h4 {
+           display: none !important;
+         }
+
+         .preview-container {
+           box-shadow: none;
+           border: none;
+           padding: 0;
+           margin: 0;
+         }
+
+         button, input, select, textarea {
+           display: none !important;
+         }
+       }
     `,
   ],
 })
@@ -473,6 +494,39 @@ export class PosTicketPrinterComponent implements OnInit {
         this.printComplete.emit(false);
       },
     });
+  }
+
+  printOrder(): void {
+    if (!this.ticketData) return;
+
+    const printContent = this.generatePrintContent();
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  }
+
+  private generatePrintContent(): string {
+    if (!this.ticketData) return '';
+
+    const html = this.ticketService.generateTicketHTML(this.ticketData);
+
+    return `
+      <html>
+        <head>
+          <title>Ticket</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }
+            .ticket { background: white; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          </style>
+        </head>
+        <body>
+          ${html}
+        </body>
+      </html>
+    `;
   }
 
   closePrinter(): void {
