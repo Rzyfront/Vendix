@@ -8,23 +8,18 @@ export class EcommercePrismaService extends BasePrismaService {
   private readonly store_only_models = [
     'products',
     'categories',
-    'brands',
-    'product_images',
-    'product_variants',
-    'stock_levels',
     'store_payment_methods',
+    'store_settings',
+    'inventory_locations',
+    'tax_categories',
+    'tax_rates',
   ];
 
   // Modelos que filtran por store_id Y user_id (si hay auth)
   private readonly store_user_models = [
     'carts',
-    'cart_items',
     'wishlists',
-    'wishlist_items',
     'orders',
-    'order_items',
-    'reviews',
-    'payments',
     'addresses',
   ];
 
@@ -53,11 +48,7 @@ export class EcommercePrismaService extends BasePrismaService {
       'createMany',
     ];
 
-    // Configurar extensions para todos los modelos
-    const all_models = [
-      ...this.store_only_models,
-      ...this.store_user_models,
-    ];
+    const all_models = [...this.store_only_models, ...this.store_user_models];
 
     for (const model of all_models) {
       extensions[model] = {};
@@ -78,12 +69,13 @@ export class EcommercePrismaService extends BasePrismaService {
     query: any,
   ) {
     const context = RequestContextService.getContext();
-    const domain_context = RequestContextService.getDomainContext();
-
-    // Obtener store_id: siempre debe existir (del dominio)
-    const store_id = context?.store_id || domain_context?.store_id;
+    const store_id = context?.store_id;
 
     if (!store_id) {
+      console.error(
+        `[EcommercePrismaService] Forbidden: No store_id in context for model ${model}. Context:`,
+        JSON.stringify(context),
+      );
       throw new ForbiddenException(
         'Access denied - store context required (domain not resolved)',
       );
@@ -98,7 +90,6 @@ export class EcommercePrismaService extends BasePrismaService {
         scoped_args.data = {
           ...scoped_args.data,
           store_id,
-          // Si es modelo store+user y hay auth, agregar user_id
           ...(this.store_user_models.includes(model) && user_id
             ? { user_id }
             : {}),
@@ -128,13 +119,10 @@ export class EcommercePrismaService extends BasePrismaService {
     // Handle Read/Update/Delete Operations
     const security_filter: Record<string, any> = { store_id };
 
-    // Para modelos store+user, agregar user_id si hay auth
     if (this.store_user_models.includes(model)) {
       if (user_id) {
         security_filter.user_id = user_id;
       }
-      // Si no hay user_id y es un modelo que lo requiere, permitir solo lectura
-      // (para endpoints públicos que pueden necesitar acceder sin user_id)
     }
 
     scoped_args.where = {
@@ -151,81 +139,78 @@ export class EcommercePrismaService extends BasePrismaService {
   get products() {
     return this.scoped_client.products;
   }
-
   get categories() {
     return this.scoped_client.categories;
   }
-
-  get brands() {
-    return this.scoped_client.brands;
+  get store_payment_methods() {
+    return this.scoped_client.store_payment_methods;
   }
-
-  get product_images() {
-    return this.scoped_client.product_images;
+  get store_settings() {
+    return this.scoped_client.store_settings;
   }
-
-  get product_variants() {
-    return this.scoped_client.product_variants;
+  get inventory_locations() {
+    return this.scoped_client.inventory_locations;
+  }
+  get tax_categories() {
+    return this.scoped_client.tax_categories;
+  }
+  get tax_rates() {
+    return this.scoped_client.tax_rates;
   }
 
   get carts() {
     return this.scoped_client.carts;
   }
-
-  get cart_items() {
-    return this.scoped_client.cart_items;
-  }
-
   get wishlists() {
     return this.scoped_client.wishlists;
   }
-
-  get wishlist_items() {
-    return this.scoped_client.wishlist_items;
-  }
-
   get orders() {
     return this.scoped_client.orders;
   }
-
-  get order_items() {
-    return this.scoped_client.order_items;
-  }
-
-  get reviews() {
-    return this.scoped_client.reviews;
-  }
-
-  get stock_levels() {
-    return this.scoped_client.stock_levels;
-  }
-
-  get store_payment_methods() {
-    return this.scoped_client.store_payment_methods;
-  }
-
-  get payments() {
-    return this.scoped_client.payments;
-  }
-
   get addresses() {
     return this.scoped_client.addresses;
   }
 
-  // Modelos globales sin scoping (para referencias y datos del sistema)
+  // Getters para modelos dependientes (usan scoping a través de sus padres o son semi-globales)
+  get product_images() {
+    return this.scoped_client.product_images;
+  }
+  get product_variants() {
+    return this.scoped_client.product_variants;
+  }
+  get cart_items() {
+    return this.scoped_client.cart_items;
+  }
+  get wishlist_items() {
+    return this.scoped_client.wishlist_items;
+  }
+  get order_items() {
+    return this.scoped_client.order_items;
+  }
+  get reviews() {
+    return this.scoped_client.reviews;
+  }
+  get stock_levels() {
+    return this.scoped_client.stock_levels;
+  }
+  get payments() {
+    return this.scoped_client.payments;
+  }
+
+  // Getters para modelos globales (sin scoping por tienda)
+  get brands() {
+    return this.baseClient.brands;
+  }
   get stores() {
     return this.baseClient.stores;
   }
-
   get system_payment_methods() {
     return this.baseClient.system_payment_methods;
   }
-
   get users() {
     return this.baseClient.users;
   }
 
-  // Override $transaction para usar scoped_client
   override $transaction(arg: any, options?: any) {
     return this.scoped_client.$transaction(arg, options);
   }

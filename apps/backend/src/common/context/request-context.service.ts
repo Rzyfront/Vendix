@@ -11,16 +11,10 @@ export interface RequestContext {
   email?: string;
 }
 
-export interface DomainContext {
-  store_id?: number;
-  organization_id?: number;
-}
-
 @Injectable()
 export class RequestContextService {
   public static asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
   private static currentContext: RequestContext | undefined;
-  private static _domainContext?: DomainContext;
 
   /**
    * Ejecuta un callback dentro de un contexto de request
@@ -38,53 +32,28 @@ export class RequestContextService {
   }
 
   /**
-   * Establece el contexto de dominio (llamado por DomainResolverMiddleware)
+   * Establece el contexto de dominio (ahora es un alias para actualizar el store actual)
    */
   static setDomainContext(store_id?: number, organization_id?: number) {
     const store = this.asyncLocalStorage.getStore();
     if (store) {
-      store.store_id = store_id;
-      store.organization_id = organization_id;
+      if (store_id) store.store_id = store_id;
+      if (organization_id) store.organization_id = organization_id;
     }
-    this._domainContext = { store_id, organization_id };
-  }
-
-  /**
-   * Obtiene el contexto de dominio
-   */
-  static getDomainContext(): DomainContext | undefined {
-    const store = this.asyncLocalStorage.getStore();
-    if (store?.store_id) {
-      return {
-        store_id: store.store_id,
-        organization_id: store.organization_id,
-      };
-    }
-    return this._domainContext;
-  }
-
-  /**
-   * Limpia el contexto de dominio
-   */
-  static clearDomainContext() {
-    this._domainContext = undefined;
   }
 
   /**
    * Obtiene el ID de la organización actual
    */
   static getOrganizationId(): number | undefined {
-    return (
-      this.getContext()?.organization_id ||
-      this.getDomainContext()?.organization_id
-    );
+    return this.getContext()?.organization_id;
   }
 
   /**
    * Obtiene el ID de la tienda actual
    */
   static getStoreId(): number | undefined {
-    return this.getDomainContext()?.store_id || this.getContext()?.store_id;
+    return this.getContext()?.store_id;
   }
 
   /**
@@ -102,10 +71,10 @@ export class RequestContextService {
   }
 
   /**
-   * Verifica si el contexto está basado en dominio
+   * Verifica si hay un store_id en el contexto
    */
   static isDomainBased(): boolean {
-    return !!this.getDomainContext()?.store_id;
+    return !!this.getContext()?.store_id;
   }
 
   /**
@@ -138,13 +107,13 @@ export class RequestContextService {
   }
 
   /**
-   * Valida que el usuario tenga acceso a la tienda del dominio
+   * Valida que el usuario tenga acceso a la tienda
    */
   static validateStoreAccess(userStoreId?: number): boolean {
-    const domainStoreId = this.getDomainContext()?.store_id;
-    if (!domainStoreId) return false;
+    const contextStoreId = this.getStoreId();
+    if (!contextStoreId) return false;
 
-    if (userStoreId && userStoreId !== domainStoreId) {
+    if (userStoreId && userStoreId !== contextStoreId) {
       return false;
     }
 

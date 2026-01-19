@@ -12,7 +12,10 @@ import {
   MaxFileSizeValidator,
   FileTypeValidator,
   BadRequestException,
+  Query,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsBulkService } from './products-bulk.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -29,13 +32,30 @@ import {
 @Controller('store/products/bulk')
 @UseGuards(PermissionsGuard)
 export class ProductsBulkController {
+  private readonly HEADER_TRANSLATIONS: Record<string, string> = {
+    nombre: 'name',
+    sku: 'sku',
+    'precio base': 'base_price',
+    costo: 'cost_price',
+    'cantidad inicial': 'stock_quantity',
+    descripción: 'description',
+    descripcion: 'description',
+    categorías: 'category_ids',
+    categorias: 'category_ids',
+    marca: 'brand_id',
+    'en oferta': 'is_on_sale',
+    'precio oferta': 'sale_price',
+    peso: 'weight',
+    'disponible ecommerce': 'available_for_ecommerce',
+  };
+
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   /**
-   * Carga masiva de productos desde JSON
+   * Carga masiva desde JSON directo
    */
   @Post('upload')
   @Permissions('store:products:create')
@@ -52,13 +72,13 @@ export class ProductsBulkController {
       if (result.failed > 0) {
         return this.responseService.created(
           result,
-          'Carga masiva de productos completada con algunos errores',
+          'Carga masiva completada con algunos errores',
         );
       }
 
       return this.responseService.created(
         result,
-        'Carga masiva de productos completada exitosamente',
+        'Carga masiva completada exitosamente',
       );
     } catch (error) {
       return this.responseService.error(
@@ -70,98 +90,40 @@ export class ProductsBulkController {
   }
 
   /**
-   * Valida productos antes de la carga masiva
-   */
-  @Post('validate')
-  @Permissions('store:products:create')
-  async validateProducts(
-    @Body() bulkUploadDto: BulkProductUploadDto,
-    @Req() req: AuthenticatedRequest,
-  ) {
-    try {
-      const result: BulkValidationResultDto =
-        await this.productsBulkService.validateBulkProducts(
-          bulkUploadDto.products,
-          req.user,
-        );
-
-      if (!result.isValid) {
-        return this.responseService.success(
-          result,
-          'Se encontraron errores en la validación',
-        );
-      }
-
-      return this.responseService.success(
-        result,
-        'Validación de productos completada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message,
-        error.message,
-        error.status || 400,
-      );
-    }
-  }
-
-  /**
-   * Obtiene la plantilla para carga masiva
-   */
-  @Get('template')
-  @Permissions('store:products:create')
-  async getTemplate() {
-    try {
-      const template: BulkUploadTemplateDto =
-        await this.productsBulkService.getBulkUploadTemplate();
-      return this.responseService.success(
-        template,
-        'Plantilla de carga masiva obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message,
-        error.message,
-        error.status || 500,
-      );
-    }
-  }
-
-  /**
-   * Descarga la plantilla en formato CSV
+   * Descarga la plantilla en formato Excel (.xlsx)
    */
   @Get('template/download')
-  @Permissions('store:products:bulk:template')
-  async downloadTemplate() {
+  @Permissions('store:products:bulk:template') // Asumiendo que existe este permiso, o store:products:create
+  async downloadTemplate(
+    @Query('type') type: 'quick' | 'complete' = 'quick',
+    @Res() res: Response,
+  ) {
     try {
-      const template: BulkUploadTemplateDto =
-        await this.productsBulkService.getBulkUploadTemplate();
+      const buffer = await this.productsBulkService.generateExcelTemplate(type);
 
-      // Generar contenido CSV
-      const csvContent = this.generateCsvFromTemplate(template);
+      const filename = `plantilla_productos_${type}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
-      return {
-        csv: csvContent,
-        filename: `product-bulk-template-${new Date().toISOString().split('T')[0]}.csv`,
-      };
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length,
+      });
+
+      res.end(buffer);
     } catch (error) {
-      return this.responseService.error(
-        error.message,
-        error.message,
-        error.status || 500,
-      );
+      res.status(500).json({
+        success: false,
+        error: { message: error.message },
+      });
     }
   }
 
   /**
-   * Carga masiva desde archivo CSV
+   * Carga masiva desde archivo Excel/CSV
    */
-
-  /**
-   * Carga masiva desde archivo CSV o Excel
-   */
-  @Post('upload/csv')
-  @Permissions('store:products:bulk:upload')
+  @Post('upload/file')
+  @Permissions('store:products:create')
   @UseInterceptors(FileInterceptor('file'))
   async uploadProductsFromFile(
     @UploadedFile(
@@ -180,51 +142,16 @@ export class ProductsBulkController {
         'text/csv',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
         'application/vnd.ms-excel', // .xls
+        'application/octet-stream', // A veces CSVs vienen así
       ];
 
-      if (!allowedMimeTypes.includes(file.mimetype)) {
-        throw new BadRequestException(
-          'Solo se permiten archivos CSV o Excel (.xlsx, .xls)',
-        );
-      }
-
-      // Validar que el archivo no esté vacío
-      if (!file.buffer || file.buffer.length === 0) {
-        throw new BadRequestException('El archivo está vacío');
-      }
+      // Lax mime check fallback to extension check if needed, but ParseFilePipe handles basic validation
 
       let products: any[] = [];
 
-
-      const isExcel =
-        file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-        file.mimetype === 'application/vnd.ms-excel' ||
-        file.originalname.toLowerCase().endsWith('.xlsx') ||
-        file.originalname.toLowerCase().endsWith('.xls');
-
-      const isCsv =
-        file.mimetype === 'text/csv' ||
-        file.mimetype === 'application/csv' ||
-        file.originalname.toLowerCase().endsWith('.csv');
-
-      // Procesar según tipo de archivo
-      if (isExcel) {
-        products = this.parseExcelFile(file.buffer);
-      } else if (isCsv) {
-        products = await this.parseCsvFile(file.buffer);
-      } else {
-        // Fallback based on content analysis or just error?
-        // Given previous permissive logic, let's try to detect by signature or just default to CSV if text-like?
-        // Safest is to error if we can't identify, but let's default to parsing logic based on looser mime check as fallback
-        if (file.mimetype.includes('csv')) {
-          products = await this.parseCsvFile(file.buffer);
-        } else {
-          // Default to Excel try if unknown? Or Error?
-          // Let's assume Excel for binary-ish mimes that we missed? 
-          // Better to just throw invalid format if didn't match strict rules above to avoid the "CSV error on Excel file" confusion
-          throw new BadRequestException('Formato de archivo no reconocido. Use .csv, .xlsx o .xls');
-        }
-      }
+      // Intentar parsear como Excel primero (ya que soporta ambos si se usa XLSX lib correctamente)
+      // La librería XLSX puede leer CSVs también si se pasa el buffer.
+      products = this.parseFile(file.buffer);
 
       // Validar productos
       const validationResult =
@@ -265,63 +192,74 @@ export class ProductsBulkController {
   }
 
   /**
-   * Parsea archivo Excel a array de productos
+   * Parsea archivo (Excel o CSV) a array de productos usando mapeo de español
    */
-  private parseExcelFile(buffer: Buffer): any[] {
+  private parseFile(buffer: Buffer): any[] {
     try {
       const workbook = XLSX.read(buffer, { type: 'buffer' });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
-      // Convertir a JSON
+      // Convertir a JSON array de arrays (header: 1) para inspeccionar encabezados
       const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
       if (jsonData.length < 2) {
         throw new BadRequestException(
-          'El archivo Excel debe contener al menos una fila de encabezados y una fila de datos',
+          'El archivo debe contener al menos una fila de encabezados y una fila de datos',
         );
       }
 
-      const headers = (jsonData[0] as string[]).map(h => h.trim());
-      const products: Record<string, any>[] = [];
+      // Procesar encabezados
+      const rawHeaders = jsonData[0] as string[];
+      const headerMap: Record<number, string> = {};
+
+      rawHeaders.forEach((h, index) => {
+        if (!h) return;
+        const normalized = h.toString().trim().toLowerCase();
+        // Buscar traducción
+        const dtoKey = this.HEADER_TRANSLATIONS[normalized];
+        if (dtoKey) {
+          headerMap[index] = dtoKey;
+        }
+      });
+
+      const products: any[] = [];
 
       for (let i = 1; i < jsonData.length; i++) {
         const row = jsonData[i] as any[];
         if (!row || row.length === 0) continue;
 
         const product: Record<string, any> = {};
+        let hasData = false;
 
-        headers.forEach((header, index) => {
-          let value = row[index];
+        row.forEach((cellValue, index) => {
+          const key = headerMap[index];
+          if (key) {
+            // Normalizar valores vacíos
+            const val =
+              cellValue === undefined || cellValue === null ? '' : cellValue;
 
-          // Normalizar valores
-          if (value !== undefined && value !== null) {
-            value = String(value).trim();
-          }
+            // Si es numérico en DTO, intentar convertir
+            if (
+              [
+                'base_price',
+                'cost_price',
+                'stock_quantity',
+                'weight',
+                'sale_price',
+              ].includes(key)
+            ) {
+              const num = parseFloat(val);
+              product[key] = isNaN(num) ? 0 : num;
+            } else {
+              product[key] = val;
+            }
 
-          // Convertir tipos de datos según el campo
-          switch (header) {
-            case 'base_price':
-            case 'stock_quantity':
-            case 'cost_price':
-            case 'weight':
-              product[header] = value ? parseFloat(value) : undefined;
-              break;
-            case 'brand_id':
-              product[header] = value ? parseInt(value, 10) : undefined;
-              break;
-            case 'category_ids':
-              product[header] = value
-                ? String(value).split(',').map((id) => parseInt(id.trim(), 10))
-                : [];
-              break;
-            default:
-              product[header] = value || undefined;
+            if (val !== '') hasData = true;
           }
         });
 
-        // Solo agregar si tiene nombre o SKU (ignorar filas vacías)
-        if (product['name'] || product['sku']) {
+        if (hasData && (product['name'] || product['sku'])) {
           products.push(product);
         }
       }
@@ -329,129 +267,8 @@ export class ProductsBulkController {
       return products;
     } catch (error) {
       throw new BadRequestException(
-        'Error al procesar el archivo Excel: ' + error.message,
+        'Error al procesar el archivo: ' + error.message,
       );
     }
-  }
-
-
-  /**
-   * Genera contenido CSV a partir de la plantilla
-   */
-  private generateCsvFromTemplate(template: BulkUploadTemplateDto): string {
-    const headers = template.headers.join(',');
-    const rows = template.sample_data.map((row) =>
-      template.headers
-        .map((header) => {
-          const value = row[header] || '';
-          // Escapar comas y comillas
-          return typeof value === 'string' &&
-            (value.includes(',') || value.includes('"'))
-            ? `"${value.replace(/"/g, '""')}"`
-            : value;
-        })
-        .join(','),
-    );
-
-    return [headers, ...rows].join('\n');
-  }
-
-  /**
-   * Parsea archivo CSV a array de productos
-   */
-  private async parseCsvFile(buffer: Buffer): Promise<any[]> {
-    try {
-      const csvContent = buffer.toString('utf-8');
-      const lines = csvContent.split('\n').filter((line) => line.trim());
-
-      if (lines.length < 2) {
-        throw new BadRequestException(
-          'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
-        );
-      }
-
-      const headers = lines[0].split(',').map((header) => header.trim());
-      const products: Record<string, any>[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        const values = this.parseCsvLine(line);
-
-        if (values.length !== headers.length) {
-          throw new BadRequestException(
-            `Formato de archivo CSV inválido en línea ${i + 1}`,
-          );
-        }
-
-        const product: Record<string, any> = {};
-        headers.forEach((header, index) => {
-          const value = values[index].trim();
-
-          // Convertir tipos de datos según el campo
-          switch (header) {
-            case 'base_price':
-            case 'stock_quantity':
-            case 'cost_price':
-            case 'weight':
-              product[header] = value ? parseFloat(value) : undefined;
-              break;
-            case 'brand_id':
-              product[header] = value ? parseInt(value, 10) : undefined;
-              break;
-            case 'category_ids':
-              product[header] = value
-                ? value.split(',').map((id) => parseInt(id.trim(), 10))
-                : [];
-              break;
-            default:
-              product[header] = value || undefined;
-          }
-        });
-
-        products.push(product);
-      }
-
-      return products;
-    } catch (error) {
-      throw new BadRequestException(
-        'Error al procesar el archivo CSV: ' + error.message,
-      );
-    }
-  }
-
-  /**
-   * Parsea una línea CSV considerando comillas y escapes
-   */
-  private parseCsvLine(line: string): string[] {
-    const result: string[] = [];
-    let current = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const nextChar = line[i + 1];
-
-      if (char === '"') {
-        if (inQuotes && nextChar === '"') {
-          // Comilla escapada
-          current += '"';
-          i++; // Saltar la siguiente comilla
-        } else {
-          // Inicio o fin de campo entre comillas
-          inQuotes = !inQuotes;
-        }
-      } else if (char === ',' && !inQuotes) {
-        // Fin del campo
-        result.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-
-    // Agregar el último campo
-    result.push(current);
-
-    return result;
   }
 }

@@ -86,16 +86,23 @@ export async function seedProductsAndCategories(
 
   const createdTaxCategories: any[] = [];
   for (const taxCategory of taxCategories) {
+    const store_id =
+      taxCategory.organization_id === techSolutionsOrg.id
+        ? techStore1.id
+        : fashionStore1.id;
+
     const createdTaxCategory = await client.tax_categories.upsert({
-      where: { name: taxCategory.name },
+      where: {
+        store_id_name: {
+          store_id: store_id,
+          name: taxCategory.name,
+        },
+      } as any,
       update: {},
       create: {
         name: taxCategory.name,
         description: taxCategory.description,
-        store_id:
-          taxCategory.organization_id === techSolutionsOrg.id
-            ? techStore1.id
-            : fashionStore1.id,
+        store_id: store_id,
       },
     });
     createdTaxCategories.push(createdTaxCategory);
@@ -107,8 +114,12 @@ export async function seedProductsAndCategories(
 
   const createdTaxRates: any[] = [];
   for (const taxCategory of taxCategories) {
-    const taxCategoryId = createdTaxCategories.find((t) => t.name === taxCategory.name)?.id || 0;
-    const storeId = taxCategory.organization_id === techSolutionsOrg.id ? techStore1.id : fashionStore1.id;
+    const taxCategoryId =
+      createdTaxCategories.find((t) => t.name === taxCategory.name)?.id || 0;
+    const storeId =
+      taxCategory.organization_id === techSolutionsOrg.id
+        ? techStore1.id
+        : fashionStore1.id;
 
     // Check if tax rate already exists
     const existing = await client.tax_rates.findFirst({
@@ -194,9 +205,10 @@ export async function seedProductsAndCategories(
 
   const createdCategories: any[] = [];
   for (const category of categories) {
-    const storeId = category.organization_id === techSolutionsOrg.id
-      ? techStore1.id
-      : fashionStore1.id;
+    const storeId =
+      category.organization_id === techSolutionsOrg.id
+        ? techStore1.id
+        : fashionStore1.id;
 
     const createdCategory = await client.categories.upsert({
       where: {
@@ -312,12 +324,9 @@ export async function seedProductsAndCategories(
       organization_id: techSolutionsOrg.id,
       store_id: techStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'laptops' && c.store_id === techStore1.id,
+        (c) => c.slug === 'laptops' && c.store_id === techStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'apple',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'apple')?.id,
       status: 'active',
     },
     {
@@ -340,12 +349,9 @@ export async function seedProductsAndCategories(
       organization_id: techSolutionsOrg.id,
       store_id: techStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'smartphones' && c.store_id === techStore1.id,
+        (c) => c.slug === 'smartphones' && c.store_id === techStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'apple',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'apple')?.id,
       status: 'active',
     },
     {
@@ -368,12 +374,9 @@ export async function seedProductsAndCategories(
       organization_id: techSolutionsOrg.id,
       store_id: techStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'smartphones' && c.store_id === techStore1.id,
+        (c) => c.slug === 'smartphones' && c.store_id === techStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'samsung',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'samsung')?.id,
       status: 'active',
     },
     {
@@ -396,12 +399,9 @@ export async function seedProductsAndCategories(
       organization_id: techSolutionsOrg.id,
       store_id: techStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'cargadores-cables' && c.store_id === techStore1.id,
+        (c) => c.slug === 'cargadores-cables' && c.store_id === techStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'samsung',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'samsung')?.id,
       status: 'active',
     },
     // Products for Fashion Retail
@@ -425,12 +425,9 @@ export async function seedProductsAndCategories(
       organization_id: fashionRetailOrg.id,
       store_id: fashionStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'calzado' && c.store_id === fashionStore1.id,
+        (c) => c.slug === 'calzado' && c.store_id === fashionStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'nike',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'nike')?.id,
       status: 'active',
     },
     {
@@ -453,12 +450,9 @@ export async function seedProductsAndCategories(
       organization_id: fashionRetailOrg.id,
       store_id: fashionStore1.id,
       category_id: createdCategories.find(
-        (c) =>
-          c.slug === 'ropa-masculina' && c.store_id === fashionStore1.id,
+        (c) => c.slug === 'ropa-masculina' && c.store_id === fashionStore1.id,
       )?.id,
-      brand_id: createdBrands.find(
-        (b) => b.slug === 'adidas',
-      )?.id,
+      brand_id: createdBrands.find((b) => b.slug === 'adidas')?.id,
       status: 'active',
     },
   ];
@@ -482,10 +476,10 @@ export async function seedProductsAndCategories(
         store_id: product.store_id,
         product_categories: product.category_id
           ? {
-            create: {
-              category_id: product.category_id,
-            },
-          }
+              create: {
+                category_id: product.category_id,
+              },
+            }
           : undefined,
         brand_id: product.brand_id,
       },

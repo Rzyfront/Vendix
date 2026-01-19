@@ -52,6 +52,10 @@ interface GeneratedVariant {
   sku: string;
   name: string;
   price: number;
+  cost_price: number;
+  profit_margin: number;
+  is_on_sale: boolean;
+  sale_price: number;
   stock: number;
   attributes: Record<string, string>;
 }
@@ -143,7 +147,7 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   private createForm(): FormGroup {
-    return this.fb.group({
+    const form = this.fb.group({
       name: [
         '',
         [
@@ -154,7 +158,12 @@ export class ProductCreatePageComponent implements OnInit {
       ],
       slug: ['', [Validators.maxLength(255)]],
       description: [''],
-      base_price: [0, [Validators.min(0)]],
+      cost_price: [0, [Validators.min(0)]],
+      profit_margin: [0, [Validators.min(0)]],
+      base_price: [0, [Validators.required, Validators.min(0)]],
+      is_on_sale: [false],
+      sale_price: [0, [Validators.min(0)]],
+      available_for_ecommerce: [true],
       sku: ['', [Validators.maxLength(100)]],
       stock_quantity: [0, [Validators.min(0)]],
       category_ids: [[] as number[]],
@@ -162,7 +171,69 @@ export class ProductCreatePageComponent implements OnInit {
       tax_category_ids: [[] as number[]],
       state: [ProductState.ACTIVE],
     });
+
+    this.setupPriceCalculations(form);
+    return form;
   }
+
+  private setupPriceCalculations(form: FormGroup): void {
+    const costCtrl = form.get('cost_price');
+    const marginCtrl = form.get('profit_margin');
+    const basePriceCtrl = form.get('base_price');
+
+    // Calculate base_price from cost and margin
+    costCtrl?.valueChanges.subscribe(() => this.calculateBasePrice(form));
+    marginCtrl?.valueChanges.subscribe(() => this.calculateBasePrice(form));
+
+    // Calculate margin from base_price and cost
+    basePriceCtrl?.valueChanges.subscribe(() => {
+      const cost = Number(costCtrl?.value || 0);
+      const basePrice = Number(basePriceCtrl?.value || 0);
+
+      if (cost > 0 && !this.isCalculating) {
+        this.isCalculating = true;
+        const margin = ((basePrice - cost) / cost) * 100;
+        marginCtrl?.setValue(Number(margin.toFixed(2)), { emitEvent: false });
+        this.isCalculating = false;
+      }
+    });
+  }
+
+  private isCalculating = false;
+  private calculateBasePrice(form: FormGroup): void {
+    if (this.isCalculating) return;
+
+    const cost = Number(form.get('cost_price')?.value || 0);
+    const margin = Number(form.get('profit_margin')?.value || 0);
+
+    this.isCalculating = true;
+    const basePrice = cost * (1 + margin / 100);
+    form
+      .get('base_price')
+      ?.setValue(Number(basePrice.toFixed(2)), { emitEvent: false });
+    this.isCalculating = false;
+  }
+
+  get priceWithTax(): number {
+    const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    const selectedTaxIds =
+      this.productForm.get('tax_category_ids')?.value || [];
+
+    let totalTaxRate = 0;
+    selectedTaxIds.forEach((id: number) => {
+      const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+      if (taxCat) {
+        // Extraer la tasa del primer tax_rate si no existe en el nivel superior
+        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
+        const rate = parseFloat(String(rawRate));
+        totalTaxRate += isNaN(rate) ? 0 : rate;
+      }
+    });
+
+    return basePrice * (1 + totalTaxRate);
+  }
+
+  private allTaxCategories: TaxCategory[] = [];
 
   private loadProduct(id: number): void {
     this.productsService.getProductById(id).subscribe({
@@ -193,7 +264,12 @@ export class ProductCreatePageComponent implements OnInit {
       name: product.name,
       slug: product.slug,
       description: product.description,
+      cost_price: product.cost_price || 0,
+      profit_margin: product.profit_margin || 0,
       base_price: product.base_price,
+      is_on_sale: product.is_on_sale || false,
+      sale_price: product.sale_price || 0,
+      available_for_ecommerce: product.available_for_ecommerce !== false,
       sku: product.sku,
       stock_quantity: product.stock_quantity,
       category_ids: categoryIds,
@@ -214,9 +290,13 @@ export class ProductCreatePageComponent implements OnInit {
         sku: v.sku,
         name: v.name || `${product.name} - ${v.sku}`,
         price:
-          v.price_override !== undefined
+          v.price_override !== undefined && v.price_override !== null
             ? Number(v.price_override)
             : Number(product.base_price),
+        cost_price: Number(v.cost_price || product.cost_price || 0),
+        profit_margin: Number(v.profit_margin || product.profit_margin || 0),
+        is_on_sale: !!v.is_on_sale,
+        sale_price: Number(v.sale_price || 0),
         stock: v.stock_quantity,
         attributes: v.attributes || {},
       }));
@@ -253,16 +333,27 @@ export class ProductCreatePageComponent implements OnInit {
   private loadTaxCategories(): void {
     this.taxesService.getTaxCategories().subscribe({
       next: (taxCategories: TaxCategory[]) => {
-        this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => ({
-          value: cat.id,
-          label: cat.name,
-          description: cat.description,
-        }));
+        this.allTaxCategories = taxCategories;
+        this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => {
+          // Extraer la tasa del primer tax_rate si no existe en el nivel superior
+          const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
+          const rate = parseFloat(String(rawRate));
+          const finalRate = isNaN(rate) ? 0 : rate;
+
+          return {
+            value: cat.id,
+            label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
+            description: cat.description,
+          };
+        });
       },
       error: (error: any) => {
         console.error('Error loading tax categories:', error);
         const message = extractApiErrorMessage(error);
-        this.toastService.error(message, 'Error al cargar categorías de impuestos');
+        this.toastService.error(
+          message,
+          'Error al cargar categorías de impuestos',
+        );
       },
     });
   }
@@ -346,6 +437,8 @@ export class ProductCreatePageComponent implements OnInit {
     const combinations = this.cartesian(validAttributes.map((a) => a.values));
 
     const basePrice = this.productForm.get('base_price')?.value || 0;
+    const baseCost = this.productForm.get('cost_price')?.value || 0;
+    const baseMargin = this.productForm.get('profit_margin')?.value || 0;
     const baseSku = this.productForm.get('sku')?.value || '';
 
     this.generatedVariants = combinations.map((combo) => {
@@ -371,6 +464,10 @@ export class ProductCreatePageComponent implements OnInit {
         name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : '',
         price: basePrice,
+        cost_price: baseCost,
+        profit_margin: baseMargin,
+        is_on_sale: false,
+        sale_price: 0,
         stock: 0,
         attributes,
       };
@@ -568,7 +665,12 @@ export class ProductCreatePageComponent implements OnInit {
       name: formValue.name,
       slug: formValue.slug || undefined,
       description: formValue.description || undefined,
+      cost_price: Number(formValue.cost_price),
+      profit_margin: Number(formValue.profit_margin),
       base_price: Number(formValue.base_price),
+      is_on_sale: !!formValue.is_on_sale,
+      sale_price: Number(formValue.sale_price),
+      available_for_ecommerce: !!formValue.available_for_ecommerce,
       sku: formValue.sku || undefined,
       stock_quantity: Number(formValue.stock_quantity),
       category_ids: formValue.category_ids || [],
@@ -584,6 +686,10 @@ export class ProductCreatePageComponent implements OnInit {
         sku: v.sku,
         name: v.name,
         price_override: Number(v.price),
+        cost_price: Number(v.cost_price),
+        profit_margin: Number(v.profit_margin),
+        is_on_sale: !!v.is_on_sale,
+        sale_price: Number(v.sale_price),
         stock_quantity: Number(v.stock),
         attributes: v.attributes,
       }));

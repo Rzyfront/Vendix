@@ -7,6 +7,8 @@ license: Apache-2.0
 metadata:
   author: vendix-bot
   version: "1.1"
+  scope: [root]
+  auto_invoke: "Creating API tests (Bruno)"
 ---
 
 ## When to Use

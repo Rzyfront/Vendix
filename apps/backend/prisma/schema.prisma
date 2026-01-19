@@ -608,6 +608,10 @@ model product_variants {
   sku                      String                     @db.VarChar(100)
   name                     String?                    @db.VarChar(255)
   price_override           Decimal?                   @db.Decimal(12, 2)
+  cost_price               Decimal?                   @db.Decimal(12, 2)
+  profit_margin            Decimal?                   @db.Decimal(5, 2)
+  is_on_sale               Boolean                    @default(false)
+  sale_price               Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
   attributes               Json?
   image_id                 Int?
@@ -642,6 +646,8 @@ model products {
   slug                     String                     @db.VarChar(255)
   description              String?
   base_price               Decimal                    @db.Decimal(12, 2)
+  cost_price               Decimal?                   @db.Decimal(12, 2)
+  profit_margin            Decimal?                   @db.Decimal(5, 2)
   sku                      String?                    @db.VarChar(100)
   stock_quantity           Int?                       @default(0)
   state                    product_state_enum         @default(inactive)
@@ -727,11 +733,13 @@ model reviews {
 model tax_categories {
   id                      Int                       @id @default(autoincrement())
   store_id                Int?
-  name                    String                    @unique @db.VarChar(100)
+  name                    String                    @db.VarChar(100)
   description             String?
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
+
+  @@unique([store_id, name], name: "store_id_name")
 }
 
 model tax_rates {

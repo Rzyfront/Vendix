@@ -18,36 +18,70 @@ import {
       [size]="'md'"
       title="Carga Masiva de Productos"
     >
-        <!-- Initial State: Instructions & Upload -->
-        <div *ngIf="!uploadResults" class="space-y-6">
-          <!-- Template Download Section -->
-          <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
-            <div class="flex items-start">
-              <app-icon
-                name="info"
-                [size]="20"
-                class="text-blue-500 mt-0.5 mr-3"
-              ></app-icon>
-              <div>
-                <h4 class="text-sm font-medium text-blue-900">
-                  Instrucciones
-                </h4>
-                <p class="text-sm text-blue-700 mt-1">
-                  Descarga la plantilla, llénala con tus productos y súbela a
-                  continuación (CSV o Excel). Asegúrate de no modificar los encabezados.
-                </p>
-                <button
-                  (click)="downloadTemplate()"
-                  class="mt-3 text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center"
+      <!-- Initial State: Instructions & Upload -->
+      <div *ngIf="!uploadResults" class="space-y-6">
+        <!-- Template Download Section -->
+        <div>
+          <h4 class="text-sm font-medium text-gray-700 mb-3">
+            1. Descarga una plantilla
+          </h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Plantilla Rápida -->
+            <div
+              class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+              (click)="downloadTemplate('quick')"
+            >
+              <div class="flex items-center mb-2">
+                <div
+                  class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors"
                 >
-                  <app-icon name="download" [size]="16" class="mr-1"></app-icon>
-                  Descargar plantilla CSV
-                </button>
+                  <app-icon name="check-circle" [size]="20"></app-icon>
+                </div>
+                <h4 class="font-bold text-indigo-900">Plantilla Rápida</h4>
+              </div>
+              <p class="text-xs text-indigo-700 mb-3 leading-relaxed h-12">
+                Solo campos indispensables: Nombre, SKU, Precio, Costo y Stock.
+              </p>
+              <div
+                class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800"
+              >
+                <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+                DESCARGAR EXCEL
+              </div>
+            </div>
+
+            <!-- Plantilla Completa -->
+            <div
+              class="border-2 border-teal-100 hover:border-teal-500 bg-teal-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+              (click)="downloadTemplate('complete')"
+            >
+              <div class="flex items-center mb-2">
+                <div
+                  class="p-2 bg-teal-100 rounded-full text-teal-600 mr-3 group-hover:bg-teal-600 group-hover:text-white transition-colors"
+                >
+                  <app-icon name="file-text" [size]="20"></app-icon>
+                </div>
+                <h4 class="font-bold text-teal-900">Plantilla Completa</h4>
+              </div>
+              <p class="text-xs text-teal-700 mb-3 leading-relaxed h-12">
+                Todos los datos: Descripción, Marca, Categorías, Peso, Ofertas,
+                etc.
+              </p>
+              <div
+                class="flex items-center text-xs font-bold text-teal-600 group-hover:text-teal-800"
+              >
+                <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+                DESCARGAR EXCEL
               </div>
             </div>
           </div>
-  
-          <!-- File Upload Section -->
+        </div>
+
+        <!-- File Upload Section -->
+        <div>
+          <h4 class="text-sm font-medium text-gray-700 mb-3">
+            2. Sube tu archivo completo
+          </h4>
           <div
             class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
             (dragover)="onDragOver($event)"
@@ -60,11 +94,11 @@ import {
             <input
               #fileInput
               type="file"
-              accept=".csv,.xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               class="hidden"
               (change)="onFileSelected($event)"
             />
-  
+
             <div *ngIf="!selectedFile">
               <app-icon
                 name="upload-cloud"
@@ -73,13 +107,13 @@ import {
                 [class.text-blue-500]="isDragging"
               ></app-icon>
               <p class="text-gray-900 font-medium">
-                Arrastra tu archivo CSV o Excel aquí
+                Arrastra tu archivo Excel (.xlsx) aquí
               </p>
               <p class="text-gray-500 text-sm mt-1">
                 o haz clic para seleccionar
               </p>
             </div>
-  
+
             <div *ngIf="selectedFile">
               <app-icon
                 name="file-text"
@@ -100,74 +134,105 @@ import {
               </button>
             </div>
           </div>
-  
-          <!-- Error Messages (Pre-upload) -->
-          <div *ngIf="uploadError" class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
-            <div class="font-medium flex items-center mb-1">
-               <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
-               Error en la carga
+        </div>
+
+        <!-- Error Messages (Pre-upload) -->
+        <div
+          *ngIf="uploadError"
+          class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm"
+        >
+          <div class="font-medium flex items-center mb-1">
+            <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
+            Error en la carga
+          </div>
+          {{ uploadError }}
+        </div>
+      </div>
+
+      <!-- Results View -->
+      <div *ngIf="uploadResults" class="space-y-6">
+        <div class="bg-white border rounded-lg overflow-hidden">
+          <div
+            class="bg-gray-50 p-4 border-b flex justify-between items-center"
+          >
+            <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
+            <span class="text-sm text-gray-500">
+              Procesados: {{ uploadResults.total_processed || 0 }}
+            </span>
+          </div>
+          <div class="p-4 grid grid-cols-2 gap-4">
+            <div class="bg-green-50 p-3 rounded border border-green-100">
+              <div class="text-sm text-green-600 font-medium">Exitosos</div>
+              <div class="text-2xl font-bold text-green-700">
+                {{ uploadResults.successful || 0 }}
+              </div>
             </div>
-            {{ uploadError }}
+            <div class="bg-red-50 p-3 rounded border border-red-100">
+              <div class="text-sm text-red-600 font-medium">Fallidos</div>
+              <div class="text-2xl font-bold text-red-700">
+                {{ uploadResults.failed || 0 }}
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Results View -->
-        <div *ngIf="uploadResults" class="space-y-6">
-           <div class="bg-white border rounded-lg overflow-hidden">
-              <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
-                 <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
-                 <span class="text-sm text-gray-500">
-                    Procesados: {{ uploadResults.total_processed || 0 }}
-                 </span>
-              </div>
-              <div class="p-4 grid grid-cols-2 gap-4">
-                 <div class="bg-green-50 p-3 rounded border border-green-100">
-                    <div class="text-sm text-green-600 font-medium">Exitosos</div>
-                    <div class="text-2xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
-                 </div>
-                 <div class="bg-red-50 p-3 rounded border border-red-100">
-                    <div class="text-sm text-red-600 font-medium">Fallidos</div>
-                    <div class="text-2xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
-                 </div>
-              </div>
-           </div>
-
-           <div *ngIf="uploadResults.failed > 0" class="border rounded-lg overflow-hidden">
-              <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
-                 <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
-                 Detalle de Errores
-              </div>
-              <div class="max-h-60 overflow-y-auto bg-white">
-                 <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
-                       <tr>
-                          <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Línea/Producto</th>
-                          <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
-                       </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                       <ng-container *ngFor="let result of uploadResults.results; let i = index">
-                          <tr *ngIf="result.status === 'error'">
-                             <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                                {{ result.product?.name || 'Producto ' + (i + 1) }}
-                             </td>
-                             <td class="px-4 py-2 text-sm text-red-600">
-                                {{ result.message }}
-                             </td>
-                          </tr>
-                       </ng-container>
-                       <!-- If errors list exists directly (from validation) -->
-                       <ng-container *ngIf="uploadResults.errors && !uploadResults.results">
-                          <tr *ngFor="let error of uploadResults.errors">
-                             <td class="px-4 py-2 text-sm text-gray-500">-</td>
-                             <td class="px-4 py-2 text-sm text-red-600">{{ error }}</td>
-                          </tr>
-                       </ng-container>
-                    </tbody>
-                 </table>
-              </div>
-           </div>
+        <div
+          *ngIf="uploadResults.failed > 0"
+          class="border rounded-lg overflow-hidden"
+        >
+          <div
+            class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center"
+          >
+            <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
+            Detalle de Errores
+          </div>
+          <div class="max-h-60 overflow-y-auto bg-white">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th
+                    scope="col"
+                    class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Línea/Producto
+                  </th>
+                  <th
+                    scope="col"
+                    class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Error
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <ng-container
+                  *ngFor="let result of uploadResults.results; let i = index"
+                >
+                  <tr *ngIf="result.status === 'error'">
+                    <td
+                      class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900"
+                    >
+                      {{ result.product?.name || 'Producto ' + (i + 1) }}
+                    </td>
+                    <td class="px-4 py-2 text-sm text-red-600">
+                      {{ result.message }}
+                    </td>
+                  </tr>
+                </ng-container>
+                <!-- If errors list exists directly (from validation) -->
+                <ng-container
+                  *ngIf="uploadResults.errors && !uploadResults.results"
+                >
+                  <tr *ngFor="let error of uploadResults.errors">
+                    <td class="px-4 py-2 text-sm text-gray-500">-</td>
+                    <td class="px-4 py-2 text-sm text-red-600">{{ error }}</td>
+                  </tr>
+                </ng-container>
+              </tbody>
+            </table>
+          </div>
         </div>
+      </div>
 
       <div
         slot="footer"
@@ -215,8 +280,8 @@ export class BulkUploadModalComponent {
 
   constructor(
     private productsService: ProductsService,
-    private toastService: ToastService
-  ) { }
+    private toastService: ToastService,
+  ) {}
 
   onCancel() {
     this.isOpenChange.emit(false);
@@ -231,14 +296,13 @@ export class BulkUploadModalComponent {
     this.uploadResults = null;
   }
 
-  downloadTemplate() {
-    this.productsService.getBulkUploadTemplate().subscribe({
-      next: (data) => {
-        const blob = new Blob([data], { type: 'text/csv' });
+  downloadTemplate(type: 'quick' | 'complete') {
+    this.productsService.getBulkUploadTemplate(type).subscribe({
+      next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = 'plantilla-productos.csv';
+        link.download = `plantilla-productos-${type}.xlsx`;
         link.click();
         window.URL.revokeObjectURL(url);
       },
@@ -281,23 +345,14 @@ export class BulkUploadModalComponent {
 
   handleFile(file: File) {
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
-    const allowedTypes = [
-      'text/csv',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel'
-    ];
-
     const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
-    const isValidType = allowedTypes.includes(file.type);
     const isValidExtension = allowedExtensions.includes(fileExtension);
-    // MIME types can be unreliable, trust extension if MIME fails or vice versa
-    if (!isValidType && !isValidExtension) {
-      // Just warn but let them try if they insist? No, block strictly for now as per prev issues.
-      // Actually, .csv mime type often varies (application/octet-stream etc), so extension check is important.
-      if (!isValidExtension) {
-        this.toastService.error('Por favor selecciona un archivo válido (CSV o Excel)');
-        return;
-      }
+
+    if (!isValidExtension) {
+      this.toastService.error(
+        'Por favor selecciona un archivo válido (.xlsx o .csv)',
+      );
+      return;
     }
     this.selectedFile = file;
     this.uploadError = null;
@@ -319,13 +374,13 @@ export class BulkUploadModalComponent {
     this.productsService.uploadBulkProducts(this.selectedFile).subscribe({
       next: (response: any) => {
         this.isUploading = false;
-
-        // Handle cases where response is wrapped in { success: ..., data: ... }
         const data = response.data || response;
 
         if (data.failed > 0 || !data.success) {
           this.uploadResults = data;
-          this.toastService.warning('La carga se completó con algunos errores.');
+          this.toastService.warning(
+            'La carga se completó con algunos errores.',
+          );
         } else {
           this.toastService.success('Productos cargados exitosamente');
           this.uploadComplete.emit();
@@ -334,8 +389,8 @@ export class BulkUploadModalComponent {
       },
       error: (error) => {
         this.isUploading = false;
-        this.uploadError = typeof error === 'string' ? error : 'Error al procesar el archivo';
-        // Check if error response contains detailed info (e.g. from 400 Bad Request)
+        this.uploadError =
+          typeof error === 'string' ? error : 'Error al procesar el archivo';
         if (error.error && error.error.details) {
           this.uploadResults = error.error.details;
         } else if (error.error && error.error.data) {

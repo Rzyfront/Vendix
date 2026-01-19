@@ -1,4 +1,9 @@
-import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
+import {
+  Module,
+  MiddlewareConsumer,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -24,7 +29,7 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
 
 @Module({
   imports: [
-    SecretsModule, // Load secrets from AWS before ConfigModule
+    SecretsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -33,18 +38,17 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
     PrismaModule,
     UsersModule,
     TestModule,
-    DomainsModule, // ✅ Módulo de dominios (público y privado)
-    PublicDomainsModule, // ✅ Módulo para resolución de dominios públicos
+    DomainsModule,
+    PublicDomainsModule,
     StorageModule,
-    AuditModule, // ✅ Importar AuditModule global (desde common)
-    DefaultPanelUIModule, // ✅ Importar DefaultPanelUIModule global (servicio centralizado de panel UI)
-    HelpersModule, // ✅ Importar HelpersModule global (utilidades para generación de dominios)
+    AuditModule,
+    DefaultPanelUIModule,
+    HelpersModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    RequestContextService, // ✅ Servicio de contexto con AsyncLocalStorage
-    DomainResolverMiddleware, // ✅ Middleware para resolver dominios en ecommerce
+    RequestContextService,
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
@@ -55,7 +59,7 @@ import { DomainResolverMiddleware } from './common/middleware/domain-resolver.mi
     },
     {
       provide: APP_INTERCEPTOR,
-      useClass: AuditInterceptor, // ✅ Registrar AuditInterceptor globalmente
+      useClass: AuditInterceptor,
     },
   ],
 })
@@ -63,6 +67,6 @@ export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
       .apply(DomainResolverMiddleware)
-      .forRoutes('ecommerce/(.*)', 'api/ecommerce/(.*)');
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
   }
 }

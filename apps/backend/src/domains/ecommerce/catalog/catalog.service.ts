@@ -179,13 +179,6 @@ export class CatalogService {
     const brands = await this.prisma.brands.findMany({
       where: {
         state: 'active',
-        products: {
-          some: {
-            state: 'active',
-            available_for_ecommerce: true,
-            // store_id se aplica automáticamente por EcommercePrismaService en products
-          },
-        },
       },
       orderBy: { name: 'asc' },
       select: {

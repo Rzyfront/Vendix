@@ -7,6 +7,8 @@ license: Apache-2.0
 metadata:
   author: vendix-arch
   version: "1.0"
+  scope: [root]
+  auto_invoke: "Understanding Public/Private Apps and Domains"
 ---
 
 ## When to Use
