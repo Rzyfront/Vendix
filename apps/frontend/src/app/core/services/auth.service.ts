@@ -166,7 +166,9 @@ export class AuthService {
   }
 
   // === MÉTODOS RESTAURADOS PARA LOS EFFECTS ===
-  registerOwner(registerData: RegisterOwnerDto): Observable<AuthResponse> {
+  registerOwner(
+    registerData: RegisterOwnerDto,
+  ): Observable<AuthResponse & { updatedEnvironment?: string }> {
     // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
     this.authFacade.clearAuthState(); // Limpiar estado de NgRx
     this.clearAllAuthData(); // Limpiar LocalStorage completamente
@@ -179,19 +181,52 @@ export class AuthService {
       localStorage.removeItem('vendix_app_config');
     }
 
-    console.log('🔐 Iniciando registro de owner con estado limpio y sin environment previo');
+    console.log(
+      '🔐 Iniciando registro de owner con estado limpio y sin environment previo',
+    );
 
     return this.http
       .post<AuthResponse>(`${this.API_URL}/register-owner`, registerData)
       .pipe(
-        tap((response) => {
-          if (response.success && response.data) {
-            const { access_token, refresh_token } = response.data;
-            if (typeof localStorage !== 'undefined') {
-              localStorage.setItem('access_token', access_token);
-              localStorage.setItem('refresh_token', refresh_token);
-            }
+        mergeMap(async (response: AuthResponse) => {
+          if (!response.success || !response.data) {
+            return response;
           }
+
+          const { user, user_settings, access_token, refresh_token } =
+            response.data;
+
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', refresh_token);
+          }
+
+          const decodedToken = this.decodeJwtToken(access_token);
+          // Los roles ahora vienen directamente como array de strings desde la API
+          user.roles = user.roles || [];
+
+          if (
+            !this.validateUserEnvironmentAccess(
+              user.roles || [],
+              (user_settings.config.app || '').toUpperCase(),
+            )
+          ) {
+            this.clearTokens();
+            throw new Error(
+              `Acceso denegado: Tu rol no permite acceso al entorno ${user_settings.config.app}.`,
+            );
+          }
+
+          return {
+            ...response,
+            data: {
+              ...response.data,
+              user,
+              user_settings,
+              permissions: decodedToken?.permissions || [],
+            },
+            updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
+          };
         }),
       );
   }
@@ -202,16 +237,45 @@ export class AuthService {
     });
   }
 
-  registerCustomer(registerData: any): Observable<AuthResponse> {
+  registerCustomer(
+    registerData: any,
+  ): Observable<AuthResponse & { updatedEnvironment?: string }> {
     // 🔒 LIMPIEZA DE SEGURIDAD: Eliminar cualquier residuo de sesión anterior antes de registrar
     this.checkAndCleanAuthResidues();
 
     console.log('🔐 Iniciando registro de customer con estado limpio');
 
-    return this.http.post<AuthResponse>(
-      `${this.API_URL}/register-customer`,
-      registerData,
-    );
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/register-customer`, registerData)
+      .pipe(
+        mergeMap(async (response: AuthResponse) => {
+          if (!response.success || !response.data) {
+            return response;
+          }
+
+          const { user, user_settings, access_token, refresh_token } =
+            response.data;
+
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', refresh_token);
+          }
+
+          const decodedToken = this.decodeJwtToken(access_token);
+          user.roles = user.roles || [];
+
+          return {
+            ...response,
+            data: {
+              ...response.data,
+              user,
+              user_settings,
+              permissions: decodedToken?.permissions || [],
+            },
+            updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
+          };
+        }),
+      );
   }
   refreshToken(): Observable<any> {
     const refreshToken = this.getRefreshToken();
@@ -256,7 +320,11 @@ export class AuthService {
         const config = settings?.config;
 
         // Backward compatibility: Transform old format to new format
-        if (config?.panel_ui && !config.panel_ui.ORG_ADMIN && !config.panel_ui.STORE_ADMIN) {
+        if (
+          config?.panel_ui &&
+          !config.panel_ui.ORG_ADMIN &&
+          !config.panel_ui.STORE_ADMIN
+        ) {
           // Old format detected - panel_ui is not nested by app type
           const appType = config.app || 'ORG_ADMIN';
 
@@ -265,13 +333,13 @@ export class AuthService {
             config: {
               ...config,
               panel_ui: {
-                [appType]: config.panel_ui
+                [appType]: config.panel_ui,
               },
               preferences: config.preferences || {
                 language: 'es',
-                theme: 'aura'
-              }
-            }
+                theme: 'aura',
+              },
+            },
           };
         }
 
@@ -283,14 +351,14 @@ export class AuthService {
               ...config,
               preferences: {
                 language: 'es',
-                theme: 'aura'
-              }
-            }
+                theme: 'aura',
+              },
+            },
           };
         }
 
         return response;
-      })
+      }),
     );
   }
 
@@ -298,7 +366,10 @@ export class AuthService {
     return this.http.put(`${this.API_URL}/settings`, data);
   }
 
-  changePassword(current_password: string, new_password: string): Observable<any> {
+  changePassword(
+    current_password: string,
+    new_password: string,
+  ): Observable<any> {
     return this.http.post(`${this.API_URL}/change-password`, {
       current_password,
       new_password,

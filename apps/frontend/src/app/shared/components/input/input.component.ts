@@ -52,8 +52,18 @@ export type InputSize = 'sm' | 'md' | 'lg';
           class="help-icon"
           [attr.data-tooltip]="tooltipText"
         >
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
           </svg>
         </span>
         <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
@@ -95,7 +105,9 @@ export type InputSize = 'sm' | 'md' | 'lg';
           type="button"
           class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
           (click)="togglePasswordVisibility()"
-          [attr.aria-label]="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+          [attr.aria-label]="
+            showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'
+          "
           tabindex="-1"
         >
           <!-- Eye icon (show password) -->
@@ -163,72 +175,74 @@ export type InputSize = 'sm' | 'md' | 'lg';
       </p>
     </div>
   `,
-  styles: [`
-    /* Hide number input spinners */
-    input[type="number"]::-webkit-outer-spin-button,
-    input[type="number"]::-webkit-inner-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-    input[type="number"] {
-      -moz-appearance: textfield;
-      appearance: textfield;
-    }
+  styles: [
+    `
+      /* Hide number input spinners */
+      input[type='number']::-webkit-outer-spin-button,
+      input[type='number']::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+      input[type='number'] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+      }
 
-    /* Tooltip help icon styles */
-    .label-with-tooltip {
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-    }
+      /* Tooltip help icon styles */
+      .label-with-tooltip {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
 
-    .help-icon {
-      color: var(--color-text-muted);
-      cursor: help;
-      position: relative;
-      display: inline-flex;
-      transition: color 0.2s ease;
-    }
+      .help-icon {
+        color: var(--color-text-muted);
+        cursor: help;
+        position: relative;
+        display: inline-flex;
+        transition: color 0.2s ease;
+      }
 
-    .help-icon:hover {
-      color: var(--color-warning);
-    }
+      .help-icon:hover {
+        color: var(--color-warning);
+      }
 
-    .help-icon[data-tooltip]:hover::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0.375rem 0.5rem;
-      background: var(--color-text-primary);
-      color: var(--color-surface);
-      font-size: var(--fs-xs);
-      border-radius: var(--radius-sm);
-      white-space: normal;
-      box-shadow: var(--shadow-md);
-      z-index: 50;
-      margin-bottom: 0.375rem;
-      pointer-events: none;
-      max-width: 300px;
-      width: max-content;
-      text-align: center;
-      line-height: 1.4;
-    }
+      .help-icon[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        border-radius: var(--radius-sm);
+        white-space: normal;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+        max-width: 300px;
+        width: max-content;
+        text-align: center;
+        line-height: 1.4;
+      }
 
-    .help-icon[data-tooltip]:hover::before {
-      content: '';
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      border: 4px solid transparent;
-      border-top-color: var(--color-text-primary);
-      margin-bottom: -0.125rem;
-      z-index: 50;
-      pointer-events: none;
-    }
-  `],
+      .help-icon[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
+      }
+    `,
+  ],
 })
 export class InputComponent implements ControlValueAccessor {
   @Input() label?: string;
@@ -266,8 +280,8 @@ export class InputComponent implements ControlValueAccessor {
   showPassword = false;
 
   // ControlValueAccessor implementation
-  private onChange = (value: string) => { };
-  private onTouched = () => { };
+  private onChange = (value: string) => {};
+  private onTouched = () => {};
 
   writeValue(value: string): void {
     this.value = value || '';
@@ -364,6 +378,10 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   getValidationError(): string | null {
+    if (this.error) {
+      return this.error;
+    }
+
     if (!this.control || !this.control.errors || !this.control.touched) {
       return null;
     }
@@ -377,6 +395,9 @@ export class InputComponent implements ControlValueAccessor {
     }
     if (errors['maxlength']) {
       return `No puede superar ${errors['maxlength'].requiredLength} caracteres.`;
+    }
+    if (errors['minlength']) {
+      return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres.`;
     }
     if (errors['minLength']) {
       return `La contraseña debe tener al menos ${errors['minLength'].requiredLength} caracteres.`;
