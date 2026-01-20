@@ -53,6 +53,7 @@ model users {
   user_settings             user_settings?
   carts                     carts[]
   wishlists                 wishlists[]
+  orders                    orders[]
   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
 
@@ -505,6 +506,7 @@ model orders {
   addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  users                                           users            @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
 
@@ -880,6 +882,7 @@ model inventory_batches {
   products                 products                   @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants         product_variants?          @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   inventory_serial_numbers inventory_serial_numbers[]
+  inventory_adjustments    inventory_adjustments[]
 
   @@unique([product_id, batch_number])
 }
@@ -956,6 +959,7 @@ model inventory_adjustments {
   product_id          Int
   product_variant_id  Int?
   location_id         Int
+  batch_id            Int?
   adjustment_type     adjustment_type_enum
   quantity_before     Int
   quantity_after      Int
@@ -966,9 +970,10 @@ model inventory_adjustments {
   created_by_user_id  Int?
   approved_at         DateTime?            @db.Timestamp(6)
   created_at          DateTime?            @default(now()) @db.Timestamp(6)
-  users               users?               @relation("inventory_adjustments_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users1              users?               @relation("inventory_adjustments_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users_inventory_adjustments_approved_by_user_idTousers users? @relation("inventory_adjustments_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users_inventory_adjustments_created_by_user_idTousers  users? @relation("inventory_adjustments_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   inventory_locations inventory_locations  @relation(fields: [location_id], references: [id], onDelete: Cascade)
+  inventory_batches   inventory_batches?   @relation(fields: [batch_id], references: [id], onDelete: SetNull)
   organizations       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   products            products             @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants    product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
@@ -976,6 +981,7 @@ model inventory_adjustments {
   @@index([organization_id, location_id, adjustment_type])
   @@index([organization_id, created_by_user_id, created_at])
   @@index([organization_id, approved_by_user_id, approved_at])
+  @@index([batch_id])
 }
 
 model stock_reservations {

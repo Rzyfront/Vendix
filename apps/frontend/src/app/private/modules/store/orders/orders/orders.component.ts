@@ -1,4 +1,10 @@
-import { Component, ViewChild, OnInit, OnDestroy, AfterViewInit } from '@angular/core';
+import {
+  Component,
+  ViewChild,
+  OnInit,
+  OnDestroy,
+  AfterViewInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -6,7 +12,6 @@ import { Subject, takeUntil } from 'rxjs';
 
 // Import components
 import { OrdersListComponent } from '../components/orders-list';
-import { OrderDetailsComponent } from '../components/order-details';
 import { OrderEmptyStateComponent } from '../components/order-empty-state';
 import { OrderFilterDropdownComponent } from '../components/order-filter-dropdown';
 import { OrderStatsComponent } from '../components/order-stats';
@@ -33,7 +38,6 @@ import { StoreOrdersService } from '../services/store-orders.service';
     CommonModule,
     FormsModule,
     OrdersListComponent,
-    OrderDetailsComponent,
     OrderEmptyStateComponent,
     OrderFilterDropdownComponent,
     OrderStatsComponent,
@@ -45,9 +49,6 @@ import { StoreOrdersService } from '../services/store-orders.service';
   styleUrls: ['./orders.component.css'],
 })
 export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
-  selectedOrderId: string | null = null;
-  showOrderDetails = false;
-
   @ViewChild(OrdersListComponent) ordersList!: OrdersListComponent;
 
   // Stats data
@@ -90,7 +91,7 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
   constructor(
     private router: Router,
     private ordersService: StoreOrdersService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadOrderStats();
@@ -129,7 +130,6 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
       });
   }
 
-
   get hasFilters(): boolean {
     return !!(
       this.searchTerm ||
@@ -158,21 +158,9 @@ export class OrdersComponent implements OnInit, AfterViewInit, OnDestroy {
     this.router.navigate(['/admin/pos']);
   }
 
-  // Show order details modal
+  // Navigate to order details page
   viewOrderDetails(orderId: string): void {
-    this.selectedOrderId = orderId;
-    this.showOrderDetails = true;
-  }
-
-  // Close order details modal
-  closeOrderDetails(): void {
-    this.showOrderDetails = false;
-    this.selectedOrderId = null;
-  }
-
-  // Handle order update from details modal
-  onOrderUpdated(updatedOrder: Order): void {
-    console.log('Order updated:', updatedOrder);
+    this.router.navigate(['/admin/orders', orderId]);
   }
 
   // Search functionality

@@ -27,7 +27,7 @@ export class PaymentsService {
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
     private stockLevelManager: StockLevelManager,
-  ) { }
+  ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -233,7 +233,7 @@ export class PaymentsService {
       // Redundant if store_id == context.store_id, but harmless.
       // If storeId != context.store_id, query returns empty (correct).
       where.orders = {
-        store_id: storeId
+        store_id: storeId,
       };
     } else {
       // Ensure we are filtering by orders relevant to this context
@@ -437,17 +437,17 @@ export class PaymentsService {
           },
           payment: payment
             ? {
-              id: payment.id,
-              amount: payment.amount,
-              payment_method:
-                payment.store_payment_method?.display_name ||
-                payment.store_payment_method?.system_payment_method
-                  ?.display_name ||
-                'Unknown',
-              status: payment.status,
-              transaction_id: payment.transaction_id,
-              change: payment.change,
-            }
+                id: payment.id,
+                amount: payment.amount,
+                payment_method:
+                  payment.store_payment_method?.display_name ||
+                  payment.store_payment_method?.system_payment_method
+                    ?.display_name ||
+                  'Unknown',
+                status: payment.status,
+                transaction_id: payment.transaction_id,
+                change: payment.change,
+              }
             : undefined,
         };
       });
@@ -489,8 +489,6 @@ export class PaymentsService {
             total_price: item.total_price,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
-            cost: item.cost,
-            notes: item.notes,
           };
 
           if (item.product_id) {
@@ -533,12 +531,17 @@ export class PaymentsService {
 
         return order;
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
           const target = error.meta?.target as string[];
           if (Array.isArray(target) && target.includes('order_number')) {
             retries--;
             if (retries === 0) {
-              throw new ConflictException('Failed to generate unique POS order number after multiple attempts');
+              throw new ConflictException(
+                'Failed to generate unique POS order number after multiple attempts',
+              );
             }
             // Retry with new order number
             continue;

@@ -4,11 +4,18 @@
     <div class="header-container">
       <div class="header-left">
         <!-- Logo -->
-        <a routerLink="/products" class="logo">
+        <a routerLink="/" class="logo">
           @if (store_logo) {
             <img [src]="store_logo" [alt]="store_name" class="logo-img" />
           } @else {
-            <span class="logo-text">{{ store_name }}</span>
+            <div class="logo-fallback">
+              <app-icon
+                name="shopping-bag"
+                [size]="24"
+                class="logo-icon"
+              ></app-icon>
+              <span class="logo-text">{{ store_name }}</span>
+            </div>
           }
         </a>
 
@@ -31,14 +38,26 @@
 
       <!-- Actions -->
       <div class="header-actions">
-        <!-- Wishlist -->
-        <button class="action-btn" (click)="goToWishlist()" title="Favoritos">
-          <i class="pi pi-heart"></i>
-        </button>
+        <!-- Icons visible only if authenticated -->
+        @if (is_authenticated$ | async) {
+          <!-- Wishlist -->
+          <button class="action-btn" (click)="goToWishlist()" title="Favoritos">
+            <app-icon name="heart" [size]="20"></app-icon>
+          </button>
+
+          <!-- User Profile Icon -->
+          <button class="action-btn" (click)="goToAccount()" title="Mi Perfil">
+            <app-icon name="user-circle" [size]="20"></app-icon>
+          </button>
+        }
 
         <!-- Cart -->
-        <button class="action-btn cart-btn" (click)="goToCart()">
-          <i class="pi pi-shopping-cart"></i>
+        <button
+          class="action-btn cart-btn"
+          (click)="goToCart()"
+          title="Carrito"
+        >
+          <app-icon name="shopping-cart" [size]="20"></app-icon>
           @if (cart_badge$ | async; as badge) {
             @if (badge.show) {
               <span class="cart-badge">{{ badge.count }}</span>
@@ -46,37 +65,42 @@
           }
         </button>
 
-        <!-- User Menu -->
+        <!-- User Menu (Guest or Authenticated Dropdown) -->
         <div class="user-menu-container">
           <button class="user-btn" (click)="toggleUserMenu()">
-            <i class="pi pi-user"></i>
             @if (is_authenticated$ | async) {
               <span class="user-name">{{ user_name$ | async }}</span>
+              <app-icon
+                name="chevron-down"
+                [size]="12"
+                class="chevron-icon"
+              ></app-icon>
+            } @else {
+              <app-icon name="user" [size]="20"></app-icon>
             }
-            <i class="pi pi-chevron-down"></i>
           </button>
           @if (show_user_menu) {
             <div class="user-dropdown">
               @if (is_authenticated$ | async) {
                 <a (click)="goToAccount()">
-                  <i class="pi pi-user"></i> Ver Perfil
+                  <app-icon name="user" [size]="16"></app-icon> Ver Perfil
                 </a>
                 <a (click)="goToWishlist()">
-                  <i class="pi pi-heart"></i> Favoritos
+                  <app-icon name="heart" [size]="16"></app-icon> Favoritos
                 </a>
                 <a (click)="goToOrders()">
-                  <i class="pi pi-list"></i> Ordenes
+                  <app-icon name="list" [size]="16"></app-icon> Ordenes
                 </a>
                 <hr />
                 <a (click)="logout()" class="logout-link">
-                  <i class="pi pi-sign-out"></i> Cerrar Sesión
+                  <app-icon name="logout" [size]="16"></app-icon> Cerrar Sesión
                 </a>
               } @else {
                 <a (click)="login()">
-                  <i class="pi pi-sign-in"></i> Iniciar Sesión
+                  <app-icon name="log-in" [size]="16"></app-icon> Iniciar Sesión
                 </a>
                 <a (click)="register()">
-                  <i class="pi pi-user-plus"></i> Registrarse
+                  <app-icon name="user-plus" [size]="16"></app-icon> Registrarse
                 </a>
               }
             </div>
@@ -85,7 +109,7 @@
 
         <!-- Mobile Menu Toggle -->
         <button class="mobile-menu-btn" (click)="toggleMobileMenu()">
-          <i class="pi pi-bars"></i>
+          <app-icon name="menu" [size]="24"></app-icon>
         </button>
       </div>
     </div>

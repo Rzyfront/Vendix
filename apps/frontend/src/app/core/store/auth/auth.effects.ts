@@ -95,8 +95,8 @@ export class AuthEffects {
               ConfigActions.initializeAppSuccess({ config: newConfig }),
             );
 
-            // 3. Esperar un tick para que el router procese las nuevas rutas
-            await new Promise((resolve) => setTimeout(resolve, 0));
+            // 3. Esperar para que el router procese las nuevas rutas
+            await new Promise((resolve) => setTimeout(resolve, 150));
 
             // 4. Calcular la ruta de destino usando la NUEVA configuración
             const targetRoute = this.navigationService.redirectAfterLogin(

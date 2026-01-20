@@ -19,6 +19,7 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
+  ToastService,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
@@ -48,7 +49,6 @@ import { Observable, Subject, takeUntil } from 'rxjs';
             user.last_name
           : ''
       "
-      
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -176,13 +176,13 @@ import { Observable, Subject, takeUntil } from 'rxjs';
                   </p>
                 </div>
                 <app-button
-                  variant="primary"
+                  [variant]="user?.email_verified ? 'success' : 'primary'"
                   size="sm"
                   (clicked)="verifyEmail()"
                   [disabled]="isUpdating || !!user?.email_verified"
                 >
                   <app-icon
-                    name="mail-check"
+                    [name]="user?.email_verified ? 'check' : 'mail-check'"
                     class="w-4 h-4"
                     slot="icon"
                   ></app-icon>
@@ -293,10 +293,11 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
   UserState = UserState;
   private destroy$ = new Subject<void>();
 
-  constructor(
-    private fb: FormBuilder,
-    private usersService: UsersService,
-  ) {
+  private fb = inject(FormBuilder);
+  private usersService = inject(UsersService);
+  private toastService = inject(ToastService);
+
+  constructor() {
     this.userForm = this.fb.group({
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
@@ -363,11 +364,13 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.isUpdating = false;
+          this.toastService.success('Usuario actualizado exitosamente');
           this.onUserUpdated.emit();
           this.isOpenChange.emit(false);
         },
         error: (error: any) => {
           this.isUpdating = false;
+          this.toastService.error('Error al actualizar el usuario');
           console.error('Error updating user:', error);
         },
       });
@@ -381,12 +384,16 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       .verifyUserEmail(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: (updatedUser: User) => {
           this.isUpdating = false;
+          this.user = updatedUser;
+          this.userForm.patchValue({ state: updatedUser.state });
+          this.toastService.success('Email verificado exitosamente');
           this.onUserUpdated.emit();
         },
         error: (error: any) => {
           this.isUpdating = false;
+          this.toastService.error('Error al verificar el email');
           console.error('Error verifying email:', error);
         },
       });
@@ -402,12 +409,17 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       .toggleUser2FA(this.user.id, newState)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: (updatedUser: User) => {
           this.isUpdating = false;
+          this.user = updatedUser;
+          this.toastService.success(
+            `2FA ${newState ? 'activado' : 'desactivado'} exitosamente`,
+          );
           this.onUserUpdated.emit();
         },
         error: (error: any) => {
           this.isUpdating = false;
+          this.toastService.error('Error al cambiar estado de 2FA');
           console.error('Error toggling 2FA:', error);
         },
       });
@@ -421,12 +433,15 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       .unlockUser(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
+        next: (updatedUser: User) => {
           this.isUpdating = false;
+          this.user = updatedUser;
+          this.toastService.success('Usuario desbloqueado exitosamente');
           this.onUserUpdated.emit();
         },
         error: (error: any) => {
           this.isUpdating = false;
+          this.toastService.error('Error al desbloquear el usuario');
           console.error('Error unlocking user:', error);
         },
       });

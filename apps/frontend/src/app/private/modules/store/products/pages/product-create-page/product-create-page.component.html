@@ -374,6 +374,11 @@
                     <div class="flex items-center justify-between mb-4 flex-none">
                         <h2 class="text-lg font-semibold text-gray-900">Inventario / Stock</h2>
                         <div class="flex gap-2">
+                            <button type="button" (click)="goToPurchase()"
+                                class="text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
+                                <app-icon name="cart" size="14"></app-icon>
+                                Iniciar Inventario
+                            </button>
                             <button *ngIf="isEditMode" type="button" (click)="openAdjustmentModal()"
                                 class="text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors shadow-sm">
                                 <app-icon name="sliders" size="14"></app-icon>
@@ -429,8 +434,7 @@
                 </div>
             </div>
         </div>
-
-        <!-- Variants Section (Full Width) -->
+    <!-- Variants Section (Full Width) -->
         <div class="bg-white rounded-xl border border-gray-200 p-2 md:p-4 shadow-sm">
             <div class="flex items-center justify-between mb-4">
                 <div>

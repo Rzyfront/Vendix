@@ -189,24 +189,26 @@ import {
                     Cantidad
                   </th>
                   <th class="px-3 py-2 text-right font-medium text-gray-500">
-                    Costo
+                    Compra
+                  </th>
+                  <th class="px-3 py-2 text-right font-medium text-gray-500">
+                    Venta
                   </th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <tr *ngFor="let item of parsedData.slice(0, 5)">
                   <td class="px-3 py-2 text-gray-900">
-                    {{ item['name'] || item['Nombre'] || '-' }}
+                    {{ item['name'] || '-' }}
                   </td>
                   <td class="px-3 py-2 text-right text-gray-700">
-                    {{
-                      item['quantity'] || item['qty'] || item['cantidad'] || 0
-                    }}
+                    {{ item['quantity'] || 0 }}
                   </td>
                   <td class="px-3 py-2 text-right text-gray-700">
-                    {{
-                      item['unit_cost'] || item['costo'] || item['cost'] || 0
-                    }}
+                    {{ item['cost_price'] | currency }}
+                  </td>
+                  <td class="px-3 py-2 text-right text-gray-700">
+                    {{ item['base_price'] | currency }}
                   </td>
                 </tr>
               </tbody>
@@ -342,26 +344,53 @@ export class PopBulkDataModalComponent {
             // Claves en español de la plantilla oficial
             const name = item['Nombre'] || item['name'];
             const sku = item['SKU'] || item['sku'];
+
             // En POP usamos 'unit_cost' y 'quantity'
             const cost = parseFloat(
-              item['Costo'] || item['cost_price'] || item['unit_cost'] || 0,
+              item['Precio Compra'] ||
+                item['Costo'] ||
+                item['cost_price'] ||
+                item['unit_cost'] ||
+                0,
             );
-            // 'Cantidad Inicial' es para carga de producto, 'Cantidad' es genérico. Aceptamos ambos.
             const qty = parseFloat(
               item['Cantidad'] ||
                 item['Cantidad Inicial'] ||
                 item['stock_quantity'] ||
                 item['quantity'] ||
+                item['qty'] ||
                 0,
             );
 
-            // Preservar otros campos para creación de producto si es 'complete'
+            const base_price = parseFloat(
+              item['Precio Venta'] || item['base_price'] || 0,
+            );
+            const profit_margin = parseFloat(
+              item['Margen'] || item['profit_margin'] || 0,
+            );
+            const description = item['Descripción'] || item['description'];
+            const brand_id = item['Marca'] || item['brand_id'];
+            const category_ids = item['Categorías'] || item['category_ids'];
+            const state = item['Estado'] || item['state'];
+            const available_for_ecommerce =
+              item['Disponible Ecommerce'] || item['available_for_ecommerce'];
+            const weight = parseFloat(item['Peso'] || item['weight'] || 0);
+
             return {
-              ...item,
               name,
               sku,
               unit_cost: isNaN(cost) ? 0 : cost,
               quantity: isNaN(qty) ? 0 : qty,
+              cost_price: isNaN(cost) ? 0 : cost,
+              stock_quantity: isNaN(qty) ? 0 : qty,
+              base_price: isNaN(base_price) ? 0 : base_price,
+              profit_margin: isNaN(profit_margin) ? 0 : profit_margin,
+              description,
+              brand_id,
+              category_ids,
+              state,
+              available_for_ecommerce,
+              weight: isNaN(weight) ? 0 : weight,
             };
           })
           .filter((item) => item.name || item.sku);

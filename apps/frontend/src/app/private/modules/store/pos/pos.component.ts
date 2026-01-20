@@ -63,12 +63,12 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
           >
             <div class="flex items-center gap-3">
               <div
-                class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-lg shadow-primary-600/20"
+                class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center"
               >
                 <app-icon
-                  name="shopping-cart"
+                  name="shopping-bag"
                   [size]="24"
-                  class="text-white"
+                  class="text-primary"
                 ></app-icon>
               </div>
               <div class="flex flex-col">
@@ -76,7 +76,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                   Vendix POS
                 </h1>
                 <span class="text-xs text-text-secondary font-medium">
-                  Point of Sale
+                  Punto de venta
                 </span>
               </div>
             </div>
@@ -268,7 +268,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.setupSubscriptions();

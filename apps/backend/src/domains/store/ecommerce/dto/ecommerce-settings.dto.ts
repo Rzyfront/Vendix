@@ -10,7 +10,7 @@ import {
   MaxLength,
   ValidateNested,
   IsInt,
-  Min
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -19,17 +19,26 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
  * DTO para las configuraciones generales de e-commerce
  */
 export class EcommerceGeneralDto {
-  @ApiPropertyOptional({ example: 'COP', description: 'Currency code (ISO 4217)' })
+  @ApiPropertyOptional({
+    example: 'COP',
+    description: 'Currency code (ISO 4217)',
+  })
   @IsOptional()
   @IsString()
   currency?: string;
 
-  @ApiPropertyOptional({ example: 'es-CO', description: 'Locale code (BCP 47)' })
+  @ApiPropertyOptional({
+    example: 'es-CO',
+    description: 'Locale code (BCP 47)',
+  })
   @IsOptional()
   @IsString()
   locale?: string;
 
-  @ApiPropertyOptional({ example: 'America/Bogota', description: 'Timezone (IANA)' })
+  @ApiPropertyOptional({
+    example: 'America/Bogota',
+    description: 'Timezone (IANA)',
+  })
   @IsOptional()
   @IsString()
   timezone?: string;
@@ -78,7 +87,10 @@ export class EcommerceCatalogDto {
   @IsNumber()
   products_per_page?: number;
 
-  @ApiPropertyOptional({ example: false, description: 'Show out of stock products' })
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Show out of stock products',
+  })
   @IsOptional()
   @IsBoolean()
   show_out_of_stock?: boolean;
@@ -143,7 +155,10 @@ export class EcommerceCheckoutDto {
   @IsBoolean()
   guest_email_required?: boolean;
 
-  @ApiPropertyOptional({ example: true, description: 'Create account after order' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Create account after order',
+  })
   @IsOptional()
   @IsBoolean()
   create_account_after_order?: boolean;
@@ -153,7 +168,10 @@ export class EcommerceCheckoutDto {
   @IsBoolean()
   terms_required?: boolean;
 
-  @ApiPropertyOptional({ example: true, description: 'Guest newsletter opt-in' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Guest newsletter opt-in',
+  })
   @IsOptional()
   @IsBoolean()
   guest_newsletter_opt_in?: boolean;
@@ -168,12 +186,18 @@ export class EcommerceShippingDto {
   @IsNumber()
   free_shipping_threshold?: number | null;
 
-  @ApiPropertyOptional({ example: true, description: 'Calculate tax before shipping' })
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Calculate tax before shipping',
+  })
   @IsOptional()
   @IsBoolean()
   calculate_tax_before_shipping?: boolean;
 
-  @ApiPropertyOptional({ example: false, description: 'Multiple shipping addresses' })
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Multiple shipping addresses',
+  })
   @IsOptional()
   @IsBoolean()
   multiple_shipping_addresses?: boolean;
@@ -204,28 +228,40 @@ export class EcommerceWishlistDto {
  * Contiene todas las secciones de configuración
  */
 export class EcommerceSettingsDto {
-  @ApiPropertyOptional({ example: 'STORE_ECOMMERCE', description: 'App type identifier' })
+  @ApiPropertyOptional({
+    example: 'STORE_ECOMMERCE',
+    description: 'App type identifier',
+  })
   @IsOptional()
   @IsString()
   @IsIn(['STORE_ECOMMERCE'])
   app?: string;
 
   // Configuración General
-  @ApiPropertyOptional({ description: 'General settings (currency, locale, timezone)', type: EcommerceGeneralDto })
+  @ApiPropertyOptional({
+    description: 'General settings (currency, locale, timezone)',
+    type: EcommerceGeneralDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceGeneralDto)
   general?: EcommerceGeneralDto;
 
   // Slider
-  @ApiPropertyOptional({ description: 'Slider configuration with photos', type: EcommerceSliderDto })
+  @ApiPropertyOptional({
+    description: 'Slider configuration with photos',
+    type: EcommerceSliderDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceSliderDto)
   slider?: EcommerceSliderDto;
 
   // Catálogo
-  @ApiPropertyOptional({ description: 'Catalog settings', type: EcommerceCatalogDto })
+  @ApiPropertyOptional({
+    description: 'Catalog settings',
+    type: EcommerceCatalogDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceCatalogDto)
@@ -239,25 +275,42 @@ export class EcommerceSettingsDto {
   cart?: EcommerceCartDto;
 
   // Checkout
-  @ApiPropertyOptional({ description: 'Checkout settings', type: EcommerceCheckoutDto })
+  @ApiPropertyOptional({
+    description: 'Checkout settings',
+    type: EcommerceCheckoutDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceCheckoutDto)
   checkout?: EcommerceCheckoutDto;
 
   // Envíos
-  @ApiPropertyOptional({ description: 'Shipping settings', type: EcommerceShippingDto })
+  @ApiPropertyOptional({
+    description: 'Shipping settings',
+    type: EcommerceShippingDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceShippingDto)
   shipping?: EcommerceShippingDto;
 
   // Lista de deseos
-  @ApiPropertyOptional({ description: 'Wishlist settings', type: EcommerceWishlistDto })
+  @ApiPropertyOptional({
+    description: 'Wishlist settings',
+    type: EcommerceWishlistDto,
+  })
   @IsOptional()
   @ValidateNested()
   @Type(() => EcommerceWishlistDto)
   wishlist?: EcommerceWishlistDto;
+
+  // Branding
+  @ApiPropertyOptional({
+    description: 'Branding settings (colors, logo, theme)',
+  })
+  @IsOptional()
+  @IsObject()
+  branding?: any;
 }
 
 export class UpdateEcommerceSettingsDto {

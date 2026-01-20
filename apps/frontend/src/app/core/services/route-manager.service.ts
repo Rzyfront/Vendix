@@ -5,7 +5,6 @@ import { takeUntil, tap } from 'rxjs/operators';
 import { ReplaySubject, Subject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
-import { NotFoundGuard } from '../guards/not-found.guard';
 
 @Injectable({
   providedIn: 'root',
@@ -18,7 +17,24 @@ export class RouteManagerService implements OnDestroy {
   private routesConfigured = new ReplaySubject<boolean>(1);
   public routesConfigured$ = this.routesConfigured.asObservable();
 
+  private initialized = false;
+
   constructor() {
+    // Initialize the route manager
+    this.init();
+  }
+
+  /**
+   * Initialize the route manager and start listening for configuration changes
+   */
+  init(): void {
+    // Prevenir doble inicialización
+    if (this.initialized) {
+      return;
+    }
+    this.initialized = true;
+
+    // Listen for app initialization SUCCESS
     this.actions$
       .pipe(
         ofType(ConfigActions.initializeAppSuccess),
@@ -26,22 +42,54 @@ export class RouteManagerService implements OnDestroy {
         takeUntil(this.destroy$),
       )
       .subscribe();
+
+    // Listen for app initialization FAILURE
+    this.actions$
+      .pipe(
+        ofType(ConfigActions.initializeAppFailure),
+        tap(({ error }) => {
+          console.error('[RouteManager] App initialization failed:', error);
+          // Usar rutas de fallback para no bloquear la app
+          this.router.resetConfig(this.getFallbackRoutes());
+          this.routesConfigured.next(true);
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe();
   }
 
-  private configureDynamicRoutes(appConfig: AppConfig): void {
+  /**
+   * Configure dynamic routes based on the provided app configuration.
+   * Public method to allow manual reconfiguration (e.g., during environment switch).
+   */
+  public configureDynamicRoutes(appConfig: AppConfig): void {
+    // Si no tenemos config válida, fallback inmediato
     if (!appConfig || !appConfig.routes) {
       console.error('[RouteManager] Invalid app config or routes.');
       this.router.resetConfig(this.getFallbackRoutes());
-      this.routesConfigured.next(true); // Notificar incluso en caso de error para no bloquear la app
+      this.routesConfigured.next(true);
       return;
     }
 
     const finalRoutes = this.buildFinalRoutes(appConfig);
-    this.router.resetConfig(finalRoutes);
 
-    // Notificar que las rutas están listas
-    this.routesConfigured.next(true);
+    // Si es la inicialización (la app no está lista), hacerlo síncrono
+    // para no romper el APP_INITIALIZER
+    if (!this.initialized_complete) {
+      this.router.resetConfig(finalRoutes);
+      this.initialized_complete = true;
+      this.routesConfigured.next(true);
+    } else {
+      // Si es un cambio en caliente (switch de entorno), poner loading y usar delay para fluidez
+      this.routesConfigured.next(false);
+      setTimeout(() => {
+        this.router.resetConfig(finalRoutes);
+        this.routesConfigured.next(true);
+      }, 100);
+    }
   }
+
+  private initialized_complete = false;
 
   private buildFinalRoutes(appConfig: AppConfig): Routes {
     const staticAuthRoutes = this.getStaticAuthRoutes();
@@ -50,13 +98,13 @@ export class RouteManagerService implements OnDestroy {
     return [
       ...staticAuthRoutes,
       ...dynamicAppRoutes,
+      // Catch-all route: redirect to home and show toast via component
       {
         path: '**',
-        canActivate: [NotFoundGuard],
         loadComponent: () =>
           import(
-            '../../shared/components/development-placeholder/development-placeholder.component'
-          ).then((c) => c.DevelopmentPlaceholderComponent),
+            '../../shared/components/not-found-redirect/not-found-redirect.component'
+          ).then((c) => c.NotFoundRedirectComponent),
       },
     ];
   }
@@ -108,6 +156,7 @@ export class RouteManagerService implements OnDestroy {
 
   private getFallbackRoutes(): Routes {
     return [
+      ...this.getStaticAuthRoutes(),
       {
         path: '',
         loadComponent: () =>
@@ -118,6 +167,16 @@ export class RouteManagerService implements OnDestroy {
       },
       { path: '**', redirectTo: '' },
     ];
+  }
+
+  /**
+   * Configure fallback routes when initialization fails or times out.
+   * This is called by APP_INITIALIZER when there's a timeout.
+   */
+  configureFallbackRoutes(): void {
+    console.warn('[RouteManager] Configuring fallback routes due to timeout');
+    this.router.resetConfig(this.getFallbackRoutes());
+    this.routesConfigured.next(true);
   }
 
   ngOnDestroy() {

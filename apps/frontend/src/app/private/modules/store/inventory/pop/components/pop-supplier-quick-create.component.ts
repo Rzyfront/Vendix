@@ -47,8 +47,12 @@ import { SuppliersService } from '../../services/suppliers.service';
       subtitle="Agrega un nuevo proveedor sin salir del punto de compra"
       (close)="onClose()"
     >
-      <form [formGroup]="supplierForm" (ngSubmit)="onSubmit()" class="mt-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <form
+        [formGroup]="supplierForm"
+        (ngSubmit)="onSubmit()"
+        class="mt-4 h-full flex flex-col"
+      >
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
           <!-- Name -->
           <div class="md:col-span-2">
             <app-input

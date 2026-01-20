@@ -32,12 +32,14 @@ export class NavigationService {
         return '/super-admin';
       case AppEnvironment.ORG_LANDING:
         return '/';
+      case AppEnvironment.STORE_LANDING:
+        return '/';
       case AppEnvironment.ORG_ADMIN:
         return '/admin';
       case AppEnvironment.STORE_ADMIN:
         return '/admin';
       case AppEnvironment.STORE_ECOMMERCE:
-        return '/shop';
+        return '/';
       default:
         return '/';
     }

@@ -30,15 +30,17 @@ export class ProductsBulkService {
   private readonly HEADER_MAP = {
     Nombre: 'name',
     SKU: 'sku',
-    'Precio Base': 'base_price',
-    Costo: 'cost_price',
+    'Precio Venta': 'base_price',
+    'Precio Compra': 'cost_price',
+    Margen: 'profit_margin',
     'Cantidad Inicial': 'stock_quantity',
     Descripción: 'description',
-    Categorías: 'category_ids', // Special handling
-    Marca: 'brand_id', // Special handling
+    Categorías: 'category_ids',
+    Marca: 'brand_id',
+    Estado: 'state',
+    'Disponible Ecommerce': 'available_for_ecommerce',
     'En Oferta': 'is_on_sale',
     'Precio Oferta': 'sale_price',
-    'Disponible Ecommerce': 'available_for_ecommerce', // Not directly in DTO but used in logic? mapped to something?
     Peso: 'weight',
   };
 
@@ -59,13 +61,19 @@ export class ProductsBulkService {
     let exampleData: any[] = [];
 
     if (type === 'quick') {
-      headers = ['Nombre', 'SKU', 'Precio Base', 'Costo', 'Cantidad Inicial'];
+      headers = [
+        'Nombre',
+        'SKU',
+        'Precio Venta',
+        'Precio Compra',
+        'Cantidad Inicial',
+      ];
       exampleData = [
         {
           Nombre: 'Camiseta Básica Blanca',
           SKU: 'CAM-BAS-BLA-001',
-          'Precio Base': 15000,
-          Costo: 8000,
+          'Precio Venta': 15000,
+          'Precio Compra': 8000,
           'Cantidad Inicial': 50,
         },
       ];
@@ -73,12 +81,15 @@ export class ProductsBulkService {
       headers = [
         'Nombre',
         'SKU',
-        'Precio Base',
-        'Costo',
+        'Precio Venta',
+        'Precio Compra',
+        'Margen',
         'Cantidad Inicial',
         'Descripción',
         'Marca',
         'Categorías',
+        'Estado',
+        'Disponible Ecommerce',
         'Peso',
         'En Oferta',
         'Precio Oferta',
@@ -87,12 +98,15 @@ export class ProductsBulkService {
         {
           Nombre: 'Zapatillas Running Pro',
           SKU: 'ZAP-RUN-PRO-42',
-          'Precio Base': 85000,
-          Costo: 45000,
+          'Precio Venta': 85000,
+          'Precio Compra': 45000,
+          Margen: 45,
           'Cantidad Inicial': 20,
           Descripción: 'Zapatillas ideales para correr largas distancias.',
           Marca: 'Nike',
           Categorías: 'Deportes, Calzado, Running',
+          Estado: 'activo',
+          'Disponible Ecommerce': 'Si',
           Peso: 0.8,
           'En Oferta': 'No',
           'Precio Oferta': 0,
@@ -147,48 +161,58 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Mapear y crear
-        const createProductDto = this.mapToCreateProductDto(
-          productData,
-          storeId,
-        );
-        const createdProduct =
-          await this.productsService.create(createProductDto);
-
-        // Variantes
-        if (productData.variants && productData.variants.length > 0) {
-          await this.processProductVariants(
-            (createdProduct as any).id,
-            productData.variants,
-          );
-        }
-
-        // Stock por ubicación
-        if (productData.stock_quantity && productData.stock_quantity > 0) {
-          // Si viene cantidad inicial en el root, asignarlo a la ubicación por defecto
-          await this.processInitialStock(
-            (createdProduct as any).id,
-            productData.stock_quantity,
-            storeId,
-          );
-        }
-
-        if (
-          productData.stock_by_location &&
-          productData.stock_by_location.length > 0
-        ) {
-          await this.processStockByLocation(
-            (createdProduct as any).id,
-            productData.stock_by_location,
-            storeId,
-          );
-        }
-
-        results.push({
-          product: createdProduct,
-          status: 'success',
-          message: 'Product created successfully',
+        // Buscar si existe por SKU para decidir si Crear o Actualizar
+        const existingProduct = await this.prisma.products.findFirst({
+          where: {
+            store_id: storeId,
+            sku: productData.sku,
+            state: { not: 'archived' },
+          },
         });
+
+        let resultProduct;
+
+        if (existingProduct) {
+          // Actualizar producto existente
+          const updateProductDto = this.mapToUpdateProductDto(productData);
+          resultProduct = await this.productsService.update(
+            existingProduct.id,
+            updateProductDto,
+          );
+
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            message: `Product with SKU ${productData.sku} updated successfully`,
+          });
+        } else {
+          // Crear nuevo producto
+          const createProductDto = this.mapToCreateProductDto(
+            productData,
+            storeId,
+          );
+          resultProduct = await this.productsService.create(createProductDto);
+
+          // Variantes (solo para creación por ahora en este flujo simple,
+          // aunque productsService.update también las maneja si vienen en el DTO)
+          if (productData.variants && productData.variants.length > 0) {
+            await this.processProductVariants(
+              (resultProduct as any).id,
+              productData.variants,
+            );
+          }
+
+          // Stock por ubicación (solo para creación inicial si no se hizo en .create)
+          // Nota: productsService.create ya maneja stock_quantity y stock_by_location
+          // pero uploadProducts lo hacía redundante. Vamos a confiar en productsService.
+
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            message: 'Product created successfully',
+          });
+        }
+
         successful++;
       } catch (error) {
         results.push({
@@ -216,36 +240,88 @@ export class ProductsBulkService {
    */
   private async preprocessProductData(product: any, storeId: number) {
     // Procesar Marca (Brand)
-    if (product.brand_id && typeof product.brand_id === 'string') {
-      const brandName = (product.brand_id as string).trim();
-      if (brandName) {
-        const brandId = await this.findOrCreateBrand(brandName, storeId);
-        product.brand_id = brandId;
-      } else {
-        delete product.brand_id;
+    if (product.brand_id) {
+      if (typeof product.brand_id === 'string') {
+        const brandName = (product.brand_id as string).trim();
+        if (/^\d+$/.test(brandName)) {
+          product.brand_id = parseInt(brandName, 10);
+        } else if (brandName) {
+          const brandId = await this.findOrCreateBrand(brandName, storeId);
+          product.brand_id = brandId;
+        } else {
+          delete product.brand_id;
+        }
       }
     }
 
     // Procesar Categorías
-    if (product.category_ids && typeof product.category_ids === 'string') {
-      const categoryNames = (product.category_ids as string).split(',');
-      const categoryIds: number[] = [];
-
-      for (const name of categoryNames) {
-        const trimmedName = name.trim();
-        if (trimmedName) {
-          const catId = await this.findOrCreateCategory(trimmedName, storeId);
-          categoryIds.push(catId);
-        }
+    if (product.category_ids) {
+      let rawCategories: any[] = [];
+      if (typeof product.category_ids === 'string') {
+        rawCategories = (product.category_ids as string).split(',');
+      } else if (Array.isArray(product.category_ids)) {
+        rawCategories = product.category_ids;
       }
-      product.category_ids = categoryIds;
+
+      if (rawCategories.length > 0) {
+        const categoryIds: number[] = [];
+        for (const cat of rawCategories) {
+          const catStr = cat.toString().trim();
+          if (!catStr) continue;
+
+          if (/^\d+$/.test(catStr)) {
+            categoryIds.push(parseInt(catStr, 10));
+          } else {
+            const catId = await this.findOrCreateCategory(catStr, storeId);
+            categoryIds.push(catId);
+          }
+        }
+        product.category_ids = categoryIds;
+      }
+    }
+
+    // Lógica de Precios: Margen tiene preferencia
+    const cost = parseFloat(product.cost_price || 0);
+    const margin = parseFloat(product.profit_margin || 0);
+
+    if (margin > 0 && cost > 0) {
+      // Precio = Costo * (1 + Margen/100)
+      product.base_price = cost * (1 + margin / 100);
     }
 
     // Normalizar Booleanos (Si/No -> true/false)
-    if (typeof product.is_on_sale === 'string') {
-      product.is_on_sale =
-        product.is_on_sale.toLowerCase() === 'si' ||
-        product.is_on_sale.toLowerCase() === 'yes';
+    const normalizeBool = (val: any) => {
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'string') {
+        return (
+          val.toLowerCase() === 'si' ||
+          val.toLowerCase() === 'yes' ||
+          val.toLowerCase() === 'verdadero' ||
+          val.toLowerCase() === 'true'
+        );
+      }
+      return !!val;
+    };
+
+    if (product.is_on_sale !== undefined) {
+      product.is_on_sale = normalizeBool(product.is_on_sale);
+    }
+
+    if (product.available_for_ecommerce !== undefined) {
+      product.available_for_ecommerce = normalizeBool(
+        product.available_for_ecommerce,
+      );
+    }
+
+    // Normalizar Estado
+    if (product.state && typeof product.state === 'string') {
+      const s = product.state.toLowerCase();
+      if (s === 'activo' || s === 'active' || s === 'habilitado')
+        product.state = 'active';
+      else if (s === 'inactivo' || s === 'inactive' || s === 'deshabilitado')
+        product.state = 'inactive';
+      else if (s === 'archivado' || s === 'archived')
+        product.state = 'archived';
     }
   }
 
@@ -357,15 +433,7 @@ export class ProductsBulkService {
         continue;
       }
 
-      const existing = await this.prisma.products.findFirst({
-        where: { store_id: storeId, sku: product.sku },
-      });
-
-      if (existing) {
-        errors.push(`Fila ${index + 1}: El SKU ${product.sku} ya existe.`);
-        continue;
-      }
-
+      // Ya no bloqueamos si el SKU existe, porque ahora actualizamos
       validProducts.push(product);
     }
 
@@ -416,13 +484,35 @@ export class ProductsBulkService {
       description: product.description,
       slug: product.slug || generateSlug(product.name),
       store_id: storeId,
-      brand_id: product.brand_id, // Ya es number
-      category_ids: product.category_ids, // Ya es number[]
+      brand_id: product.brand_id,
+      category_ids: product.category_ids,
       stock_quantity: product.stock_quantity,
       cost_price: product.cost_price,
+      profit_margin: product.profit_margin,
       weight: product.weight,
-      is_on_sale: product['is_on_sale'], // Acceso dinámico por si acaso
+      is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
+      state: product.state,
+      available_for_ecommerce: product.available_for_ecommerce,
+    };
+  }
+
+  private mapToUpdateProductDto(product: BulkProductItemDto): any {
+    return {
+      name: product.name,
+      base_price: product.base_price,
+      sku: product.sku,
+      description: product.description,
+      brand_id: product.brand_id,
+      category_ids: product.category_ids,
+      stock_quantity: product.stock_quantity,
+      cost_price: product.cost_price,
+      profit_margin: product.profit_margin,
+      weight: product.weight,
+      is_on_sale: product['is_on_sale'],
+      sale_price: product['sale_price'],
+      state: product.state,
+      available_for_ecommerce: product.available_for_ecommerce,
     };
   }
 

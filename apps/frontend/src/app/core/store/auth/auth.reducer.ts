@@ -78,9 +78,23 @@ export const authReducer = createReducer(
     loading: true,
   })),
 
-  on(AuthActions.logoutSuccess, (state) => ({
-    ...initialAuthState,
-  })),
+  on(AuthActions.logoutSuccess, (state) => {
+    // Clear localStorage
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('vendix_user_environment');
+        localStorage.removeItem('vendix_logged_out_recently');
+        localStorage.removeItem('vendix_app_config');
+        localStorage.removeItem('auth_state');
+      }
+    } catch (error) {
+      console.error('[AuthReducer] Error clearing localStorage:', error);
+    }
+
+    return {
+      ...initialAuthState,
+    };
+  }),
 
   on(AuthActions.refreshToken, (state) => ({
     ...state,
@@ -296,20 +310,17 @@ export const authReducer = createReducer(
     loading: true,
   })),
 
-  on(
-    AuthActions.updateUserSettingsSuccess,
-    (state, { user_settings }) => {
-      const newState = {
-        ...state,
-        user_settings,
-        loading: false,
-        error: null,
-      };
-      // Save to localStorage to persist changes
-      saveAuthState(newState);
-      return newState;
-    },
-  ),
+  on(AuthActions.updateUserSettingsSuccess, (state, { user_settings }) => {
+    const newState = {
+      ...state,
+      user_settings,
+      loading: false,
+      error: null,
+    };
+    // Save to localStorage to persist changes
+    saveAuthState(newState);
+    return newState;
+  }),
 
   on(AuthActions.updateUserSettingsFailure, (state, { error }) => ({
     ...state,

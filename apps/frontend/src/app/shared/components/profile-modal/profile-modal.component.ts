@@ -629,9 +629,6 @@ export class ProfileModalComponent implements OnInit {
       }
     });
 
-    // Load fresh profile data to ensure we have latest information including addresses
-    this.loadProfile();
-
     // Load countries for the selects
     this.countries = this.countryService.getCountries();
 
@@ -778,6 +775,11 @@ export class ProfileModalComponent implements OnInit {
   loadProfile() {
     // Prevent concurrent loads
     if (this.loading) {
+      return;
+    }
+
+    // Don't call if not logged in to avoid 401 on startup or unauthorized access
+    if (!this.authService.getToken()) {
       return;
     }
 

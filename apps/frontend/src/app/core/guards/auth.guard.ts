@@ -7,7 +7,7 @@ import {
   UrlTree,
 } from '@angular/router';
 import { Observable, of } from 'rxjs';
-import { map, switchMap, take, catchError } from 'rxjs/operators';
+import { catchError, switchMap, take } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
 
@@ -23,28 +23,139 @@ export class AuthGuard implements CanActivate {
     route: ActivatedRouteSnapshot,
     state: RouterStateSnapshot,
   ): Observable<boolean | UrlTree> {
-    // Check localStorage flag first for immediate logout detection
+    const path = state.url;
+
+    // 1. Check if route is public (no auth required)
+    if (this.isPublicRoute(path)) {
+      return of(true);
+    }
+
+    // 2. Check localStorage flag first for immediate logout detection
     if (this.wasRecentlyLoggedOut()) {
-      this.toastService.warning('No tienes permisos para ver esa ruta');
+      this.toastService.warning(
+        'Debes iniciar sesión para acceder a esta página',
+      );
       return of(this.router.createUrlTree(['/auth/login']));
     }
 
+    // 3. Check if authenticated
     return this.authFacade.isAuthenticated$.pipe(
       take(1),
       switchMap((isAuthenticated) => {
         if (!isAuthenticated) {
-          this.toastService.warning('No tienes permisos para ver esa ruta');
+          this.toastService.warning(
+            'Debes iniciar sesión para acceder a esta página',
+          );
           return of(this.router.createUrlTree(['/auth/login']));
         }
-        // Si está autenticado, permitir acceso
+
+        // 4. Check role-based permissions
+        if (!this.hasRolePermission(path)) {
+          this.toastService.error(
+            'No tienes permisos para acceder a esta página',
+          );
+          return of(this.getDashboardUrl());
+        }
+
+        // If authenticated and has permission, allow access
         return of(true);
       }),
       catchError((error) => {
-        console.error('[AUTH GUARD] Error in auth guard:', error);
-        this.toastService.error('Error verificando permisos');
-        return of(this.router.createUrlTree(['/auth/login']));
+        console.error('[AUTH GUARD] Error:', error);
+        this.toastService.error('Error verificando autenticación');
+        return of(this.router.createUrlTree(['/']));
       }),
     );
+  }
+
+  /**
+   * Check if a route is public (doesn't require authentication)
+   */
+  private isPublicRoute(path: string): boolean {
+    // Rutas exactas que son públicas
+    const exactPublicRoutes = ['/', ''];
+    if (exactPublicRoutes.includes(path)) {
+      return true;
+    }
+
+    // Prefijos de rutas públicas
+    const publicPrefixes = [
+      '/auth/', // Todas las rutas de autenticación
+      '/landing', // Landing pages
+      '/home', // Home público
+      '/catalog', // Catálogo público
+      '/product/', // Detalle de producto
+      '/cart', // Carrito
+      '/checkout', // Checkout
+    ];
+
+    return publicPrefixes.some((prefix) => path.startsWith(prefix));
+  }
+
+  /**
+   * Check if the user has the required role for the route
+   */
+  private hasRolePermission(path: string): boolean {
+    const userRoles = this.authFacade.getRoles();
+
+    // Si no hay roles, denegar acceso a rutas protegidas
+    if (!userRoles || userRoles.length === 0) {
+      return false;
+    }
+
+    // Super admin routes - solo super_admin
+    if (path.startsWith('/superadmin')) {
+      return userRoles.includes('super_admin');
+    }
+
+    // Admin routes - roles administrativos de organización
+    if (path.startsWith('/admin')) {
+      const adminRoles = ['super_admin', 'admin', 'owner', 'manager'];
+      return adminRoles.some((role) => userRoles.includes(role));
+    }
+
+    // Store routes - roles de tienda
+    if (path.startsWith('/store')) {
+      const storeRoles = [
+        'super_admin',
+        'admin',
+        'owner',
+        'manager',
+        'supervisor',
+        'employee',
+      ];
+      return storeRoles.some((role) => userRoles.includes(role));
+    }
+
+    // Account routes - customer
+    if (path.startsWith('/account')) {
+      return userRoles.includes('customer');
+    }
+
+    // Por defecto, permitir si está autenticado
+    return true;
+  }
+
+  /**
+   * Get the appropriate dashboard URL based on user roles
+   */
+  private getDashboardUrl(): UrlTree {
+    const userRoles = this.authFacade.getRoles();
+
+    if (userRoles.includes('super_admin')) {
+      return this.router.createUrlTree(['/superadmin/dashboard']);
+    }
+
+    if (userRoles.some((r) => ['admin', 'owner', 'manager'].includes(r))) {
+      return this.router.createUrlTree(['/admin/dashboard']);
+    }
+
+    if (userRoles.some((r) => ['supervisor', 'employee'].includes(r))) {
+      return this.router.createUrlTree(['/store/dashboard']);
+    }
+
+    // Default fallback
+    return this.router.createUrlTree(['/']);
   }
 
   /**
@@ -65,54 +176,5 @@ export class AuthGuard implements CanActivate {
       }
     }
     return false;
-  }
-
-  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
-    // Siempre redirigir al login contextual unificado
-    const loginPath = '/auth/login';
-
-    // Agregar parámetro de retorno si no es la página de login
-    const navigationExtras =
-      returnUrl !== '/auth/login' ? { queryParams: { returnUrl } } : {};
-
-    return of(this.router.createUrlTree([loginPath], navigationExtras));
-  }
-
-  private checkBasicRoutePermissions(
-    routePath: string,
-    userRoles: string[],
-  ): boolean {
-    // Rutas de super admin solo para super_admin
-    if (
-      routePath.startsWith('/superadmin') &&
-      !userRoles.includes('super_admin')
-    ) {
-      return false;
-    }
-
-    // Rutas de admin para roles administrativos
-    if (routePath.startsWith('/admin')) {
-      const adminRoles = ['super_admin', 'admin', 'owner', 'manager'];
-      if (!userRoles.some((role) => adminRoles.includes(role))) {
-        return false;
-      }
-    }
-
-    // Rutas de tienda para empleados y supervisores
-    if (routePath.startsWith('/store')) {
-      const storeRoles = ['supervisor', 'employee'];
-      if (!userRoles.some((role) => storeRoles.includes(role))) {
-        return false;
-      }
-    }
-
-    // Rutas de cuenta de cliente para clientes
-    if (routePath.startsWith('/account')) {
-      if (!userRoles.includes('customer')) {
-        return false;
-      }
-    }
-
-    return true;
   }
 }

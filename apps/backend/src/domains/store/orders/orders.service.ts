@@ -13,7 +13,7 @@ import { OrderStatsDto } from './dto/order-stats.dto';
 
 @Injectable()
 export class OrdersService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     // Enforce store context
@@ -35,7 +35,8 @@ export class OrdersService {
     while (retries > 0) {
       try {
         if (!createOrderDto.order_number) {
-          createOrderDto.order_number = await this.generateOrderNumber(store_id);
+          createOrderDto.order_number =
+            await this.generateOrderNumber(store_id);
         }
 
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
@@ -73,7 +74,9 @@ export class OrdersService {
           },
           include: {
             stores: { select: { id: true, name: true, store_code: true } },
-            order_items: { include: { products: true, product_variants: true } },
+            order_items: {
+              include: { products: true, product_variants: true },
+            },
           },
         });
       } catch (error) {
@@ -83,13 +86,12 @@ export class OrdersService {
         ) {
           // Check if the unique constraint failure is indeed on order_number
           const target = error.meta?.target as string[];
-          if (
-            Array.isArray(target) &&
-            target.includes('order_number')
-          ) {
+          if (Array.isArray(target) && target.includes('order_number')) {
             retries--;
             if (retries === 0) {
-              throw new ConflictException('Failed to generate unique order number after multiple attempts');
+              throw new ConflictException(
+                'Failed to generate unique order number after multiple attempts',
+              );
             }
             // Reset order_number to null so it gets regenerated in the next iteration
             createOrderDto.order_number = undefined;
@@ -127,11 +129,11 @@ export class OrdersService {
       ...(customer_id && { customer_id }),
       ...(date_from &&
         date_to && {
-        created_at: {
-          gte: new Date(date_from),
-          lte: new Date(date_to),
-        },
-      }),
+          created_at: {
+            gte: new Date(date_from),
+            lte: new Date(date_to),
+          },
+        }),
     };
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
@@ -175,6 +177,16 @@ export class OrdersService {
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
+        users: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
       },
     });
 
@@ -196,6 +208,16 @@ export class OrdersService {
         addresses_orders_billing_address_idToaddresses: true,
         addresses_orders_shipping_address_idToaddresses: true,
         payments: true,
+        users: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
       },
     });
   }
@@ -278,5 +300,39 @@ export class OrdersService {
       completed_orders: completedOrders,
       average_order_value: averageOrderValue,
     };
+  }
+
+  async getTimeline(orderId: number) {
+    // Ensure order exists and belongs to store (handled by findOne/scoped prisma)
+    await this.findOne(orderId);
+
+    // Fetch audit logs for this order
+    // Note: StorePrismaService might scope this, but audit_logs are usually queried via findMany
+    // We explicitly filter by resource and resourceId
+    const logs = await this.prisma.audit_logs.findMany({
+      where: {
+        resource: 'orders',
+        resource_id: orderId,
+        action: {
+          notIn: ['VIEW', 'SEARCH', 'view', 'search'],
+        },
+      },
+      include: {
+        users: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            avatar_url: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+    });
+
+    return logs;
   }
 }

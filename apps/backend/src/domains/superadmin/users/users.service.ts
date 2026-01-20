@@ -20,7 +20,7 @@ export class UsersService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     // Check if email already exists
@@ -60,7 +60,8 @@ export class UsersService {
     });
 
     // Create user_settings with default ORG_ADMIN configuration
-    const adminConfig = await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+    const adminConfig =
+      await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
@@ -434,14 +435,82 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    await this.prisma.users.update({
+    const updatedUser = await this.prisma.users.update({
       where: { id },
       data: {
         email_verified: true,
-        state: user.state === user_state_enum.pending_verification ? user_state_enum.active : undefined
+        state:
+          user.state === user_state_enum.pending_verification
+            ? user_state_enum.active
+            : undefined,
+      },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
       },
     });
 
-    return { message: 'Email verified successfully' };
+    // Remove password from response
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async toggle2FA(id: number, enabled: boolean) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.users.update({
+      where: { id },
+      data: { two_factor_enabled: enabled },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async unlock(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.users.update({
+      where: { id },
+      data: {
+        locked_until: null,
+        failed_login_attempts: 0,
+      },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 }

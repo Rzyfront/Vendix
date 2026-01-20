@@ -2,7 +2,6 @@ import {
   ApplicationConfig,
   provideZoneChangeDetection,
   APP_INITIALIZER,
-  inject,
   isDevMode,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
@@ -12,11 +11,10 @@ import {
   withInterceptorsFromDi,
   HTTP_INTERCEPTORS,
 } from '@angular/common/http';
-import { provideStore, Store } from '@ngrx/store';
+import { provideStore, Store, provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
-import { provideState } from '@ngrx/store';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
 import { AuthInterceptor } from './core/interceptors/auth.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
@@ -27,10 +25,11 @@ import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
 import { ToastService } from './shared/components/toast/toast.service';
-// Provide echarts via component
-// import { provideEcharts } from 'ngx-echarts';
 
 import { routes } from './app.routes';
+
+// Timeout for app initialization (10 seconds)
+const APP_INIT_TIMEOUT_MS = 10000;
 
 // Factory para el APP_INITIALIZER
 export function initializeApp(
@@ -39,7 +38,24 @@ export function initializeApp(
 ): () => Promise<boolean> {
   return () => {
     store.dispatch(ConfigActions.initializeApp());
-    return firstValueFrom(routeManager.routesConfigured$);
+
+    // Add timeout to prevent infinite blocking
+    // CRITICAL: Wait specifically for routes to be TRUE
+    return firstValueFrom(
+      routeManager.routesConfigured$.pipe(
+        filter((configured) => configured === true),
+        timeout(APP_INIT_TIMEOUT_MS),
+        catchError((error) => {
+          console.error(
+            '[APP_INITIALIZER] Timeout or error waiting for routes:',
+            error,
+          );
+          // Return true to allow the app to continue with fallback routes
+          routeManager.configureFallbackRoutes();
+          return of(true);
+        }),
+      ),
+    );
   };
 }
 
@@ -88,6 +104,5 @@ export const appConfig: ApplicationConfig = {
     },
     ThemeService,
     ToastService,
-    // Provide in ChartComponent directly for standalone
   ],
 };

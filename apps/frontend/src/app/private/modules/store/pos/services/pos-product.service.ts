@@ -292,7 +292,7 @@ export class PosProductService {
       if (products.indexOf(product) === 0) {
         console.log('POS Product transform:', {
           original: product,
-          transformed
+          transformed,
         });
       }
 
@@ -373,15 +373,17 @@ export class PosProductService {
   }
 
   getCategories(): Observable<Category[]> {
-    return this.http.get<Category[]>(`${environment.apiUrl}/categories`).pipe(
-      catchError((error: any) => {
-        return of([]);
-      }),
-    );
+    return this.http
+      .get<Category[]>(`${environment.apiUrl}/store/categories`)
+      .pipe(
+        catchError((error: any) => {
+          return of([]);
+        }),
+      );
   }
 
   getBrands(): Observable<Brand[]> {
-    return this.http.get<Brand[]>(`${environment.apiUrl}/brands`).pipe(
+    return this.http.get<Brand[]>(`${environment.apiUrl}/store/brands`).pipe(
       catchError((error: any) => {
         return of([]);
       }),

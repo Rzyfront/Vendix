@@ -20,6 +20,7 @@ import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
 import { environment } from '../../../environments/environment';
+import { Router } from '@angular/router';
 import { Routes } from '@angular/router';
 import { ThemeService } from './theme.service';
 
@@ -41,6 +42,7 @@ export interface AppConfig {
 export class AppConfigService {
   private http = inject(HttpClient);
   private themeService = inject(ThemeService);
+  private router = inject(Router);
 
   async setupConfig(): Promise<AppConfig> {
     // 1. Detectar la configuración base del dominio.
@@ -49,9 +51,30 @@ export class AppConfigService {
     // 2. Revisar si hay un entorno de usuario guardado (de un login previo).
     const cachedUserEnv = this.getCachedUserEnvironment();
 
-    // 3. Si existe, este tiene prioridad sobre el entorno por defecto del dominio.
-    if (cachedUserEnv) {
+    // 3. Lógica de Decisión de Entorno (ROBUSTA)
+    // El dominio resuelto es la autoridad para entornos públicos.
+    // Pero si el usuario tiene un entorno administrativo guardado (ADMIN), este debe prevalecer.
+    const isTargetAdmin =
+      cachedUserEnv &&
+      [
+        AppEnvironment.ORG_ADMIN,
+        AppEnvironment.STORE_ADMIN,
+        AppEnvironment.VENDIX_ADMIN,
+      ].includes(cachedUserEnv);
+
+    if (cachedUserEnv && isTargetAdmin) {
       domainConfig.environment = cachedUserEnv;
+    } else {
+      const isPublicEnvironment = [
+        AppEnvironment.VENDIX_LANDING,
+        AppEnvironment.ORG_LANDING,
+        AppEnvironment.STORE_LANDING,
+        AppEnvironment.STORE_ECOMMERCE,
+      ].includes(domainConfig.environment);
+
+      if (cachedUserEnv && !isPublicEnvironment) {
+        domainConfig.environment = cachedUserEnv;
+      }
     }
 
     // 4. Construir la configuración final con el entorno definitivo.
@@ -72,7 +95,28 @@ export class AppConfigService {
     const newConfig = this.buildAppConfig(domainConfig);
     this.cacheUserEnvironment(newEnv);
     this.cacheAppConfig(newConfig);
+
+    // Notify router of environment change
+    this.notifyEnvironmentChange(newEnv);
+
     return newConfig;
+  }
+
+  private notifyEnvironmentChange(newEnv: AppEnvironment): void {
+    // Navigate to reload the app with new environment
+    // This is a workaround to properly update routes
+    setTimeout(() => {
+      this.router
+        .navigate([], {
+          queryParams: { env: newEnv, refresh: Date.now() },
+        })
+        .catch((error) => {
+          console.error(
+            '[AppConfigService] Error notifying environment change:',
+            error,
+          );
+        });
+    }, 100);
   }
 
   private buildAppConfig(domainConfig: DomainConfig): AppConfig {
@@ -175,7 +219,9 @@ export class AppConfigService {
       if (typeof localStorage === 'undefined') return null;
 
       // 🔒 SECURITY CHECK: Verificar si el usuario acaba de cerrar sesión recientemente
-      const loggedOutRecently = localStorage.getItem('vendix_logged_out_recently');
+      const loggedOutRecently = localStorage.getItem(
+        'vendix_logged_out_recently',
+      );
       if (loggedOutRecently) {
         const logoutTime = parseInt(loggedOutRecently);
         const currentTime = Date.now();
@@ -202,12 +248,12 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_user_environment', env);
-    } catch (e) { }
+    } catch (e) {}
   }
   private cacheAppConfig(config: AppConfig): void {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_app_config', JSON.stringify(config));
-    } catch (e) { }
+    } catch (e) {}
   }
 }

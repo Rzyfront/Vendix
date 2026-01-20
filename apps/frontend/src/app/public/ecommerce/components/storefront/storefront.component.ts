@@ -1,10 +1,13 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router, RouterModule } from '@angular/router';
 import { ConfigFacade } from '../../../../core/store/config';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
-import { InputComponent } from '../../../../shared/components/input/input.component';
+import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
+import { IconComponent } from '../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-storefront',
@@ -12,39 +15,94 @@ import { InputComponent } from '../../../../shared/components/input/input.compon
   imports: [
     CommonModule,
     FormsModule,
+    RouterModule,
     ButtonComponent,
     CardComponent,
-    InputComponent,
+    InputsearchComponent,
+    IconComponent,
   ],
   template: `
     <div class="storefront-container">
       <!-- Header -->
       <header class="storefront-header">
         <div class="header-content">
-          <div class="store-logo">
+          <div class="store-logo" (click)="navigateToHome()">
             <img
               *ngIf="branding?.logo"
               [src]="branding.logo"
               [alt]="storeName + ' Logo'"
               class="logo-image"
             />
-            <h1 *ngIf="!branding?.logo">{{ storeName }}</h1>
+            <div *ngIf="!branding?.logo" class="logo-fallback">
+              <app-icon
+                name="shopping-bag"
+                [size]="28"
+                class="text-primary"
+              ></app-icon>
+              <h1 class="logo-text">{{ storeName }}</h1>
+            </div>
           </div>
 
           <nav class="store-nav">
             <div class="search-bar">
-              <app-input
+              <app-inputsearch
                 placeholder="Buscar productos..."
+                [debounceTime]="400"
+                size="sm"
                 [(ngModel)]="searchTerm"
-                (keyup.enter)="onSearch()"
-              ></app-input>
+                (search)="onSearch()"
+              ></app-inputsearch>
             </div>
             <div class="nav-actions">
-              <button class="nav-button" (click)="navigateToLogin()">
-                Iniciar Sesión
-              </button>
-              <button class="nav-button cart-button" (click)="toggleCart()">
-                🛒 Carrito ({{ cartItems.length }})
+              <!-- Authenticated User Actions -->
+              <ng-container *ngIf="isAuthenticated$ | async; else guestActions">
+                <button
+                  class="icon-btn"
+                  (click)="navigateToFavorites()"
+                  title="Favoritos"
+                >
+                  <app-icon name="heart" [size]="22"></app-icon>
+                  <span *ngIf="wishlist.length > 0" class="badge">{{
+                    wishlist.length
+                  }}</span>
+                </button>
+
+                <button
+                  class="icon-btn"
+                  (click)="navigateToProfile()"
+                  title="Mi Perfil"
+                >
+                  <app-icon name="user-circle" [size]="22"></app-icon>
+                </button>
+              </ng-container>
+
+              <!-- Guest Actions -->
+              <ng-template #guestActions>
+                <div class="guest-menu">
+                  <button
+                    class="icon-btn"
+                    (click)="navigateToLogin()"
+                    title="Iniciar sesión"
+                  >
+                    <app-icon name="user" [size]="22"></app-icon>
+                  </button>
+                  <div class="guest-dropdown">
+                    <button (click)="navigateToLogin()">Iniciar Sesión</button>
+                    <button (click)="navigateToRegister()">Registrarse</button>
+                  </div>
+                </div>
+              </ng-template>
+
+              <!-- Cart is always visible -->
+              <button
+                class="icon-btn cart-btn"
+                (click)="toggleCart()"
+                title="Carrito"
+              >
+                <app-icon name="shopping-cart" [size]="22"></app-icon>
+                <span *ngIf="cartItems.length > 0" class="badge badge-accent">{{
+                  cartItems.length
+                }}</span>
               </button>
             </div>
           </nav>
@@ -237,6 +295,10 @@ export class StorefrontComponent implements OnInit {
   }
 
   private configFacade = inject(ConfigFacade);
+  private authFacade = inject(AuthFacade);
+  private router = inject(Router);
+
+  isAuthenticated$ = this.authFacade.isAuthenticated$;
 
   async ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
@@ -427,13 +489,27 @@ export class StorefrontComponent implements OnInit {
     document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' });
   }
 
+  navigateToHome() {
+    this.router.navigate(['/']);
+  }
+
+  navigateToFavorites() {
+    this.router.navigate(['/favorites']);
+  }
+
+  navigateToProfile() {
+    this.router.navigate(['/profile']);
+  }
+
+  navigateToRegister() {
+    this.router.navigate(['/auth/register']);
+  }
+
   navigateToLogin() {
-    // Usar login contextual unificado
-    window.location.href = '/auth/login';
+    this.router.navigate(['/auth/login']);
   }
 
   proceedToCheckout() {
-    // Navegar al checkout
-    window.location.href = '/checkout';
+    this.router.navigate(['/checkout']);
   }
 }

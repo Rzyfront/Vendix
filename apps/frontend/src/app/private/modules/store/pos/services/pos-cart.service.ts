@@ -29,8 +29,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-
-  constructor() { }
+  constructor() {}
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -63,28 +62,17 @@ export class PosCartService {
    * Add product to cart
    */
   addToCart(request: AddToCartRequest): Observable<CartState> {
-    this.loading$.next(true);
-
     // Validate request
     const validationErrors = this.validateAddToCartRequest(request);
     if (validationErrors.length > 0) {
-      this.loading$.next(false);
       return throwError(
         () => new Error(validationErrors.map((e) => e.message).join(', ')),
       );
     }
 
     return of(request).pipe(
-      delay(200),
       map((req) => this.processAddToCart(req)),
-      tap((newState) => {
-        this.cartState$.next(newState);
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
+      tap((newState) => this.cartState$.next(newState)),
     );
   }
 
@@ -92,19 +80,9 @@ export class PosCartService {
    * Update cart item quantity
    */
   updateCartItem(request: UpdateCartItemRequest): Observable<CartState> {
-    this.loading$.next(true);
-
     return of(request).pipe(
-      delay(150),
       map((req) => this.processUpdateCartItem(req)),
-      tap((newState) => {
-        this.cartState$.next(newState);
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
+      tap((newState) => this.cartState$.next(newState)),
     );
   }
 
@@ -112,19 +90,9 @@ export class PosCartService {
    * Remove item from cart
    */
   removeFromCart(itemId: string): Observable<CartState> {
-    this.loading$.next(true);
-
     return of(itemId).pipe(
-      delay(100),
       map((id) => this.processRemoveFromCart(id)),
-      tap((newState) => {
-        this.cartState$.next(newState);
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
+      tap((newState) => this.cartState$.next(newState)),
     );
   }
 
@@ -132,15 +100,9 @@ export class PosCartService {
    * Clear entire cart
    */
   clearCart(): Observable<CartState> {
-    this.loading$.next(true);
-
     return of(null).pipe(
-      delay(100),
       map(() => this.getInitialState()),
-      tap((newState) => {
-        this.cartState$.next(newState);
-        this.loading$.next(false);
-      }),
+      tap((newState) => this.cartState$.next(newState)),
     );
   }
 
@@ -149,7 +111,6 @@ export class PosCartService {
    */
   setCustomer(customer: PosCustomer | null): Observable<CartState> {
     return of(customer).pipe(
-      delay(50),
       map((cust) => {
         const currentState = this.cartState$.value;
         return {
@@ -167,7 +128,6 @@ export class PosCartService {
    */
   updateNotes(notes: string): Observable<CartState> {
     return of(notes).pipe(
-      delay(50),
       map((note) => {
         const currentState = this.cartState$.value;
         return {
@@ -184,28 +144,17 @@ export class PosCartService {
    * Apply discount to cart
    */
   applyDiscount(request: ApplyDiscountRequest): Observable<CartState> {
-    this.loading$.next(true);
-
     // Validate discount
     const validationErrors = this.validateDiscountRequest(request);
     if (validationErrors.length > 0) {
-      this.loading$.next(false);
       return throwError(
         () => new Error(validationErrors.map((e) => e.message).join(', ')),
       );
     }
 
     return of(request).pipe(
-      delay(200),
       map((req) => this.processApplyDiscount(req)),
-      tap((newState) => {
-        this.cartState$.next(newState);
-        this.loading$.next(false);
-      }),
-      catchError((error) => {
-        this.loading$.next(false);
-        return throwError(() => error);
-      }),
+      tap((newState) => this.cartState$.next(newState)),
     );
   }
 
@@ -214,7 +163,6 @@ export class PosCartService {
    */
   removeDiscount(discountId: string): Observable<CartState> {
     return of(discountId).pipe(
-      delay(100),
       map((id) => this.processRemoveDiscount(id)),
       tap((newState) => this.cartState$.next(newState)),
     );
@@ -280,16 +228,21 @@ export class PosCartService {
       };
     } else {
       // Add new item
-      const rateSum = request.product.tax_assignments?.reduce((rateSum, assignment) => {
-        const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
-        return rateSum + assignmentRate;
-      }, 0) || 0;
+      const rateSum =
+        request.product.tax_assignments?.reduce((rateSum, assignment) => {
+          const assignmentRate =
+            assignment.tax_categories?.tax_rates?.reduce(
+              (sum, tr) => sum + parseFloat(tr.rate || '0'),
+              0,
+            ) || 0;
+          return rateSum + assignmentRate;
+        }, 0) || 0;
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
         unitPrice: request.product.price,
-        taxAmount: (request.product.price * request.quantity) * rateSum,
+        taxAmount: request.product.price * request.quantity * rateSum,
         totalPrice: request.quantity * request.product.price,
         addedAt: new Date(),
         notes: request.notes,
@@ -455,11 +408,16 @@ export class PosCartService {
    * Calculate tax for a single item
    */
   private calculateItemTax(product: any, quantity: number): number {
-    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
-      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
-      return rateSum + assignmentRate;
-    }, 0) || 0;
-    return (product.price * quantity) * rateSum;
+    const rateSum =
+      product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+        const assignmentRate =
+          assignment.tax_categories?.tax_rates?.reduce(
+            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
+            0,
+          ) || 0;
+        return rateSum + assignmentRate;
+      }, 0) || 0;
+    return product.price * quantity * rateSum;
   }
 
   /**
@@ -478,6 +436,13 @@ export class PosCartService {
       errors.push({
         field: 'quantity',
         message: 'Cantidad debe ser mayor a 0',
+      });
+    }
+
+    if (request.product && request.product.price <= 0) {
+      errors.push({
+        field: 'price',
+        message: 'El producto debe tener un precio mayor a 0',
       });
     }
 
