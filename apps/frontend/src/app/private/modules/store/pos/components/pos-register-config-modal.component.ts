@@ -34,8 +34,9 @@ import {
     template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'md'"
-      (closed)="onCancel()"
       [showCloseButton]="true"
     >
       <!-- Modal Header -->
@@ -113,6 +114,7 @@ import {
 })
 export class PosRegisterConfigModalComponent implements OnInit {
     @Input() isOpen = false;
+    @Output() isOpenChange = new EventEmitter<boolean>();
     @Output() closed = new EventEmitter<void>();
     @Output() saved = new EventEmitter<string>();
 
@@ -175,5 +177,6 @@ export class PosRegisterConfigModalComponent implements OnInit {
     onCancel(): void {
         this.configForm.reset();
         this.closed.emit();
+        this.isOpenChange.emit(false);
     }
 }

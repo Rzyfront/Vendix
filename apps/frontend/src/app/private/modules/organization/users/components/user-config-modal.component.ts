@@ -36,10 +36,12 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
-      title=""
-      
+      title="Configuración de Usuario"
+      subtitle="Administra los roles, tiendas y configuraciones del panel UI"
     >
       <form [formGroup]="configForm" (ngSubmit)="onSubmit()" *ngIf="user">
         <!-- Tabs -->

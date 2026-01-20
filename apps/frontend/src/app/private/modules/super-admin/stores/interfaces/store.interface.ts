@@ -80,6 +80,7 @@ export interface StoreListItem {
   logo_url?: string;
   created_at: string;
   updated_at: string;
+  settings?: StoreSettings;
   organizations?: {
     id: number;
     name: string;

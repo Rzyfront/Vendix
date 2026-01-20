@@ -9,15 +9,351 @@ import {
 import { StoreSettings } from '../../interfaces/store.interface';
 import {
   ButtonComponent,
-  IconComponent,
+  ModalComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-settings-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent],
-  templateUrl: './store-settings-modal.component.html',
-  styleUrls: ['./store-settings-modal.component.scss'],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: 0.3s;
+        border-radius: 24px;
+      }
+
+      .slider:before {
+        position: absolute;
+        content: '';
+        height: 18px;
+        width: 18px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: 0.3s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: var(--color-primary, #4ade80);
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(20px);
+      }
+    `,
+  ],
+  template: `
+    <app-modal
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
+      title="Configuración de la Tienda"
+      subtitle="Administra las configuraciones de la tienda seleccionada"
+    >
+      <form [formGroup]="settingsForm" class="space-y-6">
+        <!-- General Settings -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Configuración General
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Currency -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Moneda</label
+              >
+              <select
+                formControlName="currency"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+              >
+                <option
+                  *ngFor="let option of getCurrencyOptions()"
+                  [value]="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Timezone -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Zona Horaria</label
+              >
+              <select
+                formControlName="timezone"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+              >
+                <option
+                  *ngFor="let option of getTimezoneOptions()"
+                  [value]="option.value"
+                >
+                  {{ option.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notification Settings -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Notificaciones
+          </h3>
+          <div class="space-y-4">
+            <!-- General Notifications -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Activar Notificaciones</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Recibir notificaciones sobre la actividad de la tienda
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="notifications"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Email Notifications -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Notificaciones por Correo</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Recibir actualizaciones por correo
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="email_notifications"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Inventory Alerts -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Alertas de Inventario</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Alertar cuando el stock sea bajo
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="inventory_alerts"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Inventory Settings -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Gestión de Inventario
+          </h3>
+          <div class="space-y-4">
+            <!-- Enable Inventory Tracking -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Activar Seguimiento de Inventario</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Rastrear niveles de inventario de productos
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="enableInventoryTracking"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Low Stock Threshold -->
+            <div>
+              <label
+                class="block text-sm font-medium text-text-primary mb-2"
+                >Umbral de Stock Bajo</label
+              >
+              <input
+                type="number"
+                formControlName="low_stock_threshold"
+                [class]="
+                  isFieldInvalid('low_stock_threshold')
+                    ? 'border-destructive'
+                    : 'border-border'
+                "
+                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="10"
+              />
+              <div
+                *ngIf="isFieldInvalid('low_stock_threshold')"
+                class="mt-1 text-sm text-destructive"
+              >
+                {{ getErrorMessage("low_stock_threshold") }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Checkout Settings -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Configuración de Pago
+          </h3>
+          <div class="space-y-4">
+            <!-- Guest Checkout -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Permitir Compra como Invitado</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Permitir que los clientes compren sin cuenta
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="allowGuestCheckout"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Email Verification -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Requerir Verificación de Correo</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Verificar direcciones de correo de clientes
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="requireEmailVerification"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tax Settings -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Configuración de Impuestos
+          </h3>
+          <div class="space-y-4">
+            <!-- Enable Tax Calculation -->
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-sm font-medium text-text-primary"
+                  >Activar Cálculo de Impuestos</label
+                >
+                <p class="text-xs text-text-secondary">
+                  Calcular impuestos automáticamente
+                </p>
+              </div>
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  formControlName="enableTaxCalculation"
+                />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Tax Rate -->
+            <div>
+              <label
+                class="block text-sm font-medium text-text-primary mb-2"
+                >Tasa de Impuesto Predeterminada (%)</label
+              >
+              <input
+                type="number"
+                step="0.01"
+                formControlName="taxRate"
+                [class]="
+                  isFieldInvalid('taxRate')
+                    ? 'border-destructive'
+                    : 'border-border'
+                "
+                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="0.00"
+              />
+              <div
+                *ngIf="isFieldInvalid('taxRate')"
+                class="mt-1 text-sm text-destructive"
+              >
+                {{ getErrorMessage("taxRate") }}
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button (clicked)="onCancel()" variant="outline">
+          Cancelar
+        </app-button>
+        <app-button
+          (clicked)="onSubmit()"
+          [disabled]="!settingsForm.valid || isSubmitting"
+          variant="primary"
+          [loading]="isSubmitting"
+        >
+          Guardar Configuración
+        </app-button>
+      </div>
+    </app-modal>
+  `,
 })
 export class StoreSettingsModalComponent {
   @Input() isOpen: boolean = false;
@@ -77,13 +413,6 @@ export class StoreSettingsModalComponent {
     }
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onCancel(): void {
     this.cancel.emit();
   }
@@ -108,29 +437,6 @@ export class StoreSettingsModalComponent {
     }
   }
 
-  private resetForm(): void {
-    this.settingsForm.reset();
-  }
-
-  // Theme options
-  getThemeOptions() {
-    return [
-      { value: 'light', label: 'Light' },
-      { value: 'dark', label: 'Dark' },
-      { value: 'auto', label: 'Auto' },
-    ];
-  }
-
-  // Language options
-  getLanguageOptions() {
-    return [
-      { value: 'en', label: 'English' },
-      { value: 'es', label: 'Español' },
-      { value: 'fr', label: 'Français' },
-      { value: 'de', label: 'Deutsch' },
-    ];
-  }
-
   // Currency options
   getCurrencyOptions() {
     return [
@@ -139,17 +445,7 @@ export class StoreSettingsModalComponent {
       { value: 'GBP', label: 'GBP - British Pound' },
       { value: 'CAD', label: 'CAD - Canadian Dollar' },
       { value: 'MXN', label: 'MXN - Mexican Peso' },
-    ];
-  }
-
-  // Currency format options
-  getCurrencyFormatOptions() {
-    return [
-      { value: '${{amount}}', label: '$100.00' },
-      { value: '€{{amount}}', label: '€100.00' },
-      { value: '£{{amount}}', label: '£100.00' },
-      { value: '${{amount}} CAD', label: '$100.00 CAD' },
-      { value: '${{amount}} MXN', label: '$100.00 MXN' },
+      { value: 'COP', label: 'COP - Peso Colombiano' },
     ];
   }
 
@@ -162,15 +458,11 @@ export class StoreSettingsModalComponent {
       { value: 'America/Denver', label: 'Mountain Time (MT)' },
       { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
       { value: 'America/Mexico_City', label: 'Mexico City' },
+      { value: 'America/Bogota', label: 'Bogotá' },
       { value: 'Europe/London', label: 'London' },
       { value: 'Europe/Paris', label: 'Paris' },
       { value: 'Asia/Tokyo', label: 'Tokyo' },
     ];
-  }
-
-  // Getters para validación
-  get f() {
-    return this.settingsForm.controls;
   }
 
   // Validación de formulario
@@ -184,12 +476,12 @@ export class StoreSettingsModalComponent {
 
     if (!field) return '';
 
-    if (field.errors?.['required']) return 'This field is required';
+    if (field.errors?.['required']) return 'Este campo es requerido';
     if (field.errors?.['min'])
-      return `Minimum value is ${field.errors['min'].min}`;
+      return `Valor mínimo es ${field.errors['min'].min}`;
     if (field.errors?.['max'])
-      return `Maximum value is ${field.errors['max'].max}`;
+      return `Valor máximo es ${field.errors['max'].max}`;
 
-    return 'Invalid field';
+    return 'Campo inválido';
   }
 }

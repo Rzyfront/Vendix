@@ -36,9 +36,12 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nuevo Usuario"
+      subtitle="Completa el formulario para agregar un nuevo usuario a la organización"
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

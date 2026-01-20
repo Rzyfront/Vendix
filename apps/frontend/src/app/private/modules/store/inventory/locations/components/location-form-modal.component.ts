@@ -34,9 +34,11 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'md'"
       [title]="location ? 'Editar Ubicación' : 'Nueva Ubicación'"
-      size="md"
-      (closed)="onCancel()"
+      subtitle="Configura los detalles de la ubicación de inventario"
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-6 max-h-[70vh] overflow-y-auto px-1">
@@ -203,6 +205,7 @@ export class LocationFormModalComponent implements OnInit, OnChanges {
   @Input() location: InventoryLocation | null = null;
   @Input() isSubmitting = false;
 
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateLocationDto | UpdateLocationDto>();
 

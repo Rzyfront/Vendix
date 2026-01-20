@@ -68,6 +68,10 @@ interface LocationStockOption {
       size="md"
       (closed)="onCancel()"
       (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'md'"
+      title="Nuevo Ajuste de Inventario"
+      subtitle="Registra un ajuste de inventario"
     >
       <!-- Step Indicator -->
       <div class="flex items-center justify-center mb-8 px-4">

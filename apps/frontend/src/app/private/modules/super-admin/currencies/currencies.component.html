@@ -90,6 +90,7 @@
 <app-currency-create-modal
   [isOpen]="isCreateModalOpen"
   [isSubmitting]="isCreatingCurrency"
+  (isOpenChange)="onCreateModalChange($event)"
   (submit)="createCurrency($event)"
   (cancel)="onCreateModalCancel()">
 </app-currency-create-modal>
@@ -99,6 +100,7 @@
   [isOpen]="isEditModalOpen"
   [isSubmitting]="isUpdatingCurrency"
   [currency]="selectedCurrency"
+  (isOpenChange)="onEditModalChange($event)"
   (submit)="updateCurrency($event)"
   (cancel)="onEditModalCancel()">
 </app-currency-edit-modal>

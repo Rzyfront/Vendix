@@ -31,9 +31,11 @@ import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../../interfaces
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
       [title]="supplier ? 'Editar Proveedor' : 'Nuevo Proveedor'"
-      size="lg"
-      (closed)="onCancel()"
+      subtitle="Administra la información del proveedor"
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-6">
@@ -178,6 +180,7 @@ export class SupplierFormModalComponent implements OnChanges {
   @Input() supplier: Supplier | null = null;
   @Input() isSubmitting = false;
 
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateSupplierDto | UpdateSupplierDto>();
 

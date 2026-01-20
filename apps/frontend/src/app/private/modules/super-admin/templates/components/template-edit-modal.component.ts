@@ -24,10 +24,11 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Edit Template"
       [subtitle]="template?.template_name"
-      (isOpenChange)="onModalChange($event)"
     >
       <div *ngIf="template" class="space-y-6">
         <!-- Warning banner for system templates -->
@@ -202,10 +203,6 @@ export class TemplateEditModalComponent {
     }
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-  }
-
   onSubmit(): void {
     if (this.isJsonInvalid) {
       return;
@@ -224,7 +221,7 @@ export class TemplateEditModalComponent {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
   }
 
   formatConfigurationType(type: string): string {

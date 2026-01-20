@@ -35,7 +35,9 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nuevo Usuario"
     >
@@ -223,8 +225,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
         next: () => {
           this.isCreating = false;
           this.onUserCreated.emit();
-          this.isOpenChange.emit(false);
-          this.resetForm();
+          this.onCancel();
         },
         error: (error: any) => {
           this.isCreating = false;
