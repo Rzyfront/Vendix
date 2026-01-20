@@ -4,7 +4,9 @@ import {
   Output,
   EventEmitter,
   OnInit,
+  OnChanges,
   OnDestroy,
+  SimpleChanges,
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -38,7 +40,9 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Usuario"
       [subtitle]="
@@ -282,7 +286,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
     `,
   ],
 })
-export class UserEditModalComponent implements OnInit, OnDestroy {
+export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
   @Input() user: User | null = null;
   @Input() isOpen: boolean = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
@@ -335,8 +339,24 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     }
   }
 
+  ngOnChanges(changes: SimpleChanges): void {
+    // When the modal opens or user changes, update the form
+    if (changes['user'] && changes['user'].currentValue) {
+      const user = changes['user'].currentValue;
+      this.userForm.patchValue({
+        first_name: user.first_name,
+        last_name: user.last_name,
+        username: user.username,
+        email: user.email,
+        organization_id: user.organization_id,
+        app: user.app || '',
+        state: user.state,
+        password: '', // No mostrar la contraseña actual
+      });
+    }
+  }
+
   onCancel(): void {
-    this.isOpen = false;
     this.isOpenChange.emit(false);
   }
 
@@ -366,7 +386,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
           this.isUpdating = false;
           this.toastService.success('Usuario actualizado exitosamente');
           this.onUserUpdated.emit();
-          this.isOpenChange.emit(false);
+          this.onCancel();
         },
         error: (error: any) => {
           this.isUpdating = false;

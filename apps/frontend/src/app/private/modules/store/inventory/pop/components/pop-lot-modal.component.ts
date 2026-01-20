@@ -25,10 +25,11 @@ import { PopCartService, PopCartItemLotInfo } from '../services/pop-cart.service
   template: `
     <app-modal
       [isOpen]="isOpen"
-      size="md"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'md'"
       title="Información de Lote"
       subtitle="Información opcional para rastreo de inventario"
-      (close)="onClose()"
     >
       <div class="space-y-4">
         <!-- Info Message -->
@@ -150,6 +151,11 @@ export class PopLotModalComponent {
   }
 
   onClose(): void {
+    this.close.emit();
+    this.resetForm();
+  }
+
+  onCancel(): void {
     this.close.emit();
     this.resetForm();
     this.isOpenChange.emit(false);

@@ -36,10 +36,11 @@ import { InventoryService } from '../../../inventory/services';
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
       title="Nueva Orden de Compra"
-      size="lg"
-      size="lg"
-      (closed)="onCancel()"
+      subtitle="Crea una nueva orden de compra para el proveedor"
     >
       <form [formGroup]="form">
         <!-- Step 1: Basic Info -->
@@ -199,6 +200,7 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
   @Input() suppliers: Supplier[] = [];
   @Input() isSubmitting = false;
 
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() cancel = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreatePurchaseOrderDto>();
 

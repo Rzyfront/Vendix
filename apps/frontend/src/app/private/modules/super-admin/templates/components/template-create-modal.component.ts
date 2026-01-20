@@ -36,10 +36,11 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Create New Template"
       subtitle="Configure a new template for the system"
-      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="templateForm" class="space-y-6">
         <!-- Template Name -->
@@ -175,13 +176,6 @@ export class TemplateCreateModalComponent {
     }
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onSubmit(): void {
     if (this.templateForm.invalid || this.isJsonInvalid) {
       Object.keys(this.templateForm.controls).forEach((key) => {
@@ -203,7 +197,8 @@ export class TemplateCreateModalComponent {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
+    this.resetForm();
   }
 
   resetForm(): void {

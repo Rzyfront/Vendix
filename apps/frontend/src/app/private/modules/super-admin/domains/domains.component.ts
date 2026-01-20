@@ -200,7 +200,7 @@ import './domains.component.css';
       <app-domain-create-modal
         [isOpen]="isCreateModalOpen"
         [isLoading]="isCreatingDomain"
-        (openChange)="onCreateModalChange($event)"
+        (isOpenChange)="onCreateModalChange($event)"
         (create)="createDomain($event)"
         (cancel)="onCreateModalCancel()"
       ></app-domain-create-modal>
@@ -210,7 +210,7 @@ import './domains.component.css';
         [isOpen]="isEditModalOpen"
         [isLoading]="isUpdatingDomain"
         [domain]="selectedDomain"
-        (openChange)="onEditModalChange($event)"
+        (isOpenChange)="onEditModalChange($event)"
         (update)="updateDomain($event)"
         (cancel)="onEditModalCancel()"
       ></app-domain-edit-modal>

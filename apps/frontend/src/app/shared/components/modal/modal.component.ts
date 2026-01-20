@@ -20,13 +20,13 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
     <div
       *ngIf="isOpen"
       class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      (click)="onBackdropClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
       <div
         class="absolute inset-0 backdrop-blur-md bg-black/40 transition-all duration-300 ease-out"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
+        (click)="onBackdropClick()"
       ></div>
 
       <!-- Modal container con animación mejorada -->
@@ -110,12 +110,18 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 })
 export class ModalComponent implements OnInit, OnDestroy {
   private _isOpen = false;
+  private _isInternalChange = false;
 
   @Input()
   set isOpen(value: boolean) {
     if (this._isOpen !== value) {
       this._isOpen = value;
-      this.isOpenChange.emit(value);
+      // Only emit isOpenChange if this is not an internal change (from X, Escape, backdrop)
+      if (!this._isInternalChange) {
+        this.isOpenChange.emit(value);
+      }
+      this._isInternalChange = false;
+
       if (value) {
         this.opened.emit();
       } else {
@@ -147,6 +153,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() opened = new EventEmitter<void>();
+  @Output() cancel = new EventEmitter<void>();
 
   private escapeListener?: (event: KeyboardEvent) => void;
 
@@ -178,8 +185,8 @@ export class ModalComponent implements OnInit, OnDestroy {
     const sizeClasses = {
       sm: ['max-w-sm'],
       md: ['max-w-2xl'],
-      lg: ['max-w-7xl', 'w-full', 'h-full', 'max-h-[90vh]'],
-      xl: ['max-w-[98vw]', 'w-full', 'h-full', 'max-h-[90vh]'],
+      lg: ['max-w-5xl', 'w-full', 'max-h-[90vh]'],
+      xl: ['max-w-[95vw]', 'w-full', 'max-h-[90vh]'],
     };
 
     const classes = [...baseClasses, ...sizeClasses[this.size]];
@@ -200,15 +207,19 @@ export class ModalComponent implements OnInit, OnDestroy {
   }
 
   open(): void {
+    this._isInternalChange = true;
     this.isOpen = true;
   }
 
   close(): void {
+    this._isInternalChange = true;
     this.isOpen = false;
+    // Also emit the cancel event for parent components to handle
+    this.cancel.emit();
   }
 
-  onBackdropClick(event: Event): void {
-    if (this.closeOnBackdrop && event.target === event.currentTarget) {
+  onBackdropClick(): void {
+    if (this.closeOnBackdrop) {
       this.close();
     }
   }

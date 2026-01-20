@@ -77,7 +77,8 @@
     (cancel)="onEditModalCancel()"></app-store-edit-modal>
 
   <!-- Settings Store Modal -->
-  <app-store-settings-modal *ngIf="selectedStoreForSettings" [(isOpen)]="isSettingsModalOpen"
+  <app-store-settings-modal [(isOpen)]="isSettingsModalOpen"
     [isSubmitting]="isUpdatingSettings"
-    (submit)="updateStoreSettings($event)" (cancel)="onSettingsModalCancel()"></app-store-settings-modal>
+    [settings]="selectedStoreForSettings?.settings"
+    (submit)="updateStoreSettings($event)"></app-store-settings-modal>
 </div>

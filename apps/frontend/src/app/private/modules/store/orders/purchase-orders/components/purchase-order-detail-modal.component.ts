@@ -25,10 +25,11 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
       [title]="'Orden ' + (order?.order_number || '')"
-      size="lg"
-      size="lg"
-      (closed)="onClose()"
+      subtitle="Detalles de la orden de compra"
     >
       <div *ngIf="order" class="space-y-6">
         <!-- Header Info -->
@@ -145,6 +146,7 @@ export class PurchaseOrderDetailModalComponent {
   @Input() isOpen = false;
   @Input() order: PurchaseOrder | null = null;
 
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() close = new EventEmitter<void>();
   @Output() receive = new EventEmitter<{ order_id: number; items: ReceivePurchaseOrderItemDto[] }>();
   @Output() cancel = new EventEmitter<number>();
@@ -204,7 +206,13 @@ export class PurchaseOrderDetailModalComponent {
   onClose(): void {
     this.is_receiving_mode = false;
     this.receive_quantities = [];
+  }
+
+  onCancel(): void {
+    this.is_receiving_mode = false;
+    this.receive_quantities = [];
     this.close.emit();
+    this.isOpenChange.emit(false);
   }
 
   formatDate(date: string | undefined): string {

@@ -15,10 +15,13 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'md'"
       title="Carga Masiva de Productos"
       (closed)="onCancel()"
+      subtitle="Importa múltiples productos desde un archivo Excel"
     >
       <!-- Initial State: Instructions & Upload -->
       <div *ngIf="!uploadResults && !parsedData" class="space-y-6">
