@@ -76,11 +76,12 @@ export class AuthEffects {
           if (message) this.toast.success(message);
           try {
             const currentConfig = this.configFacade.getCurrentConfig();
+            // Si no hay environment actualizado, asumimos que no hay cambio de entorno
+            // Pero para customers, queremos que se queden donde estan si es STORE_ECOMMERCE
+
             if (!currentConfig || !updated_environment) {
-              console.error(
-                '[AuthEffects] No config or updated environment for redirection.',
-              );
-              await this.router.navigateByUrl('/');
+              // Normal flow if no environment update is needed (e.g. standard login)
+              // But we should check if we are in ecommerce and user is customer
               return;
             }
 
@@ -113,6 +114,48 @@ export class AuthEffects {
             );
             await this.router.navigateByUrl('/');
           }
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  registerCustomer$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.registerCustomer),
+      mergeMap((registerData) =>
+        this.authService.registerCustomer(registerData).pipe(
+          map((response) => {
+            if (!response.data) throw new Error('Invalid response data');
+            return AuthActions.registerCustomerSuccess({
+              user: response.data.user,
+              user_settings: response.data.user_settings,
+              tokens: {
+                access_token: response.data.access_token,
+                refresh_token: response.data.refresh_token,
+              },
+              permissions: response.data.permissions || [],
+              roles: response.data.user.roles || [],
+              updated_environment: response.updatedEnvironment,
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.registerCustomerFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  registerCustomerSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.registerCustomerSuccess),
+        tap(() => {
+          this.toast.success('Cuenta creada exitosamente');
         }),
       ),
     { dispatch: false },

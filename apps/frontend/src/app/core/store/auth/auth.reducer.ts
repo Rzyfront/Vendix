@@ -271,6 +271,43 @@ export const authReducer = createReducer(
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
+  // Register Customer
+  on(AuthActions.registerCustomer, (state) => ({
+    ...state,
+    loading: true,
+    error: null,
+  })),
+
+  on(
+    AuthActions.registerCustomerSuccess,
+    (state, { user, user_settings, tokens, permissions, roles }) => {
+      const newState = {
+        ...state,
+        user,
+        user_settings,
+        tokens,
+        permissions: permissions || [],
+        roles: roles || [],
+        loading: false,
+        error: null,
+        is_authenticated: true,
+      };
+      // Save to localStorage for persistence
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
+
+  on(AuthActions.registerCustomerFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+    is_authenticated: false,
+  })),
+
   // Onboarding Actions
   on(AuthActions.checkOnboardingStatus, (state) => ({
     ...state,

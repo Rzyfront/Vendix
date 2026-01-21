@@ -1,9 +1,56 @@
-import { Controller } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Body, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
+import { ResponseService } from '@common/responses/response.service';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 
+@ApiTags('Store Settings')
 @Controller('store/settings')
+@UseGuards(PermissionsGuard)
 export class SettingsController {
-  constructor(private readonly storeSettingsService: SettingsService) {}
+  constructor(
+    private readonly settingsService: SettingsService,
+    private readonly responseService: ResponseService,
+  ) {}
 
-  // TODO: Implement store settings endpoints
+  @Get()
+  @Permissions('store:settings:read')
+  @ApiOperation({ summary: 'Get current store settings' })
+  @ApiResponse({
+    status: 200,
+    description: 'Store settings retrieved successfully',
+  })
+  async getSettings() {
+    const settings = await this.settingsService.getSettings();
+    return this.responseService.success(settings);
+  }
+
+  @Patch()
+  @Permissions('store:settings:update')
+  @ApiOperation({ summary: 'Update store settings (overwrite sections)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Settings updated successfully',
+  })
+  async updateSettings(@Body() dto: UpdateSettingsDto) {
+    const settings = await this.settingsService.updateSettings(dto);
+    return this.responseService.success(
+      settings,
+      'Settings updated successfully',
+    );
+  }
+
+  @Post('reset')
+  @Permissions('store:settings:update')
+  @ApiOperation({ summary: 'Reset settings to defaults' })
+  @ApiResponse({
+    status: 200,
+    description: 'Settings reset to defaults',
+  })
+  async resetToDefault() {
+    const settings = await this.settingsService.resetToDefault();
+    return this.responseService.success(settings, 'Settings reset to defaults');
+  }
 }

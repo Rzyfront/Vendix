@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -7,6 +7,7 @@ import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
+import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
 
 @Component({
   selector: 'app-store-ecommerce-layout',
@@ -16,6 +17,7 @@ import { IconComponent } from '../../../shared/components/icon/icon.component';
     RouterModule,
     SearchAutocompleteComponent,
     IconComponent,
+    AuthModalComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
@@ -25,12 +27,15 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   store_logo: string | null = null;
   show_user_menu = false;
   show_mobile_menu = false;
+  is_auth_modal_open = false;
+  auth_modal_mode: 'login' | 'register' = 'login';
 
   // Inject dependencies first, then create observables
   private auth_facade = inject(AuthFacade);
   private domain_service = inject(TenantFacade);
   private cart_service = inject(CartService);
   private router = inject(Router);
+  private cdr = inject(ChangeDetectorRef);
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
@@ -87,10 +92,16 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   }
 
   login(): void {
-    this.router.navigate(['/auth/login']);
+    this.auth_modal_mode = 'login';
+    this.is_auth_modal_open = true;
+    this.show_user_menu = false;
+    this.cdr.detectChanges();
   }
 
   register(): void {
-    this.router.navigate(['/auth/register']);
+    this.auth_modal_mode = 'register';
+    this.is_auth_modal_open = true;
+    this.show_user_menu = false;
+    this.cdr.detectChanges();
   }
 }

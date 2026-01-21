@@ -9,6 +9,7 @@ import { AuditModule } from './audit/audit.module';
 import { StoresModule } from './stores/stores.module';
 import { UsersModule } from './users/users.module';
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
+import { TemplatesModule } from './templates/templates.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 
 @Module({
@@ -22,9 +23,10 @@ import { CurrenciesModule } from './currencies/currencies.module';
     UsersModule,
     AuditModule,
     PaymentMethodsModule,
+    TemplatesModule,
     CurrenciesModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],
 })
-export class SuperadminDomainModule { }
+export class SuperadminDomainModule {}

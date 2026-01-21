@@ -1,10 +1,105 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { StoreSettings } from './interfaces/store-settings.interface';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { validateSync } from 'class-validator';
+import { getDefaultStoreSettings } from './defaults/default-store-settings';
 
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
+
+  async getSettings(): Promise<StoreSettings> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+
+    let storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+
+    if (!storeSettings || !storeSettings.settings) {
+      return getDefaultStoreSettings();
+    }
+
+    try {
+      return this.validateSettings(storeSettings.settings);
+    } catch (error) {
+      return getDefaultStoreSettings();
+    }
+  }
+
+  async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+
+    const currentSettings = await this.getSettings();
+    const updatedSettings = {
+      ...currentSettings,
+      ...dto,
+    };
+
+    await this.validateSettings(updatedSettings);
+
+    return this.prisma.store_settings.upsert({
+      where: { store_id },
+      update: {
+        settings: updatedSettings,
+        updated_at: new Date(),
+      },
+      create: {
+        store_id,
+        settings: updatedSettings,
+      },
+    });
+  }
+
+  async resetToDefault(): Promise<StoreSettings> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+
+    await this.prisma.store_settings.delete({
+      where: { store_id },
+    });
+
+    return getDefaultStoreSettings();
+  }
+
+  private validateSettings(settings: any): StoreSettings {
+    const dto = new UpdateSettingsDto();
+    Object.assign(dto, settings);
+
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      stopAtFirstError: false,
+    });
+
+    if (errors.length > 0) {
+      throw new BadRequestException(
+        `Invalid settings structure: ${errors.map((e) => e.toString()).join(', ')}`,
+      );
+    }
+
+    return settings as StoreSettings;
+  }
 
   async create(data: any) {
     const context = RequestContextService.getContext();
@@ -17,20 +112,18 @@ export class SettingsService {
     return this.prisma.store_settings.create({
       data: {
         ...data,
-        store_id: store_id
-      }
+        store_id: store_id,
+      },
     });
   }
 
   async findAll() {
-    // Auto-scoped
     return this.prisma.store_settings.findMany();
   }
 
   async findOne(id: number) {
-    // Auto-scoped
     const setting = await this.prisma.store_settings.findFirst({
-      where: { id }
+      where: { id },
     });
     if (!setting) throw new NotFoundException('Setting not found');
     return setting;
@@ -40,14 +133,14 @@ export class SettingsService {
     await this.findOne(id);
     return this.prisma.store_settings.update({
       where: { id },
-      data
+      data,
     });
   }
 
   async remove(id: number) {
     await this.findOne(id);
     return this.prisma.store_settings.delete({
-      where: { id }
+      where: { id },
     });
   }
 }

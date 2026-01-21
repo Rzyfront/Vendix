@@ -163,3 +163,9 @@
 @if (show_user_menu) {
   <div class="menu-overlay" (click)="toggleUserMenu()"></div>
 }
+
+<app-auth-modal
+  [isOpen]="is_auth_modal_open"
+  [initialMode]="auth_modal_mode"
+  (closed)="is_auth_modal_open = false"
+></app-auth-modal>

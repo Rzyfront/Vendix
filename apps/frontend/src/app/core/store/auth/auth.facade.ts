@@ -85,10 +85,18 @@ export class AuthFacade {
   );
 
   // Panel UI observables
-  readonly panelUiConfig$ = this.store.select(AuthSelectors.selectPanelUiConfig);
-  readonly selectedAppType$ = this.store.select(AuthSelectors.selectSelectedAppType);
-  readonly currentAppPanelUi$ = this.store.select(AuthSelectors.selectCurrentAppPanelUi);
-  readonly visibleModules$ = this.store.select(AuthSelectors.selectVisibleModules);
+  readonly panelUiConfig$ = this.store.select(
+    AuthSelectors.selectPanelUiConfig,
+  );
+  readonly selectedAppType$ = this.store.select(
+    AuthSelectors.selectSelectedAppType,
+  );
+  readonly currentAppPanelUi$ = this.store.select(
+    AuthSelectors.selectCurrentAppPanelUi,
+  );
+  readonly visibleModules$ = this.store.select(
+    AuthSelectors.selectVisibleModules,
+  );
 
   // Domain settings observables
   readonly userDomainSettings$ = this.store.select(
@@ -108,6 +116,19 @@ export class AuthFacade {
     this.store.dispatch(
       AuthActions.login({ email, password, store_slug, organization_slug }),
     );
+  }
+
+  registerCustomer(data: {
+    email: string;
+    password?: string;
+    first_name: string;
+    last_name: string;
+    store_id: number;
+    phone?: string;
+    document_type?: string;
+    document_number?: string;
+  }): void {
+    this.store.dispatch(AuthActions.registerCustomer(data));
   }
 
   logout(): void {
@@ -346,7 +367,9 @@ export class AuthFacade {
   }
 
   updateUserSettings(userSettings: any): void {
-    this.store.dispatch(AuthActions.updateUserSettings({ user_settings: userSettings }));
+    this.store.dispatch(
+      AuthActions.updateUserSettings({ user_settings: userSettings }),
+    );
   }
 
   getUserId(): number | null {

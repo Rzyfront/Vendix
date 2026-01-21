@@ -1,0 +1,108 @@
+<div class="general-settings">
+  <div class="w-full">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900 mb-2">
+        Configuración General de Tienda
+      </h1>
+      <p class="text-gray-600">
+        Configura las preferencias administrativas y flujos de negocio de tu
+        tienda
+      </p>
+    </div>
+
+    @if (isLoading) {
+      <div class="bg-white rounded-lg shadow-sm border p-8">
+        <div class="text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
+          ></div>
+          <p class="mt-2 text-gray-600">Cargando configuraciones...</p>
+        </div>
+      </div>
+    } @else {
+      <div class="bg-white rounded-lg shadow-sm border">
+        <!-- Tabs Navigation -->
+        <div class="border-b border-gray-200">
+          <nav class="flex space-x-8 px-6" role="tablist">
+            @for (tab of tabs; track tab.value) {
+              <button
+                (click)="currentTab = tab.value"
+                [class.active]="currentTab === tab.value"
+                [class.inactive]="currentTab !== tab.value"
+                class="py-4 px-1 border-b-2 font-medium text-sm transition-colors"
+                role="tab"
+                [attr.aria-selected]="currentTab === tab.value"
+              >
+                {{ tab.label }}
+              </button>
+            }
+          </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div class="p-6">
+          @if (currentTab === 0) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">General</h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 1) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">
+                Inventario
+              </h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 2) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">Checkout</h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 3) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">Envíos</h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 4) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">
+                Notificaciones
+              </h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 5) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">POS</h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          } @else if (currentTab === 6) {
+            <div class="text-center py-8">
+              <h2 class="text-xl font-semibold text-gray-900 mb-2">Recibos</h2>
+              <p class="text-gray-600">Configuración en desarrollo</p>
+            </div>
+          }
+        </div>
+      </div>
+
+      <!-- Status Bar -->
+      <div class="mt-4 flex items-center justify-between text-sm text-gray-600">
+        @if (lastSaved) {
+          <span class="text-green-600">
+            ✓ Guardado a las {{ lastSaved | date: "short" }}
+          </span>
+        } @else if (hasUnsavedChanges) {
+          <span class="text-orange-600"> Hay cambios sin guardar </span>
+        } @else {
+          <span></span>
+        }
+
+        <button
+          (click)="resetToDefaults()"
+          class="text-red-600 hover:text-red-700"
+        >
+          Restablecer valores por defecto
+        </button>
+      </div>
+    }
+  </div>
+</div>
