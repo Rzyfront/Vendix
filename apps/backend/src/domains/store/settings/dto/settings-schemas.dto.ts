@@ -7,11 +7,17 @@ import {
   IsEnum,
   IsArray,
   IsOptional,
+  ValidateNested,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import {
+  ShippingTypesConfigDto,
+  ShippingZoneDto,
+} from './shipping-carriers.dto';
 
 export class GeneralSettingsDto {
+  // Campos de store_settings (existentes)
   @ApiProperty({ example: 'America/Bogota' })
   @IsString()
   timezone: string;
@@ -27,6 +33,26 @@ export class GeneralSettingsDto {
   @ApiProperty({ example: false })
   @IsBoolean()
   tax_included: boolean;
+
+  // Campos de la tabla stores (NUEVOS)
+  @ApiProperty({ example: 'Mi Tienda', required: false })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiProperty({ example: 'https://example.com/logo.png', required: false })
+  @IsOptional()
+  @IsString()
+  logo_url?: string | null;
+
+  @ApiProperty({
+    enum: ['physical', 'online', 'hybrid', 'popup', 'kiosko'],
+    example: 'physical',
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
+  store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
 }
 
 export class InventorySettingsDto {
@@ -79,11 +105,6 @@ export class ShippingSettingsDto {
   @Min(0)
   free_shipping_threshold: number;
 
-  @ApiProperty({ example: ['Bogotá', 'Medellín'], type: [String] })
-  @IsArray()
-  @IsString({ each: true })
-  shipping_zones: string[];
-
   @ApiProperty({ example: true })
   @IsBoolean()
   allow_pickup: boolean;
@@ -92,6 +113,17 @@ export class ShippingSettingsDto {
   @IsOptional()
   @IsString()
   default_shipping_method?: string | null;
+
+  @ApiProperty({ type: ShippingTypesConfigDto })
+  @ValidateNested()
+  @Type(() => ShippingTypesConfigDto)
+  shipping_types: ShippingTypesConfigDto;
+
+  @ApiProperty({ type: [ShippingZoneDto] })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ShippingZoneDto)
+  shipping_zones: ShippingZoneDto[];
 }
 
 export class NotificationsSettingsDto {

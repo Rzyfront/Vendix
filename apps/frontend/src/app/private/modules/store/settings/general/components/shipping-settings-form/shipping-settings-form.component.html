@@ -1,0 +1,305 @@
+<div class="shipping-settings-form">
+  <div class="space-y-6">
+    <!-- Section Header -->
+    <div class="border-b border-gray-200 pb-4">
+      <h3 class="text-lg font-semibold text-gray-900">
+        Configuración de Envíos
+      </h3>
+      <p class="text-sm text-gray-600 mt-1">
+        Configura los métodos de envío y carriers disponibles para tus clientes
+      </p>
+    </div>
+
+    <!-- Main Settings -->
+    <div class="space-y-4">
+      <!-- Enable Shipping -->
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900"
+            >Habilitar Envíos</label
+          >
+          <p class="text-sm text-gray-600 mt-1">
+            Activa la funcionalidad de envíos en tu tienda
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="enabledControl"
+          (changed)="onFieldChange()"
+          ariaLabel="Habilitar envíos"
+        ></app-toggle>
+      </div>
+
+      <!-- Allow Pickup -->
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900"
+            >Permitir Recogida en Tienda</label
+          >
+          <p class="text-sm text-gray-600 mt-1">
+            Los clientes pueden recoger su pedido en la tienda
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="allowPickupControl"
+          (changed)="onFieldChange()"
+          ariaLabel="Permitir recogida en tienda"
+        ></app-toggle>
+      </div>
+
+      <!-- Free Shipping Threshold -->
+      @if (form.get("enabled")?.value) {
+        <div>
+          <app-input
+            [formControl]="freeShippingThresholdControl"
+            type="number"
+            label="Umbral de Envío Gratis"
+            placeholder="0"
+            helperText="Monto mínimo de compra para envío gratuito (0 = desactivado)"
+            min="0"
+            (inputChange)="onFieldChange()"
+          ></app-input>
+        </div>
+
+        <!-- Default Shipping Method -->
+        <div>
+          <app-input
+            [formControl]="defaultShippingMethodControl"
+            type="text"
+            label="Método de Envío Predeterminado"
+            placeholder="standard"
+            helperText="ID del método de envío seleccionado por defecto"
+            (inputChange)="onFieldChange()"
+          ></app-input>
+        </div>
+      }
+    </div>
+
+    <!-- Shipping Types -->
+    @if (form.get("enabled")?.value) {
+      <div class="border-t border-gray-200 pt-6">
+        <h4 class="text-sm font-semibold text-gray-900 mb-4">Tipos de Envío</h4>
+
+        <div class="space-y-6">
+          <!-- Standard Shipping -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h5 class="text-sm font-medium text-gray-900">
+                  Envío Estándar
+                </h5>
+                <p class="text-sm text-gray-600">
+                  Carriers tradicionales (FedEx, DHL, UPS, etc.)
+                </p>
+              </div>
+              <button
+                type="button"
+                (click)="toggleShippingType('standard')"
+                class="px-3 py-1.5 text-sm rounded border transition-colors"
+                [ngClass]="{
+                  'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
+                    shippingTypes.standard?.enabled,
+                  'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
+                    !shippingTypes.standard?.enabled,
+                }"
+              >
+                {{
+                  shippingTypes.standard?.enabled ? "Activado" : "Desactivado"
+                }}
+              </button>
+            </div>
+
+            @if (
+              shippingTypes.standard?.enabled && standardCarriers.length > 0
+            ) {
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-gray-700 uppercase">
+                  Carriers Disponibles
+                </p>
+                @for (carrier of standardCarriers; track carrier.id) {
+                  <div
+                    class="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <span class="text-sm">{{ carrier.name }}</span>
+                    <button
+                      type="button"
+                      (click)="toggleCarrier('standard', carrier.id)"
+                      class="px-2 py-1 text-xs rounded"
+                      [ngClass]="{
+                        'bg-green-100 text-green-700': carrier.enabled,
+                        'bg-gray-200 text-gray-600': !carrier.enabled,
+                      }"
+                    >
+                      {{ carrier.enabled ? "Activo" : "Inactivo" }}
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Express Shipping -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h5 class="text-sm font-medium text-gray-900">Envío Express</h5>
+                <p class="text-sm text-gray-600">
+                  Delivery rápido (Servientrega, Rappi, Didi, etc.)
+                </p>
+              </div>
+              <button
+                type="button"
+                (click)="toggleShippingType('express')"
+                class="px-3 py-1.5 text-sm rounded border transition-colors"
+                [ngClass]="{
+                  'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
+                    shippingTypes.express?.enabled,
+                  'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
+                    !shippingTypes.express?.enabled,
+                }"
+              >
+                {{
+                  shippingTypes.express?.enabled ? "Activado" : "Desactivado"
+                }}
+              </button>
+            </div>
+
+            @if (shippingTypes.express?.enabled && expressCarriers.length > 0) {
+              <div class="space-y-2">
+                <p class="text-xs font-medium text-gray-700 uppercase">
+                  Carriers Disponibles
+                </p>
+                @for (carrier of expressCarriers; track carrier.id) {
+                  <div
+                    class="flex items-center justify-between p-2 bg-gray-50 rounded"
+                  >
+                    <span class="text-sm">{{ carrier.name }}</span>
+                    <button
+                      type="button"
+                      (click)="toggleCarrier('express', carrier.id)"
+                      class="px-2 py-1 text-xs rounded"
+                      [ngClass]="{
+                        'bg-green-100 text-green-700': carrier.enabled,
+                        'bg-gray-200 text-gray-600': !carrier.enabled,
+                      }"
+                    >
+                      {{ carrier.enabled ? "Activo" : "Inactivo" }}
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Local Delivery -->
+          <div class="border border-gray-200 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h5 class="text-sm font-medium text-gray-900">Entrega Local</h5>
+                <p class="text-sm text-gray-600">
+                  Delivery en la zona local (mensajeros, motos, etc.)
+                </p>
+              </div>
+              <button
+                type="button"
+                (click)="toggleShippingType('local')"
+                class="px-3 py-1.5 text-sm rounded border transition-colors"
+                [ngClass]="{
+                  'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
+                    shippingTypes.local?.enabled,
+                  'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
+                    !shippingTypes.local?.enabled,
+                }"
+              >
+                {{ shippingTypes.local.enabled ? "Activado" : "Desactivado" }}
+              </button>
+            </div>
+
+            @if (shippingTypes.local.enabled) {
+              <div class="space-y-3">
+                <div
+                  class="flex items-center justify-between p-2 bg-gray-50 rounded"
+                >
+                  <span class="text-sm">Permitir entrega manual</span>
+                  <app-toggle
+                    [checked]="shippingTypes.local.allow_manual || false"
+                    (changed)="onFieldChange()"
+                    ariaLabel="Permitir entrega manual"
+                  ></app-toggle>
+                </div>
+
+                @if (localProviders.length > 0) {
+                  <div class="space-y-2">
+                    <p class="text-xs font-medium text-gray-700 uppercase">
+                      Providers Disponibles
+                    </p>
+                    @for (provider of localProviders; track provider.id) {
+                      <div
+                        class="flex items-center justify-between p-2 bg-gray-50 rounded"
+                      >
+                        <span class="text-sm">{{ provider.name }}</span>
+                        <button
+                          type="button"
+                          (click)="toggleLocalProvider(provider.id)"
+                          class="px-2 py-1 text-xs rounded"
+                          [ngClass]="{
+                            'bg-green-100 text-green-700': provider.enabled,
+                            'bg-gray-200 text-gray-600': !provider.enabled,
+                          }"
+                        >
+                          {{ provider.enabled ? "Activo" : "Inactivo" }}
+                        </button>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- Shipping Zones -->
+    @if (form.get("enabled")?.value) {
+      <div class="border-t border-gray-200 pt-6">
+        <div class="flex items-center justify-between mb-4">
+          <h4 class="text-sm font-semibold text-gray-900">Zonas de Envío</h4>
+          <span class="text-sm text-gray-600"
+            >{{ zones.length }} zonas configuradas</span
+          >
+        </div>
+
+        @if (zones.length > 0) {
+          <div class="space-y-3">
+            @for (zone of zones; track zone.id) {
+              <div class="p-4 bg-gray-50 rounded-lg">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h5 class="text-sm font-medium text-gray-900">
+                      {{ zone.name }}
+                    </h5>
+                    <p class="text-xs text-gray-600 mt-1">
+                      {{ zone.countries.length }} países,
+                      {{ zone.states.length }} estados/provincias,
+                      {{ zone.cities.length }} ciudades
+                    </p>
+                  </div>
+                  <span class="text-xs text-gray-500"
+                    >{{ zone.shipping_rules.length || 0 }} reglas</span
+                  >
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="text-center py-8 bg-gray-50 rounded-lg">
+            <p class="text-sm text-gray-600">No hay zonas configuradas</p>
+            <p class="text-xs text-gray-500 mt-1">
+              Las zonas de envío permiten configurar reglas por ubicación
+            </p>
+          </div>
+        }
+      </div>
+    }
+  </div>
+</div>

@@ -1,0 +1,141 @@
+<div class="notifications-settings-form">
+  <div class="space-y-6">
+    <!-- Section Header -->
+    <div class="border-b border-gray-200 pb-4">
+      <h3 class="text-lg font-semibold text-gray-900">
+        Configuración de Notificaciones
+      </h3>
+      <p class="text-sm text-gray-600 mt-1">
+        Configura las alertas y notificaciones automáticas de tu tienda
+      </p>
+    </div>
+
+    <!-- Master Toggles -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900"
+            >Notificaciones por Email</label
+          >
+          <p class="text-sm text-gray-600 mt-1">
+            Recibe alertas por correo electrónico
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="emailEnabledControl"
+          (changed)="onFieldChange()"
+          ariaLabel="Notificaciones por email"
+        ></app-toggle>
+      </div>
+
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900"
+            >Notificaciones por SMS</label
+          >
+          <p class="text-sm text-gray-600 mt-1">
+            Recibe alertas por mensaje de texto
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="smsEnabledControl"
+          (changed)="onFieldChange()"
+          ariaLabel="Notificaciones por SMS"
+        ></app-toggle>
+      </div>
+    </div>
+
+    <!-- Alert Types -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">Tipos de Alertas</h4>
+
+      <div class="space-y-4">
+        <!-- Low Stock Alerts -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Alertas de Stock Bajo</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Notifica cuando un producto esté por agotarse
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="lowStockAlertsControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Alertas de stock bajo"
+          ></app-toggle>
+        </div>
+
+        @if (isEmailEnabled) {
+          <div class="ml-4">
+            <app-input
+              [formControl]="lowStockAlertsEmailControl"
+              type="email"
+              label="Email para Alertas de Stock"
+              placeholder="alerts@store.com"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          </div>
+        }
+
+        @if (isSmsEnabled) {
+          <div class="ml-4">
+            <app-input
+              [formControl]="lowStockAlertsPhoneControl"
+              type="tel"
+              label="Teléfono para Alertas de Stock"
+              placeholder="+57 300 123 4567"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          </div>
+        }
+
+        <!-- New Order Alerts -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg mt-4"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Alertas de Nuevos Pedidos</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Notifica cuando recibas un nuevo pedido
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="newOrderAlertsControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Alertas de nuevos pedidos"
+          ></app-toggle>
+        </div>
+
+        @if (isEmailEnabled) {
+          <div class="ml-4">
+            <app-input
+              [formControl]="newOrderAlertsEmailControl"
+              type="email"
+              label="Email para Alertas de Pedidos"
+              placeholder="orders@store.com"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          </div>
+        }
+
+        @if (isSmsEnabled) {
+          <div class="ml-4">
+            <app-input
+              [formControl]="newOrderAlertsPhoneControl"
+              type="tel"
+              label="Teléfono para Alertas de Pedidos"
+              placeholder="+57 300 123 4567"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+</div>

@@ -8,6 +8,7 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { DomainConfigStandardizerHelper } from '../../../common/helpers/domain-config-standardizer.helper';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class EcommerceService {
@@ -16,6 +17,7 @@ export class EcommerceService {
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly configStandardizer: DomainConfigStandardizerHelper,
+    private readonly s3Service: S3Service,
   ) {}
 
   /**
@@ -35,7 +37,38 @@ export class EcommerceService {
       return null;
     }
 
-    return domain.config as any;
+    const config = domain.config as any;
+
+    // Firmar URLs del slider para que sean visibles en el frontend
+    if (config.slider?.photos) {
+      for (const photo of config.slider.photos) {
+        if (photo.url && !photo.url.startsWith('http')) {
+          // Si la URL es una key de S3, la firmamos
+          photo.url = await this.s3Service.signUrl(photo.url);
+        }
+      }
+    }
+
+    // Firmar logo_url en inicio y branding si es necesario
+    if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
+      const signedLogo = await this.s3Service.signUrl(config.inicio.logo_url);
+      config.inicio.logo_url = signedLogo;
+
+      // Sincronizar con branding para visualización
+      if (config.branding) {
+        config.branding.logo_url = signedLogo;
+      }
+    } else if (
+      config.branding?.logo_url &&
+      !config.branding.logo_url.startsWith('http')
+    ) {
+      // Si solo está en branding (migración), firmarlo también
+      config.branding.logo_url = await this.s3Service.signUrl(
+        config.branding.logo_url,
+      );
+    }
+
+    return config;
   }
 
   /**
@@ -79,10 +112,49 @@ export class EcommerceService {
       const existingConfig: any = existingDomain.config;
 
       // Mezclamos la configuración existente con los nuevos cambios
+      // Importante: No sobreescribir con arrays vacíos si el DTO no los trae
       const mergedRaw = {
         ...existingConfig,
         ...settings_with_defaults,
+        slider: {
+          ...existingConfig.slider,
+          ...settings_with_defaults.slider,
+        },
+        inicio: {
+          ...existingConfig.inicio,
+          ...settings_with_defaults.inicio,
+        },
       };
+
+      // Limpiar y asegurar persistencia de KEYS de S3 en lugar de URLs firmadas
+      if (mergedRaw.slider?.photos && Array.isArray(mergedRaw.slider.photos)) {
+        mergedRaw.slider.photos = mergedRaw.slider.photos.map((photo: any) => {
+          const persistedPhoto = { ...photo };
+          // Si el frontend envió una KEY, esa es la que DEBE quedar en el campo 'url' de la DB
+          if (photo.key) {
+            persistedPhoto.url = photo.key;
+          } else if (photo.url && photo.url.includes('?X-Amz-Algorithm')) {
+            // Si es una URL firmada, buscamos la key en la config anterior
+            const oldPhoto = existingConfig.slider?.photos?.find(
+              (p: any) =>
+                p.key === photo.key ||
+                (p.title === photo.title && p.caption === photo.caption),
+            );
+            if (oldPhoto) persistedPhoto.url = oldPhoto.url || oldPhoto.key;
+          }
+          return persistedPhoto;
+        });
+      }
+
+      // Lo mismo para el logo_url
+      if (
+        mergedRaw.inicio?.logo_url &&
+        mergedRaw.inicio.logo_url.includes('?X-Amz-Algorithm')
+      ) {
+        // Intentar mantener el logo anterior si el nuevo es solo una firma temporal
+        mergedRaw.inicio.logo_url =
+          existingConfig.inicio?.logo_url || mergedRaw.inicio.logo_url;
+      }
 
       // Sincronizar colores de inicio.colores con branding en modo edición
       if (mergedRaw.inicio?.colores) {
@@ -241,14 +313,28 @@ export class EcommerceService {
 
   /**
    * Upload slider image to S3
-   * This method will be implemented when S3Service is available
    */
   async uploadSliderImage(file: Buffer, filename: string) {
-    // TODO: Implement S3 upload when S3Service is available
-    // For now, return a mock response
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new Error('Store ID not found in context');
+
+    // Generar path organizado por tienda
+    const timestamp = Date.now();
+    const clean_filename = filename.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
+    const key = `stores/${store_id}/ecommerce/slider/${timestamp}-${clean_filename}`;
+
+    // Cargar y optimizar imagen (S3Service se encarga de convertir a WebP y hacer el thumb)
+    const result = await this.s3Service.uploadImage(file, key, {
+      generateThumbnail: true,
+    });
+
+    // Generar URL firmada temporal para previsualización inmediata en el frontend
+    const signed_url = await this.s3Service.getPresignedUrl(result.key);
+
     return {
-      key: `https://s3.amazonaws.com/vendix-assets/ecommerce/slider/${filename}`,
-      thumbKey: `https://s3.amazonaws.com/vendix-assets/ecommerce/slider/thumb_${filename}`,
+      key: result.key, // Esta es la clave que guardaremos en la DB
+      url: signed_url, // Esta es la URL para verla ahora
+      thumbKey: result.thumbKey,
     };
   }
 }

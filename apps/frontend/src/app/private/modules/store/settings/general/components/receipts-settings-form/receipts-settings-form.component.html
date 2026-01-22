@@ -1,0 +1,79 @@
+<div class="receipts-settings-form">
+  <div class="space-y-6">
+    <!-- Section Header -->
+    <div class="border-b border-gray-200 pb-4">
+      <h3 class="text-lg font-semibold text-gray-900">Configuración de Recibos</h3>
+      <p class="text-sm text-gray-600 mt-1">
+        Personaliza los recibos que se generan después de cada venta
+      </p>
+    </div>
+
+    <!-- Receipt Options -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900">Imprimir Recibo</label>
+          <p class="text-sm text-gray-600 mt-1">Imprime automáticamente el recibo después de cada venta</p>
+        </div>
+        <app-toggle
+          formControlName='print_receipt'
+          (changed)="onFieldChange()"
+          ariaLabel="Imprimir recibo"
+        ></app-toggle>
+      </div>
+
+      <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div>
+          <label class="text-sm font-medium text-gray-900">Enviar Recibo por Email</label>
+          <p class="text-sm text-gray-600 mt-1">Envía el recibo al correo del cliente</p>
+        </div>
+        <app-toggle
+          formControlName='email_receipt'
+          (changed)="onFieldChange()"
+          ariaLabel="Enviar recibo por email"
+        ></app-toggle>
+      </div>
+    </div>
+
+    <!-- Receipt Content -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">Contenido del Recibo</h4>
+
+      <div class="space-y-4">
+        <!-- Receipt Header -->
+        <div>
+          <label class="block text-sm font-medium text-gray-900 mb-2">
+            Encabezado del Recibo
+          </label>
+          <textarea
+            formControlName='receipt_header'
+            (change)="onFieldChange()"
+            rows="3"
+            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            placeholder="Escribe el encabezado que aparecerá en la parte superior del recibo..."
+          ></textarea>
+          <p class="mt-2 text-sm text-gray-600">
+            Texto que aparecerá en la parte superior del recibo (logo, nombre de tienda, dirección, etc.)
+          </p>
+        </div>
+
+        <!-- Receipt Footer -->
+        <div>
+          <label class="block text-sm font-medium text-gray-900 mb-2">
+            Pie de Página del Recibo
+          </label>
+          <textarea
+            formControlName='receipt_footer'
+            (change)="onFieldChange()"
+            rows="3"
+            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            placeholder="Escribe el pie de página que aparecerá en la parte inferior del recibo..."
+          ></textarea>
+          <p class="mt-2 text-sm text-gray-600">
+            Mensaje de agradecimiento, política de devoluciones, información de contacto, etc.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

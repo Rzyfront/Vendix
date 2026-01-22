@@ -4,10 +4,12 @@ import {
   inject,
   ChangeDetectorRef,
   HostListener,
+  DestroyRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
@@ -42,6 +44,7 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private cart_service = inject(CartService);
   private router = inject(Router);
   private cdr = inject(ChangeDetectorRef);
+  private destroy_ref = inject(DestroyRef);
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
@@ -56,13 +59,46 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   );
 
   ngOnInit(): void {
-    // Get store info from domain resolution
-    const tenantConfig = this.domain_service.getCurrentTenantConfig();
-    const storeConfig = this.domain_service.getCurrentStore();
-    if (tenantConfig && storeConfig) {
-      this.store_name = storeConfig.name || 'Tienda';
-      this.store_logo = tenantConfig.branding?.logo?.url || null;
-    }
+    // Get store info from domain resolution reactively
+    this.domain_service.domainConfig$
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe((domainConfig: any) => {
+        if (!domainConfig) return;
+
+        // Intentar obtener configuración desde customConfig (prioridad) o config
+        const config = domainConfig.customConfig || domainConfig.config || {};
+        const tenantConfig =
+          this.domain_service.getCurrentTenantConfig() || ({} as any);
+
+        // Resolver nombre de la tienda
+        this.store_name =
+          domainConfig.store_slug ||
+          this.domain_service.getCurrentStore()?.name ||
+          'Tienda';
+
+        // Resolver Logo con prioridad:
+        // 1. customConfig.inicio.logo_url (configuración específica del layout e-commerce)
+        // 2. customConfig.branding.logo_url (configuración de branding)
+        // 3. tenantConfig.branding.logo_url (standardizer backend)
+        // 4. legacy branding
+        const inicioLogo = config.inicio?.logo_url;
+        const brandingLogo =
+          config.branding?.logo_url || config.branding?.logo?.url;
+        const tenantLogo =
+          tenantConfig.branding?.logo_url || tenantConfig.branding?.logo?.url;
+
+        this.store_logo = inicioLogo || brandingLogo || tenantLogo || null;
+
+        console.log('Layout Resolved Config:', {
+          storeName: this.store_name,
+          storeLogo: this.store_logo,
+          source: inicioLogo
+            ? 'inicio.logo_url'
+            : brandingLogo
+              ? 'branding.logo_url'
+              : 'legacy',
+        });
+      });
   }
 
   toggleUserMenu(): void {

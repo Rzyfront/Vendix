@@ -85,6 +85,7 @@ export interface EcommerceSettings {
  */
 export interface SliderPhoto {
   url?: string | null;
+  key?: string | null; // S3 key
   title?: string;
   caption?: string;
 }
@@ -94,6 +95,7 @@ export interface SliderPhoto {
  */
 export interface SliderImage {
   url?: string;
+  key?: string; // S3 key
   thumbnail?: string;
   uploading?: boolean;
   title?: string;
@@ -120,5 +122,6 @@ export interface UpdateEcommerceSettingsDto {
  */
 export interface UploadImageResponse {
   key: string;
+  url?: string;
   thumbKey?: string;
 }

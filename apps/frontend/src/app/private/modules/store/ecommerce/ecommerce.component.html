@@ -111,14 +111,68 @@
             >
           </div>
 
-          <!-- Logo -->
-          <app-input
-            label="URL del Logo"
-            formControlName="logo_url"
-            placeholder="https://ejemplo.com/logo.png"
-            helperText="Ingresa la URL pública de tu logo (PNG, JPG, SVG)"
-          >
-          </app-input>
+          <!-- Logo Upload -->
+          <div class="space-y-1.5">
+            <label class="block text-sm font-medium text-gray-700"
+              >Logo de la Tienda</label
+            >
+            <div class="flex items-center gap-4">
+              <!-- Preview del Logo -->
+              <div
+                class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group"
+              >
+                <img
+                  *ngIf="logoPreview"
+                  [src]="logoPreview"
+                  alt="Logo preview"
+                  class="w-full h-full object-contain p-2"
+                />
+                <div
+                  *ngIf="!logoPreview && !isUploadingLogo"
+                  class="text-gray-400 flex flex-col items-center"
+                >
+                  <app-icon name="image" size="24"></app-icon>
+                  <span class="text-[10px] mt-1">Sin logo</span>
+                </div>
+
+                <!-- Loading State -->
+                <div
+                  *ngIf="isUploadingLogo"
+                  class="absolute inset-0 bg-white/80 flex items-center justify-center"
+                >
+                  <div
+                    class="loader-2 animate-spin text-xl text-primary-600"
+                  ></div>
+                </div>
+
+                <!-- Botón Eliminar (Overlay) -->
+                <button
+                  *ngIf="logoPreview && !isUploadingLogo"
+                  type="button"
+                  (click)="removeLogo()"
+                  class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg"
+                >
+                  <app-icon name="x" size="14"></app-icon>
+                </button>
+              </div>
+
+              <!-- Botón Subir -->
+              <div class="flex flex-col gap-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [loading]="isUploadingLogo"
+                  (clicked)="triggerLogoInput()"
+                >
+                  <app-icon name="upload" size="14" slot="icon"></app-icon>
+                  <span>{{ logoPreview ? "Cambiar Logo" : "Subir Logo" }}</span>
+                </app-button>
+                <p class="text-xs text-gray-500">
+                  PNG, JPG o SVG. Máx 2MB. Recomendado: fondo transparente.
+                </p>
+              </div>
+            </div>
+          </div>
 
           <!-- Colores de la Marca -->
           <div formGroupName="colores">

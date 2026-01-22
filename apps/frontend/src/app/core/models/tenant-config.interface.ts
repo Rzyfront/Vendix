@@ -5,6 +5,20 @@ export interface TenantConfig {
   theme: ThemeConfig;
   features: FeatureFlags;
   seo: SEOConfig;
+  inicio?: {
+    titulo?: string;
+    parrafo?: string;
+    logo_url?: string;
+    colores?: {
+      primary_color: string;
+      secondary_color: string;
+      accent_color: string;
+    };
+  };
+  slider?: {
+    enable?: boolean;
+    photos?: any[];
+  };
 }
 
 export interface OrganizationConfig {

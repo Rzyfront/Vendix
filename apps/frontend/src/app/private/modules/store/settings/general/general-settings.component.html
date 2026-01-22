@@ -42,44 +42,40 @@
         <!-- Tab Content -->
         <div class="p-6">
           @if (currentTab === 0) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">General</h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-general-settings-form
+              [settings]="settings.general"
+              (settingsChange)="onSectionChange('general', $event)"
+            />
           } @else if (currentTab === 1) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">
-                Inventario
-              </h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-inventory-settings-form
+              [settings]="settings.inventory"
+              (settingsChange)="onSectionChange('inventory', $event)"
+            />
           } @else if (currentTab === 2) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">Checkout</h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-checkout-settings-form
+              [settings]="settings.checkout"
+              (settingsChange)="onSectionChange('checkout', $event)"
+            />
           } @else if (currentTab === 3) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">Envíos</h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-shipping-settings-form
+              [settings]="settings.shipping"
+              (settingsChange)="onSectionChange('shipping', $event)"
+            />
           } @else if (currentTab === 4) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">
-                Notificaciones
-              </h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-notifications-settings-form
+              [settings]="settings.notifications"
+              (settingsChange)="onSectionChange('notifications', $event)"
+            />
           } @else if (currentTab === 5) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">POS</h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-pos-settings-form
+              [settings]="settings.pos"
+              (settingsChange)="onSectionChange('pos', $event)"
+            />
           } @else if (currentTab === 6) {
-            <div class="text-center py-8">
-              <h2 class="text-xl font-semibold text-gray-900 mb-2">Recibos</h2>
-              <p class="text-gray-600">Configuración en desarrollo</p>
-            </div>
+            <app-receipts-settings-form
+              [settings]="settings.receipts"
+              (settingsChange)="onSectionChange('receipts', $event)"
+            />
           }
         </div>
       </div>

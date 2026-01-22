@@ -1,0 +1,222 @@
+<div class="pos-settings-form">
+  <div class="space-y-6">
+    <!-- Section Header -->
+    <div class="border-b border-gray-200 pb-4">
+      <h3 class="text-lg font-semibold text-gray-900">
+        Configuración de Punto de Venta (POS)
+      </h3>
+      <p class="text-sm text-gray-600 mt-1">
+        Configura las opciones y funcionalidades del sistema POS
+      </p>
+    </div>
+
+    <!-- Business Hours -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">
+        Horarios de Atención
+      </h4>
+
+      <div class="space-y-3">
+        @for (day of daysOfWeek; track day.key) {
+          <div class="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+            <div class="w-28 flex-shrink-0">
+              <label class="text-sm font-medium text-gray-900">{{
+                day.label
+              }}</label>
+            </div>
+
+            <div class="flex items-center gap-2">
+              @if (isDayClosed(day.key)) {
+                <span class="text-sm text-gray-500 italic">Cerrado</span>
+              } @else {
+                <input
+                  type="time"
+                  [value]="
+                    form.get('business_hours')?.value[day.key]?.open || ''
+                  "
+                  (change)="
+                    onTimeChange(day.key, 'open', $any($event).target.value)
+                  "
+                  class="px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <span class="text-gray-500">-</span>
+                <input
+                  type="time"
+                  [value]="
+                    form.get('business_hours')?.value[day.key]?.close || ''
+                  "
+                  (change)="
+                    onTimeChange(day.key, 'close', $any($event).target.value)
+                  "
+                  class="px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              }
+            </div>
+
+            <button
+              type="button"
+              (click)="toggleDayStatus(day.key)"
+              class="ml-auto px-3 py-1.5 text-sm rounded border transition-colors"
+              [ngClass]="{
+                'bg-red-50 text-red-600 border-red-200 hover:bg-red-100':
+                  !isDayClosed(day.key),
+                'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
+                  isDayClosed(day.key),
+              }"
+            >
+              {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- POS Options -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">
+        Opciones de Venta
+      </h4>
+
+      <div class="space-y-4">
+        <!-- Offline Mode -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Modo Offline</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Permite operar sin conexión a internet
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="offlineModeEnabledControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Modo offline"
+          ></app-toggle>
+        </div>
+
+        <!-- Require Cash Drawer -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Requerir Apertura de Caja</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Solicita monto inicial al iniciar turno
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="requireCashDrawerOpenControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Requerir apertura de caja"
+          ></app-toggle>
+        </div>
+
+        <!-- Auto Print Receipt -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Imprimir Recibo Automáticamente</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Imprime el recibo después de cada venta
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="autoPrintReceiptControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Imprimir recibo automáticamente"
+          ></app-toggle>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing Options -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">
+        Opciones de Precios
+      </h4>
+
+      <div class="space-y-4">
+        <!-- Allow Price Edit -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Permitir Modificar Precios</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Los cajeros pueden cambiar el precio de los productos
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="allowPriceEditControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Permitir modificar precios"
+          ></app-toggle>
+        </div>
+
+        <!-- Allow Discount -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Permitir Descuentos</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Los cajeros pueden aplicar descuentos
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="allowDiscountControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Permitir descuentos"
+          ></app-toggle>
+        </div>
+
+        <!-- Max Discount Percentage -->
+        @if (form.get("allow_discount")?.value) {
+          <div>
+            <app-input
+              [formControl]="maxDiscountPercentageControl"
+              type="number"
+              label="Porcentaje Máximo de Descuento"
+              placeholder="15"
+              helperText="Porcentaje máximo de descuento permitido por venta"
+              min="0"
+              max="100"
+              (inputChange)="onFieldChange()"
+            ></app-input>
+          </div>
+        }
+
+        <!-- Allow Refund Without Approval -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Permitir Reembolsos sin Aprobación</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Los cajeros pueden procesar devoluciones directamente
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="allowRefundWithoutApprovalControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Permitir reembolsos sin aprobación"
+          ></app-toggle>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

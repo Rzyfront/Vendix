@@ -1,0 +1,83 @@
+<div class="checkout-settings-form">
+  <div class="space-y-6">
+    <!-- Section Header -->
+    <div class="border-b border-gray-200 pb-4">
+      <h3 class="text-lg font-semibold text-gray-900">
+        Configuración de Checkout
+      </h3>
+      <p class="text-sm text-gray-600 mt-1">
+        Configura el proceso de pago y las opciones disponibles para los
+        clientes
+      </p>
+    </div>
+
+    <!-- Require Customer Data -->
+    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+      <div class="flex-1">
+        <label class="text-sm font-medium text-gray-900">
+          Requerir Datos del Cliente
+        </label>
+        <p class="text-sm text-gray-600 mt-1">
+          Los clientes deben proporcionar información personal para completar la
+          compra
+        </p>
+      </div>
+      <app-toggle
+        [formControl]="requireCustomerDataControl"
+        (changed)="onFieldChange()"
+        ariaLabel="Requerir datos del cliente"
+      ></app-toggle>
+    </div>
+
+    <!-- Allow Guest Checkout -->
+    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+      <div class="flex-1">
+        <label class="text-sm font-medium text-gray-900">
+          Permitir Compra como Invitado
+        </label>
+        <p class="text-sm text-gray-600 mt-1">
+          Los clientes pueden comprar sin crear una cuenta
+        </p>
+      </div>
+      <app-toggle
+        [formControl]="allowGuestCheckoutControl"
+        (changed)="onFieldChange()"
+        ariaLabel="Permitir compra como invitado"
+      ></app-toggle>
+    </div>
+
+    <!-- Allow Partial Payments -->
+    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+      <div class="flex-1">
+        <label class="text-sm font-medium text-gray-900">
+          Permitir Pagos Parciales
+        </label>
+        <p class="text-sm text-gray-600 mt-1">
+          Los clientes pueden pagar parte del total y completar el resto después
+        </p>
+      </div>
+      <app-toggle
+        [formControl]="allowPartialPaymentsControl"
+        (changed)="onFieldChange()"
+        ariaLabel="Permitir pagos parciales"
+      ></app-toggle>
+    </div>
+
+    <!-- Require Payment Confirmation -->
+    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+      <div class="flex-1">
+        <label class="text-sm font-medium text-gray-900">
+          Requerir Confirmación de Pago
+        </label>
+        <p class="text-sm text-gray-600 mt-1">
+          El pedido solo se procesa después de confirmar el pago
+        </p>
+      </div>
+      <app-toggle
+        [formControl]="requirePaymentConfirmationControl"
+        (changed)="onFieldChange()"
+        ariaLabel="Requerir confirmación de pago"
+      ></app-toggle>
+    </div>
+  </div>
+</div>

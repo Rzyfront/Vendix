@@ -51,8 +51,14 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   activeImageIndex = 0;
   isUploadingImage = false;
 
+  // Logo state
+  isUploadingLogo = false;
+  logoPreview: string | null = null;
+  logoKey: string | null = null;
+
   // File input reference
   fileInputRef: HTMLInputElement | null = null;
+  logoInputRef: HTMLInputElement | null = null;
 
   // Store info for auto-fill
   storeName = 'Mi Tienda';
@@ -159,12 +165,19 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             this.isSetupMode = false;
             this.settingsForm.patchValue(response.config);
 
+            // Cargar logo si existe
+            if (response.config.inicio?.logo_url) {
+              this.logoPreview = response.config.inicio.logo_url;
+              this.logoKey = response.config.inicio.logo_url;
+            }
+
             // Cargar imágenes del slider
             if (response.config.slider?.photos) {
               this.sliderImages = response.config.slider.photos
-                .filter((photo) => photo.url !== null)
+                .filter((photo) => photo.url !== null || photo.key !== null)
                 .map((photo) => ({
                   url: photo.url || undefined,
+                  key: photo.key || undefined,
                   title: photo.title,
                   caption: photo.caption,
                 }));
@@ -271,7 +284,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           const index = this.sliderImages.findIndex((img) => img.uploading);
           if (index !== -1) {
             this.sliderImages[index] = {
-              url: result.key,
+              url: result.url || result.key, // Usar la URL firmada para previsualización
+              key: result.key, // Guardar la KEY para persistencia
               thumbnail: result.thumbKey,
               title: '',
               caption: '',
@@ -340,23 +354,99 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Trigger file input for logo upload
+   */
+  triggerLogoInput(): void {
+    if (this.isUploadingLogo) return;
+
+    if (!this.logoInputRef) {
+      this.logoInputRef = document.createElement('input');
+      this.logoInputRef.type = 'file';
+      this.logoInputRef.accept = 'image/*';
+      this.logoInputRef.addEventListener('change', (e) => this.onLogoUpload(e));
+    }
+    this.logoInputRef.click();
+  }
+
+  /**
+   * Handle logo upload
+   */
+  onLogoUpload(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+
+    if (!files || files.length === 0) return;
+    const file = files[0];
+
+    if (!file.type.startsWith('image/')) {
+      this.toastService.warning('Solo se permiten archivos de imagen');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      this.toastService.warning('El logo excede el tamaño máximo de 2MB');
+      return;
+    }
+
+    this.isUploadingLogo = true;
+
+    this.ecommerceService
+      .uploadSliderImage(file) // Reutilizamos el mismo servicio de subida
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (result) => {
+          this.logoPreview = result.url || result.key;
+          this.logoKey = result.key;
+
+          const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
+          if (inicioGroup) {
+            inicioGroup.patchValue({ logo_url: result.key });
+            this.settingsForm.markAsDirty();
+          }
+
+          this.isUploadingLogo = false;
+          this.toastService.success('Logo subido exitosamente');
+        },
+        error: (error) => {
+          this.isUploadingLogo = false;
+          this.toastService.error('Error al subir el logo: ' + error.message);
+        },
+      });
+
+    input.value = '';
+  }
+
+  /**
+   * Remove logo
+   */
+  removeLogo(): void {
+    this.logoPreview = null;
+    this.logoKey = null;
+    const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
+    if (inicioGroup) {
+      inicioGroup.patchValue({ logo_url: '' });
+      this.settingsForm.markAsDirty();
+    }
+  }
+
+  /**
    * Update the form's slider photos array from sliderImages
    */
   private updateSliderPhotosForm(): void {
     const photos: SliderPhoto[] = this.sliderImages.map((img) => ({
       url: img.url || null,
+      key: img.key || null,
       title: img.title || '',
       caption: img.caption || '',
     }));
 
-    // Ensure we always have 5 slots
-    while (photos.length < 5) {
-      photos.push({ url: null, title: '', caption: '' });
+    // Asegurarnos de que el formulario tenga los datos actualizados
+    const sliderGroup = this.settingsForm.get('slider') as FormGroup;
+    if (sliderGroup) {
+      // Sincronizar el valor del slider en el formulario
+      sliderGroup.patchValue({ photos }, { emitEvent: true });
+      this.settingsForm.markAsDirty();
     }
-
-    this.settingsForm.patchValue({
-      slider: { photos },
-    });
   }
 
   /**
@@ -372,7 +462,24 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     this.applyAutoFill();
 
     this.isSaving = true;
-    const settings: EcommerceSettings = this.settingsForm.value;
+
+    // Preparar el objeto de configuración
+    const settings: EcommerceSettings = {
+      ...this.settingsForm.value,
+      inicio: {
+        ...this.settingsForm.value.inicio,
+        logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url,
+      },
+      slider: {
+        ...this.settingsForm.value.slider,
+        photos: this.sliderImages.map((img) => ({
+          url: img.key || img.url || null, // Preferir la KEY para persistencia
+          key: img.key || null,
+          title: img.title || '',
+          caption: img.caption || '',
+        })),
+      },
+    };
 
     this.ecommerceService
       .updateSettings(settings)

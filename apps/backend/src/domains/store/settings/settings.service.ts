@@ -54,6 +54,42 @@ export class SettingsService {
 
     await this.validateSettings(updatedSettings);
 
+    // NUEVO: Actualizar campos de la tabla stores si vienen en general
+    if (dto.general) {
+      const { name, logo_url, store_type, timezone } = dto.general;
+
+      // Preparar objeto de actualización solo con campos definidos
+      const storeUpdateData: any = {};
+
+      if (name !== undefined) {
+        storeUpdateData.name = name;
+      }
+      if (logo_url !== undefined) {
+        storeUpdateData.logo_url = logo_url;
+      }
+      if (store_type !== undefined) {
+        storeUpdateData.store_type = store_type;
+      }
+      if (timezone !== undefined) {
+        // Sincronizar timezone con la tabla stores
+        storeUpdateData.timezone = timezone;
+      }
+
+      // Actualizar tabla stores si hay campos para actualizar
+      if (Object.keys(storeUpdateData).length > 0) {
+        try {
+          await this.prisma.stores.update({
+            where: { id: store_id },
+            data: storeUpdateData,
+          });
+        } catch (error) {
+          console.error('Error updating stores table:', error);
+          // No fallar la operación completa si falla la actualización de stores
+          // Los settings se guardan igualmente en store_settings
+        }
+      }
+    }
+
     return this.prisma.store_settings.upsert({
       where: { store_id },
       update: {

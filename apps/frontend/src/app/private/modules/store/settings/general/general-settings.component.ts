@@ -3,11 +3,27 @@ import { CommonModule } from '@angular/common';
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
+import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
+import { CheckoutSettingsForm } from './components/checkout-settings-form/checkout-settings-form.component';
+import { ShippingSettingsForm } from './components/shipping-settings-form/shipping-settings-form.component';
+import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
+import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
+import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 
 @Component({
   selector: 'app-general-settings',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    CommonModule,
+    GeneralSettingsForm,
+    InventorySettingsForm,
+    CheckoutSettingsForm,
+    ShippingSettingsForm,
+    NotificationsSettingsForm,
+    PosSettingsForm,
+    ReceiptsSettingsForm,
+  ],
   templateUrl: './general-settings.component.html',
   styleUrls: ['./general-settings.component.scss'],
 })

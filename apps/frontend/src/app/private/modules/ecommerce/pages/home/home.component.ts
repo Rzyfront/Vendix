@@ -1,8 +1,9 @@
 import { Component, OnInit, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { CatalogService, Product } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { TenantFacade } from '../../../../../../app/core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { HeroBannerComponent } from '../../components/hero-banner';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -23,8 +24,12 @@ export class HomeComponent implements OnInit {
   featured_products: Product[] = [];
   is_loading_featured = true;
   slider_config: any = null;
+  show_slider = false;
+  banner_content = { title: '', paragraph: '' };
 
   private destroy_ref = inject(DestroyRef);
+  private tenant_facade = inject(TenantFacade);
+  private router = inject(Router);
 
   constructor(
     private catalog_service: CatalogService,
@@ -38,7 +43,7 @@ export class HomeComponent implements OnInit {
 
   loadFeaturedProducts(): void {
     this.catalog_service
-      .getProducts({ limit: 30, sort_by: 'newest' })
+      .getProducts({ limit: 16, sort_by: 'best_selling' as any })
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {
@@ -52,12 +57,56 @@ export class HomeComponent implements OnInit {
   }
 
   loadPublicConfig(): void {
-    this.catalog_service
-      .getPublicConfig()
+    // Usamos TenantFacade en lugar de una llamada HTTP redundante
+    // Esto asegura que usamos la configuración ya resuelta del dominio
+    this.tenant_facade.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
-        next: (response) => {
-          this.slider_config = response.data?.slider || null;
+        next: (domainConfig: any) => {
+          if (!domainConfig) return;
+
+          // Según la estructura del localStorage (vendix_app_config), la configuración
+          // suele estar en 'customConfig'. Mantenemos fallback a 'config' por compatibilidad.
+          const config = domainConfig.customConfig || domainConfig.config || {};
+
+          this.slider_config = config.slider || null;
+
+          // Comprobación más permisiva para 'enable' (acepta true, "true", 1, "1")
+          const enableVal = this.slider_config?.enable;
+          const sliderEnabled =
+            enableVal === true ||
+            enableVal === 'true' ||
+            enableVal === 1 ||
+            enableVal === '1';
+
+          const hasPhotos =
+            Array.isArray(this.slider_config?.photos) &&
+            this.slider_config.photos.length > 0;
+
+          this.show_slider = !!(sliderEnabled && hasPhotos);
+
+          // Mapeo de contenido para el banner estático o información del slider
+          const inicio = config.inicio || {};
+
+          this.banner_content = {
+            title: inicio.titulo || 'Bienvenido',
+            paragraph: inicio.parrafo || 'Encuentra aquí todo lo que buscas...',
+          };
+
+          // Debug exhaustivo para identificar la estructura real
+          console.log('Home Config (Resolved):', {
+            source: 'TenantFacade',
+            domainConfigKeys: Object.keys(domainConfig),
+            hasCustomConfig: !!domainConfig.customConfig,
+            hasConfig: !!domainConfig.config,
+            resolvedConfig: config,
+            slider: {
+              raw: this.slider_config,
+              enabled: sliderEnabled,
+              hasPhotos: hasPhotos,
+              show: this.show_slider,
+            },
+          });
         },
       });
   }
@@ -68,5 +117,11 @@ export class HomeComponent implements OnInit {
 
   onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
+  }
+
+  onViewMore(): void {
+    this.router.navigate(['/products']).then(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   }
 }

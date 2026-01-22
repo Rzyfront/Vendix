@@ -6,7 +6,9 @@
   @if (banner_config.image_url) {
     <div
       class="hero-background"
-      [style.background-image]="'url(' + banner_config.image_url + ')'"
+      [style.background-image]="
+        'url(&quot;' + banner_config.image_url + '&quot;)'
+      "
     ></div>
   }
 
