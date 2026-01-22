@@ -97,19 +97,19 @@
                 class="px-3 py-1.5 text-sm rounded border transition-colors"
                 [ngClass]="{
                   'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
-                    shippingTypes.standard?.enabled,
+                    shippingTypes.standard.enabled,
                   'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
-                    !shippingTypes.standard?.enabled,
+                    !shippingTypes.standard.enabled,
                 }"
               >
                 {{
-                  shippingTypes.standard?.enabled ? "Activado" : "Desactivado"
+                  shippingTypes.standard.enabled ? "Activado" : "Desactivado"
                 }}
               </button>
             </div>
 
             @if (
-              shippingTypes.standard?.enabled && standardCarriers.length > 0
+              shippingTypes.standard.enabled && standardCarriers.length > 0
             ) {
               <div class="space-y-2">
                 <p class="text-xs font-medium text-gray-700 uppercase">
@@ -152,18 +152,16 @@
                 class="px-3 py-1.5 text-sm rounded border transition-colors"
                 [ngClass]="{
                   'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
-                    shippingTypes.express?.enabled,
+                    shippingTypes.express.enabled,
                   'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
-                    !shippingTypes.express?.enabled,
+                    !shippingTypes.express.enabled,
                 }"
               >
-                {{
-                  shippingTypes.express?.enabled ? "Activado" : "Desactivado"
-                }}
+                {{ shippingTypes.express.enabled ? "Activado" : "Desactivado" }}
               </button>
             </div>
 
-            @if (shippingTypes.express?.enabled && expressCarriers.length > 0) {
+            @if (shippingTypes.express.enabled && expressCarriers.length > 0) {
               <div class="space-y-2">
                 <p class="text-xs font-medium text-gray-700 uppercase">
                   Carriers Disponibles
@@ -205,9 +203,9 @@
                 class="px-3 py-1.5 text-sm rounded border transition-colors"
                 [ngClass]="{
                   'bg-green-50 text-green-600 border-green-200 hover:bg-green-100':
-                    shippingTypes.local?.enabled,
+                    shippingTypes.local.enabled,
                   'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100':
-                    !shippingTypes.local?.enabled,
+                    !shippingTypes.local.enabled,
                 }"
               >
                 {{ shippingTypes.local.enabled ? "Activado" : "Desactivado" }}

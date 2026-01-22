@@ -1,7 +1,13 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnChanges } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnInit,
+  OnChanges,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
-import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 
 export interface ReceiptsSettings {
@@ -14,7 +20,7 @@ export interface ReceiptsSettings {
 @Component({
   selector: 'app-receipts-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, ToggleComponent],
   templateUrl: './receipts-settings-form.component.html',
   styleUrls: ['./receipts-settings-form.component.scss'],
 })
