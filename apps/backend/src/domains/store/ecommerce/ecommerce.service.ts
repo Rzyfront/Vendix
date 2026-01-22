@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EcommerceSettingsDto } from './dto/ecommerce-settings.dto';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
@@ -12,13 +12,15 @@ import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class EcommerceService {
+  private readonly logger = new Logger(EcommerceService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly configStandardizer: DomainConfigStandardizerHelper,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   /**
    * Get e-commerce settings from domain_settings
@@ -174,6 +176,17 @@ export class EcommerceService {
           mergedRaw.branding.accent_color;
       }
 
+      // ===== NUEVO: Generación de Favicon =====
+      // Detectar si el logo cambió y generar favicon
+      if (mergedRaw.inicio?.logo_url && mergedRaw.inicio.logo_url !== existingConfig.inicio?.logo_url) {
+        const newLogoUrl = mergedRaw.inicio.logo_url;
+
+        // Generar favicon asíncronamente (fire-and-forget)
+        this.generateFaviconForEcommerce(newLogoUrl)
+          .catch(error => this.logger.warn(`Favicon generation failed: ${error.message}`));
+      }
+      // ========================================
+
       // Estandarizamos para asegurar que branding y app sean correctos
       const standardizedConfig = this.configStandardizer.standardize(
         mergedRaw,
@@ -249,7 +262,7 @@ export class EcommerceService {
         appType,
       );
 
-      return this.prisma.domain_settings.create({
+      const newDomain = await this.prisma.domain_settings.create({
         data: {
           hostname,
           domain_type: 'ecommerce',
@@ -258,6 +271,14 @@ export class EcommerceService {
           config: standardizedConfig,
         },
       });
+
+      // ===== NUEVO: Generación de Favicon en Setup =====
+      if (standardizedConfig.inicio?.logo_url) {
+        this.generateFaviconForEcommerce(standardizedConfig.inicio.logo_url)
+          .catch(error => this.logger.warn(`Favicon generation failed during setup: ${error.message}`));
+      }
+
+      return newDomain;
     }
   }
 
@@ -336,5 +357,88 @@ export class EcommerceService {
       url: signed_url, // Esta es la URL para verla ahora
       thumbKey: result.thumbKey,
     };
+  }
+
+  /**
+   * Genera favicon desde el logo de ecommerce y lo agrega a branding
+   * Se ejecuta asíncronamente para no bloquear la respuesta
+   */
+  private async generateFaviconForEcommerce(logoUrl: string): Promise<void> {
+    try {
+      const store_id = RequestContextService.getStoreId();
+      if (!store_id) {
+        this.logger.warn('Store ID not found in context');
+        return;
+      }
+
+      // 1. Obtener store con organization_id
+      const store = await this.prisma.stores.findUnique({
+        where: { id: store_id },
+        select: { id: true, organization_id: true }
+      });
+
+      if (!store?.organization_id) {
+        this.logger.warn(`Store ${store_id} missing organization_id`);
+        return;
+      }
+
+      // 2. Descargar logo desde S3
+      let logoBuffer: Buffer;
+      if (logoUrl.startsWith('http')) {
+        this.logger.warn('External logo URL detected, skipping favicon generation');
+        return;
+      }
+
+      try {
+        logoBuffer = await this.s3Service.downloadImage(logoUrl);
+      } catch (error) {
+        this.logger.error(`Failed to download logo: ${error.message}`);
+        return;
+      }
+
+      // 3. Generar y subir favicons
+      const result = await this.s3Service.generateAndUploadFaviconFromLogo(
+        logoBuffer,
+        store.organization_id,
+        store_id
+      );
+
+      if (!result) {
+        this.logger.warn(`Favicon generation failed for store ${store_id}`);
+        return;
+      }
+
+      this.logger.log(`Favicons generated: ${result.sizes.join(', ')}px`);
+
+      // 4. Actualizar domain_settings.config.branding.favicon_url
+      // Buscamos específicamente el dominio de esta tienda
+      const domain = await this.prisma.domain_settings.findFirst({
+        where: {
+          domain_type: 'ecommerce',
+          store_id: store_id
+        }
+      });
+
+      if (domain) {
+        const existingConfig = (domain.config as any) || {};
+        const updatedConfig = {
+          ...existingConfig,
+          branding: {
+            ...existingConfig.branding,
+            favicon_url: result.faviconKey // Standardized to favicon_url
+          }
+        };
+
+        await this.prisma.domain_settings.update({
+          where: { id: domain.id },
+          data: { config: updatedConfig }
+        });
+
+        this.logger.log(`Favicon updated for domain ${domain.hostname}`);
+      }
+    } catch (error) {
+      this.logger.error(`Error in generateFaviconForEcommerce: ${error.message}`);
+      // No re-lanzamos el error para no afectar el flujo principal si esto falla
+    }
   }
 }

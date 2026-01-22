@@ -57,9 +57,15 @@ export const loginCustomerFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
-export const logout = createAction('[Auth] Logout');
+export const logout = createAction(
+  '[Auth] Logout',
+  props<{ redirect?: boolean }>()
+);
 
-export const logoutSuccess = createAction('[Auth] Logout Success');
+export const logoutSuccess = createAction(
+  '[Auth] Logout Success',
+  props<{ redirect?: boolean }>()
+);
 
 export const refreshToken = createAction(
   '[Auth] Refresh Token',

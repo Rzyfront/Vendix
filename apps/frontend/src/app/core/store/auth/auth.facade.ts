@@ -137,8 +137,8 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.registerCustomer(data));
   }
 
-  logout(): void {
-    this.store.dispatch(AuthActions.logout());
+  logout(options?: { redirect?: boolean }): void {
+    this.store.dispatch(AuthActions.logout({ redirect: options?.redirect ?? true }));
   }
 
   refreshToken(refresh_token: string): void {

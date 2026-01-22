@@ -6,6 +6,7 @@ import {
   HostListener,
   DestroyRef,
 } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -13,6 +14,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
+import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
@@ -42,9 +44,11 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private auth_facade = inject(AuthFacade);
   private domain_service = inject(TenantFacade);
   private cart_service = inject(CartService);
+  private store_ui_service = inject(StoreUiService);
   private router = inject(Router);
   private cdr = inject(ChangeDetectorRef);
   private destroy_ref = inject(DestroyRef);
+  private title_service = inject(Title); // Inject Title service
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
@@ -57,6 +61,15 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       return { show: count > 0, count };
     }),
   );
+  cart$ = this.cart_service.cart$;
+  show_cart_dropdown = false;
+
+  // Animation and tooltip state
+  is_animating = false;
+  show_added_tooltip = false;
+  private animation_timeout: any;
+  private tooltip_timeout: any;
+  private close_timer: any;
 
   ngOnInit(): void {
     // Get store info from domain resolution reactively
@@ -75,6 +88,11 @@ export class StoreEcommerceLayoutComponent implements OnInit {
           domainConfig.store_slug ||
           this.domain_service.getCurrentStore()?.name ||
           'Tienda';
+
+        // Update Browser Tab Title
+        if (this.store_name && this.store_name !== 'Tienda') {
+          this.title_service.setTitle(this.store_name);
+        }
 
         // Resolver Logo con prioridad:
         // 1. customConfig.inicio.logo_url (configuración específica del layout e-commerce)
@@ -99,10 +117,66 @@ export class StoreEcommerceLayoutComponent implements OnInit {
               : 'legacy',
         });
       });
+
+    // Subscribe to auth modal requests
+    this.store_ui_service.openAuthModal$
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe((mode) => {
+        this.auth_modal_mode = mode;
+        this.is_auth_modal_open = true;
+        this.cdr.detectChanges();
+      });
+
+    // Subscribe to cart item added events
+    this.cart_service.itemAdded$
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe(() => {
+        this.triggerCartAnimation();
+      });
+  }
+
+  private triggerCartAnimation(): void {
+    // Reset if already playing
+    this.is_animating = false;
+    this.show_added_tooltip = false;
+    clearTimeout(this.animation_timeout);
+    clearTimeout(this.tooltip_timeout);
+    this.cdr.detectChanges(); // Force update to reset classes
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+      this.is_animating = true;
+      this.show_added_tooltip = true;
+      this.cdr.detectChanges();
+
+      // Stop shaking after 500ms
+      this.animation_timeout = setTimeout(() => {
+        this.is_animating = false;
+        this.cdr.detectChanges();
+      }, 500);
+
+      // Hide tooltip after 3000ms
+      this.tooltip_timeout = setTimeout(() => {
+        this.show_added_tooltip = false;
+        this.cdr.detectChanges();
+      }, 3000);
+    });
   }
 
   toggleUserMenu(): void {
     this.show_user_menu = !this.show_user_menu;
+  }
+
+  onCartEnter(): void {
+    clearTimeout(this.close_timer);
+    this.show_cart_dropdown = true;
+  }
+
+  onCartLeave(): void {
+    this.close_timer = setTimeout(() => {
+      this.show_cart_dropdown = false;
+      this.cdr.detectChanges();
+    }, 300);
   }
 
   toggleMobileMenu(): void {
@@ -128,9 +202,8 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   }
 
   logout(): void {
-    this.auth_facade.logout();
+    this.auth_facade.logout({ redirect: false });
     this.show_user_menu = false;
-    this.router.navigate(['/']);
   }
 
   login(): void {
@@ -167,5 +240,48 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     if (this.show_user_menu) {
       this.show_user_menu = false;
     }
+  }
+
+  updateCartQuantity(item: any, change: number): void {
+    const newQuantity = item.quantity + change;
+    if (newQuantity <= 0) {
+      this.removeCartItem(item);
+    } else {
+      // Manual subscription handling since takeUntilDestroyed needs injection context usually
+      // or we can just subscribe directly if we don't care about leakage for single-shot actions.
+      // Better approach: use a helper or just check the observable properly.
+      // For simplicity/correctness without injection context error, we'll use a direct subscribe pattern
+      // but strictly we should use first() or take(1).
+      const sub = this.is_authenticated$.subscribe(isAuth => {
+        if (isAuth) {
+          this.cart_service.updateItem(item.id, newQuantity).subscribe();
+        } else {
+          this.cart_service.updateLocalCartItem(item.product_id, newQuantity, item.product_variant_id || undefined);
+        }
+      });
+      sub.unsubscribe();
+    }
+  }
+
+  removeCartItem(item: any): void {
+    const sub = this.is_authenticated$.subscribe(isAuth => {
+      if (isAuth) {
+        this.cart_service.removeItem(item.id).subscribe();
+      } else {
+        this.cart_service.removeFromLocalCart(item.product_id, item.product_variant_id || undefined);
+      }
+    });
+    sub.unsubscribe();
+  }
+
+  clearCart(): void {
+    const sub = this.is_authenticated$.subscribe(isAuth => {
+      if (isAuth) {
+        this.cart_service.clearCart().subscribe();
+      } else {
+        this.cart_service.clearLocalCart();
+      }
+    });
+    sub.unsubscribe();
   }
 }

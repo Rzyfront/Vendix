@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
+import { CatalogService } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
 
 export interface CartItem {
@@ -49,9 +50,13 @@ export class CartService {
     private cart_subject = new BehaviorSubject<Cart | null>(null);
     cart$ = this.cart_subject.asObservable();
 
+    private item_added_subject = new Subject<void>();
+    itemAdded$ = this.item_added_subject.asObservable();
+
     constructor(
         private http: HttpClient,
         private domain_service: TenantFacade,
+        private catalog_service: CatalogService,
     ) {
         this.loadLocalCart();
     }
@@ -70,19 +75,83 @@ export class CartService {
         if (stored) {
             try {
                 const items: LocalCartItem[] = JSON.parse(stored);
-                // Create a mock cart object for guests
-                const cart: Cart = {
-                    id: 0,
-                    currency: 'USD',
-                    subtotal: 0,
-                    item_count: items.reduce((sum, i) => sum + i.quantity, 0),
-                    items: [],
-                };
-                this.cart_subject.next(cart);
+                if (items.length === 0) {
+                    this.emitEmptyCart();
+                    return;
+                }
+
+                const productIds = [...new Set(items.map((i) => i.product_id))];
+                this.catalog_service
+                    .getProducts({ ids: productIds.join(','), limit: 100 })
+                    .subscribe({
+                        next: (response) => {
+                            const products = response.data;
+                            const cartItems: CartItem[] = items
+                                .map((localItem) => {
+                                    const product = products.find(
+                                        (p) => p.id === localItem.product_id,
+                                    );
+                                    if (!product) return null;
+
+                                    const price =
+                                        product.is_on_sale && product.sale_price
+                                            ? Number(product.sale_price)
+                                            : Number(product.base_price);
+
+                                    return {
+                                        id: localItem.product_id,
+                                        product_id: product.id,
+                                        product_variant_id:
+                                            localItem.product_variant_id || null,
+                                        quantity: localItem.quantity,
+                                        unit_price: price,
+                                        total_price: price * localItem.quantity,
+                                        product: {
+                                            name: product.name,
+                                            slug: product.slug,
+                                            sku: product.sku || '',
+                                            image_url: product.image_url,
+                                        },
+                                        variant: null,
+                                    };
+                                })
+                                .filter((i) => i !== null) as CartItem[];
+
+                            const cart: Cart = {
+                                id: 0,
+                                currency: 'USD',
+                                subtotal: cartItems.reduce(
+                                    (sum, i) => sum + i.total_price,
+                                    0,
+                                ),
+                                item_count: cartItems.reduce(
+                                    (sum, i) => sum + i.quantity,
+                                    0,
+                                ),
+                                items: cartItems,
+                            };
+                            this.cart_subject.next(cart);
+                        },
+                        error: () => this.emitEmptyCart(),
+                    });
             } catch {
                 localStorage.removeItem(this.local_storage_key);
+                this.emitEmptyCart();
             }
+        } else {
+            this.emitEmptyCart();
         }
+    }
+
+    private emitEmptyCart() {
+        const cart: Cart = {
+            id: 0,
+            currency: 'USD',
+            subtotal: 0,
+            item_count: 0,
+            items: [],
+        };
+        this.cart_subject.next(cart);
     }
 
     private getLocalCart(): LocalCartItem[] {
@@ -99,14 +168,7 @@ export class CartService {
 
     private saveLocalCart(items: LocalCartItem[]): void {
         localStorage.setItem(this.local_storage_key, JSON.stringify(items));
-        const cart: Cart = {
-            id: 0,
-            currency: 'USD',
-            subtotal: 0,
-            item_count: items.reduce((sum, i) => sum + i.quantity, 0),
-            items: [],
-        };
-        this.cart_subject.next(cart);
+        this.loadLocalCart();
     }
 
     addToLocalCart(product_id: number, quantity: number, product_variant_id?: number): void {
@@ -122,6 +184,7 @@ export class CartService {
         }
 
         this.saveLocalCart(items);
+        this.item_added_subject.next();
     }
 
     updateLocalCartItem(product_id: number, quantity: number, product_variant_id?: number): void {
@@ -167,6 +230,7 @@ export class CartService {
                 tap((response: any) => {
                     if (response.success) {
                         this.cart_subject.next(response.data);
+                        this.item_added_subject.next();
                     }
                 }),
             );

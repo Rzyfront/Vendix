@@ -15,7 +15,7 @@ export class PublicDomainsService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   /**
    * Resolve domain configuration by hostname
@@ -56,6 +56,18 @@ export class PublicDomainsService {
     // Si es un dominio de ecommerce, firmar las URLs de imágenes
     if (domain.domain_type === 'ecommerce') {
       await this.signEcommerceImages(config);
+    }
+
+    // 5. Inyectar nombre de la tienda en el título si es necesario
+    if (domain.store?.name && config.inicio) {
+      // Si el título está vacío o es el default genérico, le ponemos el nombre de la tienda
+      if (
+        !config.inicio.titulo ||
+        config.inicio.titulo === 'Bienvenido a nuestra tienda' ||
+        config.inicio.titulo === 'Bienvenido a Vendix Shop'
+      ) {
+        config.inicio.titulo = `Bienvenido a ${domain.store.name}`;
+      }
     }
 
     return {
@@ -107,6 +119,16 @@ export class PublicDomainsService {
     ) {
       config.branding.logo_url = await this.s3Service.signUrl(
         config.branding.logo_url,
+      );
+    }
+
+    // 4. Firmar Favicon en Branding
+    if (
+      config.branding?.favicon_url &&
+      !config.branding.favicon_url.startsWith('http')
+    ) {
+      config.branding.favicon_url = await this.s3Service.signUrl(
+        config.branding.favicon_url,
       );
     }
   }

@@ -37,7 +37,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     IconComponent,
   ],
   template: `
-    <app-modal [isOpen]="isOpen" (closed)="onClose()" size="sm" title=" ">
+    <app-modal [isOpen]="isOpen" (closed)="onClose()" size="sm" title=" " [overlayCloseButton]="true">
       <!-- Custom Header with Logo -->
       <div
         slot="header"

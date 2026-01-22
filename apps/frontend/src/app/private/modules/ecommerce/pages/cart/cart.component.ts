@@ -5,11 +5,14 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store';
+import { StoreUiService } from '../../services/store-ui.service';
+
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
 })
@@ -25,6 +28,7 @@ export class CartComponent implements OnInit, OnDestroy {
     private cart_service: CartService,
     private auth_facade: AuthFacade,
     private router: Router,
+    private store_ui_service: StoreUiService,
   ) { }
 
   ngOnInit(): void {
@@ -68,7 +72,10 @@ export class CartComponent implements OnInit, OnDestroy {
 
   updateQuantity(item: CartItem, delta: number): void {
     const new_quantity = item.quantity + delta;
-    if (new_quantity < 1) return;
+    if (new_quantity <= 0) {
+      this.removeItem(item);
+      return;
+    }
 
     this.updating_item_id = item.id;
 
@@ -107,8 +114,7 @@ export class CartComponent implements OnInit, OnDestroy {
 
   proceedToCheckout(): void {
     if (!this.is_authenticated) {
-      // Redirect to login with return URL
-      this.router.navigate(['/auth/login'], { queryParams: { returnUrl: '/checkout' } });
+      this.store_ui_service.openLoginModal();
     } else {
       this.router.navigate(['/checkout']);
     }

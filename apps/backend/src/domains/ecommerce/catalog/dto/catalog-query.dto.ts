@@ -53,5 +53,9 @@ export class CatalogQueryDto {
 
   @IsOptional()
   @IsString()
+  ids?: string;
+
+  @IsOptional()
+  @IsString()
   has_discount?: string;
 }

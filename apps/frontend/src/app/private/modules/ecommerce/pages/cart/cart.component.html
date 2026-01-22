@@ -8,7 +8,7 @@
     </div>
     } @else if (!cart || cart.items.length === 0) {
     <div class="empty-cart">
-        <i class="pi pi-shopping-cart"></i>
+        <app-icon name="shopping-cart" [size]="64" class="text-muted"></app-icon>
         <h2>Tu carrito está vacío</h2>
         <p>Agrega productos para comenzar tu compra</p>
         <button class="primary-btn" (click)="continueShopping()">
@@ -25,7 +25,7 @@
                     <img [src]="item.product.image_url" [alt]="item.product.name">
                     } @else {
                     <div class="no-image">
-                        <i class="pi pi-image"></i>
+                        <app-icon name="image" [size]="24" class="text-muted"></app-icon>
                     </div>
                     }
                 </div>
@@ -44,12 +44,12 @@
 
                 <div class="item-quantity">
                     <button class="qty-btn" (click)="updateQuantity(item, -1)"
-                        [disabled]="item.quantity <= 1 || updating_item_id === item.id">
-                        <i class="pi pi-minus"></i>
+                        [disabled]="updating_item_id === item.id">
+                        <app-icon name="minus" [size]="14"></app-icon>
                     </button>
                     <span class="qty-value">{{ item.quantity }}</span>
                     <button class="qty-btn" (click)="updateQuantity(item, 1)" [disabled]="updating_item_id === item.id">
-                        <i class="pi pi-plus"></i>
+                        <app-icon name="plus" [size]="14"></app-icon>
                     </button>
                 </div>
 
@@ -58,7 +58,7 @@
                 </div>
 
                 <button class="remove-btn" (click)="removeItem(item)" title="Eliminar">
-                    <i class="pi pi-trash"></i>
+                    <app-icon name="trash-2" [size]="18"></app-icon>
                 </button>
             </div>
             }

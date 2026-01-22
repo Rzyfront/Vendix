@@ -14,13 +14,14 @@ export class CatalogService {
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   async getProducts(query: CatalogQueryDto) {
     const {
       search,
       category_id,
       brand_id,
+      ids,
       min_price,
       max_price,
       sort_by = ProductSortBy.NEWEST,
@@ -53,6 +54,17 @@ export class CatalogService {
 
     if (brand_id) {
       where.brand_id = brand_id;
+    }
+
+    if (ids) {
+      const idList = ids
+        .split(',')
+        .map((id) => Number(id.trim()))
+        .filter((id) => !isNaN(id));
+
+      if (idList.length > 0) {
+        where.id = { in: idList };
+      }
     }
 
     if (min_price !== undefined) {
@@ -424,7 +436,7 @@ export class CatalogService {
     const avg_rating =
       reviews.length > 0
         ? reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) /
-          reviews.length
+        reviews.length
         : 0;
 
     // Firmar todas las imágenes del producto

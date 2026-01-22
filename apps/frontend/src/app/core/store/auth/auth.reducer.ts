@@ -98,6 +98,7 @@ export const authReducer = createReducer(
 
     return {
       ...initialAuthState,
+      loading: false,
     };
   }),
 
@@ -156,6 +157,7 @@ export const authReducer = createReducer(
 
   on(AuthActions.clearAuthState, (state) => ({
     ...initialAuthState,
+    loading: false,
   })),
 
   on(AuthActions.setLoading, (state, { loading }) => ({

@@ -3,9 +3,12 @@ import {
   ForbiddenException,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { validateSync } from 'class-validator';
@@ -13,7 +16,13 @@ import { getDefaultStoreSettings } from './defaults/default-store-settings';
 
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: StorePrismaService) {}
+  private readonly logger = new Logger(SettingsService.name);
+
+  constructor(
+    private prisma: StorePrismaService,
+    private organizationPrisma: OrganizationPrismaService,
+    private s3Service: S3Service,
+  ) {}
 
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
@@ -82,6 +91,12 @@ export class SettingsService {
             where: { id: store_id },
             data: storeUpdateData,
           });
+
+          // Trigger favicon generation asynchronously if logo_url was updated
+          if (logo_url !== undefined && logo_url !== null) {
+            this.generateFaviconForStore(store_id, logo_url)
+              .catch(error => this.logger.warn(`Favicon generation failed: ${error.message}`));
+          }
         } catch (error) {
           console.error('Error updating stores table:', error);
           // No fallar la operación completa si falla la actualización de stores
@@ -168,6 +183,91 @@ export class SettingsService {
     });
 
     return template.template_data as unknown as StoreSettings;
+  }
+
+  /**
+   * Generates a favicon from the store logo and updates the domain configuration.
+   * This method runs asynchronously (fire-and-forget) to avoid blocking the logo upload response.
+   *
+   * @param storeId - Store ID
+   * @param logoUrl - Logo URL (S3 key or HTTP URL)
+   */
+  private async generateFaviconForStore(storeId: number, logoUrl: string): Promise<void> {
+    try {
+      // 1. Get store with organization_id
+      const store = await this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { id: true, organization_id: true, logo_url: true }
+      });
+
+      if (!store?.organization_id) {
+        this.logger.warn(`Store ${storeId} missing organization_id`);
+        return;
+      }
+
+      if (!store.logo_url) {
+        this.logger.warn(`Store ${storeId} has no logo_url`);
+        return;
+      }
+
+      // 2. Download logo from S3 (if it's a key, not an external URL)
+      let logoBuffer: Buffer;
+      if (store.logo_url.startsWith('http')) {
+        this.logger.warn(`Store ${storeId} has external logo URL, skipping favicon generation`);
+        return;
+      }
+
+      try {
+        logoBuffer = await this.s3Service.downloadImage(store.logo_url);
+      } catch (error) {
+        this.logger.error(`Failed to download logo for store ${storeId}: ${error.message}`);
+        return;
+      }
+
+      // 3. Generate and upload favicons
+      const result = await this.s3Service.generateAndUploadFaviconFromLogo(
+        logoBuffer,
+        store.organization_id,
+        storeId
+      );
+
+      if (!result) {
+        this.logger.warn(`Favicon generation failed for store ${storeId}`);
+        return;
+      }
+
+      this.logger.log(`Favicons generated for store ${storeId}: ${result.sizes.join(', ')}px`);
+
+      // 4. Update the ecommerce domain config
+      const domain = await this.organizationPrisma.domain_settings.findFirst({
+        where: { store_id: storeId }
+      });
+
+      if (!domain) {
+        this.logger.warn(`No domain found for store ${storeId}`);
+        return;
+      }
+
+      // Merge with existing config
+      const existingConfig = (domain.config as any) || {};
+      const updatedConfig = {
+        ...existingConfig,
+        branding: {
+          ...existingConfig.branding,
+          favicon: result.faviconKey // Store S3 key (not signed URL)
+        }
+      };
+
+      await this.organizationPrisma.domain_settings.update({
+        where: { id: domain.id },
+        data: { config: updatedConfig }
+      });
+
+      this.logger.log(`Favicon updated for domain ${domain.hostname} (store ${storeId})`);
+    } catch (error) {
+      this.logger.error(`Error in generateFaviconForStore for store ${storeId}: ${error.message}`);
+      throw error;
+    }
   }
 
   private validateSettings(settings: any): StoreSettings {

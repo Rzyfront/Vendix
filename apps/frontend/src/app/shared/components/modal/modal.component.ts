@@ -69,6 +69,10 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
               *ngIf="showCloseButton"
               type="button"
               class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+              [class.absolute]="overlayCloseButton"
+              [class.top-4]="overlayCloseButton"
+              [class.right-4]="overlayCloseButton"
+              [class.z-10]="overlayCloseButton"
               (click)="close()"
               aria-label="Cerrar modal"
             >
@@ -148,6 +152,7 @@ export class ModalComponent implements OnInit, OnDestroy {
   @Input() closeOnBackdrop = true;
   @Input() closeOnEscape = true;
   @Input() showCloseButton = true;
+  @Input() overlayCloseButton = false;
   @Input() customClasses = '';
 
   @Output() isOpenChange = new EventEmitter<boolean>();

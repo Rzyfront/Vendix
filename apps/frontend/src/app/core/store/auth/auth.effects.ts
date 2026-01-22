@@ -227,10 +227,10 @@ export class AuthEffects {
   logout$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.logout),
-      mergeMap(() =>
+      mergeMap(({ redirect }) =>
         this.authService.logout().pipe(
-          map(() => AuthActions.logoutSuccess()),
-          catchError(() => of(AuthActions.logoutSuccess())),
+          map(() => AuthActions.logoutSuccess({ redirect })),
+          catchError(() => of(AuthActions.logoutSuccess({ redirect }))),
         ),
       ),
     ),
@@ -239,7 +239,7 @@ export class AuthEffects {
     () =>
       this.actions$.pipe(
         ofType(AuthActions.logoutSuccess),
-        tap(() => {
+        tap(({ redirect }) => {
           // CRITICAL: Clear store state FIRST before clearing localStorage
           this.store.dispatch(AuthActions.clearAuthState());
 
@@ -269,8 +269,11 @@ export class AuthEffects {
             console.log('[LOGOUT] All auth data cleared from localStorage');
           }
 
-          // Navigate AFTER everything is cleared
-          this.router.navigateByUrl('/auth/login');
+          // Navigate AFTER everything is cleared, only if redirect is true (default)
+          // Explicit check against false because undefined should be treated as true (backward compatibility)
+          if (redirect !== false) {
+            this.router.navigateByUrl('/auth/login');
+          }
         }),
       ),
     { dispatch: false },
