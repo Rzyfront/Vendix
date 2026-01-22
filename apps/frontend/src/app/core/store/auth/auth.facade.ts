@@ -118,6 +118,12 @@ export class AuthFacade {
     );
   }
 
+  loginCustomer(email: string, password: string, store_id: number): void {
+    this.store.dispatch(
+      AuthActions.loginCustomer({ email, password, store_id }),
+    );
+  }
+
   registerCustomer(data: {
     email: string;
     password?: string;

@@ -71,6 +71,19 @@ export class StoreSettingsService {
     );
   }
 
+  getSystemTemplates(): Observable<ApiResponse<any[]>> {
+    return this.http.get<ApiResponse<any[]>>(
+      `${this.api_url}/store/settings/templates`,
+    );
+  }
+
+  applyTemplate(template_name: string): Observable<ApiResponse<StoreSettings>> {
+    return this.http.post<ApiResponse<StoreSettings>>(
+      `${this.api_url}/store/settings/apply-template`,
+      { template_name },
+    );
+  }
+
   private update_settings_api(
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {

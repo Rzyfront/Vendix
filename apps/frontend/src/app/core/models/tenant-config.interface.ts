@@ -12,6 +12,7 @@ export interface OrganizationConfig {
   slug: string;
   name: string;
   description?: string;
+  account_type?: 'SINGLE_STORE' | 'MULTI_STORE_ORG';
   domains: {
     useCustomDomain: boolean;
     customDomain?: string;

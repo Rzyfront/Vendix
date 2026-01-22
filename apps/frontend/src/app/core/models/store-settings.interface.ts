@@ -20,25 +20,18 @@ export interface InventorySettings {
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
-  require_serial_numbers: boolean;
-  require_batch_tracking: boolean;
-  auto_adjust_stock: boolean;
 }
 
 export interface CheckoutSettings {
   require_customer_data: boolean;
-  require_email: boolean;
-  require_phone: boolean;
   allow_guest_checkout: boolean;
   allow_partial_payments: boolean;
-  payment_terms_days: number;
   require_payment_confirmation: boolean;
 }
 
 export interface ShippingSettings {
   enabled: boolean;
   free_shipping_threshold: number;
-  shipping_zones: string[];
   allow_pickup: boolean;
   default_shipping_method: string | null;
 }

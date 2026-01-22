@@ -225,20 +225,21 @@ model audit_logs {
 }
 
 model organizations {
-  id                            Int                            @id @default(autoincrement())
-  name                          String                         @db.VarChar(255)
-  slug                          String                         @unique @db.VarChar(255)
-  legal_name                    String?                        @db.VarChar(255)
-  tax_id                        String?                        @unique @db.VarChar(50)
-  email                         String                         @db.VarChar(255)
-  phone                         String?                        @db.VarChar(50)
-  website                       String?                        @db.VarChar(255)
+  id                            Int                              @id @default(autoincrement())
+  name                          String                           @db.VarChar(255)
+  slug                          String                           @unique @db.VarChar(255)
+  legal_name                    String?                          @db.VarChar(255)
+  tax_id                        String?                          @unique @db.VarChar(50)
+  email                         String                           @db.VarChar(255)
+  phone                         String?                          @db.VarChar(50)
+  website                       String?                          @db.VarChar(255)
   description                   String?
-  logo_url                      String?                        @db.Text
-  state                         organization_state_enum        @default(draft)
-  created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
-  updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
-  onboarding                    Boolean                        @default(false)
+  logo_url                      String?                          @db.Text
+  state                         organization_state_enum          @default(draft)
+  account_type                  organization_account_type_enum   @default(SINGLE_STORE)
+  created_at                    DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                        @default(now()) @db.Timestamp(6)
+  onboarding                    Boolean                          @default(false)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -258,6 +259,7 @@ model organizations {
   roles                         roles[]
 
   @@index([onboarding])
+  @@index([account_type])
 }
 
 model organization_settings {
@@ -1404,6 +1406,11 @@ enum organization_state_enum {
   suspended
   archived
   draft
+}
+
+enum organization_account_type_enum {
+  SINGLE_STORE
+  MULTI_STORE_ORG
 }
 
 enum store_type_enum {

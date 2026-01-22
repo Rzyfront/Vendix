@@ -1,6 +1,18 @@
-import { Component, EventEmitter, inject, Input, OnInit, Output } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  inject,
+  Input,
+  OnInit,
+  Output,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 import { ModalComponent } from '../modal/modal.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
@@ -8,28 +20,88 @@ import { finalize } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { ToggleComponent } from '../toggle/toggle.component';
 import { IconComponent } from '../icon/icon.component';
+import { GlobalFacade } from '../../../core/store/global.facade';
+import { EnvironmentContextService } from '../../../core/services/environment-context.service';
+import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
+import { DialogService, ToastService } from '../index';
 
 // Constant: Configuration of modules per app type
 const APP_MODULES = {
   ORG_ADMIN: [
-    { key: 'dashboard', label: 'Panel Principal', description: 'Vista general de la organización' },
-    { key: 'stores', label: 'Tiendas', description: 'Gestionar tiendas de la organización' },
-    { key: 'users', label: 'Usuarios', description: 'Gestionar usuarios y permisos' },
-    { key: 'audit', label: 'Auditoría', description: 'Logs de auditoría del sistema' },
-    { key: 'settings', label: 'Configuración', description: 'Ajustes de la organización' },
-    { key: 'analytics', label: 'Analíticas', description: 'Métricas y estadísticas' },
-    { key: 'reports', label: 'Reportes', description: 'Reportes detallados por tienda' },
-    { key: 'inventory', label: 'Inventario', description: 'Gestión de inventario consolidado' },
+    {
+      key: 'dashboard',
+      label: 'Panel Principal',
+      description: 'Vista general de la organización',
+    },
+    {
+      key: 'stores',
+      label: 'Tiendas',
+      description: 'Gestionar tiendas de la organización',
+    },
+    {
+      key: 'users',
+      label: 'Usuarios',
+      description: 'Gestionar usuarios y permisos',
+    },
+    {
+      key: 'audit',
+      label: 'Auditoría',
+      description: 'Logs de auditoría del sistema',
+    },
+    {
+      key: 'settings',
+      label: 'Configuración',
+      description: 'Ajustes de la organización',
+    },
+    {
+      key: 'analytics',
+      label: 'Analíticas',
+      description: 'Métricas y estadísticas',
+    },
+    {
+      key: 'reports',
+      label: 'Reportes',
+      description: 'Reportes detallados por tienda',
+    },
+    {
+      key: 'inventory',
+      label: 'Inventario',
+      description: 'Gestión de inventario consolidado',
+    },
     { key: 'billing', label: 'Facturación', description: 'Facturas y pagos' },
-    { key: 'ecommerce', label: 'E-commerce', description: 'Ventas online consolidadas' },
-    { key: 'orders', label: 'Órdenes', description: 'Gestionar órdenes de todas las tiendas' },
+    {
+      key: 'ecommerce',
+      label: 'E-commerce',
+      description: 'Ventas online consolidadas',
+    },
+    {
+      key: 'orders',
+      label: 'Órdenes',
+      description: 'Gestionar órdenes de todas las tiendas',
+    },
   ],
   STORE_ADMIN: [
     // Módulos principales (standalone - sin hijos)
-    { key: 'dashboard', label: 'Panel Principal', description: 'Vista general de la tienda' },
-    { key: 'pos', label: 'Punto de Venta', description: 'Ventas en tienda física' },
-    { key: 'products', label: 'Productos', description: 'Gestionar catálogo de productos' },
-    { key: 'ecommerce', label: 'E-commerce', description: 'Ventas online de la tienda' },
+    {
+      key: 'dashboard',
+      label: 'Panel Principal',
+      description: 'Vista general de la tienda',
+    },
+    {
+      key: 'pos',
+      label: 'Punto de Venta',
+      description: 'Ventas en tienda física',
+    },
+    {
+      key: 'products',
+      label: 'Productos',
+      description: 'Gestionar catálogo de productos',
+    },
+    {
+      key: 'ecommerce',
+      label: 'E-commerce',
+      description: 'Ventas online de la tienda',
+    },
 
     // Órdenes (padre con hijos)
     {
@@ -38,9 +110,17 @@ const APP_MODULES = {
       description: 'Sección de órdenes',
       isParent: true,
       children: [
-        { key: 'orders_sales', label: 'Órdenes de Venta', description: 'Órdenes de venta' },
-        { key: 'orders_purchase_orders', label: 'Órdenes de Compra', description: 'Órdenes de compra a proveedores' },
-      ]
+        {
+          key: 'orders_sales',
+          label: 'Órdenes de Venta',
+          description: 'Órdenes de venta',
+        },
+        {
+          key: 'orders_purchase_orders',
+          label: 'Órdenes de Compra',
+          description: 'Órdenes de compra a proveedores',
+        },
+      ],
     },
 
     // Inventario (padre con hijos)
@@ -50,11 +130,27 @@ const APP_MODULES = {
       description: 'Sección de inventario',
       isParent: true,
       children: [
-        { key: 'inventory_pop', label: 'Punto de Compra', description: 'Punto de compra a proveedores' },
-        { key: 'inventory_adjustments', label: 'Ajustes de Stock', description: 'Ajustes manuales de inventario' },
-        { key: 'inventory_locations', label: 'Ubicaciones', description: 'Ubicaciones de almacenamiento' },
-        { key: 'inventory_suppliers', label: 'Proveedores', description: 'Directorio de proveedores' },
-      ]
+        {
+          key: 'inventory_pop',
+          label: 'Punto de Compra',
+          description: 'Punto de compra a proveedores',
+        },
+        {
+          key: 'inventory_adjustments',
+          label: 'Ajustes de Stock',
+          description: 'Ajustes manuales de inventario',
+        },
+        {
+          key: 'inventory_locations',
+          label: 'Ubicaciones',
+          description: 'Ubicaciones de almacenamiento',
+        },
+        {
+          key: 'inventory_suppliers',
+          label: 'Proveedores',
+          description: 'Directorio de proveedores',
+        },
+      ],
     },
 
     // Clientes (padre con hijos)
@@ -64,9 +160,17 @@ const APP_MODULES = {
       description: 'Sección de clientes',
       isParent: true,
       children: [
-        { key: 'customers_all', label: 'Todos los Clientes', description: 'Directorio completo de clientes' },
-        { key: 'customers_reviews', label: 'Reseñas', description: 'Reseñas de clientes' },
-      ]
+        {
+          key: 'customers_all',
+          label: 'Todos los Clientes',
+          description: 'Directorio completo de clientes',
+        },
+        {
+          key: 'customers_reviews',
+          label: 'Reseñas',
+          description: 'Reseñas de clientes',
+        },
+      ],
     },
 
     // Marketing (padre con hijos)
@@ -76,9 +180,17 @@ const APP_MODULES = {
       description: 'Sección de marketing',
       isParent: true,
       children: [
-        { key: 'marketing_promotions', label: 'Promociones', description: 'Promociones y descuentos' },
-        { key: 'marketing_coupons', label: 'Cupones', description: 'Cupones de descuento' },
-      ]
+        {
+          key: 'marketing_promotions',
+          label: 'Promociones',
+          description: 'Promociones y descuentos',
+        },
+        {
+          key: 'marketing_coupons',
+          label: 'Cupones',
+          description: 'Cupones de descuento',
+        },
+      ],
     },
 
     // Analíticas (padre con hijos)
@@ -88,10 +200,22 @@ const APP_MODULES = {
       description: 'Sección de analíticas',
       isParent: true,
       children: [
-        { key: 'analytics_sales', label: 'Ventas', description: 'Métricas de ventas' },
-        { key: 'analytics_traffic', label: 'Tráfico', description: 'Análisis de tráfico web' },
-        { key: 'analytics_performance', label: 'Rendimiento', description: 'KPIs de rendimiento' },
-      ]
+        {
+          key: 'analytics_sales',
+          label: 'Ventas',
+          description: 'Métricas de ventas',
+        },
+        {
+          key: 'analytics_traffic',
+          label: 'Tráfico',
+          description: 'Análisis de tráfico web',
+        },
+        {
+          key: 'analytics_performance',
+          label: 'Rendimiento',
+          description: 'KPIs de rendimiento',
+        },
+      ],
     },
 
     // Configuración (padre con hijos)
@@ -101,20 +225,47 @@ const APP_MODULES = {
       description: 'Sección de configuración',
       isParent: true,
       children: [
-        { key: 'settings_general', label: 'General', description: 'Configuración general de la tienda' },
-        { key: 'settings_payments', label: 'Métodos de Pago', description: 'Métodos de pago aceptados' },
-        { key: 'settings_appearance', label: 'Apariencia', description: 'Personalización visual' },
-        { key: 'settings_security', label: 'Seguridad', description: 'Configuración de seguridad' },
-        { key: 'settings_domains', label: 'Dominios', description: 'Dominios de la tienda online' },
-      ]
+        {
+          key: 'settings_general',
+          label: 'General',
+          description: 'Configuración general de la tienda',
+        },
+        {
+          key: 'settings_payments',
+          label: 'Métodos de Pago',
+          description: 'Métodos de pago aceptados',
+        },
+        {
+          key: 'settings_appearance',
+          label: 'Apariencia',
+          description: 'Personalización visual',
+        },
+        {
+          key: 'settings_security',
+          label: 'Seguridad',
+          description: 'Configuración de seguridad',
+        },
+        {
+          key: 'settings_domains',
+          label: 'Dominios',
+          description: 'Dominios de la tienda online',
+        },
+      ],
     },
-  ]
+  ],
 };
 
 @Component({
   selector: 'app-settings-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ModalComponent, ButtonComponent, ToggleComponent, IconComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    ModalComponent,
+    ButtonComponent,
+    ToggleComponent,
+    IconComponent,
+  ],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
@@ -124,35 +275,49 @@ const APP_MODULES = {
       (closed)="onClose()"
       (opened)="onOpen()"
     >
-      <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-6" *ngIf="!loading; else loadingTemplate">
+      <form
+        [formGroup]="settingsForm"
+        (ngSubmit)="onSubmit()"
+        class="space-y-6"
+        *ngIf="!loading; else loadingTemplate"
+      >
         <!-- Section 1: App Type Selection -->
         <div class="app-type-section">
-          <h4 class="text-lg font-medium text-gray-900 mb-4">Tipo de Aplicación</h4>
+          <h4 class="text-lg font-medium text-gray-900 mb-4">
+            Tipo de Aplicación
+          </h4>
           <div class="app-type-selection" [class.read-only]="!canChangeAppType">
             <div
               class="app-type-card"
               [class.selected]="currentAppType === 'ORG_ADMIN'"
               [class.read-only]="!canChangeAppType"
-              (click)="selectAppType('ORG_ADMIN')">
+              *ngIf="!isSingleStore"
+              (click)="selectAppType('ORG_ADMIN')"
+            >
               <app-icon name="building" [size]="32"></app-icon>
               <div class="card-content">
                 <h3>Administración de Organización</h3>
                 <p>Gestión completa de múltiples tiendas</p>
               </div>
-              <div class="badge" *ngIf="currentAppType === 'ORG_ADMIN'">✓ Actual</div>
+              <div class="badge" *ngIf="currentAppType === 'ORG_ADMIN'">
+                ✓ Actual
+              </div>
             </div>
 
             <div
               class="app-type-card"
               [class.selected]="currentAppType === 'STORE_ADMIN'"
               [class.read-only]="!canChangeAppType"
-              (click)="selectAppType('STORE_ADMIN')">
+              (click)="selectAppType('STORE_ADMIN')"
+            >
               <app-icon name="store" [size]="32"></app-icon>
               <div class="card-content">
                 <h3>Administración de Tienda</h3>
                 <p>Gestión de operaciones de una tienda</p>
               </div>
-              <div class="badge" *ngIf="currentAppType === 'STORE_ADMIN'">✓ Actual</div>
+              <div class="badge" *ngIf="currentAppType === 'STORE_ADMIN'">
+                ✓ Actual
+              </div>
             </div>
           </div>
           <div class="read-only-badge" *ngIf="!canChangeAppType">
@@ -161,7 +326,61 @@ const APP_MODULES = {
           </div>
         </div>
 
+        <!-- Section: Upgrade to Organization -->
+        <div class="upgrade-section" *ngIf="isSingleStore && isOwner">
+          <div
+            class="upgrade-card"
+            style="background-color: var(--color-muted); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--color-border);"
+          >
+            <div
+              style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem;"
+            >
+              <app-icon name="building" [size]="32"></app-icon>
+              <div>
+                <h4
+                  style="font-size: var(--fs-base); font-weight: var(--fw-semibold); margin: 0;"
+                >
+                  Convertir en Organización Multi-Tienda
+                </h4>
+                <p
+                  style="font-size: var(--fs-sm); color: var(--color-text-secondary); margin: 0.25rem 0 0 0;"
+                >
+                  Gestiona múltiples tiendas, usuarios centralizados y reportes
+                  consolidados
+                </p>
+              </div>
+            </div>
+
+            <div
+              style="background-color: var(--color-surface); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--color-border);"
+            >
+              <p
+                style="font-weight: var(--fw-medium); font-size: var(--fs-sm); margin-bottom: 0.75rem; color: var(--color-text-primary);"
+              >
+                Esto te permitirá:
+              </p>
+              <ul
+                style="list-style-type: disc; list-style-position: inside; font-size: var(--fs-sm); color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem;"
+              >
+                <li>Administrar múltiples tiendas desde un solo lugar</li>
+                <li>Gestionar usuarios y permisos centralizados</li>
+                <li>Ver reportes consolidados de todas tus tiendas</li>
+              </ul>
+            </div>
+          </div>
+
+          <app-button
+            variant="primary"
+            [loading]="upgrading"
+            (clicked)="upgradeToOrganization()"
+            style="margin-top: 1rem; width: 100%;"
+          >
+            Convertir en Organización
+          </app-button>
+        </div>
+
         <!-- Section 2: Panel UI Configuration -->
+
         <div class="panel-ui-config">
           <h4 class="text-lg font-medium text-gray-900 mb-4">
             Módulos del Panel para {{ getAppTypeLabel(currentAppType) }}
@@ -171,52 +390,79 @@ const APP_MODULES = {
             <div [formGroupName]="currentAppType">
               <div class="module-toggles-container">
                 <!-- Parent modules with children -->
-                <div *ngFor="let module of getParentModules(currentAppType)" class="parent-module" [class.has-children]="module.isParent">
+                <div
+                  *ngFor="let module of getParentModules(currentAppType)"
+                  class="parent-module"
+                  [class.has-children]="module.isParent"
+                >
                   <div *ngIf="module.isParent" class="parent-module-wrapper">
                     <!-- Parent header with expand/collapse -->
-                    <div class="parent-header" (click)="toggleModuleExpansion(module.key)">
+                    <div
+                      class="parent-header"
+                      (click)="toggleModuleExpansion(module.key)"
+                    >
                       <div class="parent-toggle">
                         <app-toggle
                           [formControlName]="module.key"
                           [label]="module.label"
-                          (changed)="onParentToggle($event, module)">
+                          (changed)="onParentToggle($event, module)"
+                        >
                         </app-toggle>
                       </div>
                       <app-icon
                         name="chevron-right"
                         [size]="16"
                         class="expand-icon"
-                        [class.rotated]="isExpanded(module.key)">
+                        [class.rotated]="isExpanded(module.key)"
+                      >
                       </app-icon>
                     </div>
-                    <span class="module-description">{{ module.description }}</span>
+                    <span class="module-description">{{
+                      module.description
+                    }}</span>
 
                     <!-- Children modules (nested) -->
-                    <div class="child-modules" [class.expanded]="isExpanded(module.key)">
-                      <div *ngFor="let child of module.children" class="child-toggle-item">
+                    <div
+                      class="child-modules"
+                      [class.expanded]="isExpanded(module.key)"
+                    >
+                      <div
+                        *ngFor="let child of module.children"
+                        class="child-toggle-item"
+                      >
                         <div class="child-header">
                           <app-toggle
                             [formControlName]="child.key"
                             [label]="child.label"
-                            [disabled]="!isParentModuleEnabled(module.key)">
+                            [disabled]="!isParentModuleEnabled(module.key)"
+                          >
                           </app-toggle>
                         </div>
-                        <span class="module-description child-description">{{ child.description }}</span>
+                        <span class="module-description child-description">{{
+                          child.description
+                        }}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <!-- Standalone modules (without children) -->
-                <div *ngFor="let module of getParentModules(currentAppType)" class="standalone-module" [class.standalone]="!module.isParent">
+                <div
+                  *ngFor="let module of getParentModules(currentAppType)"
+                  class="standalone-module"
+                  [class.standalone]="!module.isParent"
+                >
                   <div *ngIf="!module.isParent" class="toggle-item">
                     <div class="toggle-header">
                       <app-toggle
                         [formControlName]="module.key"
-                        [label]="module.label">
+                        [label]="module.label"
+                      >
                       </app-toggle>
                     </div>
-                    <span class="module-description">{{ module.description }}</span>
+                    <span class="module-description">{{
+                      module.description
+                    }}</span>
                   </div>
                 </div>
               </div>
@@ -235,10 +481,16 @@ const APP_MODULES = {
           <!-- Language (disabled) -->
           <div class="preference-row">
             <label>Idioma</label>
-            <select formControlName="language" [disabled]="true" class="disabled-select">
+            <select
+              formControlName="language"
+              [disabled]="true"
+              class="disabled-select"
+            >
               <option value="es">Español</option>
             </select>
-            <small class="text-gray-500">Español es el único idioma disponible actualmente</small>
+            <small class="text-gray-500"
+              >Español es el único idioma disponible actualmente</small
+            >
           </div>
 
           <!-- Theme -->
@@ -247,18 +499,26 @@ const APP_MODULES = {
             <div class="theme-selector">
               <div
                 class="theme-option"
-                [class.selected]="settingsForm.get('preferences.theme')?.value === 'default'"
-                (click)="selectTheme('default')">
+                [class.selected]="
+                  settingsForm.get('preferences.theme')?.value === 'default'
+                "
+                (click)="selectTheme('default')"
+              >
                 <app-icon name="circle" [size]="32"></app-icon>
                 <div class="theme-info">
                   <span class="theme-name">Default</span>
-                  <span class="theme-description">Tema por defecto del sistema</span>
+                  <span class="theme-description"
+                    >Tema por defecto del sistema</span
+                  >
                 </div>
               </div>
               <div
                 class="theme-option"
-                [class.selected]="settingsForm.get('preferences.theme')?.value === 'aura'"
-                (click)="selectTheme('aura')">
+                [class.selected]="
+                  settingsForm.get('preferences.theme')?.value === 'aura'
+                "
+                (click)="selectTheme('aura')"
+              >
                 <app-icon name="sparkles" [size]="32"></app-icon>
                 <div class="theme-info">
                   <span class="theme-name">Aura</span>
@@ -272,25 +532,27 @@ const APP_MODULES = {
 
       <ng-template #loadingTemplate>
         <div class="flex items-center justify-center py-12">
-          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
+          ></div>
         </div>
       </ng-template>
 
       <div slot="footer" class="flex justify-end gap-3">
-        <app-button
-          variant="outline-danger"
-          (clicked)="isOpen = false"
-        >Cancelar</app-button>
+        <app-button variant="outline-danger" (clicked)="isOpen = false"
+          >Cancelar</app-button
+        >
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
           [loading]="saving"
           [disabled]="settingsForm.invalid"
-        >Guardar Cambios</app-button>
+          >Guardar Cambios</app-button
+        >
       </div>
     </app-modal>
   `,
-  styleUrls: ['./settings-modal.component.scss']
+  styleUrls: ['./settings-modal.component.scss'],
 })
 export class SettingsModalComponent implements OnInit {
   @Input() isOpen = false;
@@ -299,6 +561,11 @@ export class SettingsModalComponent implements OnInit {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
+  private globalFacade = inject(GlobalFacade);
+  private environmentContextService = inject(EnvironmentContextService);
+  private environmentSwitchService = inject(EnvironmentSwitchService);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
 
   settingsForm: FormGroup;
   loading = false;
@@ -306,6 +573,9 @@ export class SettingsModalComponent implements OnInit {
   currentSettings: any = null;
   currentAppType: string = 'ORG_ADMIN';
   canChangeAppType: boolean = false;
+  isSingleStore = false;
+  isOwner = false;
+  upgrading = false;
 
   // Nested module state
   private expandedModules: Set<string> = new Set();
@@ -313,19 +583,19 @@ export class SettingsModalComponent implements OnInit {
   constructor() {
     // Initialize panel_ui controls for ORG_ADMIN
     const orgAdminControls: any = {};
-    APP_MODULES.ORG_ADMIN.forEach(module => {
+    APP_MODULES.ORG_ADMIN.forEach((module) => {
       orgAdminControls[module.key] = [true]; // Default to true
     });
 
     // Initialize panel_ui controls for STORE_ADMIN (all modules including submodules)
     const storeAdminControls: any = {};
-    APP_MODULES.STORE_ADMIN.forEach(module => {
+    APP_MODULES.STORE_ADMIN.forEach((module) => {
       // For parent modules, initialize with true
       // For child modules, also initialize with true (all enabled by default now)
       storeAdminControls[module.key] = [true];
       // Also initialize children if they exist
       if (module.isParent && module.children) {
-        module.children.forEach(child => {
+        module.children.forEach((child) => {
           storeAdminControls[child.key] = [true];
         });
       }
@@ -335,22 +605,32 @@ export class SettingsModalComponent implements OnInit {
       app: ['ORG_ADMIN', Validators.required],
       panel_ui: this.fb.group({
         ORG_ADMIN: this.fb.group(orgAdminControls),
-        STORE_ADMIN: this.fb.group(storeAdminControls)
+        STORE_ADMIN: this.fb.group(storeAdminControls),
       }),
       preferences: this.fb.group({
         language: ['es'],
-        theme: ['default']
-      })
+        theme: ['default'],
+      }),
     });
 
     // Check permissions synchronously
     this.checkPermissions();
   }
 
-  ngOnInit() { }
+  ngOnInit() {}
 
   onOpen() {
     this.loadSettings();
+
+    const context = this.globalFacade.getUserContext();
+    this.isSingleStore = context?.organization?.account_type === 'SINGLE_STORE';
+    this.isOwner = this.authFacade.isOwner();
+
+    // Forzar STORE_ADMIN si es SINGLE_STORE
+    if (this.isSingleStore && this.currentAppType === 'ORG_ADMIN') {
+      this.currentAppType = 'STORE_ADMIN';
+      this.settingsForm.patchValue({ app: 'STORE_ADMIN' });
+    }
   }
 
   onClose() {
@@ -365,7 +645,8 @@ export class SettingsModalComponent implements OnInit {
 
   checkPermissions() {
     // Use synchronous methods from AuthFacade
-    this.canChangeAppType = this.authFacade.isOwner() || this.authFacade.isAdmin();
+    this.canChangeAppType =
+      this.authFacade.isOwner() || this.authFacade.isAdmin();
   }
 
   // ===== Nested Module Methods =====
@@ -397,7 +678,9 @@ export class SettingsModalComponent implements OnInit {
    * @returns true if the parent module is enabled
    */
   isParentModuleEnabled(parentKey: string): boolean {
-    const control = this.settingsForm.get(`panel_ui.${this.currentAppType}.${parentKey}`);
+    const control = this.settingsForm.get(
+      `panel_ui.${this.currentAppType}.${parentKey}`,
+    );
     return control?.value ?? false;
   }
 
@@ -461,8 +744,9 @@ export class SettingsModalComponent implements OnInit {
 
   loadSettings() {
     this.loading = true;
-    this.authService.getSettings()
-      .pipe(finalize(() => this.loading = false))
+    this.authService
+      .getSettings()
+      .pipe(finalize(() => (this.loading = false)))
       .subscribe({
         next: (response) => {
           const settings = response.data || response;
@@ -480,7 +764,7 @@ export class SettingsModalComponent implements OnInit {
           // Initialize with defaults even on error
           this.currentAppType = 'ORG_ADMIN';
           this.initializeForm({});
-        }
+        },
       });
   }
 
@@ -492,17 +776,18 @@ export class SettingsModalComponent implements OnInit {
       app: this.currentAppType,
       panel_ui: {
         ORG_ADMIN: {},
-        STORE_ADMIN: {}
+        STORE_ADMIN: {},
       },
       preferences: {
         language: 'es',
-        theme: 'default'
-      }
+        theme: 'default',
+      },
     };
 
     // Update ORG_ADMIN modules
-    APP_MODULES.ORG_ADMIN.forEach(module => {
-      const currentValue = config.panel_ui?.ORG_ADMIN?.[module.key] ??
+    APP_MODULES.ORG_ADMIN.forEach((module) => {
+      const currentValue =
+        config.panel_ui?.ORG_ADMIN?.[module.key] ??
         config.panel_ui?.[module.key] ??
         true;
       patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
@@ -510,7 +795,8 @@ export class SettingsModalComponent implements OnInit {
 
     // Update STORE_ADMIN modules (including children)
     APP_MODULES.STORE_ADMIN.forEach((module: any) => {
-      const currentValue = config.panel_ui?.STORE_ADMIN?.[module.key] ??
+      const currentValue =
+        config.panel_ui?.STORE_ADMIN?.[module.key] ??
         config.panel_ui?.[module.key] ??
         true;
       patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
@@ -518,7 +804,8 @@ export class SettingsModalComponent implements OnInit {
       // Also handle children if they exist
       if (module.isParent && module.children) {
         module.children.forEach((child: any) => {
-          const childValue = config.panel_ui?.STORE_ADMIN?.[child.key] ??
+          const childValue =
+            config.panel_ui?.STORE_ADMIN?.[child.key] ??
             config.panel_ui?.[child.key] ??
             true;
           patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
@@ -543,8 +830,8 @@ export class SettingsModalComponent implements OnInit {
 
   getAppTypeLabel(appType: string): string {
     const labels: Record<string, string> = {
-      'ORG_ADMIN': 'Organización',
-      'STORE_ADMIN': 'Tienda'
+      ORG_ADMIN: 'Organización',
+      STORE_ADMIN: 'Tienda',
     };
     return labels[appType] || appType;
   }
@@ -558,12 +845,14 @@ export class SettingsModalComponent implements OnInit {
 
   selectTheme(theme: string) {
     this.settingsForm.patchValue({
-      preferences: { theme }
+      preferences: { theme },
     });
   }
 
   hasModuleError(): boolean {
-    const panelUiGroup = this.settingsForm.get('panel_ui.' + this.currentAppType);
+    const panelUiGroup = this.settingsForm.get(
+      'panel_ui.' + this.currentAppType,
+    );
     if (!panelUiGroup) return false;
 
     const values = Object.values(panelUiGroup.value);
@@ -593,16 +882,16 @@ export class SettingsModalComponent implements OnInit {
 
           // Merge panel_ui: preservar app types no editados y actualizar solo el actual
           panel_ui: {
-            ...currentConfig.panel_ui,  // Preservar todos los app types existentes
-            [this.currentAppType]: formValue.panel_ui[this.currentAppType]  // ✅ Actualizar solo el app type que se está editando
+            ...currentConfig.panel_ui, // Preservar todos los app types existentes
+            [this.currentAppType]: formValue.panel_ui[this.currentAppType], // ✅ Actualizar solo el app type que se está editando
           },
 
           // Merge preferences: preservar preferencias existentes
           preferences: {
-            ...currentConfig.preferences,  // Preservar otras preferencias
+            ...currentConfig.preferences, // Preservar otras preferencias
             language: formValue.preferences.language,
-            theme: formValue.preferences.theme
-          }
+            theme: formValue.preferences.theme,
+          },
         };
 
         const dto = { config: configObj };
@@ -627,7 +916,76 @@ export class SettingsModalComponent implements OnInit {
       error: (err) => {
         console.error('Error loading current config for merge', err);
         this.saving = false;
-      }
+      },
     });
+  }
+
+  async upgradeToOrganization(): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Convertir en Organización',
+      message: `
+        <div style="display: flex; flex-direction: column; gap: 1rem; color: var(--color-text-primary);">
+          <p style="font-size: var(--fs-base);">¿Estás seguro de convertir tu cuenta en una organización multi-tienda?</p>
+
+          <div style="background-color: var(--color-muted); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--color-border);">
+            <p style="font-weight: var(--fw-medium); font-size: var(--fs-sm); margin-bottom: 0.75rem; color: var(--color-text-primary);">Esto te permitirá:</p>
+            <ul style="list-style-type: disc; list-style-position: inside; font-size: var(--fs-sm); color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem;">
+              <li>Administrar múltiples tiendas desde un solo lugar</li>
+              <li>Gestionar usuarios y permisos centralizados</li>
+              <li>Ver reportes consolidados de todas tus tiendas</li>
+            </ul>
+          </div>
+
+          <p style="font-size: var(--fs-xs); color: var(--color-text-muted); font-style: italic;">
+            * Esta acción actualizará tu tipo de cuenta y generará automáticamente el panel de organización.
+          </p>
+        </div>
+      `,
+      confirmText: 'Convertir ahora',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary',
+    });
+
+    if (!confirmed) return;
+
+    this.upgrading = true;
+
+    try {
+      const response = await this.environmentContextService
+        .upgradeAccountType()
+        .toPromise();
+
+      this.toastService.success(
+        'Tu cuenta ha sido actualizada a organización multi-tienda.',
+      );
+
+      this.upgrading = false;
+
+      setTimeout(async () => {
+        try {
+          const success =
+            await this.environmentSwitchService.performEnvironmentSwitch(
+              'ORG_ADMIN',
+            );
+          if (success) {
+            console.log('✅ Switch automático a ORG_ADMIN exitoso');
+            this.closeModal();
+          } else {
+            console.warn('⚠️ Switch falló, intentando recargar...');
+            window.location.reload();
+          }
+        } catch (switchError: any) {
+          console.error('❌ Error en switch automático:', switchError);
+          window.location.reload();
+        }
+      }, 500);
+    } catch (error: any) {
+      this.upgrading = false;
+      console.error('❌ Error al actualizar tipo de cuenta:', error);
+      this.toastService.error(
+        error.error?.message ||
+          'Error al actualizar el tipo de cuenta. Por favor, intenta de nuevo.',
+      );
+    }
   }
 }

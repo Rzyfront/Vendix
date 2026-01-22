@@ -5,6 +5,12 @@ import { ResponseService } from '@common/responses/response.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IsString } from 'class-validator';
+
+export class ApplyTemplateDto {
+  @IsString()
+  template_name: string;
+}
 
 @ApiTags('Store Settings')
 @Controller('store/settings')
@@ -52,5 +58,34 @@ export class SettingsController {
   async resetToDefault() {
     const settings = await this.settingsService.resetToDefault();
     return this.responseService.success(settings, 'Settings reset to defaults');
+  }
+
+  @Get('templates')
+  @Permissions('store:settings:read')
+  @ApiOperation({ summary: 'Get available system templates' })
+  @ApiResponse({
+    status: 200,
+    description: 'Templates retrieved successfully',
+  })
+  async getSystemTemplates() {
+    const templates = await this.settingsService.getSystemTemplates();
+    return this.responseService.success(templates);
+  }
+
+  @Post('apply-template')
+  @Permissions('store:settings:update')
+  @ApiOperation({ summary: 'Apply a system template to store' })
+  @ApiResponse({
+    status: 200,
+    description: 'Template applied successfully',
+  })
+  async applyTemplate(@Body() body: ApplyTemplateDto) {
+    const settings = await this.settingsService.applyTemplate(
+      body.template_name,
+    );
+    return this.responseService.success(
+      settings,
+      'Template applied successfully',
+    );
   }
 }

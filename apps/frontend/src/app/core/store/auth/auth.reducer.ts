@@ -36,7 +36,7 @@ export const initialAuthState: AuthState = {
 export const authReducer = createReducer(
   initialAuthState,
 
-  on(AuthActions.login, (state) => ({
+  on(AuthActions.login, AuthActions.loginCustomer, (state) => ({
     ...state,
     loading: true,
     error: null,
@@ -44,6 +44,7 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.loginSuccess,
+    AuthActions.loginCustomerSuccess,
     (state, { user, user_settings, tokens, permissions, roles }) => {
       const newState = {
         ...state,
@@ -62,16 +63,20 @@ export const authReducer = createReducer(
     },
   ),
 
-  on(AuthActions.loginFailure, (state, { error }) => ({
-    ...state,
-    loading: false,
-    // error may already be normalized by effects, but ensure fallback to string
-    error:
-      typeof error === 'string'
-        ? error
-        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    is_authenticated: false,
-  })),
+  on(
+    AuthActions.loginFailure,
+    AuthActions.loginCustomerFailure,
+    (state, { error }) => ({
+      ...state,
+      loading: false,
+      // error may already be normalized by effects, but ensure fallback to string
+      error:
+        typeof error === 'string'
+          ? error
+          : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+      is_authenticated: false,
+    }),
+  ),
 
   on(AuthActions.logout, (state) => ({
     ...state,

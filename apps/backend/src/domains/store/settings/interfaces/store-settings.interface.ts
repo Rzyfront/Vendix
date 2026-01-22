@@ -20,27 +20,107 @@ export interface InventorySettings {
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
-  require_serial_numbers: boolean;
-  require_batch_tracking: boolean;
-  auto_adjust_stock: boolean;
 }
 
 export interface CheckoutSettings {
   require_customer_data: boolean;
-  require_email: boolean;
-  require_phone: boolean;
   allow_guest_checkout: boolean;
   allow_partial_payments: boolean;
-  payment_terms_days: number;
   require_payment_confirmation: boolean;
 }
 
 export interface ShippingSettings {
   enabled: boolean;
   free_shipping_threshold: number;
-  shipping_zones: string[];
   allow_pickup: boolean;
   default_shipping_method: string | null;
+  shipping_types: ShippingTypesConfig;
+  shipping_zones: ShippingZone[];
+}
+
+export interface ShippingTypesConfig {
+  standard: {
+    enabled: boolean;
+    carriers: StandardCarrier[];
+  };
+  express: {
+    enabled: boolean;
+    carriers: ExpressCarrier[];
+  };
+  local: {
+    enabled: boolean;
+    allow_manual: boolean;
+    delivery_providers: LocalDeliveryProvider[];
+  };
+}
+
+export interface StandardCarrier {
+  id: string;
+  name: string;
+  type: 'fedex' | 'dhl' | 'ups' | 'correos' | 'estafeta' | 'custom';
+  enabled: boolean;
+  config: CarrierConfig;
+}
+
+export interface ExpressCarrier {
+  id: string;
+  name: string;
+  type: 'servientrega' | 'rappi' | 'didi' | 'uber_direct' | 'custom';
+  enabled: boolean;
+  config: ExpressCarrierConfig;
+}
+
+export interface LocalDeliveryProvider {
+  id: string;
+  name: string;
+  type: 'deliveri' | 'mensajeros' | 'motocicletas' | 'custom';
+  enabled: boolean;
+  config: LocalDeliveryConfig;
+}
+
+export interface CarrierConfig {
+  tracking_enabled: boolean;
+  estimated_days_min: number;
+  estimated_days_max: number;
+  requires_signature: boolean;
+  requires_insurance: boolean;
+  max_weight: number | null;
+  max_dimensions: {
+    length: number;
+    width: number;
+    height: number;
+  } | null;
+}
+
+export interface ExpressCarrierConfig {
+  integration_enabled: boolean;
+  priority: number;
+  tracking_enabled: boolean;
+  webhook_url: string | null;
+}
+
+export interface LocalDeliveryConfig {
+  coverage_radius: number | null;
+  estimated_minutes: number | null;
+  tracking_enabled: boolean;
+}
+
+export interface ShippingZone {
+  id: string;
+  name: string;
+  countries: string[];
+  states: string[];
+  cities: string[];
+  zip_codes: string[];
+  shipping_rules: ShippingRule[];
+}
+
+export interface ShippingRule {
+  carrier_id: string;
+  base_price: number;
+  price_per_kg: number;
+  free_shipping_threshold: number | null;
+  estimated_days: number;
 }
 
 export interface NotificationsSettings {

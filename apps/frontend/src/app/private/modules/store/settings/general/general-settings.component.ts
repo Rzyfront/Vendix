@@ -22,6 +22,8 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
   lastSaved: Date | null = null;
 
   currentTab = 0;
+  showTemplates = false;
+  templates: any[] = [];
 
   tabs = [
     { label: 'General', value: 0 },
@@ -48,6 +50,18 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
         console.error('Error loading settings:', error);
         this.toast_service.error('Error loading settings');
         this.isLoading = false;
+      },
+    });
+  }
+
+  loadTemplates() {
+    this.settings_service.getSystemTemplates().subscribe({
+      next: (response) => {
+        this.templates = response.data;
+      },
+      error: (error) => {
+        console.error('Error loading templates:', error);
+        this.toast_service.error('Error loading templates');
       },
     });
   }
@@ -91,6 +105,31 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error resetting settings:', error);
           this.toast_service.error('Error resetting settings');
+        },
+      });
+    }
+  }
+
+  openTemplates() {
+    this.showTemplates = true;
+    this.loadTemplates();
+  }
+
+  applyTemplate(template_name: string) {
+    if (
+      confirm(
+        `¿Aplicar la plantilla "${template_name}"? Esto reemplazará toda la configuración actual.`,
+      )
+    ) {
+      this.settings_service.applyTemplate(template_name).subscribe({
+        next: (response) => {
+          this.settings = response.data;
+          this.showTemplates = false;
+          this.toast_service.success('Plantilla aplicada correctamente');
+        },
+        error: (error) => {
+          console.error('Error applying template:', error);
+          this.toast_service.error('Error aplicando plantilla');
         },
       });
     }

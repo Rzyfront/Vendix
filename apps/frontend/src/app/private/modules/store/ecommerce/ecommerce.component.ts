@@ -1,6 +1,11 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { EcommerceService } from './services/ecommerce.service';
 import {
@@ -18,7 +23,14 @@ import { SelectorComponent } from '../../../../shared/components/selector/select
 @Component({
   selector: 'app-ecommerce',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, ButtonComponent, InputComponent, SelectorComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    IconComponent,
+    ButtonComponent,
+    InputComponent,
+    SelectorComponent,
+  ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
 })
@@ -28,7 +40,6 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   // Mode detection
   isSetupMode = false;
   isEditMode = false;
-  selectedTemplate: 'basic' | 'advanced' = 'basic';
 
   // Form & UI state
   settingsForm: FormGroup;
@@ -42,6 +53,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   // File input reference
   fileInputRef: HTMLInputElement | null = null;
+
+  // Store info for auto-fill
+  storeName = 'Mi Tienda';
 
   constructor(
     private fb: FormBuilder,
@@ -68,6 +82,18 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       // App type identifier (always STORE_ECOMMERCE)
       app: ['STORE_ECOMMERCE'],
 
+      // Sección Inicio
+      inicio: this.fb.group({
+        titulo: [''],
+        parrafo: [''],
+        logo_url: [''],
+        colores: this.fb.group({
+          primary_color: ['#3B82F6'],
+          secondary_color: ['#10B981'],
+          accent_color: ['#F59E0B'],
+        }),
+      }),
+
       // Configuración General
       general: this.fb.group({
         currency: ['COP'],
@@ -77,12 +103,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
       // Slider Principal
       slider: this.fb.group({
+        enable: [false],
         photos: this.fb.array([]),
       }),
 
       // Catálogo
       catalog: this.fb.group({
-        products_per_page: [12],
+        products_per_page: [16],
         show_out_of_stock: [false],
         allow_reviews: [true],
         show_variants: [true],
@@ -113,29 +140,6 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         calculate_tax_before_shipping: [true],
         multiple_shipping_addresses: [false],
       }),
-
-      // Lista de deseos
-      wishlist: this.fb.group({
-        enabled: [false],
-        public_wishlist: [false],
-        share_wishlist: [false],
-      }),
-
-      // Personalización - Colores
-      primary_color: ['#3B82F6'],
-      secondary_color: ['#10B981'],
-      accent_color: ['#F59E0B'],
-
-      // Personalización - Logo
-      logo_url: [''],
-
-      // Personalización - Product Slider
-      product_slider_enabled: [false],
-
-      // Personalización - Dominio
-      use_custom_domain: [false],
-      custom_domain: [''],
-      subdomain: [''],
     });
   }
 
@@ -144,68 +148,64 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    */
   private loadSettings(): void {
     this.isLoading = true;
-    this.ecommerceService.getSettings().pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (response: SettingsResponse) => {
-        if (response.exists && response.config) {
-          // MODO EDICIÓN: configuración existe
-          this.isEditMode = true;
-          this.isSetupMode = false;
-          this.settingsForm.patchValue(response.config);
+    this.ecommerceService
+      .getSettings()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: SettingsResponse) => {
+          if (response.exists && response.config) {
+            // MODO EDICIÓN: configuración existe
+            this.isEditMode = true;
+            this.isSetupMode = false;
+            this.settingsForm.patchValue(response.config);
 
-          // Cargar imágenes del slider
-          if (response.config.slider?.photos) {
-            this.sliderImages = response.config.slider.photos
-              .filter(photo => photo.url !== null)
-              .map(photo => ({
-                url: photo.url || undefined,
-                title: photo.title,
-                caption: photo.caption,
-              }));
+            // Cargar imágenes del slider
+            if (response.config.slider?.photos) {
+              this.sliderImages = response.config.slider.photos
+                .filter((photo) => photo.url !== null)
+                .map((photo) => ({
+                  url: photo.url || undefined,
+                  title: photo.title,
+                  caption: photo.caption,
+                }));
+            }
+          } else {
+            // MODO SETUP: no existe configuración
+            this.isSetupMode = true;
+            this.isEditMode = false;
+            this.loadTemplate();
           }
-        } else {
-          // MODO SETUP: no existe configuración
-          this.isSetupMode = true;
-          this.isEditMode = false;
-          this.loadTemplate('basic');
-        }
-        this.isLoading = false;
-      },
-      error: (error) => {
-        this.toastService.error('Error al cargar configuración: ' + error.message);
-        this.isLoading = false;
-      },
-    });
+          this.isLoading = false;
+        },
+        error: (error) => {
+          this.toastService.error(
+            'Error al cargar configuración: ' + error.message,
+          );
+          this.isLoading = false;
+        },
+      });
   }
 
   /**
    * Load default template (used in setup mode)
    */
-  private loadTemplate(type: 'basic' | 'advanced'): void {
+  private loadTemplate(): void {
     this.isLoading = true;
-    this.ecommerceService.getTemplate(type).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (template: EcommerceSettings) => {
-        this.settingsForm.patchValue(template);
-        this.sliderImages = [];
-        this.activeImageIndex = 0;
-        this.isLoading = false;
-      },
-      error: (error) => {
-        this.toastService.error('Error al cargar template: ' + error.message);
-        this.isLoading = false;
-      },
-    });
-  }
-
-  /**
-   * Handle template change in setup mode
-   */
-  onTemplateChange(type: 'basic' | 'advanced'): void {
-    this.selectedTemplate = type;
-    this.loadTemplate(type);
+    this.ecommerceService
+      .getTemplate('basic')
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (template: EcommerceSettings) => {
+          this.settingsForm.patchValue(template);
+          this.sliderImages = [];
+          this.activeImageIndex = 0;
+          this.isLoading = false;
+        },
+        error: (error) => {
+          this.toastService.error('Error al cargar template: ' + error.message);
+          this.isLoading = false;
+        },
+      });
   }
 
   /**
@@ -223,7 +223,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       this.fileInputRef = document.createElement('input');
       this.fileInputRef.type = 'file';
       this.fileInputRef.accept = 'image/*';
-      this.fileInputRef.addEventListener('change', (e) => this.onSliderImageUpload(e));
+      this.fileInputRef.addEventListener('change', (e) =>
+        this.onSliderImageUpload(e),
+      );
     }
     this.fileInputRef.click();
   }
@@ -261,29 +263,30 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     this.isUploadingImage = true;
 
     // Upload
-    this.ecommerceService.uploadSliderImage(file).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (result) => {
-        const index = this.sliderImages.findIndex(img => img.uploading);
-        if (index !== -1) {
-          this.sliderImages[index] = {
-            url: result.key,
-            thumbnail: result.thumbKey,
-            title: '',
-            caption: '',
-          };
-        }
-        this.isUploadingImage = false;
-        this.updateSliderPhotosForm();
-        this.toastService.success('Imagen subida exitosamente');
-      },
-      error: (error) => {
-        this.sliderImages = this.sliderImages.filter(img => !img.uploading);
-        this.isUploadingImage = false;
-        this.toastService.error('Error al subir imagen: ' + error.message);
-      },
-    });
+    this.ecommerceService
+      .uploadSliderImage(file)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (result) => {
+          const index = this.sliderImages.findIndex((img) => img.uploading);
+          if (index !== -1) {
+            this.sliderImages[index] = {
+              url: result.key,
+              thumbnail: result.thumbKey,
+              title: '',
+              caption: '',
+            };
+          }
+          this.isUploadingImage = false;
+          this.updateSliderPhotosForm();
+          this.toastService.success('Imagen subida exitosamente');
+        },
+        error: (error) => {
+          this.sliderImages = this.sliderImages.filter((img) => !img.uploading);
+          this.isUploadingImage = false;
+          this.toastService.error('Error al subir imagen: ' + error.message);
+        },
+      });
 
     input.value = '';
   }
@@ -302,7 +305,11 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   /**
    * Update image metadata (title or caption)
    */
-  updateImageMetadata(index: number, field: 'title' | 'caption', value: string): void {
+  updateImageMetadata(
+    index: number,
+    field: 'title' | 'caption',
+    value: string,
+  ): void {
     if (this.sliderImages[index]) {
       this.sliderImages[index][field] = value;
       this.updateSliderPhotosForm();
@@ -336,7 +343,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Update the form's slider photos array from sliderImages
    */
   private updateSliderPhotosForm(): void {
-    const photos: SliderPhoto[] = this.sliderImages.map(img => ({
+    const photos: SliderPhoto[] = this.sliderImages.map((img) => ({
       url: img.url || null,
       title: img.title || '',
       caption: img.caption || '',
@@ -348,7 +355,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     }
 
     this.settingsForm.patchValue({
-      slider: { photos }
+      slider: { photos },
     });
   }
 
@@ -361,36 +368,40 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Apply auto-fill before submitting
+    this.applyAutoFill();
+
     this.isSaving = true;
     const settings: EcommerceSettings = this.settingsForm.value;
 
-    this.ecommerceService.updateSettings(settings).pipe(
-      takeUntil(this.destroy$)
-    ).subscribe({
-      next: (savedSettings) => {
-        const message = this.isSetupMode
-          ? 'Tienda e-commerce configurada exitosamente'
-          : 'Configuración actualizada exitosamente';
+    this.ecommerceService
+      .updateSettings(settings)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (savedSettings) => {
+          const message = this.isSetupMode
+            ? 'Tienda e-commerce configurada exitosamente'
+            : 'Configuración actualizada exitosamente';
 
-        this.toastService.success(message);
-        this.settingsForm.markAsPristine();
+          this.toastService.success(message);
+          this.settingsForm.markAsPristine();
 
-        // If we were in setup mode, transition to edit mode
-        if (this.isSetupMode) {
-          this.isSetupMode = false;
-          this.isEditMode = true;
+          // If we were in setup mode, transition to edit mode
+          if (this.isSetupMode) {
+            this.isSetupMode = false;
+            this.isEditMode = true;
 
-          // Reload to get the saved configuration
-          this.loadSettings();
-        }
+            // Reload to get the saved configuration
+            this.loadSettings();
+          }
 
-        this.isSaving = false;
-      },
-      error: (error) => {
-        this.toastService.error('Error al guardar: ' + error.message);
-        this.isSaving = false;
-      },
-    });
+          this.isSaving = false;
+        },
+        error: (error) => {
+          this.toastService.error('Error al guardar: ' + error.message);
+          this.isSaving = false;
+        },
+      });
   }
 
   /**
@@ -398,10 +409,36 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    */
   onReset(): void {
     if (this.isSetupMode) {
-      this.loadTemplate(this.selectedTemplate);
+      this.loadTemplate();
     } else {
       this.loadSettings();
     }
     this.settingsForm.markAsPristine();
+  }
+
+  /**
+   * Apply auto-fill defaults to inicio section
+   */
+  private applyAutoFill(): void {
+    const inicio = this.settingsForm.get('inicio');
+    if (!inicio) return;
+
+    const titulo = inicio.get('titulo')?.value;
+    const parrafo = inicio.get('parrafo')?.value;
+
+    // Auto-fill título if empty
+    if (!titulo || titulo.trim() === '') {
+      inicio.patchValue({
+        titulo: `Bienvenido a ${this.storeName}`,
+      });
+    }
+
+    // Auto-fill párrafo if empty
+    if (!parrafo || parrafo.trim() === '') {
+      inicio.patchValue({
+        parrafo:
+          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
+      });
+    }
   }
 }

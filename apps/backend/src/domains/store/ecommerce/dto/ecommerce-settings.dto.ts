@@ -16,6 +16,76 @@ import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
+ * DTO para los colores de la sección inicio
+ */
+export class InicioColoresDto {
+  @ApiPropertyOptional({
+    example: '#3B82F6',
+    description: 'Primary color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  primary_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#10B981',
+    description: 'Secondary color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  secondary_color?: string;
+
+  @ApiPropertyOptional({
+    example: '#F59E0B',
+    description: 'Accent color',
+  })
+  @IsOptional()
+  @IsHexColor()
+  accent_color?: string;
+}
+
+/**
+ * DTO para la sección inicio de e-commerce
+ */
+export class InicioDto {
+  @ApiPropertyOptional({
+    example: 'Bienvenido a Mi Tienda',
+    description: 'Título de la página de inicio',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  titulo?: string;
+
+  @ApiPropertyOptional({
+    example:
+      'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
+    description: 'Párrafo descriptivo de la página de inicio',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  parrafo?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://ejemplo.com/logo.png',
+    description: 'URL del logo',
+  })
+  @IsOptional()
+  @IsString()
+  logo_url?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Colores de la marca',
+    type: InicioColoresDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InicioColoresDto)
+  colores?: InicioColoresDto;
+}
+
+/**
  * DTO para las configuraciones generales de e-commerce
  */
 export class EcommerceGeneralDto {
@@ -70,6 +140,11 @@ export class SliderPhotoDto {
  * DTO para la configuración del slider
  */
 export class EcommerceSliderDto {
+  @ApiPropertyOptional({ example: false, description: 'Enable slider' })
+  @IsOptional()
+  @IsBoolean()
+  enable?: boolean;
+
   @ApiPropertyOptional({ description: 'Array of slider photos (max 5)' })
   @IsOptional()
   @IsArray()
@@ -237,6 +312,16 @@ export class EcommerceSettingsDto {
   @IsIn(['STORE_ECOMMERCE'])
   app?: string;
 
+  // Sección Inicio
+  @ApiPropertyOptional({
+    description: 'Configuración de inicio (título, párrafo, logo, colores)',
+    type: InicioDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => InicioDto)
+  inicio?: InicioDto;
+
   // Configuración General
   @ApiPropertyOptional({
     description: 'General settings (currency, locale, timezone)',
@@ -294,19 +379,9 @@ export class EcommerceSettingsDto {
   @Type(() => EcommerceShippingDto)
   shipping?: EcommerceShippingDto;
 
-  // Lista de deseos
+  // Branding (deprecated - migrado a inicio.colores)
   @ApiPropertyOptional({
-    description: 'Wishlist settings',
-    type: EcommerceWishlistDto,
-  })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => EcommerceWishlistDto)
-  wishlist?: EcommerceWishlistDto;
-
-  // Branding
-  @ApiPropertyOptional({
-    description: 'Branding settings (colors, logo, theme)',
+    description: 'Branding settings (colors, logo, theme) - DEPRECATED',
   })
   @IsOptional()
   @IsObject()

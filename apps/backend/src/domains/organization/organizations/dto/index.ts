@@ -29,6 +29,11 @@ export enum OrganizationState {
   ARCHIVED = 'archived',
 }
 
+export enum OrganizationAccountType {
+  SINGLE_STORE = 'SINGLE_STORE',
+  MULTI_STORE_ORG = 'MULTI_STORE_ORG',
+}
+
 // CreateOrganizationDto eliminado - creación de organizaciones es función de superadmin
 
 export class UpdateOrganizationDto {
@@ -108,6 +113,15 @@ export class OrganizationDashboardDto {
   @IsOptional()
   @IsEnum(DashboardPeriod)
   period?: DashboardPeriod = DashboardPeriod.SIX_MONTHS;
+}
+
+/**
+ * DTO para upgrade de tipo de cuenta de organización
+ * Solo permite upgrade de SINGLE_STORE a MULTI_STORE_ORG (no downgrade)
+ */
+export class UpgradeAccountTypeDto {
+  @IsEnum(OrganizationAccountType)
+  account_type: OrganizationAccountType.MULTI_STORE_ORG;
 }
 
 // UsersDashboardDto eliminado - gestión de usuarios es función del módulo users

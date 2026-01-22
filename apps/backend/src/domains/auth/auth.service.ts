@@ -22,6 +22,7 @@ import {
 } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
+import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class AuthService {
@@ -168,6 +169,10 @@ export class AuthService {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(first_name || '');
+    const formatted_last_name = toTitleCase(last_name || '');
+
     // Buscar si ya existe un OWNER con este email con onboarding incompleto
     // IMPORTANTE: Solo considerar owners, NO customers u otros roles
     const existingUser = await this.prismaService.users.findFirst({
@@ -230,6 +235,7 @@ export class AuthService {
           slug: organization_slug,
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
+          account_type: 'MULTI_STORE_ORG', // Por defecto Multi-Store para nuevos owners
         },
       });
 
@@ -278,8 +284,8 @@ export class AuthService {
         data: {
           email,
           password: hashedPassword,
-          first_name,
-          last_name,
+          first_name: formatted_first_name,
+          last_name: formatted_last_name,
           phone,
           username: await this.generateUniqueUsername(email),
           email_verified: false,
@@ -503,13 +509,17 @@ export class AuthService {
     // Hash de la contraseña
     const hashedPassword = await bcrypt.hash(finalPassword, 12);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(first_name || '');
+    const formatted_last_name = toTitleCase(last_name || '');
+
     // Crear usuario (no hay store_id directo en users; se asocia en store_users)
     const user = await this.prismaService.users.create({
       data: {
         email,
         password: hashedPassword,
-        first_name,
-        last_name,
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
         phone,
         document_type,
         document_number,
@@ -551,13 +561,16 @@ export class AuthService {
       include: {
         user_roles: {
           include: {
-            roles: {
-              include: {
-                role_permissions: {
-                  include: {
-                    permissions: true,
-                  },
-                },
+            roles: true,
+          },
+        },
+        user_settings: true,
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
               },
             },
           },
@@ -566,7 +579,7 @@ export class AuthService {
     });
 
     if (!userWithRoles) {
-      throw new BadRequestException('Error al crear usuario customer');
+      throw new BadRequestException('Error al recuperar el usuario registrado');
     }
 
     // Generar tokens
@@ -771,13 +784,17 @@ export class AuthService {
     // Hash de la contraseña
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(first_name || '');
+    const formatted_last_name = toTitleCase(last_name || '');
+
     // Crear usuario
     const user = await this.prismaService.users.create({
       data: {
         email,
         password: hashedPassword,
-        first_name,
-        last_name,
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
         username: await this.generateUniqueUsername(email),
         organization_id: adminUser.organization_id,
         email_verified: true, // Staff creado por admin, email ya verificado
@@ -785,8 +802,9 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario staff usando el servicio centralizado
-    const staffConfig = await this.defaultPanelUIService.generatePanelUI(app);
+    // Crear user_settings para el usuario staff usando el servicio centralizado (siempre STORE_ADMIN)
+    const staffConfig =
+      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
@@ -2751,6 +2769,104 @@ export class AuthService {
       permissions,
       roles,
       updatedEnvironment: targetEnvironment,
+    };
+  }
+
+  async loginCustomer(
+    loginCustomerDto: any,
+    client_info?: { ip_address?: string; user_agent?: string },
+  ) {
+    const { email, password, store_id } = loginCustomerDto;
+
+    // Buscar la tienda
+    const store = await this.prismaService.stores.findUnique({
+      where: { id: store_id },
+    });
+
+    if (!store) {
+      throw new BadRequestException('Tienda no encontrada');
+    }
+
+    // Buscar usuario
+    const user = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: store.organization_id,
+      },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        user_settings: true,
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
+        store_users: {
+          where: { store_id: store.id },
+        },
+      },
+    });
+
+    if (!user) {
+      await this.logLoginAttempt(null, false, email);
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // Validar contraseña
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      await this.logLoginAttempt(user.id, false);
+      throw new UnauthorizedException('Credenciales inválidas');
+    }
+
+    // Validar que el usuario no esté suspendido o archivado
+    if (user.state === 'suspended' || user.state === 'archived') {
+      await this.logLoginAttempt(user.id, false);
+      throw new UnauthorizedException('Cuenta suspendida o archivada');
+    }
+
+    // Validar que sea un cliente
+    const roles = user.user_roles?.map((ur) => ur.roles?.name) || [];
+    if (!roles.includes('customer')) {
+      throw new UnauthorizedException('Acceso restringido a clientes');
+    }
+
+    // Validar que esté asociado a esta tienda
+    if (user.store_users.length === 0) {
+      throw new UnauthorizedException('No tienes acceso a esta tienda');
+    }
+
+    // Generar tokens
+    const tokens = await this.generateTokens(user, {
+      organization_id: store.organization_id,
+      store_id: store.id,
+    });
+
+    await this.createUserSession(user.id, tokens.refresh_token, {
+      ip_address: client_info?.ip_address || '127.0.0.1',
+      user_agent: client_info?.user_agent || 'Customer-Device',
+    });
+
+    await this.logLoginAttempt(user.id, true);
+
+    return {
+      user: user,
+      user_settings: user.user_settings,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      token_type: 'Bearer',
+      expires_in: tokens.expires_in,
+      roles,
+      updatedEnvironment: 'STORE_ECOMMERCE',
     };
   }
 }

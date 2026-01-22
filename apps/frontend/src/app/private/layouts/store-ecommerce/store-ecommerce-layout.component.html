@@ -159,13 +159,10 @@
   <div class="mobile-overlay" (click)="toggleMobileMenu()"></div>
 }
 
-<!-- Overlay for user menu -->
-@if (show_user_menu) {
-  <div class="menu-overlay" (click)="toggleUserMenu()"></div>
-}
-
 <app-auth-modal
   [isOpen]="is_auth_modal_open"
   [initialMode]="auth_modal_mode"
+  [storeLogo]="store_logo"
+  [storeName]="store_name"
   (closed)="is_auth_modal_open = false"
 ></app-auth-modal>

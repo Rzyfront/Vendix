@@ -4,8 +4,9 @@ import {
   Output,
   EventEmitter,
   inject,
-  OnInit,
   OnChanges,
+  DestroyRef,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -14,11 +15,15 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { filter } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-auth-modal',
@@ -29,19 +34,46 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    IconComponent,
   ],
   template: `
-    <app-modal
-      [isOpen]="isOpen"
-      (closed)="onClose()"
-      [title]="isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'"
-      [subtitle]="
-        isLogin
-          ? 'Ingresa tus credenciales para continuar'
-          : 'Regístrate para realizar tu compra'
-      "
-      size="sm"
-    >
+    <app-modal [isOpen]="isOpen" (closed)="onClose()" size="sm" title=" ">
+      <!-- Custom Header with Logo -->
+      <div
+        slot="header"
+        class="flex flex-col items-center text-center w-full py-2"
+      >
+        <!-- Store Logo -->
+        <div class="mb-4">
+          @if (storeLogo) {
+            <img
+              [src]="storeLogo"
+              [alt]="storeName"
+              class="h-12 w-auto object-contain"
+            />
+          } @else {
+            <div class="flex items-center gap-2 text-[var(--color-primary)]">
+              <app-icon name="shopping-bag" [size]="32"></app-icon>
+              <span
+                class="text-xl font-bold text-[var(--color-text-primary)]"
+                >{{ storeName }}</span
+              >
+            </div>
+          }
+        </div>
+        <!-- Title -->
+        <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
+          {{ isLogin ? 'Iniciar Sesion' : 'Crear Cuenta' }}
+        </h3>
+        <p class="text-sm text-[var(--color-text-secondary)] mt-1">
+          {{
+            isLogin
+              ? 'Ingresa tus credenciales para continuar'
+              : 'Registrate para realizar tu compra'
+          }}
+        </p>
+      </div>
+
       <div class="space-y-4 py-2">
         <!-- Tabs -->
         <div class="flex border-b border-[var(--color-border)] mb-4">
@@ -69,8 +101,17 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
           </button>
         </div>
 
+        <!-- Error Message -->
+        @if (errorMessage) {
+          <div
+            class="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm"
+          >
+            {{ errorMessage }}
+          </div>
+        }
+
         <form [formGroup]="authForm" (ngSubmit)="onSubmit()" class="space-y-4">
-          <ng-container *ngIf="!isLogin">
+          @if (!isLogin) {
             <div class="grid grid-cols-2 gap-4">
               <app-input
                 label="Nombre"
@@ -79,25 +120,30 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
               ></app-input>
               <app-input
                 label="Apellido"
-                placeholder="Ej. Pérez"
+                placeholder="Ej. Perez"
                 formControlName="last_name"
               ></app-input>
             </div>
-          </ng-container>
+          }
 
           <app-input
-            label="Correo Electrónico"
+            label="Correo Electronico"
             type="email"
             placeholder="tu@email.com"
             formControlName="email"
           ></app-input>
 
           <app-input
-            label="Contraseña"
+            label="Contrasena"
             type="password"
-            placeholder="••••••••"
+            placeholder="********"
             formControlName="password"
           ></app-input>
+          @if (!isLogin && authForm.get('password')?.touched) {
+            <p class="text-[10px] text-[var(--color-text-secondary)] mt-1">
+              Mínimo 8 caracteres y al menos un carácter especial (ej. @, #, !).
+            </p>
+          }
 
           <div class="pt-4">
             <app-button
@@ -114,57 +160,79 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
     </app-modal>
   `,
 })
-export class AuthModalComponent implements OnInit, OnChanges {
+export class AuthModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() initialMode: 'login' | 'register' = 'login';
+  @Input() storeLogo: string | null = null;
+  @Input() storeName = 'Tienda';
   @Output() closed = new EventEmitter<void>();
 
   isLogin = true;
+  errorMessage: string | null = null;
+
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
   private tenantFacade = inject(TenantFacade);
+  private destroyRef = inject(DestroyRef);
 
   loading$ = this.authFacade.loading$;
-  authForm!: FormGroup;
+  authForm: FormGroup;
 
-  ngOnInit() {
-    this.isLogin = this.initialMode === 'login';
-    this.initForm();
-
-    // Cerrar modal automáticamente cuando el usuario se loguea con éxito
-    this.authFacade.isAuthenticated$.subscribe((isAuth) => {
-      if (isAuth && this.isOpen) {
-        this.onClose();
-      }
-    });
-  }
-
-  // React to input changes
-  ngOnChanges() {
-    if (this.initialMode) {
-      this.isLogin = this.initialMode === 'login';
-      if (this.authForm) {
-        this.updateValidators();
-      }
-    }
-  }
-
-  initForm() {
+  constructor() {
+    // Initialize form in constructor
     this.authForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      password: ['', [Validators.required, Validators.minLength(6)]],
+      password: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(8),
+          Validators.pattern(/.*[^A-Za-z0-9].*/), // Al menos un carácter especial
+        ],
+      ],
       first_name: [''],
       last_name: [''],
     });
-    this.updateValidators();
+
+    // Auto-close modal on successful authentication (using takeUntilDestroyed)
+    this.authFacade.isAuthenticated$
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        filter((isAuth) => isAuth && this.isOpen),
+      )
+      .subscribe(() => {
+        this.onClose();
+      });
+
+    // Listen for auth errors
+    this.authFacade.error$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((error) => {
+        if (error && this.isOpen) {
+          this.errorMessage =
+            typeof error === 'string' ? error : extractApiErrorMessage(error);
+        }
+      });
   }
 
-  switchMode(isLogin: boolean) {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['initialMode']) {
+      this.isLogin = this.initialMode === 'login';
+      this.updateValidators();
+    }
+    // Clear error when modal opens
+    if (changes['isOpen'] && this.isOpen) {
+      this.errorMessage = null;
+    }
+  }
+
+  switchMode(isLogin: boolean): void {
     this.isLogin = isLogin;
+    this.errorMessage = null;
     this.updateValidators();
   }
 
-  updateValidators() {
+  updateValidators(): void {
     const firstNameControl = this.authForm.get('first_name');
     const lastNameControl = this.authForm.get('last_name');
 
@@ -180,33 +248,63 @@ export class AuthModalComponent implements OnInit, OnChanges {
     lastNameControl?.updateValueAndValidity();
   }
 
-  onClose() {
+  onClose(): void {
     this.isOpen = false;
+    this.errorMessage = null;
     this.closed.emit();
     this.authForm.reset();
   }
 
-  onSubmit() {
+  onSubmit(): void {
     if (this.authForm.invalid) {
       this.authForm.markAllAsTouched();
       return;
     }
 
+    // Clear previous errors
+    this.errorMessage = null;
+
     const currentDomain = this.tenantFacade.getCurrentDomainConfig();
     const currentStore = this.tenantFacade.getCurrentStore();
 
     if (this.isLogin) {
-      this.authFacade.login(
+      // Use the dedicated loginCustomer for e-commerce
+      const storeId = this.tenantFacade.getCurrentStoreId();
+
+      if (!storeId) {
+        this.errorMessage =
+          'No se pudo identificar la tienda. Por favor, recarga la página.';
+        return;
+      }
+
+      this.authFacade.loginCustomer(
         this.authForm.value.email,
         this.authForm.value.password,
-        currentDomain?.store_slug,
-        currentDomain?.organization_slug,
+        storeId,
       );
     } else {
-      this.authFacade.registerCustomer({
-        ...this.authForm.value,
-        store_id: currentStore?.id,
-      });
+      // Get values from form
+      const { email, password, first_name, last_name } = this.authForm.value;
+
+      // Get store_id safely using the new robust method
+      const storeId = this.tenantFacade.getCurrentStoreId();
+
+      if (!storeId) {
+        this.errorMessage =
+          'No se pudo identificar la tienda. Por favor, recarga la página.';
+        return;
+      }
+
+      // Explicitly construct the payload to avoid any extra properties like 'type'
+      const payload = {
+        email,
+        password,
+        first_name,
+        last_name,
+        store_id: storeId,
+      };
+
+      this.authFacade.registerCustomer(payload);
     }
   }
 }

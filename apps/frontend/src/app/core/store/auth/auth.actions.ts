@@ -29,6 +29,34 @@ export const loginFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
+// Login Customer Actions
+export const loginCustomer = createAction(
+  '[Auth] Login Customer',
+  props<{
+    email: string;
+    password: string;
+    store_id: number;
+  }>(),
+);
+
+export const loginCustomerSuccess = createAction(
+  '[Auth] Login Customer Success',
+  props<{
+    user: any;
+    user_settings?: any;
+    tokens: { access_token: string; refresh_token: string };
+    permissions?: string[];
+    roles?: string[];
+    message?: string;
+    updated_environment?: string;
+  }>(),
+);
+
+export const loginCustomerFailure = createAction(
+  '[Auth] Login Customer Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
 export const logout = createAction('[Auth] Logout');
 
 export const logoutSuccess = createAction('[Auth] Logout Success');

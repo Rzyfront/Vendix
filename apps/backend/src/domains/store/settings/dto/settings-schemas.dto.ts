@@ -49,32 +49,12 @@ export class InventorySettingsDto {
   @ApiProperty({ example: false })
   @IsBoolean()
   allow_negative_stock: boolean;
-
-  @ApiProperty({ example: false })
-  @IsBoolean()
-  require_serial_numbers: boolean;
-
-  @ApiProperty({ example: false })
-  @IsBoolean()
-  require_batch_tracking: boolean;
-
-  @ApiProperty({ example: true })
-  @IsBoolean()
-  auto_adjust_stock: boolean;
 }
 
 export class CheckoutSettingsDto {
   @ApiProperty({ example: true })
   @IsBoolean()
   require_customer_data: boolean;
-
-  @ApiProperty({ example: true })
-  @IsBoolean()
-  require_email: boolean;
-
-  @ApiProperty({ example: false })
-  @IsBoolean()
-  require_phone: boolean;
 
   @ApiProperty({ example: false })
   @IsBoolean()
@@ -83,11 +63,6 @@ export class CheckoutSettingsDto {
   @ApiProperty({ example: false })
   @IsBoolean()
   allow_partial_payments: boolean;
-
-  @ApiProperty({ example: 0 })
-  @IsNumber()
-  @Min(0)
-  payment_terms_days: number;
 
   @ApiProperty({ example: true })
   @IsBoolean()

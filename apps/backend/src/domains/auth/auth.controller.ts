@@ -17,6 +17,7 @@ import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { EnvironmentSwitchService } from './environment-switch.service';
 import { LoginDto } from './dto/login.dto';
+import { LoginCustomerDto } from './dto/login-customer.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
 import { RegisterCustomerDto } from './dto/register-customer.dto';
 import { RegisterStaffDto } from './dto/register-staff.dto';
@@ -40,7 +41,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly environmentSwitchService: EnvironmentSwitchService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post('register-owner')
   @Public()
@@ -154,6 +155,36 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al iniciar sesión',
+        error.response?.message || error.message,
+        error.status || 401,
+      );
+    }
+  }
+
+  @Public()
+  @Post('login-customer')
+  @HttpCode(HttpStatus.OK)
+  async loginCustomer(
+    @Body() loginCustomerDto: LoginCustomerDto,
+    @Req() request: Request,
+  ) {
+    const raw_ip = request.headers['x-forwarded-for'] || request.ip || '';
+    const ip_address = Array.isArray(raw_ip) ? raw_ip[0] : String(raw_ip || '');
+    const user_agent = request.get('user-agent') || '';
+    const client_info = {
+      ip_address: ip_address || undefined,
+      user_agent: user_agent || undefined,
+    };
+
+    try {
+      const result = await this.authService.loginCustomer(
+        loginCustomerDto,
+        client_info,
+      );
+      return this.responseService.success(result, 'Login de cliente exitoso');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al iniciar sesión como cliente',
         error.response?.message || error.message,
         error.status || 401,
       );

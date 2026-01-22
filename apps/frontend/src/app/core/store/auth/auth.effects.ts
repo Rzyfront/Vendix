@@ -63,10 +63,42 @@ export class AuthEffects {
     ),
   );
 
+  loginCustomer$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.loginCustomer),
+      mergeMap((loginData) =>
+        this.authService.loginCustomer(loginData).pipe(
+          map((response) => {
+            if (!response.data) throw new Error('Invalid response data');
+            return AuthActions.loginCustomerSuccess({
+              user: response.data.user,
+              user_settings: response.data.user_settings,
+              tokens: {
+                access_token: response.data.access_token,
+                refresh_token: response.data.refresh_token,
+              },
+              permissions: response.data.permissions || [],
+              roles: response.data.user.roles || [],
+              message: response.message,
+              updated_environment: response.updatedEnvironment,
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.loginCustomerFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   loginSuccess$ = createEffect(
     () =>
       this.actions$.pipe(
-        ofType(AuthActions.loginSuccess),
+        ofType(AuthActions.loginSuccess, AuthActions.loginCustomerSuccess),
         tap(async ({ roles, message, updated_environment }) => {
           // CRITICAL: Clear the logout flag on successful login
           if (typeof localStorage !== 'undefined') {
@@ -122,7 +154,7 @@ export class AuthEffects {
   registerCustomer$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.registerCustomer),
-      mergeMap((registerData) =>
+      mergeMap(({ type, ...registerData }) =>
         this.authService.registerCustomer(registerData).pipe(
           map((response) => {
             if (!response.data) throw new Error('Invalid response data');

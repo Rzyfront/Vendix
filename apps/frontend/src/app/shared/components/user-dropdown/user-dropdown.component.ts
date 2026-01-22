@@ -83,9 +83,6 @@ export interface UserMenuOption {
         </div>
       </div>
     </div>
-    
-
-
   `,
   styleUrls: ['./user-dropdown.component.scss'],
 })

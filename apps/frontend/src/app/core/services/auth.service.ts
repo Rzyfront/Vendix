@@ -142,6 +142,50 @@ export class AuthService {
       );
   }
 
+  loginCustomer(
+    loginData: any,
+  ): Observable<AuthResponse & { updatedEnvironment?: string }> {
+    // 🔒 LIMPIEZA DE SEGURIDAD
+    this.checkAndCleanAuthResidues();
+
+    console.log('🔐 Iniciando login de customer');
+
+    // Asegurar que no enviamos 'type' si viene de un action de NgRx
+    const { type, ...cleanData } = loginData;
+
+    return this.http
+      .post<AuthResponse>(`${this.API_URL}/login-customer`, cleanData)
+      .pipe(
+        mergeMap(async (response: AuthResponse) => {
+          if (!response.success || !response.data) {
+            throw new Error(response.message || 'Login failed');
+          }
+
+          const { user, user_settings, access_token, refresh_token } =
+            response.data;
+
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', refresh_token);
+          }
+
+          const decodedToken = this.decodeJwtToken(access_token);
+          user.roles = user.roles || [];
+
+          return {
+            ...response,
+            data: {
+              ...response.data,
+              user,
+              user_settings,
+              permissions: decodedToken?.permissions || [],
+            },
+            updatedEnvironment: 'STORE_ECOMMERCE',
+          };
+        }),
+      );
+  }
+
   public validateUserEnvironmentAccess(
     userRoles: string[],
     targetEnv: string,
@@ -245,8 +289,11 @@ export class AuthService {
 
     console.log('🔐 Iniciando registro de customer con estado limpio');
 
+    // Asegurar que no enviamos 'type' si viene de un action de NgRx
+    const { type, ...cleanData } = registerData;
+
     return this.http
-      .post<AuthResponse>(`${this.API_URL}/register-customer`, registerData)
+      .post<AuthResponse>(`${this.API_URL}/register-customer`, cleanData)
       .pipe(
         mergeMap(async (response: AuthResponse) => {
           if (!response.success || !response.data) {

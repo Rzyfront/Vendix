@@ -3,9 +3,31 @@
  * Matches backend EcommerceSettingsDto structure
  */
 
+/**
+ * Colores de la sección inicio
+ */
+export interface InicioColores {
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+}
+
+/**
+ * Sección Inicio de e-commerce
+ */
+export interface InicioSettings {
+  titulo?: string;
+  parrafo?: string;
+  logo_url?: string | null;
+  colores?: InicioColores;
+}
+
 export interface EcommerceSettings {
   // App type identifier
   app?: string;
+
+  // Sección Inicio
+  inicio?: InicioSettings;
 
   // Configuración General
   general?: {
@@ -16,6 +38,7 @@ export interface EcommerceSettings {
 
   // Slider Principal
   slider?: {
+    enable?: boolean;
     photos?: SliderPhoto[];
   };
 
@@ -53,28 +76,8 @@ export interface EcommerceSettings {
     multiple_shipping_addresses?: boolean;
   };
 
-  // Lista de deseos
-  wishlist?: {
-    enabled?: boolean;
-    public_wishlist?: boolean;
-    share_wishlist?: boolean;
-  };
-
-  // Personalización - Colores (Original sections)
-  primary_color?: string;
-  secondary_color?: string;
-  accent_color?: string;
-
-  // Personalización - Logo
-  logo_url?: string;
-
-  // Personalización - Product Slider
-  product_slider_enabled?: boolean;
-
-  // Personalización - Dominio
-  use_custom_domain?: boolean;
-  custom_domain?: string;
-  subdomain?: string;
+  // Branding (deprecated - migrado a inicio.colores)
+  branding?: any;
 }
 
 /**

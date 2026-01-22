@@ -82,6 +82,58 @@ export class SettingsService {
     return getDefaultStoreSettings();
   }
 
+  async getSystemTemplates(): Promise<any[]> {
+    const templates = await this.prisma.default_templates.findMany({
+      where: {
+        configuration_type: 'store_settings',
+      },
+      select: {
+        template_name: true,
+        template_data: true,
+        description: true,
+      },
+      orderBy: {
+        template_name: 'asc',
+      },
+    });
+
+    return templates;
+  }
+
+  async applyTemplate(template_name: string): Promise<StoreSettings> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+
+    const template = await this.prisma.default_templates.findFirst({
+      where: {
+        template_name,
+        configuration_type: 'store_settings',
+      },
+    });
+
+    if (!template) {
+      throw new NotFoundException(`Template '${template_name}' not found`);
+    }
+
+    await this.prisma.store_settings.upsert({
+      where: { store_id },
+      update: {
+        settings: template.template_data,
+        updated_at: new Date(),
+      },
+      create: {
+        store_id,
+        settings: template.template_data,
+      },
+    });
+
+    return template.template_data as unknown as StoreSettings;
+  }
+
   private validateSettings(settings: any): StoreSettings {
     const dto = new UpdateSettingsDto();
     Object.assign(dto, settings);

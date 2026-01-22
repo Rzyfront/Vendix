@@ -1,16 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { UpdateOrganizationDto, OrganizationDashboardDto } from './dto';
+import {
+  UpdateOrganizationDto,
+  OrganizationDashboardDto,
+  UpgradeAccountTypeDto,
+  OrganizationAccountType,
+} from './dto';
 import { Prisma } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
+import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
 @Injectable()
 export class OrganizationsService {
   constructor(
     private prisma: OrganizationPrismaService,
+    private globalPrisma: GlobalPrismaService,
     private s3Service: S3Service,
-  ) { }
+    private defaultPanelUIService: DefaultPanelUIService,
+  ) {}
 
   async getProfile() {
     // Obtener organization_id del contexto del usuario
@@ -243,6 +257,95 @@ export class OrganizationsService {
           sub_label: 'vs last month',
         },
       },
+    };
+  }
+
+  /**
+   * Upgrade organization account type from SINGLE_STORE to MULTI_STORE_ORG
+   * Only owners can perform this action
+   */
+  async upgradeAccountType(dto: UpgradeAccountTypeDto) {
+    const context = RequestContextService.getContext();
+
+    if (!context?.organization_id || !context?.user_id) {
+      throw new NotFoundException('Context not found');
+    }
+
+    // Get user with roles to validate owner status
+    const user = await this.globalPrisma.users.findUnique({
+      where: { id: context.user_id },
+      include: {
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+        organizations: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Validate that user is owner
+    const isOwner = user.user_roles?.some((ur) => ur.roles?.name === 'owner');
+    if (!isOwner) {
+      throw new ForbiddenException(
+        'Solo los owners pueden cambiar el tipo de cuenta.',
+      );
+    }
+
+    // Validate that organization is not already MULTI_STORE_ORG
+    if (user.organizations?.account_type === 'MULTI_STORE_ORG') {
+      throw new BadRequestException(
+        'Tu cuenta ya es una organización multi-tienda.',
+      );
+    }
+
+    // Update account_type to MULTI_STORE_ORG
+    const org = await this.prisma.organizations.update({
+      where: { id: context.organization_id },
+      data: {
+        account_type: 'MULTI_STORE_ORG',
+        updated_at: new Date(),
+      },
+    });
+
+    // Get current user_settings
+    const userSettings = await this.globalPrisma.user_settings.findUnique({
+      where: { user_id: context.user_id },
+    });
+
+    if (userSettings) {
+      // Generate ORG_ADMIN config using DefaultPanelUIService
+      const generatedConfig =
+        await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+      const orgAdminPanelUi = generatedConfig.panel_ui?.ORG_ADMIN || {};
+
+      const currentConfig = (userSettings.config as any) || {};
+      const currentPanelUi = currentConfig.panel_ui || {};
+
+      // Add ORG_ADMIN to panel_ui if not present
+      await this.globalPrisma.user_settings.update({
+        where: { id: userSettings.id },
+        data: {
+          config: {
+            ...currentConfig,
+            panel_ui: {
+              ...currentPanelUi,
+              ORG_ADMIN: orgAdminPanelUi,
+            },
+          },
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    return {
+      account_type: org.account_type,
+      message:
+        'Tu cuenta ha sido actualizada a organización multi-tienda. Ahora puedes cambiar al entorno de organización.',
     };
   }
 }

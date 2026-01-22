@@ -14,6 +14,7 @@ import {
 import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class UsersService {
@@ -39,11 +40,15 @@ export class UsersService {
     // Hash password
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(createUserDto.first_name || '');
+    const formatted_last_name = toTitleCase(createUserDto.last_name || '');
+
     const user = await this.prisma.users.create({
       data: {
         email: createUserDto.email,
-        first_name: createUserDto.first_name,
-        last_name: createUserDto.last_name,
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
         username: createUserDto.username,
         password: hashedPassword,
         organization_id: createUserDto.organization_id,

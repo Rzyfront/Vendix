@@ -1,4 +1,10 @@
-import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  inject,
+  ChangeDetectorRef,
+  HostListener,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -103,5 +109,27 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.is_auth_modal_open = true;
     this.show_user_menu = false;
     this.cdr.detectChanges();
+  }
+
+  // Close user menu when clicking outside (same pattern as admin layouts)
+  @HostListener('document:click', ['$event'])
+  onClickOutside(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    const userMenuContainer = document.querySelector('.user-menu-container');
+    if (
+      this.show_user_menu &&
+      userMenuContainer &&
+      !userMenuContainer.contains(target)
+    ) {
+      this.show_user_menu = false;
+    }
+  }
+
+  // Close user menu on Escape key
+  @HostListener('document:keydown.escape')
+  onEscapeKey(): void {
+    if (this.show_user_menu) {
+      this.show_user_menu = false;
+    }
   }
 }
