@@ -5,6 +5,7 @@ import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CatalogService } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
 export interface CartItem {
     id: number;
@@ -57,8 +58,24 @@ export class CartService {
         private http: HttpClient,
         private domain_service: TenantFacade,
         private catalog_service: CatalogService,
+        private auth_facade: AuthFacade
     ) {
-        this.loadLocalCart();
+        this.initializeCart();
+    }
+
+    private initializeCart() {
+        this.auth_facade.isAuthenticated$.subscribe((isAuthenticated) => {
+            if (isAuthenticated) {
+                const localItems = this.getLocalCart();
+                if (localItems.length > 0) {
+                    this.syncFromLocalStorage().subscribe();
+                } else {
+                    this.getCart().subscribe();
+                }
+            } else {
+                this.loadLocalCart();
+            }
+        });
     }
 
     private getHeaders(): HttpHeaders {
@@ -268,7 +285,7 @@ export class CartService {
             tap((response: any) => {
                 if (response.success) {
                     this.cart_subject.next(response.data);
-                    this.clearLocalCart();
+                    localStorage.removeItem(this.local_storage_key);
                 }
             }),
         );
