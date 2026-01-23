@@ -9,6 +9,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { validateSync } from 'class-validator';
@@ -22,7 +23,8 @@ export class SettingsService {
     private prisma: StorePrismaService,
     private organizationPrisma: OrganizationPrismaService,
     private s3Service: S3Service,
-  ) {}
+    private s3PathHelper: S3PathHelper,
+  ) { }
 
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
@@ -194,14 +196,22 @@ export class SettingsService {
    */
   private async generateFaviconForStore(storeId: number, logoUrl: string): Promise<void> {
     try {
-      // 1. Get store with organization_id
+      // 1. Get store with organization and slugs for path S3
       const store = await this.prisma.stores.findUnique({
         where: { id: storeId },
-        select: { id: true, organization_id: true, logo_url: true }
+        select: {
+          id: true,
+          slug: true,
+          organization_id: true,
+          logo_url: true,
+          organizations: {
+            select: { id: true, slug: true },
+          },
+        },
       });
 
-      if (!store?.organization_id) {
-        this.logger.warn(`Store ${storeId} missing organization_id`);
+      if (!store?.organization_id || !store.organizations) {
+        this.logger.warn(`Store ${storeId} missing organization data`);
         return;
       }
 
@@ -224,11 +234,15 @@ export class SettingsService {
         return;
       }
 
-      // 3. Generate and upload favicons
+      // 3. Generate and upload favicons using path with slug-id
+      const faviconPath = this.s3PathHelper.buildFaviconPath(
+        store.organizations,
+        store,
+      );
+
       const result = await this.s3Service.generateAndUploadFaviconFromLogo(
         logoBuffer,
-        store.organization_id,
-        storeId
+        faviconPath,
       );
 
       if (!result) {

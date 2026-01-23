@@ -9,6 +9,7 @@ import {
 import { DomainConfigStandardizerHelper } from '../../../common/helpers/domain-config-standardizer.helper';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 
 @Injectable()
 export class EcommerceService {
@@ -20,6 +21,7 @@ export class EcommerceService {
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly configStandardizer: DomainConfigStandardizerHelper,
     private readonly s3Service: S3Service,
+    private readonly s3PathHelper: S3PathHelper,
   ) { }
 
   /**
@@ -339,10 +341,30 @@ export class EcommerceService {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) throw new Error('Store ID not found in context');
 
-    // Generar path organizado por tienda
+    // Obtener store con org para construir path con slugs
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: {
+        id: true,
+        slug: true,
+        organizations: {
+          select: { id: true, slug: true },
+        },
+      },
+    });
+
+    if (!store || !store.organizations) {
+      throw new Error('Store or organization not found');
+    }
+
+    // Generar path organizado con slug-id
     const timestamp = Date.now();
     const clean_filename = filename.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
-    const key = `stores/${store_id}/ecommerce/slider/${timestamp}-${clean_filename}`;
+    const basePath = this.s3PathHelper.buildEcommerceSliderPath(
+      store.organizations,
+      store,
+    );
+    const key = `${basePath}/${timestamp}-${clean_filename}`;
 
     // Cargar y optimizar imagen (S3Service se encarga de convertir a WebP y hacer el thumb)
     const result = await this.s3Service.uploadImage(file, key, {
@@ -371,14 +393,21 @@ export class EcommerceService {
         return;
       }
 
-      // 1. Obtener store con organization_id
+      // 1. Obtener store con organization y slugs para path S3
       const store = await this.prisma.stores.findUnique({
         where: { id: store_id },
-        select: { id: true, organization_id: true }
+        select: {
+          id: true,
+          slug: true,
+          organization_id: true,
+          organizations: {
+            select: { id: true, slug: true },
+          },
+        },
       });
 
-      if (!store?.organization_id) {
-        this.logger.warn(`Store ${store_id} missing organization_id`);
+      if (!store?.organization_id || !store.organizations) {
+        this.logger.warn(`Store ${store_id} missing organization data`);
         return;
       }
 
@@ -396,11 +425,15 @@ export class EcommerceService {
         return;
       }
 
-      // 3. Generar y subir favicons
+      // 3. Generar y subir favicons usando path con slug-id
+      const faviconPath = this.s3PathHelper.buildFaviconPath(
+        store.organizations,
+        store,
+      );
+
       const result = await this.s3Service.generateAndUploadFaviconFromLogo(
         logoBuffer,
-        store.organization_id,
-        store_id
+        faviconPath,
       );
 
       if (!result) {

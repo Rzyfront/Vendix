@@ -226,7 +226,7 @@ export class CartService {
 
     clearLocalCart(): void {
         localStorage.removeItem(this.local_storage_key);
-        this.cart_subject.next(null);
+        this.emitEmptyCart();
     }
 
     // API methods for authenticated users
@@ -276,7 +276,13 @@ export class CartService {
     }
 
     clearCart(): Observable<any> {
-        return this.http.delete(this.api_url, { headers: this.getHeaders() });
+        return this.http.delete(this.api_url, { headers: this.getHeaders() }).pipe(
+            tap((response: any) => {
+                if (response.success) {
+                    this.emitEmptyCart();
+                }
+            }),
+        );
     }
 
     syncFromLocalStorage(): Observable<any> {

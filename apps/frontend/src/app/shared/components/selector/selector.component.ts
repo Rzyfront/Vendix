@@ -229,7 +229,7 @@ export class SelectorComponent
       stateClasses = [
         'border-border',
         'hover:border-border',
-        'focus:ring-primary/50',
+        'focus:ring-secondary/40',
         'focus:border-primary',
       ];
     }

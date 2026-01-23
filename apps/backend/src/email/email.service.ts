@@ -254,9 +254,13 @@ export class EmailService implements OnModuleInit {
     return this.provider.sendPasswordResetEmail(to, token, username);
   }
 
-  async sendWelcomeEmail(to: string, username: string): Promise<EmailResult> {
+  async sendWelcomeEmail(
+    to: string,
+    username: string,
+    options?: any,
+  ): Promise<EmailResult> {
     this.logger.log(`Sending welcome email to ${to}`);
-    return this.provider.sendWelcomeEmail(to, username);
+    return this.provider.sendWelcomeEmail(to, username, options);
   }
 
   async sendOnboardingEmail(

@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { EmailService } from '../../email/email.service';
+import { EmailBrandingService } from '../../email/services/email-branding.service';
 import * as bcrypt from 'bcrypt';
 import { LoginDto } from './dto/login.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly prismaService: GlobalPrismaService,
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
+    private readonly emailBrandingService: EmailBrandingService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
@@ -643,15 +645,46 @@ export class AuthService {
 
     // Enviar email de bienvenida y verificación
     try {
+      // Obtener branding de la tienda para el email de bienvenida
+      let branding;
+      let storeName;
+      let organizationName;
+      try {
+        const storeWithBranding = await this.prismaService.stores.findUnique({
+          where: { id: store_id },
+          select: {
+            name: true,
+            organizations: {
+              select: { name: true, slug: true },
+            },
+          },
+        });
+        if (storeWithBranding) {
+          storeName = storeWithBranding.name;
+          organizationName = storeWithBranding.organizations?.name;
+          branding = await this.emailBrandingService.getStoreBranding(store_id);
+        }
+      } catch (error) {
+        // Continuar sin branding si hay error
+      }
+
       await this.emailService.sendVerificationEmail(
         userWithRoles.email,
         verificationToken,
         `${userWithRoles.first_name} ${userWithRoles.last_name}`,
         organizationSlug,
       );
+      // Customers reciben email con branding de la tienda
       await this.emailService.sendWelcomeEmail(
         userWithRoles.email,
         userWithRoles.first_name,
+        {
+          userType: 'customer',
+          branding,
+          storeName,
+          organizationName,
+          organizationSlug,
+        },
       );
     } catch (error) {
       // No fallar el registro si el email no se puede enviar
@@ -867,6 +900,66 @@ export class AuthService {
         description: `Usuario staff creado por administrador ${adminUser.email}`,
       },
     );
+
+    // Enviar email de bienvenida con branding de la tienda/organización
+    try {
+      // Obtener branding para el email de bienvenida
+      let branding;
+      let storeName;
+      let organizationName;
+      let organizationSlug;
+      try {
+        if (store_id) {
+          const storeWithBranding = await this.prismaService.stores.findUnique({
+            where: { id: store_id },
+            select: {
+              name: true,
+              organizations: {
+                select: { name: true, slug: true },
+              },
+            },
+          });
+          if (storeWithBranding) {
+            storeName = storeWithBranding.name;
+            organizationName = storeWithBranding.organizations?.name;
+            organizationSlug = storeWithBranding.organizations?.slug;
+            branding = await this.emailBrandingService.getStoreBranding(store_id);
+          }
+        } else {
+          // Si no hay store_id, usar branding de la organización
+          const orgWithBranding = await this.prismaService.organizations.findUnique({
+            where: { id: adminUser.organization_id },
+            select: { name: true, slug: true },
+          });
+          if (orgWithBranding) {
+            organizationName = orgWithBranding.name;
+            organizationSlug = orgWithBranding.slug;
+            branding = await this.emailBrandingService.getOrganizationBranding(
+              adminUser.organization_id,
+            );
+          }
+        }
+      } catch (error) {
+        // Continuar sin branding si hay error
+      }
+
+      // Staff recibe email con branding de la tienda/organización
+      if (userWithRoles) {
+        await this.emailService.sendWelcomeEmail(
+          userWithRoles.email,
+          userWithRoles.first_name,
+          {
+            userType: 'staff',
+            branding,
+            storeName,
+            organizationName,
+            organizationSlug,
+          },
+        );
+      }
+    } catch (error) {
+      // No fallar el registro si el email no se puede enviar
+    }
 
     // Remover password del response (no es necesario ya que no se incluye en la query)
     const userWithoutPassword = userWithRoles;

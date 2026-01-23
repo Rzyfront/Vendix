@@ -225,21 +225,21 @@ model audit_logs {
 }
 
 model organizations {
-  id                            Int                              @id @default(autoincrement())
-  name                          String                           @db.VarChar(255)
-  slug                          String                           @unique @db.VarChar(255)
-  legal_name                    String?                          @db.VarChar(255)
-  tax_id                        String?                          @unique @db.VarChar(50)
-  email                         String                           @db.VarChar(255)
-  phone                         String?                          @db.VarChar(50)
-  website                       String?                          @db.VarChar(255)
+  id                            Int                            @id @default(autoincrement())
+  name                          String                         @db.VarChar(255)
+  slug                          String                         @unique @db.VarChar(255)
+  legal_name                    String?                        @db.VarChar(255)
+  tax_id                        String?                        @unique @db.VarChar(50)
+  email                         String                         @db.VarChar(255)
+  phone                         String?                        @db.VarChar(50)
+  website                       String?                        @db.VarChar(255)
   description                   String?
-  logo_url                      String?                          @db.Text
-  state                         organization_state_enum          @default(draft)
-  account_type                  organization_account_type_enum   @default(SINGLE_STORE)
-  created_at                    DateTime?                        @default(now()) @db.Timestamp(6)
-  updated_at                    DateTime?                        @default(now()) @db.Timestamp(6)
-  onboarding                    Boolean                          @default(false)
+  logo_url                      String?                        @db.Text
+  state                         organization_state_enum        @default(draft)
+  account_type                  organization_account_type_enum @default(SINGLE_STORE)
+  created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
+  onboarding                    Boolean                        @default(false)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -484,31 +484,32 @@ model order_items {
 }
 
 model orders {
-  id                                              Int              @id @default(autoincrement())
+  id                                              Int                      @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int
-  order_number                                    String           @db.VarChar(50)
+  order_number                                    String                   @db.VarChar(50)
   shipping_address_id                             Int?
   billing_address_id                              Int?
   shipping_address_snapshot                       Json?
   billing_address_snapshot                        Json?
-  currency                                        String?          @db.VarChar(10)
-  subtotal_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  discount_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  tax_amount                                      Decimal          @default(0.00) @db.Decimal(12, 2)
-  shipping_cost                                   Decimal          @default(0.00) @db.Decimal(12, 2)
-  grand_total                                     Decimal          @default(0.00) @db.Decimal(12, 2)
-  state                                           order_state_enum @default(created)
+  currency                                        String?                  @db.VarChar(10)
+  subtotal_amount                                 Decimal                  @default(0.00) @db.Decimal(12, 2)
+  discount_amount                                 Decimal                  @default(0.00) @db.Decimal(12, 2)
+  tax_amount                                      Decimal                  @default(0.00) @db.Decimal(12, 2)
+  shipping_cost                                   Decimal                  @default(0.00) @db.Decimal(12, 2)
+  grand_total                                     Decimal                  @default(0.00) @db.Decimal(12, 2)
+  state                                           order_state_enum         @default(created)
+  delivery_type                                   order_delivery_type_enum @default(direct_delivery)
   internal_notes                                  String?
-  created_at                                      DateTime?        @default(now()) @db.Timestamp(6)
-  updated_at                                      DateTime?        @default(now()) @db.Timestamp(6)
-  placed_at                                       DateTime?        @db.Timestamp(6)
-  completed_at                                    DateTime?        @db.Timestamp(6)
+  created_at                                      DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at                                      DateTime?                @default(now()) @db.Timestamp(6)
+  placed_at                                       DateTime?                @db.Timestamp(6)
+  completed_at                                    DateTime?                @db.Timestamp(6)
   order_items                                     order_items[]
-  addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  users                                           users            @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_billing_address_idToaddresses  addresses?               @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_shipping_address_idToaddresses addresses?               @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                          stores                   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  users                                           users                    @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
 
@@ -956,29 +957,29 @@ model supplier_products {
 }
 
 model inventory_adjustments {
-  id                  Int                  @id @default(autoincrement())
-  organization_id     Int
-  product_id          Int
-  product_variant_id  Int?
-  location_id         Int
-  batch_id            Int?
-  adjustment_type     adjustment_type_enum
-  quantity_before     Int
-  quantity_after      Int
-  quantity_change     Int
-  reason_code         String?              @db.VarChar(50)
-  description         String?
-  approved_by_user_id Int?
-  created_by_user_id  Int?
-  approved_at         DateTime?            @db.Timestamp(6)
-  created_at          DateTime?            @default(now()) @db.Timestamp(6)
-  users_inventory_adjustments_approved_by_user_idTousers users? @relation("inventory_adjustments_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users_inventory_adjustments_created_by_user_idTousers  users? @relation("inventory_adjustments_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  inventory_locations inventory_locations  @relation(fields: [location_id], references: [id], onDelete: Cascade)
-  inventory_batches   inventory_batches?   @relation(fields: [batch_id], references: [id], onDelete: SetNull)
-  organizations       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  products            products             @relation(fields: [product_id], references: [id], onDelete: Cascade)
-  product_variants    product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
+  id                                                     Int                  @id @default(autoincrement())
+  organization_id                                        Int
+  product_id                                             Int
+  product_variant_id                                     Int?
+  location_id                                            Int
+  batch_id                                               Int?
+  adjustment_type                                        adjustment_type_enum
+  quantity_before                                        Int
+  quantity_after                                         Int
+  quantity_change                                        Int
+  reason_code                                            String?              @db.VarChar(50)
+  description                                            String?
+  approved_by_user_id                                    Int?
+  created_by_user_id                                     Int?
+  approved_at                                            DateTime?            @db.Timestamp(6)
+  created_at                                             DateTime?            @default(now()) @db.Timestamp(6)
+  users_inventory_adjustments_approved_by_user_idTousers users?               @relation("inventory_adjustments_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users_inventory_adjustments_created_by_user_idTousers  users?               @relation("inventory_adjustments_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  inventory_locations                                    inventory_locations  @relation(fields: [location_id], references: [id], onDelete: Cascade)
+  inventory_batches                                      inventory_batches?   @relation(fields: [batch_id], references: [id], onDelete: SetNull)
+  organizations                                          organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  products                                               products             @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  product_variants                                       product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
 
   @@index([organization_id, location_id, adjustment_type])
   @@index([organization_id, created_by_user_id, created_at])
@@ -1247,15 +1248,15 @@ model wishlist_items {
 // ===== DEFAULT TEMPLATES =====
 
 model default_templates {
-  id                Int                    @id @default(autoincrement())
-  template_name     String                 @unique @db.VarChar(255)
+  id                 Int                       @id @default(autoincrement())
+  template_name      String                    @unique @db.VarChar(255)
   configuration_type template_config_type_enum
-  template_data     Json
-  description       String?                @db.Text
-  is_active         Boolean                @default(true)
-  is_system         Boolean                @default(false)
-  created_at        DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at        DateTime?              @default(now()) @db.Timestamp(6)
+  template_data      Json
+  description        String?                   @db.Text
+  is_active          Boolean                   @default(true)
+  is_system          Boolean                   @default(false)
+  created_at         DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                 @default(now()) @db.Timestamp(6)
 
   @@index([configuration_type])
   @@index([is_active])
@@ -1319,6 +1320,13 @@ enum order_state_enum {
   cancelled
   refunded
   finished
+}
+
+enum order_delivery_type_enum {
+  pickup
+  home_delivery
+  direct_delivery
+  other
 }
 
 enum payment_method_state_enum {

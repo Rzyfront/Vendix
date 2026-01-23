@@ -24,6 +24,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
 
 @Injectable()
 export class ProductsService {
@@ -35,7 +36,8 @@ export class ProductsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
-  ) {}
+    private readonly s3PathHelper: S3PathHelper,
+  ) { }
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -101,7 +103,7 @@ export class ProductsService {
         if (!brand) {
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-              `Please check available brands in the system.`,
+            `Please check available brands in the system.`,
           );
         }
       } else {
@@ -168,11 +170,11 @@ export class ProductsService {
                 ...(current_context?.is_super_admin
                   ? {}
                   : {
-                      OR: [
-                        { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
-                        { store_id: null }, // Categorías globales
-                      ],
-                    }),
+                    OR: [
+                      { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
+                      { store_id: null }, // Categorías globales
+                    ],
+                  }),
               },
             });
 
@@ -210,7 +212,8 @@ export class ProductsService {
 
           // 2. Procesar images (structured with possible base64)
           if (images && images.length > 0) {
-            const uploadedImages = await this.handleImageUploads(images, slug);
+            const { org, store: storeContext } = await this.getStoreWithOrgContext(store_id);
+            const uploadedImages = await this.handleImageUploads(images, slug, org, storeContext);
             finalImages.push(
               ...uploadedImages.map((img) => ({
                 ...img,
@@ -432,12 +435,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -882,9 +885,12 @@ export class ProductsService {
 
             // 2. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
+              const { org, store: storeContext } = await this.getStoreWithOrgContext(existingProduct.store_id);
               const uploadedImages = await this.handleImageUploads(
                 images,
                 product.slug,
+                org,
+                storeContext,
               );
               finalImages.push(
                 ...uploadedImages.map((img) => ({
@@ -1281,14 +1287,18 @@ export class ProductsService {
   private async handleImageUploads(
     images: ProductImageDto[],
     productSlug: string,
+    org: S3OrgContext,
+    store: S3StoreContext,
   ): Promise<any[]> {
     const processedImages: any[] = [];
+    const basePath = this.s3PathHelper.buildProductPath(org, store);
+
     for (const [index, image] of images.entries()) {
       let imageUrl = image.image_url;
       if (imageUrl.startsWith('data:image')) {
         const result = await this.s3Service.uploadBase64(
           imageUrl,
-          `products/${productSlug}-${Date.now()}-${index}`,
+          `${basePath}/${productSlug}-${Date.now()}-${index}`,
           undefined,
           { generateThumbnail: true },
         );
@@ -1330,5 +1340,32 @@ export class ProductsService {
         }
       }
     }
+  }
+
+  /**
+   * Helper to get store with organization context for S3 path building
+   */
+  private async getStoreWithOrgContext(
+    storeId: number,
+  ): Promise<{ org: S3OrgContext; store: S3StoreContext }> {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        id: true,
+        slug: true,
+        organizations: {
+          select: { id: true, slug: true },
+        },
+      },
+    });
+
+    if (!store || !store.organizations) {
+      throw new BadRequestException('Store or organization not found');
+    }
+
+    return {
+      org: store.organizations,
+      store: { id: store.id, slug: store.slug },
+    };
   }
 }

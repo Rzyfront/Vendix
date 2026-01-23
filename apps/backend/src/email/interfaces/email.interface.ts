@@ -1,3 +1,5 @@
+import { EmailBranding, WelcomeEmailOptions } from './branding.interface';
+
 // Interfaz base para todos los proveedores de email
 export interface EmailProvider {
   sendEmail(
@@ -17,7 +19,11 @@ export interface EmailProvider {
     token: string,
     username: string,
   ): Promise<EmailResult>;
-  sendWelcomeEmail(to: string, username: string): Promise<EmailResult>;
+  sendWelcomeEmail(
+    to: string,
+    username: string,
+    options?: WelcomeEmailOptions,
+  ): Promise<EmailResult>;
   sendOnboardingEmail(
     to: string,
     username: string,

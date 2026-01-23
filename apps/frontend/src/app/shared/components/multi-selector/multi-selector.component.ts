@@ -60,7 +60,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
           [disabled]="disabled"
           (click)="toggleDropdown()"
           class="w-full min-h-[42px] px-3 py-2 text-left border bg-[var(--color-surface)] transition-colors
-                 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary
+                 focus:outline-none focus:ring-2 focus:ring-secondary/40 focus:border-primary
                  disabled:opacity-50 disabled:cursor-not-allowed"
           style="border-radius: var(--radius-sm);"
           [class.border-border]="!errorText"
@@ -112,7 +112,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
               [(ngModel)]="searchTerm"
               (input)="onSearch()"
               class="w-full px-3 py-1.5 text-sm border border-border
-                     focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary
+                     focus:outline-none focus:ring-1 focus:ring-secondary/40 focus:border-primary
                      bg-[var(--color-surface)] text-[var(--color-text-primary)]"
               style="border-radius: var(--radius-sm);"
               placeholder="Buscar..."

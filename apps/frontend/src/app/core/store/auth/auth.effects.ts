@@ -227,13 +227,9 @@ export class AuthEffects {
   logout$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.logout),
-      mergeMap(({ redirect }) =>
-        this.authService.logout().pipe(
-          map(() => AuthActions.logoutSuccess({ redirect })),
-          catchError(() => of(AuthActions.logoutSuccess({ redirect }))),
-        ),
-      ),
-    ),
+      tap(() => this.authService.logout()),
+      map(({ redirect }) => AuthActions.logoutSuccess({ redirect }))
+    )
   );
   logoutSuccess$ = createEffect(
     () =>

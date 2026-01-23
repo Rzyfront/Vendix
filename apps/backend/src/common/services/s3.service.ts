@@ -201,18 +201,15 @@ export class S3Service {
      * Creates 16x16, 32x32, and 192x192 PNG favicons optimized for browsers and PWA.
      *
      * @param logoBuffer - Buffer of the logo image
-     * @param orgId - Organization ID for S3 path structure
-     * @param storeId - Store ID for S3 path structure
+     * @param basePath - S3 base path for favicons (caller should use S3PathHelper)
      * @returns Object with favicon key and generated sizes, or null if failed
      */
     async generateAndUploadFaviconFromLogo(
         logoBuffer: Buffer,
-        orgId: number,
-        storeId: number,
+        basePath: string,
     ): Promise<{ faviconKey: string; sizes: number[] } | null> {
         try {
             const sizes = [16, 32, 192];
-            const basePath = `organizations/${orgId}/stores/${storeId}/favicons`;
             let mainFaviconKey: string | undefined;
 
             for (const size of sizes) {

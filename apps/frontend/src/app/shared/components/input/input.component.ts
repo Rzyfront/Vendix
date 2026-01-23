@@ -275,13 +275,13 @@ export class InputComponent implements ControlValueAccessor {
   @Output() inputBlur = new EventEmitter<void>();
   @Output() suffixClick = new EventEmitter<void>();
 
-  value = '';
+  @Input() value = '';
   inputId = `input-${Math.random().toString(36).substr(2, 9)}`;
   showPassword = false;
 
   // ControlValueAccessor implementation
-  private onChange = (value: string) => {};
-  private onTouched = () => {};
+  private onChange = (value: string) => { };
+  private onTouched = () => { };
 
   writeValue(value: string): void {
     this.value = value || '';
@@ -344,7 +344,7 @@ export class InputComponent implements ControlValueAccessor {
       stateClasses = [
         'border-border',
         'hover:border-border',
-        'focus:ring-primary/50',
+        'focus:ring-secondary/40',
         'focus:border-primary',
       ];
     }

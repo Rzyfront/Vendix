@@ -104,9 +104,7 @@ export class CartComponent implements OnInit, OnDestroy {
 
   clearCart(): void {
     if (this.is_authenticated) {
-      this.cart_service.clearCart().subscribe(() => {
-        this.cart = null;
-      });
+      this.cart_service.clearCart().subscribe();
     } else {
       this.cart_service.clearLocalCart();
     }

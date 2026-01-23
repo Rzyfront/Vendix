@@ -1,303 +1,227 @@
-<div class="w-full max-w-[1600px] mx-auto p-2 md:p-4 space-y-2 md:space-y-4">
+<div class="w-full max-w-[1600px] mx-auto min-h-screen">
   <!-- Loading State -->
-  <div
-    *ngIf="isLoading"
-    class="flex flex-col items-center justify-center py-20 gap-4"
-  >
-    <div
-      class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"
-    ></div>
+  <div *ngIf="isLoading" class="flex flex-col items-center justify-center py-20 gap-4">
+    <div class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"></div>
     <p class="text-[var(--color-text-secondary)]">Cargando configuración...</p>
   </div>
 
   <!-- Main Content -->
   <ng-container *ngIf="!isLoading">
     <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-4">
-      <!-- Page Header -->
+      <!-- Page Header Sticky -->
       <div
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <div
-          class="flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-        >
+        class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 md:px-6 md:py-4 shadow-sm mb-4 rounded-b-xl">
+        <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div class="flex items-center gap-4">
             <div
-              class="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center border border-primary-100 shadow-sm"
-            >
-              <app-icon
-                name="shopping-bag"
-                size="24"
-                class="text-primary-600"
-              ></app-icon>
+              class="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center border border-primary-100 shadow-sm">
+              <app-icon name="shopping-bag" size="24" class="text-primary-600"></app-icon>
             </div>
             <div class="flex flex-col">
-              <h1 class="text-xl font-bold text-gray-900 leading-tight">
-                {{
+              <div class="flex items-center gap-3">
+                <h1 class="text-xl font-bold text-gray-900 leading-tight">
+                  {{
                   isEditMode
-                    ? "Configuración de E-commerce"
-                    : "Configurar Tienda E-commerce"
-                }}
-              </h1>
+                  ? "Configuración de E-commerce"
+                  : "Configurar Tienda E-commerce"
+                  }}
+                </h1>
+                <div class="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-lg">
+                  <span class="w-2 h-2 rounded-full" [class.bg-green-500]="isEditMode"
+                    [class.bg-blue-500]="isSetupMode"></span>
+                  <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide">
+                    {{ isSetupMode ? "Configurar" : "Editar" }}
+                  </span>
+                </div>
+              </div>
               <p class="text-sm text-gray-500 font-medium">
                 {{
-                  isEditMode
-                    ? "Administra la configuración de tu tienda en línea"
-                    : "Configura tu tienda e-commerce con los parámetros básicos para empezar a vender"
+                isEditMode
+                ? "Administra la configuración de tu tienda en línea"
+                : "Configura tu tienda e-commerce con los parámetros básicos para empezar a vender"
                 }}
               </p>
             </div>
           </div>
-          <div
-            class="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg"
-          >
-            <span
-              class="w-2 h-2 rounded-full"
-              [class.bg-green-500]="isEditMode"
-              [class.bg-blue-500]="isSetupMode"
-            ></span>
-            <span
-              class="text-xs font-semibold text-gray-600 uppercase tracking-wide"
-            >
-              {{ isSetupMode ? "Configurar" : "Editar" }}
-            </span>
+
+          <!-- Header Actions -->
+          <div class="flex items-center gap-3">
+            <app-button variant="outline" size="sm" (clicked)="onReset()"
+              [disabled]="isSaving || settingsForm.pristine">
+              Restablecer
+            </app-button>
+            <app-button variant="primary" size="sm" (clicked)="onSubmit()"
+              [disabled]="isSaving || settingsForm.pristine" [loading]="isSaving">
+              <ng-container *ngIf="!isSaving" slot="icon">
+                <app-icon name="save" size="16"></app-icon>
+              </ng-container>
+              <span>{{
+                isSaving
+                ? "Guardando..."
+                : isSetupMode
+                ? "Configurar Tienda"
+                : "Guardar Cambios"
+                }}</span>
+            </app-button>
           </div>
         </div>
       </div>
 
-      <!-- SECCIÓN 1: INICIO -->
-      <div
-        formGroupName="inicio"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon name="home" size="18" class="text-primary-600"></app-icon>
-          </div>
-          Sección de Inicio
-        </h2>
-        <p class="text-sm text-gray-500 mb-6">
-          Configura el título y párrafo de bienvenida de tu tienda. Si dejas los
-          campos vacíos, se rellenarán automáticamente.
-        </p>
+      <div class="p-2 md:p-4 space-y-4">
+        <!-- SECCIÓN 1: INICIO -->
+        <div formGroupName="inicio" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="home" size="18" class="text-primary-600"></app-icon>
+            </div>
+            Sección de Inicio
+          </h2>
+          <p class="text-sm text-gray-500 mb-6">
+            Configura el título y párrafo de bienvenida de tu tienda. Si dejas los
+            campos vacíos, se rellenarán automáticamente.
+          </p>
 
-        <div class="space-y-4">
-          <!-- Título -->
-          <app-input
-            label="Título de Bienvenida"
-            formControlName="titulo"
-            placeholder="Bienvenido a Mi Tienda"
-            helperText="Se auto-rellena como: 'Bienvenido a {nombre de la tienda}' si está vacío"
-          >
-          </app-input>
+          <div class="space-y-4">
+            <!-- Título -->
+            <app-input label="Título de Bienvenida" formControlName="titulo" placeholder="Bienvenido a Mi Tienda"
+              helperText="Se auto-rellena como: 'Bienvenido a {nombre de la tienda}' si está vacío">
+            </app-input>
 
-          <!-- Párrafo -->
-          <div class="space-y-1.5">
-            <label class="block text-sm font-medium text-gray-700"
-              >Párrafo Descriptivo</label
-            >
-            <textarea
-              formControlName="parrafo"
-              rows="3"
-              placeholder="Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos..."
-              class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"
-            >
+            <!-- Párrafo -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-700">Párrafo Descriptivo</label>
+              <textarea formControlName="parrafo" rows="3"
+                placeholder="Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos..."
+                class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none">
             </textarea>
-            <small class="text-xs text-gray-500"
-              >Se auto-rellena con un mensaje por defecto si está vacío</small
-            >
-          </div>
+              <small class="text-xs text-gray-500">Se auto-rellena con un mensaje por defecto si está vacío</small>
+            </div>
 
-          <!-- Logo Upload -->
-          <div class="space-y-1.5">
-            <label class="block text-sm font-medium text-gray-700"
-              >Logo de la Tienda</label
-            >
-            <div class="flex items-center gap-4">
-              <!-- Preview del Logo -->
-              <div
-                class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group"
-              >
-                <img
-                  *ngIf="logoPreview"
-                  [src]="logoPreview"
-                  alt="Logo preview"
-                  class="w-full h-full object-contain p-2"
-                />
+            <!-- Logo Upload -->
+            <div class="space-y-1.5">
+              <label class="block text-sm font-medium text-gray-700">Logo de la Tienda</label>
+              <div class="flex items-center gap-4">
+                <!-- Preview del Logo -->
                 <div
-                  *ngIf="!logoPreview && !isUploadingLogo"
-                  class="text-gray-400 flex flex-col items-center"
-                >
-                  <app-icon name="image" size="24"></app-icon>
-                  <span class="text-[10px] mt-1">Sin logo</span>
+                  class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
+                  <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview"
+                    class="w-full h-full object-contain p-2" />
+                  <div *ngIf="!logoPreview && !isUploadingLogo" class="text-gray-400 flex flex-col items-center">
+                    <app-icon name="image" size="24"></app-icon>
+                    <span class="text-[10px] mt-1">Sin logo</span>
+                  </div>
+
+                  <!-- Loading State -->
+                  <div *ngIf="isUploadingLogo" class="absolute inset-0 bg-white/80 flex items-center justify-center">
+                    <div class="loader-2 animate-spin text-xl text-primary-600"></div>
+                  </div>
+
+                  <!-- Botón Eliminar (Overlay) -->
+                  <button *ngIf="logoPreview && !isUploadingLogo" type="button" (click)="removeLogo()"
+                    class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
+                    <app-icon name="x" size="14"></app-icon>
+                  </button>
                 </div>
 
-                <!-- Loading State -->
-                <div
-                  *ngIf="isUploadingLogo"
-                  class="absolute inset-0 bg-white/80 flex items-center justify-center"
-                >
-                  <div
-                    class="loader-2 animate-spin text-xl text-primary-600"
-                  ></div>
+                <!-- Botón Subir -->
+                <div class="flex flex-col gap-2">
+                  <app-button variant="outline" size="sm" [loading]="isUploadingLogo" (clicked)="triggerLogoInput()">
+                    <app-icon name="upload" size="14" slot="icon"></app-icon>
+                    <span>{{ logoPreview ? "Cambiar Logo" : "Subir Logo" }}</span>
+                  </app-button>
+                  <p class="text-xs text-gray-500">
+                    PNG, JPG o SVG. Máx 2MB. Recomendado: fondo transparente.
+                  </p>
                 </div>
-
-                <!-- Botón Eliminar (Overlay) -->
-                <button
-                  *ngIf="logoPreview && !isUploadingLogo"
-                  type="button"
-                  (click)="removeLogo()"
-                  class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg"
-                >
-                  <app-icon name="x" size="14"></app-icon>
-                </button>
-              </div>
-
-              <!-- Botón Subir -->
-              <div class="flex flex-col gap-2">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  [loading]="isUploadingLogo"
-                  (clicked)="triggerLogoInput()"
-                >
-                  <app-icon name="upload" size="14" slot="icon"></app-icon>
-                  <span>{{ logoPreview ? "Cambiar Logo" : "Subir Logo" }}</span>
-                </app-button>
-                <p class="text-xs text-gray-500">
-                  PNG, JPG o SVG. Máx 2MB. Recomendado: fondo transparente.
-                </p>
               </div>
             </div>
-          </div>
 
-          <!-- Colores de la Marca -->
-          <div formGroupName="colores">
-            <h3 class="text-base font-semibold text-gray-900 mb-3 mt-6">
-              Colores de la Marca
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div
-                class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-              >
-                <label class="block text-sm font-medium text-gray-700 mb-2"
-                  >Color Primario</label
-                >
-                <div class="flex items-center gap-2">
-                  <input
-                    type="color"
-                    formControlName="primary_color"
-                    class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0"
-                  />
-                  <app-input
-                    formControlName="primary_color"
-                    placeholder="#3B82F6"
-                    customWrapperClass="!mt-0 flex-1"
-                    customInputClass="!font-mono !uppercase"
-                  ></app-input>
+            <!-- Colores de la Marca -->
+            <div formGroupName="colores">
+              <h3 class="text-base font-semibold text-gray-900 mb-3 mt-6">
+                Colores de la Marca
+              </h3>
+
+              <!-- Info Place Sync -->
+              <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div class="flex items-start gap-3">
+                  <app-icon name="info" size="20" class="text-blue-500 mt-0.5"></app-icon>
+                  <div class="flex-1">
+                    <h4 class="text-sm font-semibold text-blue-900 mb-1">Personalización de Marca</h4>
+                    <p class="text-sm text-blue-700 mb-3">
+                      El branding de tu tienda E-commerce es independiente y puede ser personalizado para ofrecer una
+                      experiencia única a tus clientes. Puedes optar por un diseño que se diferencie de tu panel
+                      administrativo o mantener la coherencia visual.
+                    </p>
+                    <button type="button" (click)="syncColorsFromTheme()"
+                      class="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors">
+                      <app-icon name="refresh-cw" size="14"></app-icon>
+                      Usar colores de la aplicación actual
+                    </button>
+                  </div>
                 </div>
               </div>
-
-              <div
-                class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-              >
-                <label class="block text-sm font-medium text-gray-700 mb-2"
-                  >Color Secundario</label
-                >
-                <div class="flex items-center gap-2">
-                  <input
-                    type="color"
-                    formControlName="secondary_color"
-                    class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0"
-                  />
-                  <app-input
-                    formControlName="secondary_color"
-                    placeholder="#10B981"
-                    customWrapperClass="!mt-0 flex-1"
-                    customInputClass="!font-mono !uppercase"
-                  ></app-input>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Color Primario</label>
+                  <div class="flex items-center gap-2">
+                    <input type="color" formControlName="primary_color"
+                      class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
+                    <app-input formControlName="primary_color" placeholder="#3B82F6" customWrapperClass="!mt-0 flex-1"
+                      customInputClass="!font-mono !uppercase"></app-input>
+                  </div>
                 </div>
-              </div>
 
-              <div
-                class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-              >
-                <label class="block text-sm font-medium text-gray-700 mb-2"
-                  >Color de Acento</label
-                >
-                <div class="flex items-center gap-2">
-                  <input
-                    type="color"
-                    formControlName="accent_color"
-                    class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0"
-                  />
-                  <app-input
-                    formControlName="accent_color"
-                    placeholder="#F59E0B"
-                    customWrapperClass="!mt-0 flex-1"
-                    customInputClass="!font-mono !uppercase"
-                  ></app-input>
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Color Secundario</label>
+                  <div class="flex items-center gap-2">
+                    <input type="color" formControlName="secondary_color"
+                      class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
+                    <app-input formControlName="secondary_color" placeholder="#10B981" customWrapperClass="!mt-0 flex-1"
+                      customInputClass="!font-mono !uppercase"></app-input>
+                  </div>
+                </div>
+
+                <div class="p-4 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+                  <label class="block text-sm font-medium text-gray-700 mb-2">Color de Acento</label>
+                  <div class="flex items-center gap-2">
+                    <input type="color" formControlName="accent_color"
+                      class="w-10 h-10 rounded-lg cursor-pointer border-0 p-0" />
+                    <app-input formControlName="accent_color" placeholder="#F59E0B" customWrapperClass="!mt-0 flex-1"
+                      customInputClass="!font-mono !uppercase"></app-input>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 2: GENERAL -->
-      <div
-        formGroupName="general"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon
-              name="globe"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-          </div>
-          Configuración General
-        </h2>
+        <!-- SECCIÓN 2: GENERAL -->
+        <div formGroupName="general" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="globe" size="18" class="text-primary-600"></app-icon>
+            </div>
+            Configuración General
+          </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <app-selector
-            label="Moneda"
-            formControlName="currency"
-            size="md"
-            [options]="[
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <app-selector label="Moneda" formControlName="currency" size="md" [options]="[
               { value: 'COP', label: 'COP - Peso Colombiano' },
               { value: 'USD', label: 'USD - Dólar Estadounidense' },
               { value: 'EUR', label: 'EUR - Euro' },
               { value: 'MXN', label: 'MXN - Peso Mexicano' },
-            ]"
-          ></app-selector>
+            ]"></app-selector>
 
-          <app-selector
-            label="Idioma"
-            formControlName="locale"
-            size="md"
-            [options]="[
+            <app-selector label="Idioma" formControlName="locale" size="md" [options]="[
               { value: 'es-CO', label: 'Español (Colombia)' },
               { value: 'es-ES', label: 'Español (España)' },
               { value: 'es-MX', label: 'Español (México)' },
               { value: 'en-US', label: 'English (United States)' },
               { value: 'pt-BR', label: 'Português (Brasil)' },
-            ]"
-          ></app-selector>
+            ]"></app-selector>
 
-          <app-selector
-            label="Zona Horaria"
-            formControlName="timezone"
-            size="md"
-            [options]="[
+            <app-selector label="Zona Horaria" formControlName="timezone" size="md" [options]="[
               { value: 'America/Bogota', label: 'Bogotá (UTC-5)' },
               { value: 'America/Mexico_City', label: 'México (UTC-6)' },
               {
@@ -306,598 +230,374 @@
               },
               { value: 'America/Lima', label: 'Lima (UTC-5)' },
               { value: 'America/Santiago', label: 'Santiago (UTC-4)' },
-            ]"
-          ></app-selector>
+            ]"></app-selector>
+          </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 3: CONFIGURACIÓN DE SLIDER -->
-      <div
-        formGroupName="slider"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <div class="flex items-center justify-between mb-4">
-          <h2
-            class="text-lg font-semibold text-gray-900 flex items-center gap-2"
-          >
-            <div
-              class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-            >
-              <app-icon
-                name="image"
-                size="18"
-                class="text-primary-600"
-              ></app-icon>
+        <!-- SECCIÓN 3: CONFIGURACIÓN DE SLIDER -->
+        <div formGroupName="slider" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+                <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+              </div>
+              Slider Principal
+            </h2>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" formControlName="enable" class="sr-only peer" />
+              <div
+                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+              </div>
+            </label>
+          </div>
+
+          <!-- Info Box Slider -->
+          <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div class="flex items-start gap-3">
+              <app-icon name="info" size="20" class="text-blue-500 mt-0.5"></app-icon>
+              <div class="flex-1">
+                <h4 class="text-sm font-semibold text-blue-900 mb-1">Impacto Visual del Slider</h4>
+                <p class="text-sm text-blue-700">
+                  El slider es lo primero que verán tus clientes al entrar. Utiliza **títulos impactantes** y
+                  **párrafos descriptivos** (leyendas) en cada imagen para contar una historia, destacar promociones
+                  o comunicar la propuesta de valor de tu marca. Un slider bien documentado aumenta la tasa de
+                  conversión.
+                </p>
+              </div>
             </div>
-            Slider Principal
+          </div>
+
+          <!-- Mensaje cuando slider está desactivado -->
+          <div *ngIf="!settingsForm.get('slider.enable')?.value"
+            class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <p class="text-sm text-gray-600">
+              El slider de imágenes está desactivado. Actívalo para mostrar un
+              carrusel de imágenes en la página de inicio de tu tienda.
+            </p>
+          </div>
+
+          <div *ngIf="settingsForm.get('slider.enable')?.value" class="space-y-3">
+            <p class="text-sm text-gray-500">
+              Agrega hasta 5 imágenes para el carrusel principal (PNG, JPG, WebP -
+              máx 5MB cada una).
+            </p>
+
+            <!-- Thumbnails Grid Compacto -->
+            <div class="flex gap-2 flex-wrap">
+              <div *ngFor="let img of sliderImages; let i = index"
+                class="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500 group"
+                [class.border-primary-500]="activeImageIndex === i" [class.border-gray-200]="activeImageIndex !== i"
+                [class.opacity-60]="img.uploading" (click)="!img.uploading && setActiveImage(i)">
+                <img [src]="img.url || img.thumbnail" alt="Thumbnail" class="w-full h-full object-cover" />
+                <div *ngIf="img.uploading" class="absolute inset-0 flex items-center justify-center bg-white/80">
+                  <div class="loader-2 animate-spin text-xl text-primary-600"></div>
+                </div>
+                <button *ngIf="!img.uploading" type="button"
+                  class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-xs shadow-lg"
+                  (click)="$event.stopPropagation(); removeSliderImage(i)">
+                  ✕
+                </button>
+              </div>
+
+              <div *ngIf="sliderImages.length < 5 && !isUploadingImage"
+                class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
+                (click)="triggerFileInput()">
+                <app-icon name="upload" class="text-2xl"></app-icon>
+                <span class="text-[10px] mt-1">Subir</span>
+              </div>
+            </div>
+
+            <!-- Metadata Compacta (solo si hay imagen seleccionada) -->
+            <div
+              *ngIf="sliderImages.length > 0 && sliderImages[activeImageIndex] && !sliderImages[activeImageIndex].uploading"
+              class="p-4 bg-primary-50/50 border border-primary-100 rounded-xl shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+
+              <!-- Indicator of which image is being edited -->
+              <div class="flex items-center gap-3 mb-4 pb-3 border-b border-primary-100">
+                <div class="w-10 h-10 rounded-lg overflow-hidden border border-primary-200 shadow-sm">
+                  <img [src]="sliderImages[activeImageIndex].url || sliderImages[activeImageIndex].thumbnail"
+                    alt="Current editing" class="w-full h-full object-cover">
+                </div>
+                <div>
+                  <h4 class="text-xs font-bold text-primary-900 uppercase tracking-wider">
+                    Modificando Contenido: Imagen #{{ activeImageIndex + 1 }}
+                  </h4>
+                  <p class="text-[10px] text-primary-600 font-medium">Define cómo se verá esta imagen en el carrusel</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input label="Título del Slide" [value]="sliderImages[activeImageIndex].title || ''"
+                  (inputChange)="onTitleInputChange($event)" placeholder="Ej: Nueva Colección 2024"
+                  customWrapperClass="!mt-0"></app-input>
+
+                <app-input label="Párrafo Descriptivo (Leyenda)" [value]="sliderImages[activeImageIndex].caption || ''"
+                  (inputChange)="onCaptionInputChange($event)" placeholder="Ej: Descubre nuestras ofertas exclusivas..."
+                  customWrapperClass="!mt-0"></app-input>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SECCIÓN 4: CATÁLOGO -->
+        <div formGroupName="catalog" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="package" size="18" class="text-primary-600"></app-icon>
+            </div>
+            Configuración del Catálogo
           </h2>
-          <label class="relative inline-flex cursor-pointer">
-            <input
-              type="checkbox"
-              formControlName="enable"
-              class="sr-only peer"
-            />
+
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <app-input label="Productos por página" type="number" formControlName="products_per_page"
+              placeholder="16"></app-input>
+
             <div
-              class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-            ></div>
-          </label>
-        </div>
-
-        <!-- Mensaje cuando slider está desactivado -->
-        <div
-          *ngIf="!settingsForm.get('slider.enable')?.value"
-          class="p-4 bg-gray-50 rounded-lg border border-gray-200"
-        >
-          <p class="text-sm text-gray-600">
-            El slider de imágenes está desactivado. Actívalo para mostrar un
-            carrusel de imágenes en la página de inicio de tu tienda.
-          </p>
-        </div>
-
-        <div *ngIf="settingsForm.get('slider.enable')?.value" class="space-y-3">
-          <p class="text-sm text-gray-500">
-            Agrega hasta 5 imágenes para el carrusel principal (PNG, JPG, WebP -
-            máx 5MB cada una).
-          </p>
-
-          <!-- Thumbnails Grid Compacto -->
-          <div class="flex gap-2 flex-wrap">
-            <div
-              *ngFor="let img of sliderImages; let i = index"
-              class="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500 group"
-              [class.border-primary-500]="activeImageIndex === i"
-              [class.border-gray-200]="activeImageIndex !== i"
-              [class.opacity-60]="img.uploading"
-              (click)="!img.uploading && setActiveImage(i)"
-            >
-              <img
-                [src]="img.url || img.thumbnail"
-                alt="Thumbnail"
-                class="w-full h-full object-cover"
-              />
-              <div
-                *ngIf="img.uploading"
-                class="absolute inset-0 flex items-center justify-center bg-white/80"
-              >
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Mostrar productos sin stock</label>
+                <small class="text-xs text-gray-500">Permite ver productos agotados</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="show_out_of_stock" class="sr-only peer" />
                 <div
-                  class="loader-2 animate-spin text-xl text-primary-600"
-                ></div>
-              </div>
-              <button
-                *ngIf="!img.uploading"
-                type="button"
-                class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-xs shadow-lg"
-                (click)="$event.stopPropagation(); removeSliderImage(i)"
-              >
-                ✕
-              </button>
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
 
             <div
-              *ngIf="sliderImages.length < 5 && !isUploadingImage"
-              class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
-              (click)="triggerFileInput()"
-            >
-              <app-icon name="upload" class="text-2xl"></app-icon>
-              <span class="text-[10px] mt-1">Subir</span>
-            </div>
-          </div>
-
-          <!-- Metadata Compacta (solo si hay imagen seleccionada) -->
-          <div
-            *ngIf="
-              sliderImages.length > 0 &&
-              sliderImages[activeImageIndex] &&
-              !sliderImages[activeImageIndex].uploading
-            "
-            class="p-3 bg-gray-50 border border-gray-200 rounded-lg"
-          >
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700"
-                  >Título</label
-                >
-                <input
-                  type="text"
-                  [value]="sliderImages[activeImageIndex].title || ''"
-                  (input)="onTitleInputChange($event)"
-                  placeholder="Título de la imagen"
-                  class="w-full px-2 py-1.5 text-sm rounded-lg bg-white border border-gray-300 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none"
-                />
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Permitir reseñas</label>
+                <small class="text-xs text-gray-500">Los clientes pueden calificar</small>
               </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="allow_reviews" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
 
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700"
-                  >Leyenda</label
-                >
-                <input
-                  type="text"
-                  [value]="sliderImages[activeImageIndex].caption || ''"
-                  (input)="onCaptionInputChange($event)"
-                  placeholder="Descripción"
-                  class="w-full px-2 py-1.5 text-sm rounded-lg bg-white border border-gray-300 focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none"
-                />
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Mostrar variantes</label>
+                <small class="text-xs text-gray-500">Opciones de producto</small>
               </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="show_variants" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Productos relacionados</label>
+                <small class="text-xs text-gray-500">Sugerir productos similares</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="show_related_products" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Habilitar filtros</label>
+                <small class="text-xs text-gray-500">Filtros avanzados</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="enable_filters" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 4: CATÁLOGO -->
-      <div
-        formGroupName="catalog"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon
-              name="package"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-          </div>
-          Configuración del Catálogo
-        </h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <app-input
-            label="Productos por página"
-            type="number"
-            formControlName="products_per_page"
-            placeholder="16"
-          ></app-input>
-
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Mostrar productos sin stock</label
-              >
-              <small class="text-xs text-gray-500"
-                >Permite ver productos agotados</small
-              >
+        <!-- SECCIÓN 5: CARRITO -->
+        <div formGroupName="cart" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="shopping-cart" size="18" class="text-primary-600"></app-icon>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="show_out_of_stock"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+            Configuración del Carrito
+          </h2>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Permitir reseñas</label
-              >
-              <small class="text-xs text-gray-500"
-                >Los clientes pueden calificar</small
-              >
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="allow_reviews"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <!-- Inputs primero -->
+            <app-input label="Expiración (horas)" type="number" formControlName="cart_expiration_hours"
+              placeholder="24"></app-input>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Mostrar variantes</label
-              >
-              <small class="text-xs text-gray-500">Opciones de producto</small>
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="show_variants"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+            <app-input label="Cantidad máxima por item" type="number" formControlName="max_quantity_per_item"
+              placeholder="10"></app-input>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Productos relacionados</label
-              >
-              <small class="text-xs text-gray-500"
-                >Sugerir productos similares</small
-              >
+            <!-- Toggles después -->
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Checkout de invitados</label>
+                <small class="text-xs text-gray-500">Comprar sin registro</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="allow_guest_checkout" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="show_related_products"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Habilitar filtros</label
-              >
-              <small class="text-xs text-gray-500">Filtros avanzados</small>
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Guardar para después</label>
+                <small class="text-xs text-gray-500">Guardar items del carrito</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="save_for_later" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="enable_filters"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
           </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 5: CARRITO -->
-      <div
-        formGroupName="cart"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon
-              name="shopping-cart"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-          </div>
-          Configuración del Carrito
-        </h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <!-- Inputs primero -->
-          <app-input
-            label="Expiración (horas)"
-            type="number"
-            formControlName="cart_expiration_hours"
-            placeholder="24"
-          ></app-input>
-
-          <app-input
-            label="Cantidad máxima por item"
-            type="number"
-            formControlName="max_quantity_per_item"
-            placeholder="10"
-          ></app-input>
-
-          <!-- Toggles después -->
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Checkout de invitados</label
-              >
-              <small class="text-xs text-gray-500">Comprar sin registro</small>
+        <!-- SECCIÓN 6: CHECKOUT -->
+        <div formGroupName="checkout" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="credit-card" size="18" class="text-primary-600"></app-icon>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="allow_guest_checkout"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+            Configuración del Checkout
+          </h2>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Guardar para después</label
-              >
-              <small class="text-xs text-gray-500"
-                >Guardar items del carrito</small
-              >
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Requerir registro</label>
+                <small class="text-xs text-gray-500">Obligar a crear cuenta</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="require_registration" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="save_for_later"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Email de invitado requerido</label>
+                <small class="text-xs text-gray-500">Pedir email en checkout</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="guest_email_required" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Crear cuenta después del pedido</label>
+                <small class="text-xs text-gray-500">Opción post-compra</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="create_account_after_order" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Términos requeridos</label>
+                <small class="text-xs text-gray-500">Aceptar términos</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="terms_required" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
+
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Opt-in newsletter</label>
+                <small class="text-xs text-gray-500">Suscripción al newsletter</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="guest_newsletter_opt_in" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 6: CHECKOUT -->
-      <div
-        formGroupName="checkout"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon
-              name="credit-card"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-          </div>
-          Configuración del Checkout
-        </h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Requerir registro</label
-              >
-              <small class="text-xs text-gray-500"
-                >Obligar a crear cuenta</small
-              >
+        <!-- SECCIÓN 7: ENVÍOS -->
+        <div formGroupName="shipping" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
+              <app-icon name="truck" size="18" class="text-primary-600"></app-icon>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="require_registration"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+            Configuración de Envíos
+          </h2>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Email de invitado requerido</label
-              >
-              <small class="text-xs text-gray-500"
-                >Pedir email en checkout</small
-              >
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="guest_email_required"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <app-input label="Umbral de envío gratis" type="number" formControlName="free_shipping_threshold"
+              placeholder="0" helperText="Dejar vacío para no ofrecer"></app-input>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Crear cuenta después del pedido</label
-              >
-              <small class="text-xs text-gray-500">Opción post-compra</small>
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Impuesto antes del envío</label>
+                <small class="text-xs text-gray-500">Orden de cálculo</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="calculate_tax_before_shipping" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="create_account_after_order"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
 
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Términos requeridos</label
-              >
-              <small class="text-xs text-gray-500">Aceptar términos</small>
+            <div
+              class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all">
+              <div class="flex-1">
+                <label class="block text-sm font-medium text-gray-700">Múltiples direcciones</label>
+                <small class="text-xs text-gray-500">Enviar a varias direcciones</small>
+              </div>
+              <label class="relative inline-flex cursor-pointer">
+                <input type="checkbox" formControlName="multiple_shipping_addresses" class="sr-only peer" />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
+                </div>
+              </label>
             </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="terms_required"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
-
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Opt-in newsletter</label
-              >
-              <small class="text-xs text-gray-500"
-                >Suscripción al newsletter</small
-              >
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="guest_newsletter_opt_in"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
           </div>
         </div>
-      </div>
 
-      <!-- SECCIÓN 7: ENVÍOS -->
-      <div
-        formGroupName="shipping"
-        class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
-      >
-        <h2
-          class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
-        >
-          <div
-            class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
-          >
-            <app-icon
-              name="truck"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-          </div>
-          Configuración de Envíos
-        </h2>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <app-input
-            label="Umbral de envío gratis"
-            type="number"
-            formControlName="free_shipping_threshold"
-            placeholder="0"
-            helperText="Dejar vacío para no ofrecer"
-          ></app-input>
-
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Impuesto antes del envío</label
-              >
-              <small class="text-xs text-gray-500">Orden de cálculo</small>
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="calculate_tax_before_shipping"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
-
-          <div
-            class="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg hover:border-primary-300 transition-all"
-          >
-            <div class="flex-1">
-              <label class="block text-sm font-medium text-gray-700"
-                >Múltiples direcciones</label
-              >
-              <small class="text-xs text-gray-500"
-                >Enviar a varias direcciones</small
-              >
-            </div>
-            <label class="relative inline-flex cursor-pointer">
-              <input
-                type="checkbox"
-                formControlName="multiple_shipping_addresses"
-                class="sr-only peer"
-              />
-              <div
-                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
-              ></div>
-            </label>
-          </div>
-        </div>
-      </div>
-
-      <!-- Form Actions -->
-      <div class="flex justify-end gap-3 pt-4 border-t border-gray-200">
-        <app-button variant="outline" (clicked)="onReset()">
-          Restablecer
-        </app-button>
-        <app-button
-          variant="primary"
-          (clicked)="onSubmit()"
-          [disabled]="isSaving || settingsForm.pristine"
-          [loading]="isSaving"
-        >
-          <ng-container *ngIf="!isSaving" slot="icon">
-            <app-icon name="save" size="16"></app-icon>
-          </ng-container>
-          <span>{{
-            isSaving
-              ? "Guardando..."
-              : isSetupMode
-                ? "Configurar Tienda"
-                : "Guardar Cambios"
-          }}</span>
-        </app-button>
       </div>
     </form>
   </ng-container>

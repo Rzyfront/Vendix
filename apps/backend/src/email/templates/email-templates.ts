@@ -1,3 +1,5 @@
+import { EmailBranding } from '../interfaces/branding.interface';
+
 export interface EmailTemplateData {
   username: string;
   email: string;
@@ -9,6 +11,11 @@ export interface EmailTemplateData {
   year?: number;
   vlink?: string; // Organization slug for login instructions
   password?: string; // User's password for login instructions
+  // Branding fields
+  branding?: EmailBranding;
+  userType?: 'owner' | 'staff' | 'customer';
+  storeName?: string;
+  organizationName?: string;
 }
 
 export class EmailTemplates {
@@ -396,22 +403,224 @@ El equipo de ${this.COMPANY_NAME}
       ? `https://${data.vlink}.vendix.online`
       : this.BASE_URL;
 
+    // Dynamic branding with fallback to Vendix defaults
+    const companyName = data.organizationName || data.storeName || data.companyName || this.COMPANY_NAME;
+    const primaryColor = data.branding?.primary_color || '#7ED7A5';
+    const secondaryColor = data.branding?.secondary_color || '#2F6F4E';
+    const accentColor = data.branding?.accent_color || '#FFFFFF';
+    const logoUrl = data.branding?.logo_url;
+    const userType = data.userType || 'owner';
+
+    // Personalize content based on user type
+    const getWelcomeEmoji = () => {
+      switch (userType) {
+        case 'staff':
+          return '👋';
+        case 'customer':
+          return '🛍️';
+        default:
+          return '✨';
+      }
+    };
+
+    const getWelcomeTitle = () => {
+      switch (userType) {
+        case 'staff':
+          return `¡Bienvenido al equipo de ${companyName}!`;
+        case 'customer':
+          return `¡Gracias por registrarte en ${companyName}!`;
+        default:
+          return `¡Bienvenido de nuevo, ${data.username}!`;
+      }
+    };
+
+    const getSubtitle = () => {
+      switch (userType) {
+        case 'staff':
+          return 'Tu cuenta de staff está lista';
+        case 'customer':
+          return 'Tu cuenta de cliente está lista';
+        default:
+          return 'Tu cuenta está lista para despegar';
+      }
+    };
+
+    const getWelcomeMessage = () => {
+      switch (userType) {
+        case 'staff':
+          return `Tu cuenta de staff ha sido verificada y está completamente lista para usar. 🎉 Estás a punto de comenzar una experiencia increíble gestionando la tienda con las herramientas más modernas.`;
+        case 'customer':
+          return `Tu cuenta de cliente ha sido verificada y está completamente lista para usar. 🎉 Descubre nuestros productos y disfruta de una experiencia de compra única.`;
+        default:
+          return `¡Tu cuenta ha sido verificada y está completamente lista para usar! 🎉 Estás a punto de comenzar una increíble experiencia gestionando tu negocio con las herramientas más modernas y eficientes.`;
+      }
+    };
+
+    const getCardTitle = () => {
+      switch (userType) {
+        case 'staff':
+          return '🏪 Tu Panel de Staff te espera';
+        case 'customer':
+          return '🛒 Comienza a comprar';
+        default:
+          return '📊 Tu Dashboard te espera';
+      }
+    };
+
+    const getCardMessage = () => {
+      switch (userType) {
+        case 'staff':
+          return `Accede ahora al panel de staff y comienza a gestionar ${companyName} con todas las herramientas disponibles.`;
+        case 'customer':
+          return `Explora nuestro catálogo de productos y comienza a disfrutar de una experiencia de compra única en ${companyName}.`;
+        default:
+          return `Accede ahora a tu panel de control y comienza a explorar todas las funciones que ${companyName} tiene preparadas para ti.`;
+      }
+    };
+
+    const getButtonText = () => {
+      switch (userType) {
+        case 'staff':
+          return '🎯 Ir a mi Panel de Staff';
+        case 'customer':
+          return '🛒 Ir a la Tienda';
+        default:
+          return '🎯 Ir a mi Dashboard';
+      }
+    };
+
+    const getFeatureList = () => {
+      switch (userType) {
+        case 'staff':
+          return `
+            <div class="feature-grid">
+              <div class="feature-item">
+                <span class="feature-icon">📦</span>
+                <div class="feature-text"><strong>Gestión de inventario</strong><br>Controla tu stock en tiempo real</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">💳</span>
+                <div class="feature-text"><strong>Punto de venta</strong><br>Procesa ventas rápidamente</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">👥</span>
+                <div class="feature-text"><strong>Gestión de clientes</strong><br>Conoce a tus clientes</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">📊</span>
+                <div class="feature-text"><strong>Reportes de ventas</strong><br>Analiza tu desempeño</div>
+              </div>
+            </div>
+          `;
+        case 'customer':
+          return `
+            <div class="feature-grid">
+              <div class="feature-item">
+                <span class="feature-icon">🛒</span>
+                <div class="feature-text"><strong>Carrito de compras</strong><br>Compra fácil y seguro</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">📦</span>
+                <div class="feature-text"><strong>Seguimiento de pedidos</strong><br>Mira tu pedido en vivo</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">⭐</span>
+                <div class="feature-text"><strong>Programa de lealtad</strong><br>Acumula puntos</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">🎁</span>
+                <div class="feature-text"><strong>Ofertas exclusivas</strong><br>Descuentos especiales</div>
+              </div>
+            </div>
+          `;
+        default:
+          return `
+            <div class="feature-grid">
+              <div class="feature-item">
+                <span class="feature-icon">📊</span>
+                <div class="feature-text"><strong>Dashboard en vivo</strong><br>Monitorea tu negocio en tiempo real</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">🏪</span>
+                <div class="feature-text"><strong>Múltiples tiendas</strong><br>Administra todas desde un lugar</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">📦</span>
+                <div class="feature-text"><strong>Inventario inteligente</strong><br>Nunca te quedes sin stock</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">💳</span>
+                <div class="feature-text"><strong>Pagos digitales</strong><br>Acepta múltiples métodos</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">👥</span>
+                <div class="feature-text"><strong>Gestión de clientes</strong><br>Conoce mejor a tus usuarios</div>
+              </div>
+              <div class="feature-item">
+                <span class="feature-icon">📈</span>
+                <div class="feature-text"><strong>Reportes avanzados</strong><br>Toma decisiones inteligentes</div>
+              </div>
+            </div>
+          `;
+      }
+    };
+
+    const getNextSteps = () => {
+      if (userType === 'customer') {
+        return '';
+      }
+      return `
+        <div class="next-steps">
+          <div class="next-steps-title">🎯 Siguientes pasos recomendados</div>
+          <div class="step-item">
+            <div class="step-number">1</div>
+            <span>${userType === 'staff' ? 'Explora el panel de staff' : 'Completa tu perfil de organización'}</span>
+          </div>
+          <div class="step-item">
+            <div class="step-number">2</div>
+            <span>${userType === 'staff' ? 'Familiarízate con el inventario' : 'Configura tu primera tienda'}</span>
+          </div>
+          <div class="step-item">
+            <div class="step-number">3</div>
+            <span>${userType === 'staff' ? 'Comienza a gestionar ventas' : 'Agrega tus primeros productos'}</span>
+          </div>
+          <div class="step-item">
+            <div class="step-number">4</div>
+            <span>${userType === 'staff' ? 'Explora los reportes' : 'Explora el dashboard y reportes'}</span>
+          </div>
+        </div>
+      `;
+    };
+
+    const getSubject = () => {
+      switch (userType) {
+        case 'staff':
+          return `🎉 ¡Bienvenido al equipo de ${companyName}!`;
+        case 'customer':
+          return `🎉 ¡Bienvenido a ${companyName}!`;
+        default:
+          return `🎉 ¡Tu cuenta ${companyName} está lista! Comienza ahora`;
+      }
+    };
+
     return {
-      subject: `🎉 ¡Tu cuenta ${this.COMPANY_NAME} está lista! Comienza ahora`,
+      subject: getSubject(),
       html: `
         <!DOCTYPE html>
         <html lang="es">
         <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>¡Comienza con Vendix!</title>
+          <title>¡Bienvenido!</title>
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
             .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
-            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 50px 30px; text-align: center; position: relative; }
+            .header { background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%); padding: 50px 30px; text-align: center; position: relative; }
             .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" stroke-width="0.5" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>') repeat; opacity: 0.1; }
-            .header h1 { color: #FFFFFF; margin: 0; font-size: 32px; font-weight: 700; position: relative; z-index: 1; }
-            .header .subtitle { color: rgba(255, 255, 255, 0.9); margin: 10px 0 0 0; font-size: 16px; position: relative; z-index: 1; }
+            .logo-container { text-align: center; margin-bottom: 15px; position: relative; z-index: 1; }
+            .logo-image { max-height: 60px; }
+            .header h1 { color: ${accentColor}; margin: 0; font-size: 32px; font-weight: 700; position: relative; z-index: 1; }
+            .header .subtitle { color: ${accentColor}; margin: 10px 0 0 0; font-size: 16px; position: relative; z-index: 1; opacity: 0.9; }
             .content { padding: 50px 30px; }
             .success-section { text-align: center; margin-bottom: 40px; }
             .success-emoji { font-size: 64px; margin-bottom: 20px; }
@@ -420,16 +629,16 @@ El equipo de ${this.COMPANY_NAME}
             .dashboard-card { background: linear-gradient(135deg, #DBEAFE 0%, #BFDBFE 100%); border: 2px solid #3B82F6; border-radius: 12px; padding: 30px; margin: 30px 0; text-align: center; }
             .dashboard-title { color: #1E3A8A; font-size: 18px; font-weight: 600; margin-bottom: 15px; }
             .dashboard-message { color: #1E40AF; margin-bottom: 25px; line-height: 1.6; }
-            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 18px 36px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; font-size: 16px; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(47, 111, 78, 0.2); }
-            .button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(47, 111, 78, 0.3); }
+            .button { background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%); color: ${accentColor}; padding: 18px 36px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; font-size: 16px; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); }
+            .button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3); }
             .login-reminder { background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 8px; padding: 20px; margin: 30px 0; }
             .login-title { color: #166534; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
             .features { background-color: #F8FAFC; border-radius: 12px; padding: 30px; margin: 30px 0; border: 1px solid #E2E8F0; }
             .features-title { color: #1F2937; font-size: 20px; font-weight: 600; margin-bottom: 25px; text-align: center; }
             .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
             .feature-item { display: flex; align-items: center; padding: 15px; background-color: #FFFFFF; border-radius: 8px; border: 1px solid #E5E7EB; transition: all 0.3s ease; }
-            .feature-item:hover { border-color: #7ED7A5; box-shadow: 0 2px 4px rgba(126, 215, 165, 0.1); }
-            .feature-icon { color: #10B981; font-size: 24px; margin-right: 15px; min-width: 30px; }
+            .feature-item:hover { border-color: ${primaryColor}; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+            .feature-icon { font-size: 24px; margin-right: 15px; min-width: 30px; }
             .feature-text { color: #374151; font-size: 14px; line-height: 1.5; }
             .next-steps { background-color: #FEF3C7; border-left: 4px solid #F59E0B; border-radius: 8px; padding: 25px; margin: 30px 0; }
             .next-steps-title { color: #92400E; font-size: 18px; font-weight: 600; margin-bottom: 15px; }
@@ -437,9 +646,9 @@ El equipo de ${this.COMPANY_NAME}
             .step-number { background-color: #F59E0B; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 15px; }
             .divider { border-top: 2px solid #E5E7EB; margin: 40px 0; }
             .footer { background-color: #1F2937; padding: 30px; text-align: center; color: #D1D5DB; font-size: 14px; }
-            .footer-logo { font-size: 24px; font-weight: 700; color: #7ED7A5; margin-bottom: 15px; }
+            .footer-logo { font-size: 24px; font-weight: 700; color: ${primaryColor}; margin-bottom: 15px; }
             .footer-links { margin: 20px 0; }
-            .footer-links a { color: #7ED7A5; text-decoration: none; margin: 0 10px; }
+            .footer-links a { color: ${primaryColor}; text-decoration: none; margin: 0 10px; }
             .footer-links a:hover { text-decoration: underline; }
             .copyright { margin-top: 20px; color: #9CA3AF; font-size: 12px; }
           </style>
@@ -447,35 +656,38 @@ El equipo de ${this.COMPANY_NAME}
         <body>
           <div class="container">
             <div class="header">
-              <h1>🚀 ${this.COMPANY_NAME}</h1>
-              <div class="subtitle">Tu cuenta está lista para despegar</div>
+              ${logoUrl ? `
+                <div class="logo-container">
+                  <img src="${logoUrl}" alt="${companyName}" class="logo-image">
+                </div>
+              ` : `
+                <h1>${getWelcomeEmoji()} ${companyName}</h1>
+              `}
+              <div class="subtitle">${getSubtitle()}</div>
             </div>
             <div class="content">
               <div class="success-section">
-                <div class="success-emoji">✨</div>
-                <div class="success-title">¡Bienvenido de nuevo, ${data.username}!</div>
+                <div class="success-emoji">${getWelcomeEmoji()}</div>
+                <div class="success-title">${getWelcomeTitle()}</div>
                 <div class="success-message">
-                  ¡Tu cuenta ha sido verificada y está completamente lista para usar! 🎉
-                  Estás a punto de comenzar una increíble experiencia gestionando tu negocio
-                  con las herramientas más modernas y eficientes.
+                  ${getWelcomeMessage()}
                 </div>
               </div>
 
               <div class="dashboard-card">
-                <div class="dashboard-title">📊 Tu Dashboard te espera</div>
+                <div class="dashboard-title">${getCardTitle()}</div>
                 <div class="dashboard-message">
-                  Accede ahora a tu panel de control y comienza a explorar todas las funciones
-                  que ${this.COMPANY_NAME} tiene preparadas para ti.
+                  ${getCardMessage()}
                 </div>
                 <div style="text-align: center;">
-                  <a href="${dashboardUrl}" class="button">🎯 Ir a mi Dashboard</a>
+                  <a href="${dashboardUrl}" class="button">${getButtonText()}</a>
                 </div>
               </div>
 
               <div class="login-reminder">
                 <div class="login-title">🔐 Recordatorio de acceso</div>
                 <div style="color: #15803D; font-size: 14px; line-height: 1.6;">
-                  🌐 <strong>Tu enlace de acceso:</strong> <a href="${loginUrl}" style="color: #2F6F4E;">${loginUrl}</a><br>
+                  🌐 <strong>Tu enlace de acceso:</strong> <a href="${loginUrl}" style="color: ${secondaryColor};">${loginUrl}</a><br>
                   📧 <strong>Tu correo:</strong> ${data.email}<br>
                   💡 <strong>Consejo:</strong> ¡Guarda este enlace como favorito para acceso rápido!
                 </div>
@@ -483,75 +695,34 @@ El equipo de ${this.COMPANY_NAME}
 
               <div class="features">
                 <div class="features-title">🎯 Todo lo que puedes hacer ahora</div>
-                <div class="feature-grid">
-                  <div class="feature-item">
-                    <span class="feature-icon">📊</span>
-                    <div class="feature-text"><strong>Dashboard en vivo</strong><br>Monitorea tu negocio en tiempo real</div>
-                  </div>
-                  <div class="feature-item">
-                    <span class="feature-icon">🏪</span>
-                    <div class="feature-text"><strong>Múltiples tiendas</strong><br>Administra todas desde un lugar</div>
-                  </div>
-                  <div class="feature-item">
-                    <span class="feature-icon">📦</span>
-                    <div class="feature-text"><strong>Inventario inteligente</strong><br>Nunca te quedes sin stock</div>
-                  </div>
-                  <div class="feature-item">
-                    <span class="feature-icon">💳</span>
-                    <div class="feature-text"><strong>Pagos digitales</strong><br>Acepta múltiples métodos</div>
-                  </div>
-                  <div class="feature-item">
-                    <span class="feature-icon">👥</span>
-                    <div class="feature-text"><strong>Gestión de clientes</strong><br>Conoce mejor a tus usuarios</div>
-                  </div>
-                  <div class="feature-item">
-                    <span class="feature-icon">📈</span>
-                    <div class="feature-text"><strong>Reportes avanzados</strong><br>Toma decisiones inteligentes</div>
-                  </div>
-                </div>
+                ${getFeatureList()}
               </div>
 
-              <div class="next-steps">
-                <div class="next-steps-title">🎯 Siguientes pasos recomendados</div>
-                <div class="step-item">
-                  <div class="step-number">1</div>
-                  <span>Completa tu perfil de organización</span>
-                </div>
-                <div class="step-item">
-                  <div class="step-number">2</div>
-                  <span>Configura tu primera tienda</span>
-                </div>
-                <div class="step-item">
-                  <div class="step-number">3</div>
-                  <span>Agrega tus primeros productos</span>
-                </div>
-                <div class="step-item">
-                  <div class="step-number">4</div>
-                  <span>Explora el dashboard y reportes</span>
-                </div>
-              </div>
+              ${getNextSteps()}
 
               <div style="text-align: center; margin: 40px 0; padding: 25px; background-color: #F8FAFC; border-radius: 12px; border: 1px solid #E2E8F0;">
                 <div style="color: #6B7280; font-size: 16px; margin-bottom: 15px;">
-                  ¿Necesitas ayuda para comenzar? Estamos aquí para ti.
+                  ${userType === 'customer' ? '¿Tienes preguntas?' : '¿Necesitas ayuda para comenzar?'} Estamos aquí para ti.
                 </div>
                 <div style="color: #4B5563; font-size: 14px;">
-                  📧 <a href="mailto:${this.SUPPORT_EMAIL}" style="color: #2F6F4E;">${this.SUPPORT_EMAIL}</a><br>
-                  🌐 <a href="https://help.vendix.online" style="color: #2F6F4E;">Centro de Ayuda</a><br>
-                  💬 <a href="https://vendix.online/chat" style="color: #2F6F4E;">Chat en vivo</a>
+                  📧 <a href="mailto:${this.SUPPORT_EMAIL}" style="color: ${secondaryColor};">${this.SUPPORT_EMAIL}</a><br>
+                  🌐 <a href="https://help.vendix.online" style="color: ${secondaryColor};">Centro de Ayuda</a><br>
+                  ${userType !== 'customer' ? '💬 <a href="https://vendix.online/chat" style="color: ' + secondaryColor + ';">Chat en vivo</a>' : ''}
                 </div>
               </div>
             </div>
             <div class="footer">
-              <div class="footer-logo">${this.COMPANY_NAME}</div>
+              <div class="footer-logo">${companyName}</div>
               <div class="footer-links">
                 <a href="https://vendix.online">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
                 <a href="https://help.vendix.online">Ayuda</a>
               </div>
               <div class="copyright">
-                © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
-                ¡Estás listo para transformar tu negocio! 🚀
+                © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.<br>
+                ${userType === 'owner' ? '¡Estás listo para transformar tu negocio! 🚀' :
+                  userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
+                  '¡Gracias por elegirnos! 🛍️'}
               </div>
             </div>
           </div>
@@ -559,15 +730,14 @@ El equipo de ${this.COMPANY_NAME}
         </html>
       `,
       text: `
-🎉 ¡Tu cuenta ${this.COMPANY_NAME} está lista!
+🎉 ${getSubject()}
 
 ¡Hola ${data.username}!
 
-¡Felicidades! Tu cuenta ha sido verificada y está completamente operativa.
-Estás listo para comenzar a gestionar tu negocio como nunca antes.
+${getWelcomeMessage()}
 
 🎯 COMIENZA AHORA:
-Accede a tu dashboard desde:
+Accede desde:
 ${dashboardUrl}
 
 🔐 TUS DATOS DE ACCESO:
@@ -575,27 +745,26 @@ ${dashboardUrl}
 📧 Correo: ${data.email}
 
 ✨ ¿QUÉ PUEDES HACER AHORA?
-📊 Ver tu dashboard en tiempo real
-🏪 Administrar múltiples tiendas
-📦 Controlar inventario inteligente
-💳 Procesar pagos digitales
-👥 Gestionar clientes
-📈 Generar reportes avanzados
+${userType === 'staff' ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas' :
+  userType === 'customer' ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas' :
+  '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'}
 
-🎯 SIGUIENTES PASOS RECOMENDADOS:
-1. Completa tu perfil de organización
-2. Configura tu primera tienda
-3. Agrega tus primeros productos
-4. Explora los reportes y analíticas
+${userType !== 'customer' ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
+1. ${userType === 'staff' ? 'Explora el panel de staff' : 'Completa tu perfil de organización'}
+2. ${userType === 'staff' ? 'Familiarízate con el inventario' : 'Configura tu primera tienda'}
+3. ${userType === 'staff' ? 'Comienza a gestionar ventas' : 'Agrega tus primeros productos'}
+4. ${userType === 'staff' ? 'Explora los reportes' : 'Explora el dashboard y reportes'}
 
-¿NECESITAS AYUDA?
+` : ''}¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
 🌐 Ayuda: https://help.vendix.online
-💬 Chat: https://vendix.online/chat
+${userType !== 'customer' ? '💬 Chat: https://vendix.online/chat' : ''}
 
-¡Bienvenido al futuro del comercio! 🚀
+${userType === 'owner' ? '¡Bienvenido al futuro del comercio! 🚀' :
+  userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
+  '¡Gracias por elegirnos! 🛍️'}
 
-El equipo de ${this.COMPANY_NAME}
+El equipo de ${companyName}
       `,
     };
   }

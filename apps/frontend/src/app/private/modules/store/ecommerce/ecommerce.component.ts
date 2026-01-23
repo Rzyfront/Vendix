@@ -333,17 +333,17 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   /**
    * Handle input event for image title
    */
-  onTitleInputChange(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    this.updateImageMetadata(this.activeImageIndex, 'title', input.value);
+  onTitleInputChange(event: Event | string): void {
+    const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
+    this.updateImageMetadata(this.activeImageIndex, 'title', value);
   }
 
   /**
    * Handle input event for image caption
    */
-  onCaptionInputChange(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    this.updateImageMetadata(this.activeImageIndex, 'caption', input.value);
+  onCaptionInputChange(event: Event | string): void {
+    const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
+    this.updateImageMetadata(this.activeImageIndex, 'caption', value);
   }
 
   /**
@@ -547,5 +547,61 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
       });
     }
+  }
+  /**
+   * Sincronizar colores desde el tema actual
+   */
+  syncColorsFromTheme(): void {
+    const root = document.documentElement;
+    const computedStyle = getComputedStyle(root);
+
+    const primaryColor = this.rgbToHex(
+      computedStyle.getPropertyValue('--color-primary').trim(),
+    );
+    const secondaryColor = this.rgbToHex(
+      computedStyle.getPropertyValue('--color-secondary').trim(),
+    );
+    const accentColor = this.rgbToHex(
+      computedStyle.getPropertyValue('--color-accent').trim(),
+    );
+
+    const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
+    if (coloresGroup) {
+      coloresGroup.patchValue({
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        accent_color: accentColor,
+      });
+      this.settingsForm.markAsDirty();
+      this.toastService.success(
+        'Colores sincronizados con la aplicación actual',
+      );
+    }
+  }
+
+  /**
+   * Convert RGB/RGBA to Hex
+   */
+  private rgbToHex(rgb: string): string {
+    // Si ya es hex, retornar
+    if (rgb.startsWith('#')) return rgb;
+
+    // Extraer números
+    const match = rgb.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)$/);
+    if (!match) return rgb;
+
+    const r = parseInt(match[1]);
+    const g = parseInt(match[2]);
+    const b = parseInt(match[3]);
+
+    return (
+      '#' +
+      [r, g, b]
+        .map((x) => {
+          const hex = x.toString(16);
+          return hex.length === 1 ? '0' + hex : hex;
+        })
+        .join('')
+    ).toUpperCase();
   }
 }

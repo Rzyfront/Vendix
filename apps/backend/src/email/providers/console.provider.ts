@@ -8,6 +8,7 @@ import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
+import { WelcomeEmailOptions } from '../interfaces/branding.interface';
 
 @Injectable()
 export class ConsoleProvider implements EmailProvider {
@@ -93,16 +94,40 @@ export class ConsoleProvider implements EmailProvider {
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendWelcomeEmail(to: string, username: string): Promise<EmailResult> {
+  async sendWelcomeEmail(
+    to: string,
+    username: string,
+    options?: WelcomeEmailOptions,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
-      companyName: 'Vendix',
+      companyName: options?.organizationName || 'Vendix',
+      storeName: options?.storeName,
+      organizationName: options?.organizationName,
+      branding: options?.branding,
+      userType: options?.userType || 'owner',
+      vlink: options?.organizationSlug,
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getWelcomeTemplate(templateData);
+
+    // Log adicional para debugging
+    if (options?.userType) {
+      this.logger.log(`👤 USER TYPE: ${options.userType}`);
+    }
+    if (options?.storeName) {
+      this.logger.log(`🏪 STORE: ${options.storeName}`);
+    }
+    if (options?.branding?.logo_url) {
+      this.logger.log(`🖼️ LOGO: ${options.branding.logo_url}`);
+    }
+    if (options?.branding?.primary_color) {
+      this.logger.log(`🎨 PRIMARY COLOR: ${options.branding.primary_color}`);
+    }
+
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
