@@ -75,6 +75,12 @@
     display: flex;
     align-items: center;
     gap: 0.25rem; // Tightened
+
+    .desktop-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
   }
 
   .action-btn {
@@ -578,10 +584,16 @@
   }
 }
 
-// Navigation
+// Navigation (Desktop Only)
 .main-nav {
   display: flex;
+  align-items: center;
+  height: 100%;
   gap: 1.5rem;
+
+  @media (max-width: 1024px) {
+    display: none;
+  }
 
   a {
     color: var(--color-text-secondary);
@@ -609,6 +621,168 @@
 
       &::after {
         width: 100%;
+      }
+    }
+  }
+}
+
+// Mobile Sidebar (Root Level)
+.mobile-sidebar {
+  position: fixed;
+  top: 0;
+  right: -290px;
+  width: 270px;
+  height: 100vh;
+  background: var(--color-surface);
+  z-index: 2000; // Above overlay
+  transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-2xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &.open {
+    right: 0;
+  }
+
+  // Hide on desktop
+  @media (min-width: 1025px) {
+    display: none;
+  }
+
+  // Mobile Header
+  .mobile-nav-header {
+    padding: 1rem;
+    background: var(--color-background);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-shrink: 0;
+
+    .close-menu-btn {
+      background: transparent;
+      border: none;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      padding: 0.25rem;
+      margin-left: 0.5rem; // Add slight gap for easier click
+
+      &:hover {
+        color: var(--color-text-primary);
+      }
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+
+      .avatar-circle {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-primary);
+      }
+
+      .user-details {
+        display: flex;
+        flex-direction: column;
+
+        .greeting {
+          font-size: 0.75rem;
+          color: var(--color-text-secondary);
+        }
+
+        .name {
+          font-size: 0.9375rem;
+          font-weight: 700;
+          color: var(--color-text-primary);
+        }
+      }
+    }
+
+    .guest-info {
+      .welcome-text {
+        display: block;
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--color-text-primary);
+        margin-bottom: 0.125rem;
+      }
+
+      .sub-text {
+        margin: 0;
+        font-size: 0.8rem;
+        color: var(--color-text-secondary);
+      }
+    }
+  }
+
+  // Scroll Content
+  .nav-scroll-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .nav-section {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .user-section {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .nav-subtitle {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+    margin: 0 0 0.5rem 0.5rem;
+    font-weight: 700;
+  }
+
+  .nav-divider {
+    display: block;
+    margin: 0.75rem 0;
+    border: none;
+    border-top: 1px solid var(--color-border);
+  }
+
+  a {
+    font-size: 0.9375rem;
+    padding: 0.625rem 0.75rem;
+    border-radius: 8px;
+    color: var(--color-text-secondary);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: all var(--transition-fast);
+
+    &:hover,
+    &.active {
+      background: var(--color-background);
+      color: var(--color-primary);
+    }
+
+    &.logout-link {
+      color: var(--color-error);
+
+      &:hover {
+        background: #fee2e2;
       }
     }
   }
@@ -710,19 +884,43 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(4px);
   z-index: var(--z-modal-backdrop);
+
+  // Never show on desktop
+  @media (min-width: 1025px) {
+    display: none !important;
+  }
 }
 
 // Responsive
+// Responsive
 @media (max-width: 1024px) {
   .ecommerce-header {
-    .header-left .main-nav {
+    .header-left {
+      // Allow header left to shrink
+      flex-shrink: 1;
+      min-width: 0;
+    }
+
+    // Hide desktop specific actions
+    .desktop-actions,
+    .user-menu-container.desktop-only {
       display: none;
     }
 
+    // Ensure search is visible but flexible
     .header-search {
-      display: none;
+      display: block; // Changed from none to block
+      flex: 1;
+      margin: 0 1rem; // Add spacing
+      min-width: 0; // Allow shrinking
+    }
+
+    // Adjust logo for mobile to save space
+    .logo {
+      .logo-text {
+        display: none; // Hide text on mobile to save space for search
+      }
     }
 
     .mobile-menu-btn {
@@ -730,34 +928,7 @@
     }
   }
 
-  .main-nav {
-    position: fixed;
-    top: 0;
-    left: -300px;
-    width: 280px;
-    height: 100vh;
-    background: var(--color-surface);
-    flex-direction: column;
-    padding: 4rem 2rem;
-    gap: 1rem;
-    z-index: var(--z-sidebar);
-    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: var(--shadow-2xl);
 
-    &.open {
-      left: 0;
-    }
-
-    a {
-      font-size: 1.125rem;
-      padding: 0.75rem 0;
-      border-bottom: 1px solid var(--color-border);
-
-      &::after {
-        display: none;
-      }
-    }
-  }
 
   .ecommerce-footer .footer-container {
     grid-template-columns: repeat(2, 1fr);
@@ -767,10 +938,16 @@
 
 @media (max-width: 640px) {
   .ecommerce-header {
-    padding: 0 1rem;
+    padding: 0 0.5rem; // Reduced padding as requested (was 1rem)
+    height: 56px; // Slightly smaller height
 
-    .user-btn .user-name {
-      display: none;
+    .header-container {
+      gap: 0.5rem; // Reduce gap between items
+      padding: 0;
+    }
+
+    .header-search {
+      margin: 0 0.5rem;
     }
   }
 
@@ -779,6 +956,6 @@
   }
 
   .ecommerce-main {
-    padding: 1rem;
+    padding: 1rem 0.5rem;
   }
 }

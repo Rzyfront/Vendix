@@ -54,6 +54,8 @@ export class CartService {
     private item_added_subject = new Subject<void>();
     itemAdded$ = this.item_added_subject.asObservable();
 
+    private is_authenticated = false;
+
     constructor(
         private http: HttpClient,
         private domain_service: TenantFacade,
@@ -65,6 +67,8 @@ export class CartService {
 
     private initializeCart() {
         this.auth_facade.isAuthenticated$.subscribe((isAuthenticated) => {
+            this.is_authenticated = isAuthenticated;
+
             if (isAuthenticated) {
                 const localItems = this.getLocalCart();
                 if (localItems.length > 0) {
@@ -188,6 +192,9 @@ export class CartService {
         this.loadLocalCart();
     }
 
+    /**
+     * @deprecated Use addToCart() instead which automatically handles authentication state
+     */
     addToLocalCart(product_id: number, quantity: number, product_variant_id?: number): void {
         const items = this.getLocalCart();
         const existing = items.find(
@@ -204,6 +211,9 @@ export class CartService {
         this.item_added_subject.next();
     }
 
+    /**
+     * @deprecated Use updateCartItem() instead which automatically handles authentication state
+     */
     updateLocalCartItem(product_id: number, quantity: number, product_variant_id?: number): void {
         const items = this.getLocalCart();
         const item = items.find(
@@ -216,6 +226,9 @@ export class CartService {
         }
     }
 
+    /**
+     * @deprecated Use removeCartItem() instead which automatically handles authentication state
+     */
     removeFromLocalCart(product_id: number, product_variant_id?: number): void {
         let items = this.getLocalCart();
         items = items.filter(
@@ -224,6 +237,9 @@ export class CartService {
         this.saveLocalCart(items);
     }
 
+    /**
+     * @deprecated Use clearAllCart() instead which automatically handles authentication state
+     */
     clearLocalCart(): void {
         localStorage.removeItem(this.local_storage_key);
         this.emitEmptyCart();
@@ -291,9 +307,65 @@ export class CartService {
             tap((response: any) => {
                 if (response.success) {
                     this.cart_subject.next(response.data);
+                    // Limpiar localStorage INMEDIATAMENTE después de sincronizar
                     localStorage.removeItem(this.local_storage_key);
                 }
             }),
         );
+    }
+
+    // ========== UNIFIED PUBLIC METHODS ==========
+    // These methods automatically detect authentication state and use the appropriate storage
+
+    /**
+     * Agrega un producto al carrito.
+     * Detecta automáticamente si usar API (autenticado) o localStorage (guest).
+     */
+    addToCart(product_id: number, quantity: number, product_variant_id?: number): Observable<any> | void {
+        if (this.is_authenticated) {
+            return this.addItem(product_id, quantity, product_variant_id);
+        } else {
+            this.addToLocalCart(product_id, quantity, product_variant_id);
+        }
+    }
+
+    /**
+     * Actualiza la cantidad de un item en el carrito.
+     * Para usuarios autenticados, requiere item_id de la DB.
+     * Para guests, requiere product_id y product_variant_id.
+     */
+    updateCartItem(
+        identifier: { item_id?: number; product_id?: number; product_variant_id?: number },
+        quantity: number
+    ): Observable<any> | void {
+        if (this.is_authenticated && identifier.item_id) {
+            return this.updateItem(identifier.item_id, quantity);
+        } else if (!this.is_authenticated && identifier.product_id !== undefined) {
+            this.updateLocalCartItem(identifier.product_id, quantity, identifier.product_variant_id);
+        }
+    }
+
+    /**
+     * Remueve un item del carrito.
+     */
+    removeCartItem(
+        identifier: { item_id?: number; product_id?: number; product_variant_id?: number }
+    ): Observable<any> | void {
+        if (this.is_authenticated && identifier.item_id) {
+            return this.removeItem(identifier.item_id);
+        } else if (!this.is_authenticated && identifier.product_id !== undefined) {
+            this.removeFromLocalCart(identifier.product_id, identifier.product_variant_id);
+        }
+    }
+
+    /**
+     * Limpia todo el carrito.
+     */
+    clearAllCart(): Observable<any> | void {
+        if (this.is_authenticated) {
+            return this.clearCart();
+        } else {
+            this.clearLocalCart();
+        }
     }
 }

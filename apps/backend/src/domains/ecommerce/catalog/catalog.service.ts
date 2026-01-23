@@ -125,6 +125,9 @@ export class CatalogService {
         // pero usaremos created_at como fallback para el resto
         orderBy = { created_at: 'desc' };
         break;
+      case ProductSortBy.OLDEST:
+        orderBy = { created_at: 'asc' };
+        break;
       case ProductSortBy.NEWEST:
       default:
         orderBy = { created_at: 'desc' };

@@ -179,6 +179,8 @@ export class S3Service {
             return keyOrUrl || undefined;
         }
 
+        const EXPIRATION_TIME = 24 * 60 * 60; // 24 hours
+
         let targetKey = keyOrUrl;
         if (useThumbnail) {
             const pathParts = keyOrUrl.split('/');
@@ -186,14 +188,14 @@ export class S3Service {
             targetKey = [...pathParts, `thumb_${fileName}`].join('/');
 
             try {
-                return await this.getPresignedUrl(targetKey);
+                return await this.getPresignedUrl(targetKey, EXPIRATION_TIME);
             } catch {
                 // Return original key signature as fallback
-                return this.getPresignedUrl(keyOrUrl);
+                return this.getPresignedUrl(keyOrUrl, EXPIRATION_TIME);
             }
         }
 
-        return this.getPresignedUrl(targetKey);
+        return this.getPresignedUrl(targetKey, EXPIRATION_TIME);
     }
 
     /**

@@ -1,168 +1,272 @@
 <div class="account-page">
+    <!-- Account Header -->
     <div class="account-header">
-        <h1>Mi Cuenta</h1>
+        <div class="header-content">
+            @if (profile && profile.avatar_url) {
+                <div class="avatar">
+                    <img [src]="profile.avatar_url" [alt]="profile.first_name || 'Usuario'" />
+                </div>
+            } @else {
+                <div class="avatar avatar-placeholder">
+                    <app-icon name="user" [size]="24"></app-icon>
+                </div>
+            }
+            <div class="header-info">
+                <h1>Mi Cuenta</h1>
+                <p class="header-email">{{ profile?.email }}</p>
+            </div>
+        </div>
         <button class="logout-btn" (click)="logout()">
-            <i class="pi pi-sign-out"></i>
+            <app-icon name="log-out" [size]="18"></app-icon>
             Cerrar sesión
         </button>
     </div>
 
+    <!-- Navigation Tabs -->
     <nav class="account-nav">
         <a routerLink="/account" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
-            <i class="pi pi-user"></i> Perfil
+            <app-icon name="user" [size]="24"></app-icon>
+            Perfil
         </a>
         <a routerLink="/account/orders" routerLinkActive="active">
-            <i class="pi pi-list"></i> Mis Pedidos
+            <app-icon name="list" [size]="18"></app-icon>
+            Mis Pedidos
         </a>
     </nav>
 
     @if (success_message) {
-    <div class="success-message">
-        <i class="pi pi-check-circle"></i>
-        {{ success_message }}
-    </div>
+        <div class="success-message">
+            <app-icon name="check-circle" [size]="20"></app-icon>
+            {{ success_message }}
+        </div>
     }
 
     @if (error_message) {
-    <div class="error-message">
-        <i class="pi pi-exclamation-circle"></i>
-        {{ error_message }}
-    </div>
+        <div class="error-message">
+            <app-icon name="alert-circle" [size]="20"></app-icon>
+            {{ error_message }}
+        </div>
     }
 
     @if (is_loading) {
-    <div class="loading">
-        <div class="spinner"></div>
-    </div>
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Cargando...</p>
+        </div>
     } @else {
-    <div class="account-content">
-        <!-- Profile Section -->
-        <section class="account-section">
-            <h2>Información Personal</h2>
-            <form [formGroup]="profile_form" (ngSubmit)="saveProfile()">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Nombre</label>
-                        <input type="text" formControlName="first_name" placeholder="Tu nombre">
+        <div class="account-grid">
+            <!-- Main Column: Personal Info + Security -->
+            <div class="main-column">
+                <!-- Personal Info Section -->
+                <section class="account-section">
+                    <div class="section-header">
+                        <h2>Información Personal</h2>
                     </div>
-                    <div class="form-group">
-                        <label>Apellido</label>
-                        <input type="text" formControlName="last_name" placeholder="Tu apellido">
+                    <form [formGroup]="profile_form" (ngSubmit)="saveProfile()">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Nombre</label>
+                                <input type="text" formControlName="first_name" placeholder="Tu nombre" />
+                            </div>
+                            <div class="form-group">
+                                <label>Apellido</label>
+                                <input type="text" formControlName="last_name" placeholder="Tu apellido" />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Teléfono</label>
+                                <input
+                                    type="tel"
+                                    inputmode="numeric"
+                                    formControlName="phone"
+                                    placeholder="Solo números"
+                                    (input)="onNumericInput($event, 'phone')"
+                                    [class.error]="profile_form.get('phone')?.touched && profile_form.get('phone')?.invalid"
+                                />
+                                @if (profile_form.get('phone')?.touched && profile_form.get('phone')?.hasError('pattern')) {
+                                <span class="error-text">Solo se permiten números</span>
+                                }
+                            </div>
+                            <div class="form-group">
+                                <label>Email</label>
+                                <input type="email" [value]="profile?.email" disabled />
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Tipo de Documento</label>
+                                <select formControlName="document_type">
+                                    <option value="">Seleccionar</option>
+                                    <option value="CC">Cédula de Ciudadanía</option>
+                                    <option value="CE">Cédula de Extranjería</option>
+                                    <option value="NIT">NIT</option>
+                                    <option value="passport">Pasaporte</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Número de Documento</label>
+                                <input
+                                    type="text"
+                                    inputmode="numeric"
+                                    formControlName="document_number"
+                                    placeholder="Solo números"
+                                    (input)="onNumericInput($event, 'document_number')"
+                                    [class.error]="profile_form.get('document_number')?.touched && profile_form.get('document_number')?.invalid"
+                                />
+                                @if (profile_form.get('document_number')?.touched && profile_form.get('document_number')?.hasError('pattern')) {
+                                <span class="error-text">Solo se permiten números</span>
+                                }
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="save-btn" [disabled]="is_saving || !profile_form.valid">
+                                @if (is_saving) {
+                                    <span class="btn-spinner"></span>
+                                    Guardando...
+                                } @else {
+                                    <app-icon name="save" [size]="18"></app-icon>
+                                    Guardar cambios
+                                }
+                            </button>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Security Section -->
+                <section class="account-section">
+                    <div class="section-header">
+                        <h2>Seguridad</h2>
                     </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Teléfono</label>
-                        <input type="tel" formControlName="phone" placeholder="Teléfono">
-                    </div>
-                    <div class="form-group">
-                        <label>Email</label>
-                        <input type="email" [value]="profile?.email" disabled>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Tipo de Documento</label>
-                        <select formControlName="document_type">
-                            <option value="">Seleccionar</option>
-                            <option value="CC">Cédula de Ciudadanía</option>
-                            <option value="CE">Cédula de Extranjería</option>
-                            <option value="NIT">NIT</option>
-                            <option value="passport">Pasaporte</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Número de Documento</label>
-                        <input type="text" formControlName="document_number" placeholder="Número">
-                    </div>
-                </div>
-                <button type="submit" class="save-btn" [disabled]="is_saving || !profile_form.valid">
-                    @if (is_saving) {
-                    Guardando...
+                    @if (!show_password_form) {
+                        <div class="security-actions">
+                            <p class="security-hint">Cambiar tu contraseña regularmente ayuda a proteger tu cuenta.</p>
+                            <button class="secondary-btn" (click)="show_password_form = true">
+                                <app-icon name="key" [size]="18"></app-icon>
+                                Cambiar contraseña
+                            </button>
+                        </div>
                     } @else {
-                    Guardar cambios
+                        <form [formGroup]="password_form" (ngSubmit)="changePassword()">
+                            <div class="form-group">
+                                <label>Contraseña actual</label>
+                                <input type="password" formControlName="current_password" placeholder="Contraseña actual" />
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Nueva contraseña</label>
+                                    <input type="password" formControlName="new_password" placeholder="Nueva contraseña" />
+                                </div>
+                                <div class="form-group">
+                                    <label>Confirmar contraseña</label>
+                                    <input type="password" formControlName="confirm_password" placeholder="Confirmar" />
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="button" class="cancel-btn" (click)="show_password_form = false; password_form.reset()">
+                                    Cancelar
+                                </button>
+                                <button type="submit" class="save-btn" [disabled]="is_changing_password || !password_form.valid">
+                                    @if (is_changing_password) {
+                                        <span class="btn-spinner"></span>
+                                        Cambiando...
+                                    } @else {
+                                        Cambiar contraseña
+                                    }
+                                </button>
+                            </div>
+                        </form>
                     }
-                </button>
-            </form>
-        </section>
-
-        <!-- Password Section -->
-        <section class="account-section">
-            <h2>Seguridad</h2>
-            @if (!show_password_form) {
-            <button class="secondary-btn" (click)="show_password_form = true">
-                Cambiar contraseña
-            </button>
-            } @else {
-            <form [formGroup]="password_form" (ngSubmit)="changePassword()">
-                <div class="form-group">
-                    <label>Contraseña actual</label>
-                    <input type="password" formControlName="current_password" placeholder="Contraseña actual">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Nueva contraseña</label>
-                        <input type="password" formControlName="new_password" placeholder="Nueva contraseña">
-                    </div>
-                    <div class="form-group">
-                        <label>Confirmar contraseña</label>
-                        <input type="password" formControlName="confirm_password" placeholder="Confirmar">
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="cancel-btn"
-                        (click)="show_password_form = false; password_form.reset()">
-                        Cancelar
-                    </button>
-                    <button type="submit" class="save-btn" [disabled]="is_changing_password || !password_form.valid">
-                        @if (is_changing_password) {
-                        Cambiando...
-                        } @else {
-                        Cambiar contraseña
-                        }
-                    </button>
-                </div>
-            </form>
-            }
-        </section>
-
-        <!-- Addresses Section -->
-        <section class="account-section">
-            <div class="section-header">
-                <h2>Direcciones</h2>
-                <button class="add-btn">
-                    <i class="pi pi-plus"></i>
-                    Agregar
-                </button>
+                </section>
             </div>
 
-            @if (addresses.length === 0) {
-            <p class="empty-text">No tienes direcciones guardadas</p>
-            } @else {
-            <div class="address-grid">
-                @for (addr of addresses; track addr.id) {
-                <div class="address-card" [class.primary]="addr.is_primary">
-                    @if (addr.is_primary) {
-                    <span class="primary-badge">Principal</span>
-                    }
-                    <p class="address-line">{{ addr.address_line1 }}</p>
-                    @if (addr.address_line2) {
-                    <p class="address-line">{{ addr.address_line2 }}</p>
-                    }
-                    <p class="address-city">{{ addr.city }}, {{ addr.state_province }}</p>
-                    @if (addr.phone_number) {
-                    <p class="address-phone">Tel: {{ addr.phone_number }}</p>
-                    }
-                    <div class="address-actions">
-                        <button class="delete-btn" (click)="deleteAddress(addr.id)">
-                            <i class="pi pi-trash"></i>
+            <!-- Side Column: Addresses -->
+            <div class="side-column">
+                <section class="account-section addresses-section">
+                    <div class="section-header">
+                        <h2>Mis Direcciones</h2>
+                        <button class="icon-btn" (click)="openAddressModal('create')" title="Agregar dirección">
+                            <app-icon name="plus" [size]="18"></app-icon>
                         </button>
                     </div>
-                </div>
-                }
+
+                    @if (!profile || !profile.addresses || profile.addresses.length === 0) {
+                        <div class="empty-state">
+                            <app-icon name="map-pin" [size]="32"></app-icon>
+                            <p>No tienes direcciones guardadas</p>
+                            <button class="secondary-btn" (click)="openAddressModal('create')">
+                                Agregar dirección
+                            </button>
+                        </div>
+                    } @else {
+                        <div class="address-list">
+                            @for (addr of profile.addresses; track addr.id) {
+                                <div class="address-card" [class.primary]="addr.is_primary">
+                                    <div class="address-icon">
+                                        <app-icon name="map-pin" [size]="32"></app-icon>
+                                    </div>
+                                    <div class="address-content">
+                                        <div class="address-header">
+                                            <span class="address-type">{{ getAddressTypeLabel(addr.type) }}</span>
+                                            @if (addr.is_primary) {
+                                                <span class="primary-badge">
+                                                    <app-icon name="star" [size]="14"></app-icon>
+                                                    Principal
+                                                </span>
+                                            }
+                                        </div>
+                                        <div class="address-body">
+                                            <p class="address-line">{{ addr.address_line1 }}</p>
+                                            @if (addr.address_line2) {
+                                                <p class="address-line">{{ addr.address_line2 }}</p>
+                                            }
+                                            <div class="address-location">
+                                                <span class="location-item">
+                                                    <app-icon name="building-2" [size]="14"></app-icon>
+                                                    {{ addr.city }}
+                                                </span>
+                                                @if (addr.state_province) {
+                                                    <span class="location-separator">•</span>
+                                                    <span class="location-item">{{ addr.state_province }}</span>
+                                                }
+                                            </div>
+                                            @if (addr.phone_number) {
+                                                <p class="address-phone">
+                                                    <app-icon name="phone" [size]="14"></app-icon>
+                                                    {{ addr.phone_number }}
+                                                </p>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="address-actions">
+                                        @if (!addr.is_primary) {
+                                            <button class="icon-btn" (click)="setAddressPrimary(addr.id)" title="Establecer como principal">
+                                                <app-icon name="star" [size]="18"></app-icon>
+                                            </button>
+                                        }
+                                        <button class="icon-btn" (click)="openAddressModal('edit', addr)" title="Editar">
+                                            <app-icon name="edit" [size]="16"></app-icon>
+                                        </button>
+                                        <button class="icon-btn icon-btn-danger" (click)="deleteAddress(addr.id)" title="Eliminar">
+                                            <app-icon name="trash" [size]="16"></app-icon>
+                                        </button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </section>
             </div>
-            }
-        </section>
-    </div>
+        </div>
+    }
+
+    <!-- Address Modal (Dynamic Component) -->
+    @if (show_address_modal) {
+        <app-address-modal
+            [mode]="address_modal_mode"
+            [address]="editing_address"
+            [onClose]="closeAddressModal"
+            [onSave]="onAddressSaved"
+        />
     }
 </div>

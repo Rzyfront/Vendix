@@ -43,14 +43,9 @@
                 </div>
 
                 <div class="item-quantity">
-                    <button class="qty-btn" (click)="updateQuantity(item, -1)"
-                        [disabled]="updating_item_id === item.id">
-                        <app-icon name="minus" [size]="14"></app-icon>
-                    </button>
-                    <span class="qty-value">{{ item.quantity }}</span>
-                    <button class="qty-btn" (click)="updateQuantity(item, 1)" [disabled]="updating_item_id === item.id">
-                        <app-icon name="plus" [size]="14"></app-icon>
-                    </button>
+                    <app-quantity-control [value]="item.quantity" [min]="1" [size]="'md'"
+                        [disabled]="updating_item_id === item.id"
+                        (valueChange)="updateQuantity(item, $event)"></app-quantity-control>
                 </div>
 
                 <div class="item-total">

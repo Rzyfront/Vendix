@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class CartService {
-    constructor(private readonly prisma: EcommercePrismaService) { }
+    constructor(
+        private readonly prisma: EcommercePrismaService,
+        private readonly s3Service: S3Service,
+    ) { }
 
     async getCart() {
         // store_id y user_id se aplican automáticamente por EcommercePrismaService
@@ -50,7 +54,7 @@ export class CartService {
             });
         }
 
-        return this.mapCartToResponse(cart);
+        return await this.mapCartToResponse(cart);
     }
 
     async addItem(dto: AddToCartDto) {
@@ -244,28 +248,35 @@ export class CartService {
         });
     }
 
-    private mapCartToResponse(cart: any) {
-        const items = cart.cart_items.map((item: any) => ({
-            id: item.id,
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: Number(item.unit_price) * item.quantity,
-            product: {
-                name: item.product.name,
-                slug: item.product.slug,
-                sku: item.product.sku,
-                image_url: item.product.product_images?.[0]?.image_url || null,
-            },
-            variant: item.product_variant
-                ? {
-                    name: item.product_variant.name,
-                    sku: item.product_variant.sku,
-                    attributes: item.product_variant.attributes,
-                }
-                : null,
-        }));
+    private async mapCartToResponse(cart: any) {
+        const items = await Promise.all(
+            cart.cart_items.map(async (item: any) => {
+                const raw_image_url = item.product.product_images?.[0]?.image_url || null;
+                const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+
+                return {
+                    id: item.id,
+                    product_id: item.product_id,
+                    product_variant_id: item.product_variant_id,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    total_price: Number(item.unit_price) * item.quantity,
+                    product: {
+                        name: item.product.name,
+                        slug: item.product.slug,
+                        sku: item.product.sku,
+                        image_url: signed_image_url || null,
+                    },
+                    variant: item.product_variant
+                        ? {
+                            name: item.product_variant.name,
+                            sku: item.product_variant.sku,
+                            attributes: item.product_variant.attributes,
+                        }
+                        : null,
+                };
+            }),
+        );
 
         return {
             id: cart.id,

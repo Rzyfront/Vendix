@@ -61,7 +61,7 @@ export interface CatalogQuery {
   brand_id?: number;
   min_price?: number;
   max_price?: number;
-  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest';
+  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
   page?: number;
   limit?: number;
   created_after?: string;

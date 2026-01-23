@@ -6,6 +6,7 @@ import { CartService } from '../../services/cart.service';
 import { TenantFacade } from '../../../../../../app/core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { HeroBannerComponent } from '../../components/hero-banner';
+import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -16,6 +17,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     RouterModule,
     ProductCardComponent,
     HeroBannerComponent,
+    ProductQuickViewModalComponent,
   ],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
@@ -27,6 +29,10 @@ export class HomeComponent implements OnInit {
   show_slider = false;
   banner_content = { title: '', paragraph: '' };
 
+  // Quick View Modal
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
   private destroy_ref = inject(DestroyRef);
   private tenant_facade = inject(TenantFacade);
   private router = inject(Router);
@@ -34,7 +40,7 @@ export class HomeComponent implements OnInit {
   constructor(
     private catalog_service: CatalogService,
     private cart_service: CartService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadFeaturedProducts();
@@ -112,11 +118,19 @@ export class HomeComponent implements OnInit {
   }
 
   onAddToCart(product: Product): void {
-    this.cart_service.addToLocalCart(product.id, 1);
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) {
+      result.subscribe();
+    }
   }
 
   onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
   }
 
   onViewMore(): void {

@@ -8,11 +8,12 @@ import { AuthFacade } from '../../../../../core/store';
 import { StoreUiService } from '../../services/store-ui.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
 })
@@ -70,43 +71,50 @@ export class CartComponent implements OnInit, OnDestroy {
     });
   }
 
-  updateQuantity(item: CartItem, delta: number): void {
-    const new_quantity = item.quantity + delta;
+  updateQuantity(item: CartItem, new_quantity: number): void {
     if (new_quantity <= 0) {
       this.removeItem(item);
       return;
     }
 
+    if (new_quantity === item.quantity) return;
+
     this.updating_item_id = item.id;
 
-    if (this.is_authenticated) {
-      this.cart_service.updateItem(item.id, new_quantity).subscribe({
-        next: () => {
-          this.updating_item_id = null;
-        },
-        error: () => {
-          this.updating_item_id = null;
-        },
+    const result = this.cart_service.updateCartItem(
+      {
+        item_id: item.id,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id || undefined
+      },
+      new_quantity
+    );
+
+    if (result) {
+      result.subscribe({
+        next: () => { this.updating_item_id = null; },
+        error: () => { this.updating_item_id = null; },
       });
     } else {
-      this.cart_service.updateLocalCartItem(item.product_id, new_quantity, item.product_variant_id || undefined);
       this.updating_item_id = null;
     }
   }
 
   removeItem(item: CartItem): void {
-    if (this.is_authenticated) {
-      this.cart_service.removeItem(item.id).subscribe();
-    } else {
-      this.cart_service.removeFromLocalCart(item.product_id, item.product_variant_id || undefined);
+    const result = this.cart_service.removeCartItem({
+      item_id: item.id,
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id || undefined
+    });
+    if (result) {
+      result.subscribe();
     }
   }
 
   clearCart(): void {
-    if (this.is_authenticated) {
-      this.cart_service.clearCart().subscribe();
-    } else {
-      this.cart_service.clearLocalCart();
+    const result = this.cart_service.clearAllCart();
+    if (result) {
+      result.subscribe();
     }
   }
 

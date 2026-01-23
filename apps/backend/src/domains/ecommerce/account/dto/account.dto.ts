@@ -20,6 +20,14 @@ export class UpdateProfileDto {
     @IsOptional()
     @IsString()
     document_number?: string;
+
+    @IsOptional()
+    @IsString()
+    avatar_url?: string;
+
+    @IsOptional()
+    @IsString()
+    username?: string;
 }
 
 export class ChangePasswordDto {
@@ -60,4 +68,42 @@ export class CreateAddressDto {
 
     @IsOptional()
     is_primary?: boolean;
+
+    @IsOptional()
+    @IsString()
+    type?: string;
+}
+
+export class UpdateAddressDto {
+    @IsString()
+    address_line1: string;
+
+    @IsOptional()
+    @IsString()
+    address_line2?: string;
+
+    @IsString()
+    city: string;
+
+    @IsOptional()
+    @IsString()
+    state_province?: string;
+
+    @IsString()
+    country_code: string;
+
+    @IsOptional()
+    @IsString()
+    postal_code?: string;
+
+    @IsOptional()
+    @IsString()
+    phone_number?: string;
+
+    @IsOptional()
+    is_primary?: boolean;
+
+    @IsOptional()
+    @IsString()
+    type?: string;
 }

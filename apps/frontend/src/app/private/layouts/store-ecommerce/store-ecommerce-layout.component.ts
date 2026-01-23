@@ -18,6 +18,7 @@ import { StoreUiService } from '../../modules/ecommerce/services/store-ui.servic
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
+import { QuantityControlComponent } from '../../../shared/components/quantity-control/quantity-control.component';
 
 @Component({
   selector: 'app-store-ecommerce-layout',
@@ -28,6 +29,7 @@ import { AuthModalComponent } from './components/auth-modal/auth-modal.component
     SearchAutocompleteComponent,
     IconComponent,
     AuthModalComponent,
+    QuantityControlComponent,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
@@ -242,16 +244,11 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     }
   }
 
-  updateCartQuantity(item: any, change: number): void {
-    const newQuantity = item.quantity + change;
+  updateCartQuantity(item: any, newQuantity: number): void {
+    if (newQuantity === item.quantity) return;
     if (newQuantity <= 0) {
       this.removeCartItem(item);
     } else {
-      // Manual subscription handling since takeUntilDestroyed needs injection context usually
-      // or we can just subscribe directly if we don't care about leakage for single-shot actions.
-      // Better approach: use a helper or just check the observable properly.
-      // For simplicity/correctness without injection context error, we'll use a direct subscribe pattern
-      // but strictly we should use first() or take(1).
       const sub = this.is_authenticated$.subscribe(isAuth => {
         if (isAuth) {
           this.cart_service.updateItem(item.id, newQuantity).subscribe();

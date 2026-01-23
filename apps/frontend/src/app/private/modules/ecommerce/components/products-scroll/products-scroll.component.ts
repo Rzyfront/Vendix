@@ -23,6 +23,7 @@ export class ProductsScrollComponent implements AfterViewInit, OnDestroy {
 
   @Output() add_to_cart = new EventEmitter<Product>();
   @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Output() quick_view = new EventEmitter<Product>();
 
   products: Product[] = [];
   is_loading = false;
@@ -101,5 +102,9 @@ export class ProductsScrollComponent implements AfterViewInit, OnDestroy {
 
   onToggleWishlist(product: Product): void {
     this.toggle_wishlist.emit(product);
+  }
+
+  onQuickView(product: Product): void {
+    this.quick_view.emit(product);
   }
 }

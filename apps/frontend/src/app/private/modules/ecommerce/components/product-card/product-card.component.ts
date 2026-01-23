@@ -4,11 +4,11 @@ import { RouterModule } from '@angular/router';
 import { Product } from '../../services/catalog.service';
 
 @Component({
-    selector: 'app-product-card',
-    standalone: true,
-    imports: [CommonModule, RouterModule],
-    template: `
-    <article class="product-card" [routerLink]="['/catalog', product.slug]">
+  selector: 'app-product-card',
+  standalone: true,
+  imports: [CommonModule, RouterModule],
+  template: `
+    <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
         @if (product.image_url) {
           <img [src]="product.image_url" [alt]="product.name" loading="lazy">
@@ -42,7 +42,7 @@ import { Product } from '../../services/catalog.service';
       </button>
     </article>
   `,
-    styles: [`
+  styles: [`
     .product-card {
       background: var(--color-surface);
       border-radius: var(--radius-lg);
@@ -186,20 +186,31 @@ import { Product } from '../../services/catalog.service';
   `],
 })
 export class ProductCardComponent {
-    @Input() product!: Product;
-    @Input() in_wishlist = false;
-    @Output() add_to_cart = new EventEmitter<Product>();
-    @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Input() product!: Product;
+  @Input() in_wishlist = false;
+  @Output() add_to_cart = new EventEmitter<Product>();
+  @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Output() quick_view = new EventEmitter<Product>();
 
-    onAddToCart(event: Event): void {
-        event.stopPropagation();
-        event.preventDefault();
-        this.add_to_cart.emit(this.product);
+  onQuickView(event: Event): void {
+    // Let clicks on buttons/links propagate normally to their handlers
+    const target = event.target as HTMLElement;
+    if (target.closest('button') || target.closest('a')) {
+      return;
     }
+    event.preventDefault();
+    this.quick_view.emit(this.product);
+  }
 
-    onWishlistClick(event: Event): void {
-        event.stopPropagation();
-        event.preventDefault();
-        this.toggle_wishlist.emit(this.product);
-    }
+  onAddToCart(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.add_to_cart.emit(this.product);
+  }
+
+  onWishlistClick(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.toggle_wishlist.emit(this.product);
+  }
 }

@@ -6,6 +6,7 @@ export enum ProductSortBy {
   PRICE_ASC = 'price_asc',
   PRICE_DESC = 'price_desc',
   NEWEST = 'newest',
+  OLDEST = 'oldest',
   BEST_SELLING = 'best_selling',
 }
 
