@@ -94,19 +94,22 @@ export class PosCreditTermsDto {
 }
 
 export class CreatePosPaymentDto {
-  // Datos del cliente
+  // Datos del cliente (opcionales para ventas anónimas)
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  customer_id: number;
+  customer_id?: number;
 
+  @IsOptional()
   @IsString()
   @MaxLength(255)
-  customer_name: string;
+  customer_name?: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(255)
-  customer_email: string;
+  customer_email?: string;
 
   @IsOptional()
   @IsString()

@@ -42,11 +42,9 @@ export class SettingsService {
       return getDefaultStoreSettings();
     }
 
-    try {
-      return this.validateSettings(storeSettings.settings);
-    } catch (error) {
-      return getDefaultStoreSettings();
-    }
+    // Retornar los settings guardados directamente sin validación estricta
+    // Esto permite que los settings antiguos sigan funcionando
+    return storeSettings.settings as StoreSettings;
   }
 
   async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
@@ -58,12 +56,17 @@ export class SettingsService {
     }
 
     const currentSettings = await this.getSettings();
-    const updatedSettings = {
-      ...currentSettings,
-      ...dto,
-    };
 
-    await this.validateSettings(updatedSettings);
+    // Solo validar las secciones que se están actualizando
+    await this.validatePartialSettings(dto);
+
+    // Merge solo las secciones enviadas
+    const updatedSettings = { ...currentSettings };
+    for (const key of Object.keys(dto)) {
+      if (dto[key as keyof UpdateSettingsDto] !== undefined) {
+        (updatedSettings as any)[key] = dto[key as keyof UpdateSettingsDto];
+      }
+    }
 
     // NUEVO: Actualizar campos de la tabla stores si vienen en general
     if (dto.general) {
@@ -284,11 +287,18 @@ export class SettingsService {
     }
   }
 
-  private validateSettings(settings: any): StoreSettings {
-    const dto = new UpdateSettingsDto();
-    Object.assign(dto, settings);
+  private async validatePartialSettings(dto: UpdateSettingsDto): Promise<void> {
+    // Validar solo las secciones que se están enviando (no son undefined)
+    const partialDto = new UpdateSettingsDto();
 
-    const errors = validateSync(dto, {
+    for (const key of Object.keys(dto)) {
+      const value = dto[key as keyof UpdateSettingsDto];
+      if (value !== undefined) {
+        (partialDto as any)[key] = value;
+      }
+    }
+
+    const errors = validateSync(partialDto, {
       whitelist: true,
       forbidNonWhitelisted: true,
       stopAtFirstError: false,
@@ -299,8 +309,6 @@ export class SettingsService {
         `Invalid settings structure: ${errors.map((e) => e.toString()).join(', ')}`,
       );
     }
-
-    return settings as StoreSettings;
   }
 
   async create(data: any) {

@@ -486,7 +486,7 @@ model order_items {
 model orders {
   id                                              Int                      @id @default(autoincrement())
   store_id                                        Int
-  customer_id                                     Int
+  customer_id                                     Int?
   order_number                                    String                   @db.VarChar(50)
   shipping_address_id                             Int?
   billing_address_id                              Int?
@@ -506,10 +506,10 @@ model orders {
   placed_at                                       DateTime?                @db.Timestamp(6)
   completed_at                                    DateTime?                @db.Timestamp(6)
   order_items                                     order_items[]
-  addresses_orders_billing_address_idToaddresses  addresses?               @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  addresses_orders_shipping_address_idToaddresses addresses?               @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                          stores                   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  users                                           users                    @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  users                                           users?           @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
 

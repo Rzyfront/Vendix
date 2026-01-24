@@ -135,6 +135,8 @@ export interface NotificationsSettings {
 }
 
 export interface PosSettings {
+  allow_anonymous_sales: boolean;
+  anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   offline_mode_enabled: boolean;
   require_cash_drawer_open: boolean;

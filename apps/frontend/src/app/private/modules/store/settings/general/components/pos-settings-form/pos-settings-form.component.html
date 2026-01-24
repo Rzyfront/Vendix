@@ -10,6 +10,54 @@
       </p>
     </div>
 
+    <!-- Anonymous Sales Settings -->
+    <div class="border-t border-gray-200 pt-6">
+      <h4 class="text-sm font-semibold text-gray-900 mb-4">
+        Ventas Anónimas
+      </h4>
+
+      <div class="space-y-4">
+        <!-- Allow Anonymous Sales -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Permitir Ventas Anónimas</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Permite realizar ventas sin registrar información del cliente
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="allowAnonymousSalesControl"
+            (changed)="onFieldChange()"
+            ariaLabel="Permitir ventas anónimas"
+          ></app-toggle>
+        </div>
+
+        <!-- Anonymous Sales as Default -->
+        <div
+          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+        >
+          <div>
+            <label class="text-sm font-medium text-gray-900"
+              >Ventas Anónimas por Defecto</label
+            >
+            <p class="text-sm text-gray-600 mt-1">
+              Usa ventas anónimas como el tipo de venta predeterminado
+            </p>
+          </div>
+          <app-toggle
+            [formControl]="anonymousSalesAsDefaultControl"
+            (changed)="onFieldChange()"
+            [disabled]="!allowAnonymousSalesControl.value"
+            ariaLabel="Ventas anónimas por defecto"
+          ></app-toggle>
+        </div>
+      </div>
+    </div>
+
     <!-- Business Hours -->
     <div class="border-t border-gray-200 pt-6">
       <h4 class="text-sm font-semibold text-gray-900 mb-4">

@@ -58,6 +58,7 @@ export function hydrateAuthState(): Partial<AuthState> {
       return {
         user: parsedState.user,
         user_settings: parsedState.user_settings,
+        store_settings: parsedState.store_settings, // CRITICAL: Restore store_settings
         tokens: parsedState.tokens,
         roles: parsedState.user.roles || parsedState.roles || [],
         permissions: parsedState.permissions || [],
@@ -104,6 +105,7 @@ export function saveAuthState(state: AuthState): void {
       const stateToSave = {
         user: state.user,
         user_settings: state.user_settings,
+        store_settings: state.store_settings,
         tokens: state.tokens,
         roles: state.roles,
         permissions: state.permissions,

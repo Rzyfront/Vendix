@@ -84,6 +84,9 @@ export class AuthFacade {
     AuthSelectors.selectUserStoreSlug,
   );
 
+  // Store settings observables
+  readonly storeSettings$ = this.store.select(AuthSelectors.selectStoreSettings);
+
   // Panel UI observables
   readonly panelUiConfig$ = this.store.select(
     AuthSelectors.selectPanelUiConfig,
@@ -376,6 +379,19 @@ export class AuthFacade {
     this.store.dispatch(
       AuthActions.updateUserSettings({ user_settings: userSettings }),
     );
+  }
+
+  // Store settings methods
+  updateStoreSettings(storeSettings: any): void {
+    this.store.dispatch(
+      AuthActions.updateStoreSettingsSuccess({ store_settings: storeSettings }),
+    );
+  }
+
+  getStoreSettings(): any {
+    let result: any = null;
+    this.storeSettings$.pipe(take(1)).subscribe((settings) => (result = settings));
+    return result;
   }
 
   getUserId(): number | null {

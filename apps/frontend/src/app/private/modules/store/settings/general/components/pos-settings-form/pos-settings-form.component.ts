@@ -17,6 +17,8 @@ export interface BusinessHours {
 }
 
 export interface PosSettings {
+  allow_anonymous_sales: boolean;
+  anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   offline_mode_enabled: boolean;
   require_cash_drawer_open: boolean;
@@ -39,6 +41,8 @@ export class PosSettingsForm implements OnInit, OnChanges {
   @Output() settingsChange = new EventEmitter<PosSettings>();
 
   form: FormGroup = new FormGroup({
+    allow_anonymous_sales: new FormControl(false),
+    anonymous_sales_as_default: new FormControl(false),
     business_hours: new FormControl(this.getDefaultBusinessHours()),
     offline_mode_enabled: new FormControl(false),
     require_cash_drawer_open: new FormControl(false),
@@ -60,6 +64,14 @@ export class PosSettingsForm implements OnInit, OnChanges {
   ];
 
   // Typed getters for FormControls
+  get allowAnonymousSalesControl(): FormControl<boolean> {
+    return this.form.get('allow_anonymous_sales') as FormControl<boolean>;
+  }
+
+  get anonymousSalesAsDefaultControl(): FormControl<boolean> {
+    return this.form.get('anonymous_sales_as_default') as FormControl<boolean>;
+  }
+
   get offlineModeEnabledControl(): FormControl<boolean> {
     return this.form.get('offline_mode_enabled') as FormControl<boolean>;
   }

@@ -171,8 +171,7 @@ export class SelectorComponent
   get containerClasses(): string {
     return [
       'w-full',
-      // 'mt-4' removed to allow proper alignment in tables. 
-      // Add margin in parent if needed (e.g. forms).
+      'mt-4', // Add margin-top to align with InputComponent
     ]
       .filter(Boolean)
       .join(' ');

@@ -1,23 +1,29 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, Subject, BehaviorSubject } from 'rxjs';
+import { Observable, Subject, BehaviorSubject, throwError } from 'rxjs';
 import {
   debounceTime,
   distinctUntilChanged,
   switchMap,
   takeUntil,
+  map,
+  catchError,
 } from 'rxjs/operators';
+import { environment } from '../../../../../../../environments/environment';
+import { Store } from '@ngrx/store';
 import {
   ApiResponse,
   StoreSettings,
 } from '../../../../../../core/models/store-settings.interface';
+import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
 
 @Injectable({
   providedIn: 'root',
 })
 export class StoreSettingsService {
   private http = inject(HttpClient);
-  private api_url = '/api';
+  private store = inject(Store);
+  private readonly api_base_url = `${environment.apiUrl}/store`;
 
   private save_settings$$ = new Subject<Partial<StoreSettings>>();
   private destroy$$ = new Subject<void>();
@@ -42,16 +48,24 @@ export class StoreSettingsService {
       .subscribe({
         next: (response) => {
           console.log('Settings saved successfully:', response);
+          // Update local BehaviorSubject
           this.settings$$.next(response.data);
+          // Dispatch success action directly to update NgRx store
+          this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings: response.data }));
         },
         error: (error) => console.error('Error saving settings:', error),
       });
   }
 
   getSettings(): Observable<ApiResponse<StoreSettings>> {
-    return this.http.get<ApiResponse<StoreSettings>>(
-      `${this.api_url}/store/settings`,
-    );
+    return this.http
+      .get<ApiResponse<StoreSettings>>(
+        `${this.api_base_url}/settings`,
+      )
+      .pipe(
+        map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
   }
 
   saveSettings(settings: Partial<StoreSettings>): void {
@@ -65,32 +79,67 @@ export class StoreSettingsService {
   }
 
   resetToDefault(): Observable<ApiResponse<StoreSettings>> {
-    return this.http.post<ApiResponse<StoreSettings>>(
-      `${this.api_url}/store/settings/reset`,
-      {},
-    );
+    return this.http
+      .post<ApiResponse<StoreSettings>>(
+        `${this.api_base_url}/settings/reset`,
+        {},
+      )
+      .pipe(
+        map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
   }
 
   getSystemTemplates(): Observable<ApiResponse<any[]>> {
-    return this.http.get<ApiResponse<any[]>>(
-      `${this.api_url}/store/settings/templates`,
-    );
+    return this.http
+      .get<ApiResponse<any[]>>(
+        `${this.api_base_url}/settings/templates`,
+      )
+      .pipe(
+        map((response) => response || { success: true, data: [] }),
+        catchError(this.handleError)
+      );
   }
 
   applyTemplate(template_name: string): Observable<ApiResponse<StoreSettings>> {
-    return this.http.post<ApiResponse<StoreSettings>>(
-      `${this.api_url}/store/settings/apply-template`,
-      { template_name },
-    );
+    return this.http
+      .post<ApiResponse<StoreSettings>>(
+        `${this.api_base_url}/settings/apply-template`,
+        { template_name },
+      )
+      .pipe(
+        map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
   }
 
   private update_settings_api(
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {
-    return this.http.patch<ApiResponse<StoreSettings>>(
-      `${this.api_url}/store/settings`,
-      settings,
-    );
+    return this.http
+      .patch<ApiResponse<StoreSettings>>(
+        `${this.api_base_url}/settings`,
+        settings,
+      )
+      .pipe(
+        map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
+  }
+
+  private handleError(error: any): Observable<never> {
+    let error_message = 'An unknown error occurred';
+
+    if (error.error instanceof ErrorEvent) {
+      error_message = error.error.message;
+    } else if (error.error && error.error.message) {
+      error_message = error.error.message;
+    } else if (error.message) {
+      error_message = error.message;
+    }
+
+    console.error('StoreSettingsService error:', error);
+    return throwError(() => new Error(error_message));
   }
 
   ngOnDestroy() {

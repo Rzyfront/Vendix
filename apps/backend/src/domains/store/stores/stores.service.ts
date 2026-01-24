@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
 
 @Injectable()
 export class StoresService {
@@ -65,40 +66,35 @@ export class StoresService {
       },
     });
 
-    const signedStore = {
-      ...store,
-      logo_url: await this.s3Service.signUrl((store as any).logo_url),
+    // Always create store_settings with defaults or provided settings
+    const settingsToCreate = settings && Object.keys(settings).length > 0
+      ? settings
+      : getDefaultStoreSettings();
+
+    await this.prisma.store_settings.create({
+      data: {
+        store_id: store.id,
+        settings: settingsToCreate,
+      },
+    });
+
+    // Refetch to include settings
+    const refetched = await this.prisma.stores.findUnique({
+      where: { id: store.id },
+      include: {
+        organizations: { select: { id: true, name: true, slug: true } },
+        addresses: true,
+        store_settings: true,
+        _count: {
+          select: { products: true, orders: true, store_users: true },
+        },
+      },
+    });
+
+    return {
+      ...refetched,
+      logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
     };
-
-    // Create store settings if provided
-    if (settings && Object.keys(settings).length > 0) {
-      await this.prisma.store_settings.create({
-        data: {
-          store_id: store.id,
-          settings,
-        },
-      });
-
-      // Refetch to include settings
-      const refetched = await this.prisma.stores.findUnique({
-        where: { id: store.id },
-        include: {
-          organizations: { select: { id: true, name: true, slug: true } },
-          addresses: true,
-          store_settings: true,
-          _count: {
-            select: { products: true, orders: true, store_users: true },
-          },
-        },
-      });
-
-      return {
-        ...refetched,
-        logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
-      };
-    }
-
-    return signedStore;
   }
 
   async findAll(query: StoreQueryDto) {

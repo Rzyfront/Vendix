@@ -32,6 +32,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       new_order_alerts_phone: null,
     },
     pos: {
+      allow_anonymous_sales: false,
+      anonymous_sales_as_default: false,
       business_hours: getDefaultBusinessHours(),
       offline_mode_enabled: false,
       require_cash_drawer_open: false,

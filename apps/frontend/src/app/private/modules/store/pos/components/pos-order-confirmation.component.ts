@@ -296,9 +296,6 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
     this.customerEmail = this.orderData.customer_email || '';
     this.customerTaxId = this.orderData.customer_tax_id || this.orderData.customer?.tax_id || this.orderData.customer?.document_number || '';
 
-    console.log('Order data customer:', this.orderData.customer);
-    console.log('Customer tax_id:', this.customerTaxId);
-
     this.orderItems = (this.orderData.items || []).map((item: any) => {
       const unitPrice = Number(item.unit_price || item.unitPrice || 0);
       const quantity = Number(item.quantity || 0);
@@ -312,8 +309,6 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         tax,
       };
     });
-
-    console.log('Order items with tax:', this.orderItems);
 
     this.orderSubtotal = Number(this.orderData.subtotal || 0);
     this.orderDiscount = Number(this.orderData.discount_amount || this.orderData.discount || 0);
