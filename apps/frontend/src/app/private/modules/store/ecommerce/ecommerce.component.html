@@ -46,10 +46,20 @@
 
           <!-- Header Actions -->
           <div class="flex items-center gap-3">
-            <app-button variant="outline" size="sm" (clicked)="onReset()"
+            <!-- Botón Restablecer (solo en modo setup) -->
+            <app-button *ngIf="isSetupMode" variant="outline" size="sm" (clicked)="onReset()"
               [disabled]="isSaving || settingsForm.pristine">
               Restablecer
             </app-button>
+
+            <!-- Botón Abrir Tienda (solo en modo edit, cuando la tienda ya está creada) -->
+            <app-button *ngIf="isEditMode && ecommerceUrl" variant="outline" size="sm" (clicked)="openEcommerceStore()"
+              [disabled]="!ecommerceUrl">
+              <app-icon name="external-link" size="16" slot="icon"></app-icon>
+              <span>Abrir Tienda</span>
+            </app-button>
+
+            <!-- Botón Guardar -->
             <app-button variant="primary" size="sm" (clicked)="onSubmit()"
               [disabled]="isSaving || settingsForm.pristine" [loading]="isSaving">
               <ng-container *ngIf="!isSaving" slot="icon">

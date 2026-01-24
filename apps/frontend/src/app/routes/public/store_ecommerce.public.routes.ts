@@ -114,6 +114,13 @@ export const storeEcommercePublicRoutes: Routes = [
           ).then((c) => c.CartComponent),
       },
       {
+        path: 'wishlist',
+        loadComponent: () =>
+          import(
+            '../../private/modules/ecommerce/pages/wishlist/wishlist.component'
+          ).then((c) => c.WishlistComponent),
+      },
+      {
         path: 'checkout',
         canActivate: [AuthGuard],
         loadComponent: () =>

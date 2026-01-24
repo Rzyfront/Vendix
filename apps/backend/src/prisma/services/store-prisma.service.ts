@@ -20,6 +20,8 @@ export class StorePrismaService extends BasePrismaService {
     'store_payment_methods',
     'addresses',
     'domain_settings',
+    'shipping_zones',
+    'shipping_methods',
   ];
 
   constructor() {
@@ -67,6 +69,7 @@ export class StorePrismaService extends BasePrismaService {
       'stock_reservations', // Relational
       'inventory_transactions', // Relational
       'purchase_orders', // Relational
+      'shipping_rates', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -137,6 +140,7 @@ export class StorePrismaService extends BasePrismaService {
       'purchase_orders': { location: { store_id: context.store_id } },
       'inventory_movements': { products: { store_id: context.store_id } },
       'inventory_transactions': { products: { store_id: context.store_id } },
+      'shipping_rates': { shipping_zone: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -374,6 +378,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get domain_settings() {
     return this.scoped_client.domain_settings;
+  }
+
+  get shipping_zones() {
+    return this.scoped_client.shipping_zones;
+  }
+
+  get shipping_methods() {
+    return this.scoped_client.shipping_methods;
+  }
+
+  get shipping_rates() {
+    return this.scoped_client.shipping_rates;
   }
 
   // Global tables (no store scoping)

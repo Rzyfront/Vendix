@@ -20,7 +20,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_partial_payments: false,
       require_payment_confirmation: true,
     },
-    shipping: getDefaultShippingSettings(),
+    shipping: {
+      enabled: true,
+      default_weight_unit: 'kg',
+      default_dimension_unit: 'cm',
+    },
     notifications: {
       email_enabled: true,
       sms_enabled: false,
@@ -52,62 +56,9 @@ export function getDefaultStoreSettings(): StoreSettings {
   };
 }
 
-const correosCarrier = {
-  id: 'correos' as const,
-  name: 'Correos de Chile',
-  type: 'correos' as const,
-  enabled: true,
-  config: {
-    tracking_enabled: true,
-    estimated_days_min: 2,
-    estimated_days_max: 5,
-    requires_signature: false,
-    requires_insurance: false,
-    max_weight: null,
-    max_dimensions: null,
-  },
-} as const;
 
-const estafetaCarrier = {
-  id: 'estafeta' as const,
-  name: 'Estafeta',
-  type: 'estafeta' as const,
-  enabled: true,
-  config: {
-    tracking_enabled: true,
-    estimated_days_min: 1,
-    estimated_days_max: 3,
-    requires_signature: true,
-    requires_insurance: false,
-    max_weight: null,
-    max_dimensions: null,
-  },
-} as const;
 
-function getDefaultShippingSettings() {
-  return {
-    enabled: true,
-    free_shipping_threshold: 0,
-    allow_pickup: true,
-    default_shipping_method: 'standard',
-    shipping_zones: [],
-    shipping_types: {
-      standard: {
-        enabled: true,
-        carriers: [correosCarrier, estafetaCarrier],
-      },
-      express: {
-        enabled: false,
-        carriers: [],
-      },
-      local: {
-        enabled: false,
-        allow_manual: false,
-        delivery_providers: [],
-      },
-    },
-  };
-}
+
 
 function getDefaultBusinessHours(): Record<
   string,

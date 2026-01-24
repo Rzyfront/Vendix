@@ -330,6 +330,8 @@ model stores {
   carts                 carts[]
   wishlists             wishlists[]
   main_store_users      users[]                 @relation("main_store")
+  shipping_zones        shipping_zones[]
+  shipping_methods      shipping_methods[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -500,6 +502,7 @@ model orders {
   grand_total                                     Decimal                  @default(0.00) @db.Decimal(12, 2)
   state                                           order_state_enum         @default(created)
   delivery_type                                   order_delivery_type_enum @default(direct_delivery)
+  shipping_method_id                              Int?
   internal_notes                                  String?
   created_at                                      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                                      DateTime?                @default(now()) @db.Timestamp(6)
@@ -512,6 +515,7 @@ model orders {
   users                                           users?           @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
+  shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -1180,6 +1184,70 @@ model return_order_items {
   @@index([return_order_id, product_id])
 }
 
+// ===== SHIPPING & LOGISTICS DOMAIN =====
+
+model shipping_zones {
+  id             Int              @id @default(autoincrement())
+  store_id       Int
+  name           String           @db.VarChar(100)
+  display_name   String?          @db.VarChar(100)
+  countries      String[] // Array of ISO country codes
+  regions        String[] // Array of region/state codes
+  cities         String[] // Specific cities if needed
+  zip_codes      String[] // Zip code patterns
+  is_active      Boolean          @default(true)
+  created_at     DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamp(6)
+  store          stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates shipping_rates[]
+
+  @@index([store_id])
+}
+
+model shipping_methods {
+  id             Int                       @id @default(autoincrement())
+  store_id       Int
+  name           String                    @db.VarChar(100)
+  code           String?                   @db.VarChar(50)
+  description    String?
+  logo_url       String?
+  type           shipping_method_type_enum @default(custom)
+  provider_name  String?                   @db.VarChar(50) // e.g., "fedex", "uber"
+  tracking_url   String?
+  min_days       Int?
+  max_days       Int?
+  is_active      Boolean                   @default(true)
+  display_order  Int                       @default(0)
+  created_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  store          stores                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates shipping_rates[]
+  orders         orders[]
+
+  @@index([store_id])
+}
+
+model shipping_rates {
+  id                      Int                     @id @default(autoincrement())
+  shipping_zone_id        Int
+  shipping_method_id      Int
+  name                    String?                 @db.VarChar(100)
+  type                    shipping_rate_type_enum @default(flat)
+  base_cost               Decimal                 @default(0.00) @db.Decimal(12, 2)
+  per_unit_cost           Decimal?                @default(0.00) @db.Decimal(12, 2) // Price per kg or per item
+  min_val                 Decimal?                @db.Decimal(12, 2) // Min condition (weight/price)
+  max_val                 Decimal?                @db.Decimal(12, 2) // Max condition (weight/price)
+  free_shipping_threshold Decimal?                @db.Decimal(12, 2)
+  is_active               Boolean                 @default(true)
+  created_at              DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?               @default(now()) @db.Timestamp(6)
+  shipping_zone           shipping_zones          @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
+  shipping_method         shipping_methods        @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+
+  @@index([shipping_zone_id])
+  @@index([shipping_method_id])
+}
+
 // ===== ECOMMERCE MODELS =====
 
 model carts {
@@ -1585,4 +1653,20 @@ enum template_config_type_enum {
   notifications
   user_panel_ui
   user_settings
+}
+
+enum shipping_method_type_enum {
+  custom
+  pickup
+  own_fleet
+  carrier
+  third_party_provider
+}
+
+enum shipping_rate_type_enum {
+  flat
+  weight_based
+  price_based
+  carrier_calculated
+  free
 }

@@ -95,4 +95,12 @@
         </div>
     </div>
     }
+
+    @if (recommendedProducts().length > 0) {
+    <app-product-carousel title="Agrega ofertas imperdibles a tu compra" [products]="recommendedProducts()"
+        (quick_view)="onQuickView($event)" (add_to_cart)="onAddToCartFromSlider($event)" />
+    }
+
+    <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
+        (closed)="quickViewOpen = false" (addedToCart)="onAddToCartFromSlider($event)" />
 </div>

@@ -97,6 +97,7 @@ export class DefaultPanelUIService {
       settings_appearance: true,
       settings_security: true,
       settings_domains: true,
+      settings_shipping: true,
     },
 
     /**
@@ -129,7 +130,7 @@ export class DefaultPanelUIService {
     VENDIX_LANDING: 'user_settings_landing',
   };
 
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(private readonly prisma: GlobalPrismaService) { }
 
   /**
    * Obtiene la configuración de panel UI para un tipo de aplicación

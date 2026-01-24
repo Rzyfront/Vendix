@@ -242,6 +242,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/settings/domains',
         },
+        {
+          label: 'Envíos',
+          icon: 'circle',
+          route: '/admin/settings/shipping',
+        },
       ],
     },
   ];

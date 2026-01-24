@@ -96,6 +96,11 @@ export class AuthGuard implements CanActivate {
    * Check if the user has the required role for the route
    */
   private hasRolePermission(path: string): boolean {
+    // Account routes - accessible to any authenticated user
+    if (path.startsWith('/account')) {
+      return true;
+    }
+
     const userRoles = this.authFacade.getRoles();
 
     // Si no hay roles, denegar acceso a rutas protegidas
@@ -127,11 +132,6 @@ export class AuthGuard implements CanActivate {
       return storeRoles.some((role) => userRoles.includes(role));
     }
 
-    // Account routes - customer
-    if (path.startsWith('/account')) {
-      return userRoles.includes('customer');
-    }
-
     // Por defecto, permitir si está autenticado
     return true;
   }
@@ -151,7 +151,7 @@ export class AuthGuard implements CanActivate {
     }
 
     if (userRoles.some((r) => ['supervisor', 'employee'].includes(r))) {
-      return this.router.createUrlTree(['/store/dashboard']);
+      return this.router.createUrlTree(['/admin/dashboard']);
     }
 
     // Default fallback

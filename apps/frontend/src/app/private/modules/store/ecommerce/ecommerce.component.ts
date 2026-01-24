@@ -63,6 +63,9 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   // Store info for auto-fill
   storeName = 'Mi Tienda';
 
+  // Ecommerce URL for "Open Store" button
+  ecommerceUrl: string | null = null;
+
   constructor(
     private fb: FormBuilder,
     private ecommerceService: EcommerceService,
@@ -182,10 +185,14 @@ export class EcommerceComponent implements OnInit, OnDestroy {
                   caption: photo.caption,
                 }));
             }
+
+            // Obtener la URL de la Ecommerce desde la respuesta del endpoint
+            this.ecommerceUrl = response.ecommerceUrl || null;
           } else {
             // MODO SETUP: no existe configuración
             this.isSetupMode = true;
             this.isEditMode = false;
+            this.ecommerceUrl = null;
             this.loadTemplate();
           }
           this.isLoading = false;
@@ -521,6 +528,17 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       this.loadSettings();
     }
     this.settingsForm.markAsPristine();
+  }
+
+  /**
+   * Open the Ecommerce store in a new tab
+   */
+  openEcommerceStore(): void {
+    if (this.ecommerceUrl) {
+      window.open(this.ecommerceUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      this.toastService.warning('No se pudo obtener la URL de la tienda');
+    }
   }
 
   /**

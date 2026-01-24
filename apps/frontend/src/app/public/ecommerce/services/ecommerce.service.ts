@@ -1,8 +1,8 @@
 import { environment } from '../../../../environments/environment';
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Observable, of, forkJoin } from 'rxjs';
+import { map, switchMap, catchError } from 'rxjs/operators';
 
 export interface Product {
   id: number;
@@ -48,7 +48,7 @@ export interface Order {
 export class EcommerceService {
   private apiUrl = `${environment.apiUrl}/ecommerce`;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   // Productos
   getProducts(params?: {
@@ -90,16 +90,67 @@ export class EcommerceService {
 
   // Carrito
   getCart(): Observable<CartItem[]> {
-    // En producción, esto vendría del backend
-    const cart = localStorage.getItem('ecommerce_cart');
-    return new Observable((observer) => {
-      if (cart) {
-        observer.next(JSON.parse(cart));
-      } else {
-        observer.next([]);
-      }
-      observer.complete();
-    });
+    const cartJson = localStorage.getItem('ecommerce_cart');
+    const cart: CartItem[] = cartJson ? JSON.parse(cartJson) : [];
+
+    if (cart.length === 0) {
+      return of([]);
+    }
+
+    const productIds = [...new Set(cart.map((item) => item.product.id))];
+    const params = {
+      ids: productIds.join(','),
+      limit: productIds.length.toString(),
+    };
+
+    // Usamos el endpoint de catalog que sí soporta signed URLs y está verificado
+    return this.http.get<any>(`${this.apiUrl}/catalog`, { params }).pipe(
+      map((response) => {
+        const freshProducts: Product[] = response.data || [];
+
+        // Actualizamos los items del carrito con la info fresca (especialmente URLs de imágenes)
+        const updatedCart = cart.map((item) => {
+          const freshProduct = freshProducts.find((p) => p.id === item.product.id);
+          if (freshProduct) {
+            // Mapeamos los campos del backend a los del frontend
+            const freshAny = freshProduct as any;
+            const price = freshAny.is_on_sale && freshAny.sale_price
+              ? Number(freshAny.sale_price)
+              : Number(freshAny.base_price);
+
+            const originalPrice = freshAny.is_on_sale
+              ? Number(freshAny.base_price)
+              : undefined;
+
+            return {
+              ...item,
+              product: {
+                ...item.product, // Mantener campos existentes
+                ...freshProduct, // Sobreescribir con frescos
+                // Corrección de campos específicos
+                name: freshAny.name || item.product.name,
+                image: freshAny.image_url || item.product.image,
+                price: price || item.product.price,
+                originalPrice: originalPrice,
+                stock: freshAny.stock_quantity ?? item.product.stock,
+                onSale: freshAny.is_on_sale ?? item.product.onSale,
+                description: freshAny.description || item.product.description || ''
+              }
+            };
+          }
+          return item;
+        });
+
+        // Actualizamos el localStorage con la data fresca
+        localStorage.setItem('ecommerce_cart', JSON.stringify(updatedCart));
+        return updatedCart;
+      }),
+      catchError((error) => {
+        console.error('Error refreshing cart data', error);
+        // En caso de error (e.g. offline), retornamos lo que hay en caché
+        return of(cart);
+      })
+    );
   }
 
   addToCart(product: Product, quantity: number = 1): Observable<CartItem[]> {

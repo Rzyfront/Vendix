@@ -108,6 +108,7 @@ export interface SliderImage {
 export interface SettingsResponse {
   exists: boolean;
   config?: EcommerceSettings;
+  ecommerceUrl?: string; // URL del dominio de Ecommerce activo
 }
 
 /**

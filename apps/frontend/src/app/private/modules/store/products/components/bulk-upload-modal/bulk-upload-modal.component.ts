@@ -117,6 +117,9 @@ import {
               <p class="text-gray-500 text-sm mt-1">
                 o haz clic para seleccionar
               </p>
+              <p class="text-xs text-indigo-500 mt-2 font-medium">
+                Máximo 1000 productos por archivo
+              </p>
             </div>
 
             <div *ngIf="selectedFile">
@@ -464,6 +467,14 @@ export class BulkUploadModalComponent {
           return;
         }
 
+        if (rawData.length > 1000) {
+          this.toastService.error(
+            `El archivo excede el límite de 1000 productos (tiene ${rawData.length}). Por favor divídelo en varios archivos.`,
+          );
+          this.resetState();
+          return;
+        }
+
         // Mapeo de encabezados (similar al backend para consistencia)
         this.parsedData = rawData
           .map((item: any) => {
@@ -476,15 +487,19 @@ export class BulkUploadModalComponent {
             const cost_price = parseFloat(
               item['Precio Compra'] || item['Costo'] || item['cost_price'] || 0,
             );
-            const profit_margin = parseFloat(
+            let profit_margin = parseFloat(
               item['Margen'] || item['profit_margin'] || 0,
             );
+            // Auto-fix for decimal margins
+            if (profit_margin > 0 && profit_margin < 1) {
+              profit_margin = profit_margin * 100;
+            }
             const stock_quantity = parseFloat(
               item['Cantidad Inicial'] ||
-                item['Cantidad'] ||
-                item['stock_quantity'] ||
-                item['quantity'] ||
-                0,
+              item['Cantidad'] ||
+              item['stock_quantity'] ||
+              item['quantity'] ||
+              0,
             );
 
             const description = item['Descripción'] || item['description'];

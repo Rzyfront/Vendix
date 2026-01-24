@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -7,11 +7,17 @@ import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart } from '../../services/cart.service';
 import { CheckoutService, PaymentMethod, CheckoutRequest } from '../../services/checkout.service';
 import { AccountService, Address } from '../../services/account.service';
+import { CatalogService, Product } from '../../services/catalog.service';
+import { CountryService, Country, Department, City } from '../../../../../services/country.service';
+
+import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
+import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule],
+  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
 })
@@ -33,7 +39,22 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   step = 1; // 1: Address, 2: Payment, 3: Confirm
 
+  // Recommendations
+  recommendedProducts = signal<Product[]>([]);
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
+  // Location data (Country API)
+  countries: Country[] = [];
+  departments: Department[] = [];
+  cities: City[] = [];
+  loading_departments = false;
+  loading_cities = false;
+
   private destroy$ = new Subject<void>();
+  private catalogService = inject(CatalogService);
+  private countryService = inject(CountryService);
+  private cdr = inject(ChangeDetectorRef);
 
   constructor(
     private cart_service: CartService,
@@ -46,7 +67,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.setupLocationData();
     this.loadData();
+    this.loadRecommendations();
   }
 
   ngOnDestroy(): void {
@@ -64,6 +87,59 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       postal_code: [''],
       phone_number: ['', Validators.required],
     });
+  }
+
+  private setupLocationData(): void {
+    // Load countries
+    this.countries = this.countryService.getCountries();
+
+    // Setup listeners
+    const countryControl = this.address_form.get('country_code');
+    const depControl = this.address_form.get('state_province');
+    const cityControl = this.address_form.get('city');
+
+    countryControl?.valueChanges.subscribe((code: string) => {
+      if (code === 'CO') {
+        this.loadDepartments();
+      } else {
+        // Clear downstream data for non-Colombia countries
+        this.departments = [];
+        this.cities = [];
+        depControl?.setValue('');
+        cityControl?.setValue('');
+        this.cdr.markForCheck();
+      }
+    });
+
+    depControl?.valueChanges.subscribe((depId: any) => {
+      if (depId) {
+        const numericDepId = Number(depId);
+        if (!isNaN(numericDepId)) {
+          this.loadCities(numericDepId);
+        }
+      } else {
+        this.cities = [];
+        cityControl?.setValue('');
+        this.cdr.markForCheck();
+      }
+    });
+
+    // Load departments for default country
+    this.loadDepartments();
+  }
+
+  private async loadDepartments(): Promise<void> {
+    this.loading_departments = true;
+    this.departments = await this.countryService.getDepartments();
+    this.loading_departments = false;
+    this.cdr.markForCheck();
+  }
+
+  private async loadCities(depId: number): Promise<void> {
+    this.loading_cities = true;
+    this.cities = await this.countryService.getCitiesByDepartment(depId);
+    this.loading_cities = false;
+    this.cdr.markForCheck();
   }
 
   loadData(): void {
@@ -108,6 +184,21 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.is_loading = false;
         this.use_new_address = true;
       },
+    });
+  }
+
+  loadRecommendations(): void {
+    this.catalogService.getProducts({ limit: 10, sort_by: 'newest', has_discount: true }).subscribe({
+      next: (response) => {
+        if (response.data.length > 0) {
+          this.recommendedProducts.set(response.data);
+        } else {
+          // Fallback if no sales
+          this.catalogService.getProducts({ limit: 10, sort_by: 'newest' }).subscribe(res => {
+            this.recommendedProducts.set(res.data);
+          });
+        }
+      }
     });
   }
 
@@ -165,7 +256,31 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     };
 
     if (this.use_new_address) {
-      request.shipping_address = this.address_form.value;
+      // Convert IDs to names for backend compatibility
+      let addressValue = { ...this.address_form.value };
+
+      // For Colombia, convert department and city IDs to names
+      if (addressValue.country_code === 'CO') {
+        // Convert department ID to name
+        if (addressValue.state_province) {
+          const depId = Number(addressValue.state_province);
+          const department = this.departments.find(d => d.id === depId);
+          if (department) {
+            addressValue.state_province = department.name;
+          }
+        }
+
+        // Convert city ID to name
+        if (addressValue.city) {
+          const cityId = Number(addressValue.city);
+          const city = this.cities.find(c => c.id === cityId);
+          if (city) {
+            addressValue.city = city.name;
+          }
+        }
+      }
+
+      request.shipping_address = addressValue;
     } else if (this.selected_address_id) {
       request.shipping_address_id = this.selected_address_id;
     }
@@ -187,5 +302,55 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
+  }
+
+  onAddToCartFromSlider(product: Product): void {
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) result.subscribe();
+  }
+
+  // Helper getters for displaying selected location names in confirmation
+  getSelectedCountryName(): string {
+    const code = this.address_form.get('country_code')?.value;
+    const country = this.countries.find(c => c.code === code);
+    return country?.name || code || '';
+  }
+
+  getSelectedDepartmentName(): string {
+    const depId = Number(this.address_form.get('state_province')?.value);
+    const department = this.departments.find(d => d.id === depId);
+    return department?.name || this.address_form.get('state_province')?.value || '';
+  }
+
+  getSelectedCityName(): string {
+    const cityId = Number(this.address_form.get('city')?.value);
+    const city = this.cities.find(c => c.id === cityId);
+    return city?.name || this.address_form.get('city')?.value || '';
+  }
+
+  // Helper method for field validation errors
+  getFieldError(fieldName: string): string {
+    const control = this.address_form.get(fieldName);
+    if (!control || !control.touched || !control.errors) {
+      return '';
+    }
+
+    const errors = control.errors;
+    if (errors['required']) {
+      return 'Este campo es requerido';
+    }
+    if (errors['minlength']) {
+      return `Mínimo ${errors['minlength'].requiredLength} caracteres`;
+    }
+    if (errors['pattern']) {
+      return 'Formato inválido';
+    }
+
+    return '';
   }
 }

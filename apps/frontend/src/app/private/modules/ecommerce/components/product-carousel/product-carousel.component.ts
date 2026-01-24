@@ -40,6 +40,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                   @if (product.is_on_sale) {
                     <span class="sale-badge">Oferta</span>
                   }
+                  <button class="add-cart-btn" (click)="onAddToCart($event, product)" title="Agregar a la orden">
+                    <app-icon name="plus" [size]="16" />
+                  </button>
                 </div>
                 <div class="product-info">
                   <span class="product-brand" *ngIf="product.brand">{{ product.brand.name }}</span>
@@ -121,12 +124,14 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     }
 
     .carousel-item {
-      flex: 0 0 calc(20% - 0.8rem); /* Show 5 items */
+      flex: 0 0 calc(16.666% - 0.8rem); /* Show 6 items */
       scroll-snap-align: start;
-      min-width: 180px;
+      min-width: 140px;
 
-      @media (max-width: 1024px) { flex: 0 0 calc(33.33% - 0.7rem); }
-      @media (max-width: 640px) { flex: 0 0 calc(50% - 0.5rem); }
+      @media (max-width: 1200px) { flex: 0 0 calc(20% - 0.8rem); } /* 5 items */
+      @media (max-width: 992px) { flex: 0 0 calc(25% - 0.8rem); } /* 4 items */
+      @media (max-width: 768px) { flex: 0 0 calc(33.33% - 0.7rem); } /* 3 items */
+      @media (max-width: 576px) { flex: 0 0 calc(50% - 0.5rem); } /* 2 items */
     }
 
     .product-mini-card {
@@ -170,6 +175,37 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         font-size: 0.65rem;
         font-weight: var(--fw-bold);
       }
+      
+      .add-cart-btn {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0;
+        transform: translateY(10px);
+        transition: all var(--transition-fast);
+        box-shadow: var(--shadow-sm);
+        color: var(--color-text-primary);
+        
+        &:hover {
+          background: var(--color-primary);
+          color: white;
+          border-color: var(--color-primary);
+        }
+      }
+      
+      .product-mini-card:hover & .add-cart-btn {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .product-info {
@@ -209,6 +245,7 @@ export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
   @Input() title = 'Productos sugeridos';
   @Input() products: Product[] = [];
   @Output() quick_view = new EventEmitter<Product>();
+  @Output() add_to_cart = new EventEmitter<Product>();
 
   @ViewChild('viewport') viewport!: ElementRef<HTMLDivElement>;
 
@@ -240,6 +277,12 @@ export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
 
   onQuickView(product: Product): void {
     this.quick_view.emit(product);
+  }
+
+  onAddToCart(event: Event, product: Product): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.add_to_cart.emit(product);
   }
 
   private startAutoScroll(): void {

@@ -72,7 +72,27 @@ export class EcommerceService {
       );
     }
 
-    return config;
+    // Construir la URL del dominio de Ecommerce
+    const ecommerceUrl = this.buildEcommerceUrl(domain.hostname);
+
+    // Retornar config junto con la URL
+    return {
+      config,
+      ecommerceUrl,
+    };
+  }
+
+  /**
+   * Construye la URL completa del dominio de Ecommerce
+   */
+  private buildEcommerceUrl(hostname: string): string {
+    // Si el hostname ya incluye el protocolo, retornarlo tal cual
+    if (hostname.startsWith('http://') || hostname.startsWith('https://')) {
+      return hostname;
+    }
+
+    // Construir la URL con https
+    return `https://${hostname}`;
   }
 
   /**

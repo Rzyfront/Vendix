@@ -203,9 +203,11 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.show_user_menu = false;
   }
 
+
   logout(): void {
     this.auth_facade.logout({ redirect: false });
     this.show_user_menu = false;
+    this.router.navigate(['/']);
   }
 
   login(): void {

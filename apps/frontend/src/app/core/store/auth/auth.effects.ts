@@ -230,7 +230,7 @@ export class AuthEffects {
   logout$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.logout),
-      tap(() => this.authService.logout()),
+      tap(({ redirect }) => this.authService.logout({ redirect })),
       map(({ redirect }) => AuthActions.logoutSuccess({ redirect }))
     )
   );

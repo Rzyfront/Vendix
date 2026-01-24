@@ -69,6 +69,7 @@ export class MenuFilterService {
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     Dominios: 'settings_domains',
+    Envíos: 'settings_shipping',
   };
 
   /**

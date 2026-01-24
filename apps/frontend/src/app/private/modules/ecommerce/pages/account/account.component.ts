@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AccountService, UserProfile, Address } from '../../services/account.service';
@@ -20,6 +20,7 @@ export class AccountComponent implements OnInit {
   private auth_facade = inject(AuthFacade);
   private fb = inject(FormBuilder);
   private destroy_ref = inject(DestroyRef);
+  private router = inject(Router);
 
   profile: UserProfile | null = null;
 
@@ -231,7 +232,8 @@ export class AccountComponent implements OnInit {
   }
 
   logout(): void {
-    this.auth_facade.logout();
+    this.auth_facade.logout({ redirect: false });
+    this.router.navigate(['/']);
   }
 
   clearMessages(): void {

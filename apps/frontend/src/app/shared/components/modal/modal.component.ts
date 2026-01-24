@@ -48,20 +48,22 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
             *ngIf="hasHeader"
             class="px-4 py-3 md:px-5 md:py-4 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
           >
-            <div class="flex-1 min-w-0">
-              <h3
-                *ngIf="title"
-                class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
-              >
-                {{ title }}
-              </h3>
-              <p
-                *ngIf="subtitle"
-                class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-1 truncate"
-              >
-                {{ subtitle }}
-              </p>
+            <div class="flex items-center gap-3 overflow-hidden flex-1">
               <ng-content select="[slot=header]"></ng-content>
+              <div class="min-w-0 flex-1">
+                <h3
+                  *ngIf="title"
+                  class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
+                >
+                  {{ title }}
+                </h3>
+                <p
+                  *ngIf="subtitle"
+                  class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-0.5 truncate"
+                >
+                  {{ subtitle }}
+                </p>
+              </div>
             </div>
 
             <!-- Close button mejorado -->

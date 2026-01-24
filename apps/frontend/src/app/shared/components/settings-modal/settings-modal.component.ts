@@ -250,6 +250,11 @@ const APP_MODULES = {
           label: 'Dominios',
           description: 'Dominios de la tienda online',
         },
+        {
+          key: 'settings_shipping',
+          label: 'Envíos',
+          description: 'Configuración de envíos y zonas',
+        },
       ],
     },
   ],
@@ -617,7 +622,7 @@ export class SettingsModalComponent implements OnInit {
     this.checkPermissions();
   }
 
-  ngOnInit() {}
+  ngOnInit() { }
 
   onOpen() {
     this.loadSettings();
@@ -984,7 +989,7 @@ export class SettingsModalComponent implements OnInit {
       console.error('❌ Error al actualizar tipo de cuenta:', error);
       this.toastService.error(
         error.error?.message ||
-          'Error al actualizar el tipo de cuenta. Por favor, intenta de nuevo.',
+        'Error al actualizar el tipo de cuenta. Por favor, intenta de nuevo.',
       );
     }
   }

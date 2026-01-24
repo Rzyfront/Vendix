@@ -1,12 +1,13 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { Product } from '../../services/catalog.service';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   template: `
     <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
@@ -14,11 +15,11 @@ import { Product } from '../../services/catalog.service';
           <img [src]="product.image_url" [alt]="product.name" loading="lazy">
         } @else {
           <div class="no-image">
-            <i class="pi pi-image"></i>
+            <app-icon name="image" [size]="24" class="text-muted"></app-icon>
           </div>
         }
         <button class="wishlist-btn" (click)="onWishlistClick($event)" [class.active]="in_wishlist">
-          <i class="pi" [class.pi-heart-fill]="in_wishlist" [class.pi-heart]="!in_wishlist"></i>
+          <app-icon name="heart" [size]="18"></app-icon>
         </button>
       </div>
       <div class="product-info">
@@ -36,10 +37,14 @@ import { Product } from '../../services/catalog.service';
           <span class="out-of-stock">Agotado</span>
         }
       </div>
-      <button class="add-to-cart-btn" (click)="onAddToCart($event)" [disabled]="product.stock_quantity === 0">
-        <i class="pi pi-shopping-cart"></i>
-        Agregar
-      </button>
+      <div class="actions-container">
+        <button class="buy-now-btn" (click)="onBuyNow($event)" [disabled]="product.stock_quantity === 0">
+          Comprar
+        </button>
+        <button class="add-btn" (click)="onAddToCart($event)" [disabled]="product.stock_quantity === 0" title="Agregar al carrito">
+          <app-icon name="shopping-cart" [size]="16"></app-icon>
+        </button>
+      </div>
     </article>
   `,
   styles: [`
@@ -158,8 +163,14 @@ import { Product } from '../../services/catalog.service';
       font-weight: var(--fw-medium);
     }
 
-    .add-to-cart-btn {
+    .actions-container {
       margin: 0 1rem 1rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .buy-now-btn {
+      flex: 1;
       padding: 0.75rem 1rem;
       background: var(--color-primary);
       color: var(--color-text-on-primary);
@@ -171,7 +182,6 @@ import { Product } from '../../services/catalog.service';
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
       transition: background var(--transition-fast);
 
       &:hover:not(:disabled) {
@@ -183,6 +193,32 @@ import { Product } from '../../services/catalog.service';
         cursor: not-allowed;
       }
     }
+
+    .add-btn {
+      width: 42px;
+      padding: 0;
+      background: var(--color-surface-variant);
+      color: var(--color-primary);
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all var(--transition-fast);
+
+      &:hover:not(:disabled) {
+        background: var(--color-primary-light);
+      }
+
+      &:disabled {
+        border-color: var(--color-text-muted);
+        color: var(--color-text-muted);
+        cursor: not-allowed;
+      }
+      
+      i { font-size: 1.2rem; }
+    }
   `],
 })
 export class ProductCardComponent {
@@ -192,6 +228,8 @@ export class ProductCardComponent {
   @Output() toggle_wishlist = new EventEmitter<Product>();
   @Output() quick_view = new EventEmitter<Product>();
 
+  private router = inject(Router);
+
   onQuickView(event: Event): void {
     // Let clicks on buttons/links propagate normally to their handlers
     const target = event.target as HTMLElement;
@@ -200,6 +238,13 @@ export class ProductCardComponent {
     }
     event.preventDefault();
     this.quick_view.emit(this.product);
+  }
+
+  onBuyNow(event: Event): void {
+    event.stopPropagation();
+    event.preventDefault();
+    this.add_to_cart.emit(this.product);
+    this.router.navigate(['/cart']);
   }
 
   onAddToCart(event: Event): void {

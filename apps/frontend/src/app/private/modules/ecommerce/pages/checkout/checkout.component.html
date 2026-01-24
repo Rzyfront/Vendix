@@ -66,38 +66,89 @@
 
                 @if (use_new_address) {
                 <form [formGroup]="address_form" class="address-form">
-                    <div class="form-row">
-                        <div class="form-group full">
-                            <label>Dirección *</label>
-                            <input type="text" formControlName="address_line1" placeholder="Calle y número">
-                        </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group full">
-                            <label>Apartamento, oficina, etc. (opcional)</label>
-                            <input type="text" formControlName="address_line2" placeholder="Apto, piso, oficina">
-                        </div>
-                    </div>
+                    <app-input
+                        label="Dirección"
+                        formControlName="address_line1"
+                        placeholder="Calle y número"
+                        [error]="getFieldError('address_line1')"
+                        [required]="true"
+                    ></app-input>
+
+                    <app-input
+                        label="Apartamento, oficina, etc. (opcional)"
+                        formControlName="address_line2"
+                        placeholder="Apto, piso, oficina"
+                    ></app-input>
+
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Ciudad *</label>
-                            <input type="text" formControlName="city" placeholder="Ciudad">
+                            <label>País</label>
+                            <select formControlName="country_code" class="checkout-select">
+                                <option value="">Selecciona un país</option>
+                                @for (country of countries; track country.code) {
+                                    <option [value]="country.code">{{ country.name }}</option>
+                                }
+                            </select>
+                            @if (getFieldError('country_code')) {
+                                <p class="error-text">{{ getFieldError('country_code') }}</p>
+                            }
                         </div>
                         <div class="form-group">
                             <label>Departamento/Estado</label>
-                            <input type="text" formControlName="state_province" placeholder="Departamento">
+                            @if (loading_departments) {
+                                <select class="checkout-select" disabled>
+                                    <option>Cargando...</option>
+                                </select>
+                            } @else {
+                                <select formControlName="state_province" class="checkout-select" [disabled]="departments.length === 0">
+                                    <option value="">Selecciona un departamento</option>
+                                    @for (dep of departments; track dep.id) {
+                                        <option [value]="dep.id">{{ dep.name }}</option>
+                                    }
+                                </select>
+                            }
+                            @if (getFieldError('state_province')) {
+                                <p class="error-text">{{ getFieldError('state_province') }}</p>
+                            }
                         </div>
                     </div>
+
                     <div class="form-row">
                         <div class="form-group">
-                            <label>Código Postal</label>
-                            <input type="text" formControlName="postal_code" placeholder="Código postal">
+                            <label>Ciudad</label>
+                            @if (loading_cities) {
+                                <select class="checkout-select" disabled>
+                                    <option>Cargando...</option>
+                                </select>
+                            } @else {
+                                <select formControlName="city" class="checkout-select" [disabled]="cities.length === 0">
+                                    <option value="">Selecciona una ciudad</option>
+                                    @for (city of cities; track city.id) {
+                                        <option [value]="city.id">{{ city.name }}</option>
+                                    }
+                                </select>
+                            }
+                            @if (getFieldError('city')) {
+                                <p class="error-text">{{ getFieldError('city') }}</p>
+                            }
                         </div>
                         <div class="form-group">
-                            <label>Teléfono *</label>
-                            <input type="tel" formControlName="phone_number" placeholder="Teléfono de contacto">
+                            <app-input
+                                label="Código Postal"
+                                formControlName="postal_code"
+                                placeholder="Código postal"
+                            ></app-input>
                         </div>
                     </div>
+
+                    <app-input
+                        label="Teléfono"
+                        formControlName="phone_number"
+                        type="tel"
+                        placeholder="Teléfono de contacto"
+                        [error]="getFieldError('phone_number')"
+                        [required]="true"
+                    ></app-input>
                 </form>
                 }
             </div>
@@ -138,12 +189,22 @@
                         <h3>Dirección de Envío</h3>
                         @if (use_new_address) {
                         <p>{{ address_form.value.address_line1 }}</p>
-                        <p>{{ address_form.value.city }}, {{ address_form.value.state_province }}</p>
+                        @if (address_form.value.address_line2) {
+                        <p>{{ address_form.value.address_line2 }}</p>
+                        }
+                        <p>{{ getSelectedCityName() }}, {{ getSelectedDepartmentName() }}</p>
+                        <p>{{ getSelectedCountryName() }}</p>
+                        @if (address_form.value.postal_code) {
+                        <p>Código Postal: {{ address_form.value.postal_code }}</p>
+                        }
                         <p>Tel: {{ address_form.value.phone_number }}</p>
                         } @else {
                         @for (addr of addresses; track addr.id) {
                         @if (addr.id === selected_address_id) {
                         <p>{{ addr.address_line1 }}</p>
+                        @if (addr.address_line2) {
+                        <p>{{ addr.address_line2 }}</p>
+                        }
                         <p>{{ addr.city }}, {{ addr.state_province }}</p>
                         <p>Tel: {{ addr.phone_number }}</p>
                         }
@@ -245,4 +306,14 @@
         </div>
     </div>
     }
+
+    @if (recommendedProducts().length > 0 && !is_submitting) {
+    <div class="checkout-offers">
+        <app-product-carousel title="Agrega ofertas imperdibles a tu compra" [products]="recommendedProducts()"
+            (quick_view)="onQuickView($event)" (add_to_cart)="onAddToCartFromSlider($event)" />
+    </div>
+    }
+
+    <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
+        (closed)="quickViewOpen = false" (addedToCart)="onAddToCartFromSlider($event)" />
 </div>

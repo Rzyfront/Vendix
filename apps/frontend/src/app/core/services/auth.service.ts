@@ -282,8 +282,9 @@ export class AuthService {
    * Cierra la sesión limpiando datos locales, estado de NgRx y notificando al backend.
    * La limpieza local es síncrona para garantizar que el usuario salga inmediatamente.
    */
-  logout(): void {
+  logout(options?: { redirect?: boolean }): void {
     const refreshToken = this.getRefreshToken();
+    const shouldRedirect = options?.redirect ?? true;
 
     // 1. Limpieza Local Inmediata
     this.authFacade.clearAuthState();
@@ -296,8 +297,10 @@ export class AuthService {
 
     console.log('[AuthService] Logout triggered - local state cleared');
 
-    // 2. Redirección
-    this.router.navigate(['/auth/login']);
+    // 2. Redirección (Solo si se solicita)
+    if (shouldRedirect) {
+      this.router.navigate(['/auth/login']);
+    }
 
     // 3. Notificación Backend (Fire and forget)
     // No esperamos la respuesta para bloquear la UI

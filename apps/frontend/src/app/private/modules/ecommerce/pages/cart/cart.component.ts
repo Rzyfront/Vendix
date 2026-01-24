@@ -1,19 +1,23 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store';
 import { StoreUiService } from '../../services/store-ui.service';
+import { CatalogService, Product } from '../../services/catalog.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
+import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent],
+  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ProductCarouselComponent, ProductQuickViewModalComponent],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
 })
@@ -23,7 +27,14 @@ export class CartComponent implements OnInit, OnDestroy {
   is_authenticated = false;
   updating_item_id: number | null = null;
 
+  // Recommendations
+  recommendedProducts = signal<Product[]>([]);
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
   private destroy$ = new Subject<void>();
+  private catalogService = inject(CatalogService);
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private cart_service: CartService,
@@ -41,6 +52,8 @@ export class CartComponent implements OnInit, OnDestroy {
         this.loadLocalCart();
       }
     });
+
+    this.loadRecommendations();
   }
 
   ngOnDestroy(): void {
@@ -68,6 +81,21 @@ export class CartComponent implements OnInit, OnDestroy {
     this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
       this.cart = cart;
       this.is_loading = false;
+    });
+  }
+
+  loadRecommendations(): void {
+    this.catalogService.getProducts({ limit: 10, sort_by: 'newest', has_discount: true }).subscribe({
+      next: (response) => {
+        if (response.data.length > 0) {
+          this.recommendedProducts.set(response.data);
+        } else {
+          // Fallback if no sales
+          this.catalogService.getProducts({ limit: 10, sort_by: 'newest' }).subscribe(res => {
+            this.recommendedProducts.set(res.data);
+          });
+        }
+      }
     });
   }
 
@@ -128,5 +156,15 @@ export class CartComponent implements OnInit, OnDestroy {
 
   continueShopping(): void {
     this.router.navigate(['/catalog']);
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
+  }
+
+  onAddToCartFromSlider(product: Product): void {
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) result.subscribe();
   }
 }

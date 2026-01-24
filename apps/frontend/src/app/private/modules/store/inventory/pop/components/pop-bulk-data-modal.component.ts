@@ -134,6 +134,9 @@ import {
             <p class="text-gray-500 text-sm mt-1">
               o haz clic para seleccionar
             </p>
+            <p class="text-xs text-indigo-500 mt-2 font-medium">
+              Máximo 1000 items por archivo
+            </p>
           </div>
 
           <div *ngIf="selectedFile">
@@ -341,6 +344,14 @@ export class PopBulkDataModalComponent {
           return;
         }
 
+        if (data.length > 1000) {
+          this.toastService.error(
+            `El archivo excede el límite de 1000 items (tiene ${data.length})`,
+          );
+          this.resetState();
+          return;
+        }
+
         // Normalizar claves de español a inglés para POP
         this.parsedData = data
           .map((item: any) => {
@@ -351,26 +362,30 @@ export class PopBulkDataModalComponent {
             // En POP usamos 'unit_cost' y 'quantity'
             const cost = parseFloat(
               item['Precio Compra'] ||
-                item['Costo'] ||
-                item['cost_price'] ||
-                item['unit_cost'] ||
-                0,
+              item['Costo'] ||
+              item['cost_price'] ||
+              item['unit_cost'] ||
+              0,
             );
             const qty = parseFloat(
               item['Cantidad'] ||
-                item['Cantidad Inicial'] ||
-                item['stock_quantity'] ||
-                item['quantity'] ||
-                item['qty'] ||
-                0,
+              item['Cantidad Inicial'] ||
+              item['stock_quantity'] ||
+              item['quantity'] ||
+              item['qty'] ||
+              0,
             );
 
             const base_price = parseFloat(
               item['Precio Venta'] || item['base_price'] || 0,
             );
-            const profit_margin = parseFloat(
+            let profit_margin = parseFloat(
               item['Margen'] || item['profit_margin'] || 0,
             );
+            // Auto-fix for decimal margins
+            if (profit_margin > 0 && profit_margin < 1) {
+              profit_margin = profit_margin * 100;
+            }
             const description = item['Descripción'] || item['description'];
             const brand_id = item['Marca'] || item['brand_id'];
             const category_ids = item['Categorías'] || item['category_ids'];
