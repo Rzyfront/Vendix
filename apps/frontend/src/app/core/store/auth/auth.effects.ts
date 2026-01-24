@@ -43,6 +43,7 @@ export class AuthEffects {
               return AuthActions.loginSuccess({
                 user: response.data.user,
                 user_settings: response.data.user_settings,
+                store_settings: response.data.store_settings,
                 tokens: {
                   access_token: response.data.access_token,
                   refresh_token: response.data.refresh_token,
@@ -73,6 +74,7 @@ export class AuthEffects {
             return AuthActions.loginCustomerSuccess({
               user: response.data.user,
               user_settings: response.data.user_settings,
+              store_settings: response.data.store_settings,
               tokens: {
                 access_token: response.data.access_token,
                 refresh_token: response.data.refresh_token,
@@ -161,6 +163,7 @@ export class AuthEffects {
             return AuthActions.registerCustomerSuccess({
               user: response.data.user,
               user_settings: response.data.user_settings,
+              store_settings: response.data.store_settings,
               tokens: {
                 access_token: response.data.access_token,
                 refresh_token: response.data.refresh_token,
@@ -333,6 +336,7 @@ export class AuthEffects {
               return AuthActions.restoreAuthState({
                 user: parsedState.user,
                 user_settings: parsedState.user_settings,
+                store_settings: parsedState.store_settings,
                 tokens: parsedState.tokens,
                 permissions: parsedState.permissions || [],
                 roles: parsedState.roles || [],
@@ -521,6 +525,18 @@ export class AuthEffects {
           const errorMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           this.toast.error(errorMessage, 'Error al actualizar configuración');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  // Update Store Settings
+  updateStoreSettingsSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.updateStoreSettingsSuccess),
+        tap(() => {
+          this.toast.success('Configuración de tienda actualizada correctamente');
         }),
       ),
     { dispatch: false },

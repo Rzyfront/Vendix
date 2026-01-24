@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
 import { CheckoutSettingsForm } from './components/checkout-settings-form/checkout-settings-form.component';
@@ -16,6 +17,7 @@ import { ReceiptsSettingsForm } from './components/receipts-settings-form/receip
   standalone: true,
   imports: [
     CommonModule,
+    ButtonComponent,
     GeneralSettingsForm,
     InventorySettingsForm,
     CheckoutSettingsForm,

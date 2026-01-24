@@ -16,6 +16,7 @@ export const loginSuccess = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -44,6 +45,7 @@ export const loginCustomerSuccess = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -108,6 +110,7 @@ export const restoreAuthState = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -207,6 +210,7 @@ export const registerCustomerSuccess = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -257,4 +261,15 @@ export const updateUserSettingsSuccess = createAction(
 export const updateUserSettingsFailure = createAction(
   '[Auth] Update User Settings Failure',
   props<{ error: NormalizedApiPayload | string }>(),
+);
+
+// Update Store Settings Actions
+export const updateStoreSettings = createAction(
+  '[Auth] Update Store Settings',
+  props<{ store_settings: any }>(),
+);
+
+export const updateStoreSettingsSuccess = createAction(
+  '[Auth] Update Store Settings Success',
+  props<{ store_settings: any }>(),
 );

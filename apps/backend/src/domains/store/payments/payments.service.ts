@@ -504,25 +504,32 @@ export class PaymentsService {
           return orderItem;
         });
 
+        // Build order data - only include customer_id if provided (for anonymous sales)
+        const orderData: any = {
+          store_id: dto.store_id,
+          order_number: orderNumber,
+          state: 'processing', // Match enum order_state_enum
+          subtotal_amount: dto.subtotal,
+          tax_amount: dto.tax_amount || 0,
+          discount_amount: dto.discount_amount || 0,
+          grand_total: dto.total_amount,
+          currency: dto.currency || 'USD',
+          billing_address_id: dto.billing_address_id,
+          shipping_address_id: dto.shipping_address_id,
+          internal_notes: dto.internal_notes,
+          order_items: {
+            create: orderItems,
+          },
+        };
+
+        // Only include customer_id if provided (for anonymous sales, this will be undefined/null)
+        if (dto.customer_id !== undefined && dto.customer_id !== null) {
+          orderData.customer_id = dto.customer_id;
+        }
+
         // Create the order
         const order = await tx.orders.create({
-          data: {
-            customer_id: dto.customer_id,
-            store_id: dto.store_id,
-            order_number: orderNumber,
-            state: 'processing', // Match enum order_state_enum
-            subtotal_amount: dto.subtotal,
-            tax_amount: dto.tax_amount || 0,
-            discount_amount: dto.discount_amount || 0,
-            grand_total: dto.total_amount,
-            currency: dto.currency || 'USD',
-            billing_address_id: dto.billing_address_id,
-            shipping_address_id: dto.shipping_address_id,
-            internal_notes: dto.internal_notes,
-            order_items: {
-              create: orderItems,
-            },
-          },
+          data: orderData,
           include: {
             order_items: true,
             stores: true,

@@ -165,44 +165,63 @@ export class NotificationsSettingsDto {
 }
 
 export class PosSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  allow_anonymous_sales?: boolean;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  anonymous_sales_as_default?: boolean;
+
   @ApiProperty({
     example: {
       monday: { open: '09:00', close: '19:00' },
       tuesday: { open: '09:00', close: '19:00' },
     },
     type: Object,
+    required: false,
   })
-  business_hours: Record<string, { open: string; close: string }>;
+  @IsOptional()
+  business_hours?: Record<string, { open: string; close: string }>;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  offline_mode_enabled: boolean;
+  offline_mode_enabled?: boolean;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  require_cash_drawer_open: boolean;
+  require_cash_drawer_open?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  auto_print_receipt: boolean;
+  auto_print_receipt?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_price_edit: boolean;
+  allow_price_edit?: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_discount: boolean;
+  allow_discount?: boolean;
 
-  @ApiProperty({ example: 15 })
+  @ApiProperty({ example: 15, required: false })
+  @IsOptional()
   @IsNumber()
   @Min(0)
   @Max(100)
-  max_discount_percentage: number;
+  max_discount_percentage?: number;
 
-  @ApiProperty({ example: false })
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_refund_without_approval: boolean;
+  allow_refund_without_approval?: boolean;
 }
 
 export class ReceiptsSettingsDto {

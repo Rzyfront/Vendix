@@ -208,6 +208,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (requestRegisterConfig)="onOpenRegisterConfigModal()"
+        (customerSelected)="onPaymentCustomerSelected($event)"
       ></app-pos-payment-interface>
 
       <app-pos-order-confirmation
@@ -365,6 +366,17 @@ export class PosComponent implements OnInit, OnDestroy {
       });
   }
 
+  onPaymentCustomerSelected(customer: PosCustomer): void {
+    // Customer selected from the payment modal's internal selector
+    this.customerService.selectCustomer(customer);
+    this.cartService
+      .setCustomer(customer)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.toastService.success('Cliente asignado correctamente');
+      });
+  }
+
   onProductSelected(product: any): void {
     // Product selected from POS product selection
     // console.log('Product selected:', product);
@@ -440,6 +452,7 @@ export class PosComponent implements OnInit, OnDestroy {
       this.completedOrder = {
         ...(paymentData.order || {}),
         isCreditSale: !!paymentData.isCreditSale,
+        isAnonymousSale: !!paymentData.isAnonymousSale,
         // Ensure we have current cart details for the ticket
         items:
           paymentData.order?.items ||
@@ -455,11 +468,15 @@ export class PosComponent implements OnInit, OnDestroy {
         discount_amount:
           paymentData.order?.discount_amount || this.cartSummary.discountAmount,
         total_amount: paymentData.order?.total_amount || this.cartSummary.total,
-        customer_name: this.selectedCustomer
+        // Only include customer info if NOT an anonymous sale
+        // and customer data is not already in the order from backend
+        customer_name: (!paymentData.isAnonymousSale && this.selectedCustomer)
           ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
-          : paymentData.order?.customer_name,
-        customer_email:
-          this.selectedCustomer?.email || paymentData.order?.customer_email,
+          : paymentData.order?.customer_name || '',
+        customer_email: (!paymentData.isAnonymousSale && this.selectedCustomer?.email)
+          ? this.selectedCustomer.email
+          : paymentData.order?.customer_email || '',
+        customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
       };
 

@@ -1225,7 +1225,9 @@ export class AuthService {
       name: string;
       slug: string;
       organizations: any;
+      store_settings?: any;
     } | null = null;
+    let active_store_settings: any = null;
 
     if (effective_organization_slug) {
       // Verificar que el usuario pertenezca a la organización especificada
@@ -1263,6 +1265,7 @@ export class AuthService {
         include: {
           store: {
             include: {
+              store_settings: true,
               organizations: {
                 include: {
                   domain_settings: {
@@ -1294,6 +1297,7 @@ export class AuthService {
       target_organization_id = storeUser.store.organizations.id;
       target_store_id = storeUser.store.id;
       active_store = storeUser.store; // Guardar la tienda activa
+      active_store_settings = storeUser.store.store_settings?.settings || null;
       login_context = `store:${effective_store_slug}`;
     }
 
@@ -1382,6 +1386,7 @@ export class AuthService {
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
       user_settings: userSettings,
+      store_settings: active_store_settings,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,

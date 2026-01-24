@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Body, UseGuards, UsePipes } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -6,6 +6,7 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { IsString } from 'class-validator';
+import { ValidationPipe } from '@nestjs/common';
 
 export class ApplyTemplateDto {
   @IsString()
@@ -40,6 +41,14 @@ export class SettingsController {
     status: 200,
     description: 'Settings updated successfully',
   })
+  @UsePipes(new ValidationPipe({
+    transform: true,
+    whitelist: false, // Permitir propiedades no definidas para updates parciales
+    forbidNonWhitelisted: false,
+    transformOptions: {
+      enableImplicitConversion: true,
+    },
+  }))
   async updateSettings(@Body() dto: UpdateSettingsDto) {
     const settings = await this.settingsService.updateSettings(dto);
     return this.responseService.success(

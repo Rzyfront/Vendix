@@ -52,6 +52,7 @@ export interface AuthResponse {
   data: {
     user: User;
     user_settings: UserSettings;
+    store_settings?: any;
     access_token: string;
     refresh_token: string;
     token_type: 'Bearer';
@@ -104,7 +105,7 @@ export class AuthService {
             throw new Error(response.message || 'Login failed');
           }
 
-          const { user, user_settings, access_token, refresh_token } =
+          const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
 
           if (typeof localStorage !== 'undefined') {
@@ -134,6 +135,7 @@ export class AuthService {
               ...response.data,
               user,
               user_settings,
+              store_settings,
               permissions: decodedToken?.permissions || [],
             },
             updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
@@ -161,7 +163,7 @@ export class AuthService {
             throw new Error(response.message || 'Login failed');
           }
 
-          const { user, user_settings, access_token, refresh_token } =
+          const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
 
           if (typeof localStorage !== 'undefined') {
@@ -237,7 +239,7 @@ export class AuthService {
             return response;
           }
 
-          const { user, user_settings, access_token, refresh_token } =
+          const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
 
           if (typeof localStorage !== 'undefined') {
@@ -267,6 +269,7 @@ export class AuthService {
               ...response.data,
               user,
               user_settings,
+              store_settings,
               permissions: decodedToken?.permissions || [],
             },
             updatedEnvironment: (user_settings.config.app || '').toUpperCase(),
@@ -328,7 +331,7 @@ export class AuthService {
             return response;
           }
 
-          const { user, user_settings, access_token, refresh_token } =
+          const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
 
           if (typeof localStorage !== 'undefined') {
@@ -345,6 +348,7 @@ export class AuthService {
               ...response.data,
               user,
               user_settings,
+              store_settings,
               permissions: decodedToken?.permissions || [],
             },
             updatedEnvironment: (user_settings.config.app || '').toUpperCase(),

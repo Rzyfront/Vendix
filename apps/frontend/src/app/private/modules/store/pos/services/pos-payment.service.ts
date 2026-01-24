@@ -224,15 +224,16 @@ export class PosPaymentService {
       return throwError(() => new Error('Caja no configurada.'));
     }
 
-    if (!cartState.customer) {
+    // Check if anonymous sale is allowed
+    const isAnonymousSale = paymentRequest.isAnonymousSale === true;
+
+    // For non-anonymous sales, customer is required
+    if (!isAnonymousSale && !cartState.customer) {
       return throwError(() => new Error('Debe seleccionar un cliente para procesar la venta.'));
     }
 
-    const sale_data = {
-      customer_id: cartState.customer.id,
-      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
-      customer_email: cartState.customer.email,
-      customer_phone: cartState.customer.phone,
+    // Build sale data with conditional customer fields
+    const sale_data: any = {
       store_id: this.getStoreId(),
       items: cartState.items.map((item) => ({
         product_id: parseInt(item.product.id),
@@ -270,6 +271,14 @@ export class PosPaymentService {
       internal_notes: cartState.notes || '',
       update_inventory: true,
     };
+
+    // Only include customer fields if it's not an anonymous sale
+    if (!isAnonymousSale && cartState.customer) {
+      sale_data.customer_id = cartState.customer.id;
+      sale_data.customer_name = `${cartState.customer.first_name} ${cartState.customer.last_name}`;
+      sale_data.customer_email = cartState.customer.email;
+      sale_data.customer_phone = cartState.customer.phone;
+    }
 
     return this.http.post<any>(this.apiUrl, sale_data).pipe(
       map((response) => {

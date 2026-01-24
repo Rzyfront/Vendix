@@ -13,6 +13,11 @@ export const selectUserSettings = createSelector(
   (state: AuthState) => state.user_settings,
 );
 
+export const selectStoreSettings = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.store_settings,
+);
+
 export const selectPermissions = createSelector(
   selectAuthState,
   (state: AuthState) => state.permissions,

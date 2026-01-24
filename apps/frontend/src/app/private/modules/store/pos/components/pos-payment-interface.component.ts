@@ -5,6 +5,7 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  ChangeDetectorRef,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -16,6 +17,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil, debounceTime } from 'rxjs';
 import { Router } from '@angular/router';
+import { Store } from '@ngrx/store';
 
 import {
   ButtonComponent,
@@ -23,13 +25,17 @@ import {
   InputComponent,
   CardComponent,
   IconComponent,
+  SelectorComponent,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import {
   PosPaymentService,
   PaymentMethod,
 } from '../services/pos-payment.service';
+import { PosCustomerService } from '../services/pos-customer.service';
 import { CartState } from '../models/cart.model';
+import { PosCustomer } from '../models/customer.model';
+import * as fromAuth from '../../../../../core/store/auth';
 
 interface PaymentState {
   selectedMethod: PaymentMethod | null;
@@ -37,6 +43,7 @@ interface PaymentState {
   reference: string;
   isProcessing: boolean;
   change: number;
+  isAnonymousSale: boolean;
 }
 
 @Component({
@@ -50,6 +57,7 @@ interface PaymentState {
     InputComponent,
     CardComponent,
     IconComponent,
+    SelectorComponent,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -492,6 +500,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   @Output() requestCustomer = new EventEmitter<void>();
   @Output() requestRegisterConfig = new EventEmitter<void>();
   @Output() draftSaved = new EventEmitter<any>();
+  @Output() customerSelected = new EventEmitter<PosCustomer>();
 
   paymentMethods: PaymentMethod[] = [];
   paymentForm: FormGroup;
@@ -501,7 +510,29 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     reference: '',
     isProcessing: false,
     change: 0,
+    isAnonymousSale: false,
   };
+
+  // Store settings
+  storeSettingsSubscription: any;
+  allowAnonymousSales = false;
+  anonymousSalesAsDefault = false;
+
+  // Document type options for customer creation
+  documentTypeOptions = [
+    { value: 'dni', label: 'DNI' },
+    { value: 'passport', label: 'Pasaporte' },
+    { value: 'cedula', label: 'Cédula' },
+    { value: 'other', label: 'Otro' },
+  ];
+
+  // Customer management within modal
+  showCustomerSelector = false;
+  customerSearchResults: PosCustomer[] = [];
+  customerSearchQuery = '';
+  isSearchingCustomer = false;
+  showCreateCustomerForm = false;
+  customerForm: FormGroup;
 
   // quickCashAmounts = [10, 20, 50, 100]; // Removed as per new requirement
 
@@ -515,18 +546,60 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     return this.paymentForm.get('reference') as FormControl;
   }
 
+  get customerEmailControl(): FormControl {
+    return this.customerForm.get('email') as FormControl;
+  }
+
+  get customerFirstNameControl(): FormControl {
+    return this.customerForm.get('firstName') as FormControl;
+  }
+
+  get customerLastNameControl(): FormControl {
+    return this.customerForm.get('lastName') as FormControl;
+  }
+
+  get customerPhoneControl(): FormControl {
+    return this.customerForm.get('phone') as FormControl;
+  }
+
+  get customerDocumentTypeControl(): FormControl {
+    return this.customerForm.get('documentType') as FormControl;
+  }
+
+  get customerDocumentNumberControl(): FormControl {
+    return this.customerForm.get('documentNumber') as FormControl;
+  }
+
+  get customerDisplayName(): string {
+    if (!this.cartState?.customer) {
+      return 'Seleccionar cliente';
+    }
+    const firstName = this.cartState.customer.first_name || '';
+    const lastName = this.cartState.customer.last_name || '';
+    return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
+  }
+
+  get customerEmail(): string {
+    return this.cartState?.customer?.email || '';
+  }
+
   constructor(
     private fb: FormBuilder,
     private paymentService: PosPaymentService,
+    private customerService: PosCustomerService,
     private toastService: ToastService,
-    private router: Router
+    private router: Router,
+    private store: Store,
+    private cdr: ChangeDetectorRef
   ) {
     this.paymentForm = this.createPaymentForm();
+    this.customerForm = this.createCustomerForm();
   }
 
   ngOnInit(): void {
     this.loadPaymentMethods();
     this.setupFormListeners();
+    this.loadStoreSettings();
   }
 
   ngOnDestroy(): void {
@@ -541,17 +614,30 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
     });
   }
 
+  private createCustomerForm(): FormGroup {
+    return this.fb.group({
+      email: ['', [Validators.required, Validators.email]],
+      firstName: ['', [Validators.required, Validators.minLength(2)]],
+      lastName: ['', [Validators.required, Validators.minLength(2)]],
+      phone: [''],
+      documentType: [''],
+      documentNumber: ['', [Validators.required]],
+    });
+  }
+
   private setupFormListeners(): void {
     this.cashReceivedControl.valueChanges
       .pipe(takeUntil(this.destroy$), debounceTime(100))
-      .subscribe((value) => {
-        this.paymentState.cashReceived = parseFloat(value) || 0;
-        this.calculateChange();
+      .subscribe((value: string | number | null) => {
+        if (value !== null && value !== undefined && value !== '') {
+          this.paymentState.cashReceived = parseFloat(value.toString()) || 0;
+          this.calculateChange();
+        }
       });
 
     this.referenceControl.valueChanges
       .pipe(takeUntil(this.destroy$))
-      .subscribe((value) => {
+      .subscribe((value: string | null) => {
         this.paymentState.reference = value || '';
       });
   }
@@ -563,6 +649,42 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       .subscribe((methods) => {
         this.paymentMethods = methods;
       });
+  }
+
+  private loadStoreSettings(): void {
+    this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
+      // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
+      const settings = storeSettings?.settings;
+      if (settings?.pos) {
+        const prevAllowAnonymous = this.allowAnonymousSales;
+
+        this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
+        this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
+
+        console.log('[POS Payment] Store settings updated:', {
+          allowAnonymousSales: this.allowAnonymousSales,
+          anonymousSalesAsDefault: this.anonymousSalesAsDefault,
+          prevAllowAnonymous,
+          isAnonymousSale: this.paymentState.isAnonymousSale,
+          rawSettings: settings,
+        });
+
+        // If anonymous sales are not allowed, always disable the toggle
+        if (!this.allowAnonymousSales) {
+          this.paymentState.isAnonymousSale = false;
+        } else {
+          // Only update if this is first load (prevAllowAnonymous is falsy)
+          // or if we want to respect the default setting
+          if (!prevAllowAnonymous || this.anonymousSalesAsDefault) {
+            this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+          }
+          // Otherwise, preserve current user selection
+        }
+
+        // Trigger change detection to update UI
+        this.cdr.markForCheck();
+      }
+    });
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
@@ -646,6 +768,11 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return false;
     }
 
+    // Check customer requirement (unless anonymous sale is allowed and selected)
+    if (!this.paymentState.isAnonymousSale && !this.cartState?.customer) {
+      return false;
+    }
+
     if (this.paymentState.selectedMethod.type === 'cash') {
       const total = this.cartState?.summary?.total || 0;
       return this.paymentState.cashReceived >= total;
@@ -668,7 +795,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!this.cartState.customer) {
+    // Check customer requirement (unless anonymous sale is allowed and selected)
+    if (!this.paymentState.isAnonymousSale && !this.cartState.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
       this.onModalClosed();
@@ -691,6 +819,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       paymentMethod: this.paymentState.selectedMethod,
       cashReceived: this.paymentState.cashReceived,
       reference: this.paymentState.reference,
+      isAnonymousSale: this.paymentState.isAnonymousSale,
     };
 
     this.paymentService
@@ -706,6 +835,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
               payment: response.payment,
               change: response.change,
               message: response.message,
+              isAnonymousSale: this.paymentState.isAnonymousSale,
             });
             this.onModalClosed();
           } else {
@@ -732,6 +862,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   processCreditSale(): void {
     if (!this.cartState || this.paymentState.isProcessing) return;
 
+    // Credit sales always require a customer (cannot be anonymous)
     if (!this.cartState.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
@@ -832,9 +963,153 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       reference: '',
       isProcessing: false,
       change: 0,
+      isAnonymousSale: this.allowAnonymousSales && this.anonymousSalesAsDefault,
     };
     this.paymentForm.reset();
+    this.customerForm.reset();
+    this.showCustomerSelector = false;
+    this.customerSearchResults = [];
+    this.customerSearchQuery = '';
+    this.showCreateCustomerForm = false;
     this.closed.emit();
+  }
+
+  // Anonymous Sale Toggle
+  toggleAnonymousSale(enabled: boolean): void {
+    this.paymentState.isAnonymousSale = enabled;
+    if (enabled) {
+      // When switching to anonymous, clear customer selector
+      this.showCustomerSelector = false;
+      this.showCreateCustomerForm = false;
+    } else {
+      // When switching to customer sale, show customer selector if no customer selected
+      if (!this.cartState?.customer) {
+        this.showCustomerSelector = true;
+      }
+    }
+  }
+
+  // Customer Management Methods
+  openCustomerSelector(): void {
+    this.showCustomerSelector = true;
+    this.showCreateCustomerForm = false;
+    this.paymentState.isAnonymousSale = false;
+  }
+
+  closeCustomerSelector(): void {
+    this.showCustomerSelector = false;
+    this.showCreateCustomerForm = false;
+    this.customerSearchResults = [];
+    this.customerSearchQuery = '';
+  }
+
+  onCustomerSearch(query: string): void {
+    this.customerSearchQuery = query;
+    if (query && query.trim().length >= 2) {
+      this.isSearchingCustomer = true;
+
+      this.customerService
+        .searchCustomers({ query: query.trim(), limit: 10 })
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (response) => {
+            this.customerSearchResults = response.data || [];
+            this.isSearchingCustomer = false;
+          },
+          error: (error) => {
+            console.error('Error searching customers:', error);
+            this.customerSearchResults = [];
+            this.isSearchingCustomer = false;
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: 'Error al buscar clientes',
+            });
+          },
+        });
+    } else {
+      this.customerSearchResults = [];
+      this.isSearchingCustomer = false;
+    }
+  }
+
+  selectCustomer(customer: PosCustomer): void {
+    // Emit event to parent to update cart customer
+    this.customerSelected.emit(customer);
+    this.closeCustomerSelector();
+  }
+
+  switchToCreateCustomer(): void {
+    this.showCreateCustomerForm = true;
+    this.customerSearchResults = [];
+  }
+
+  switchToCustomerSearch(): void {
+    this.showCreateCustomerForm = false;
+  }
+
+  onCreateCustomer(): void {
+    if (this.customerForm.valid) {
+      const formValue = this.customerForm.value;
+
+      const customerRequest = {
+        email: formValue.email,
+        first_name: formValue.firstName,
+        last_name: formValue.lastName,
+        phone: formValue.phone || undefined,
+        document_type: formValue.documentType || undefined,
+        document_number: formValue.documentNumber || undefined,
+      };
+
+      this.isSearchingCustomer = true;
+
+      this.customerService
+        .createQuickCustomer(customerRequest)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe({
+          next: (customer) => {
+            this.isSearchingCustomer = false;
+            this.customerSelected.emit(customer);
+            this.closeCustomerSelector();
+            this.toastService.success('Cliente creado correctamente');
+          },
+          error: (error) => {
+            this.isSearchingCustomer = false;
+            console.error('Error creating customer:', error);
+            this.toastService.show({
+              variant: 'error',
+              title: 'Error',
+              description: error.error?.message || error.message || 'Error al crear cliente',
+            });
+          },
+        });
+    } else {
+      // Mark all fields as touched to show validation errors
+      Object.keys(this.customerForm.controls).forEach((key) => {
+        const control = this.customerForm.get(key);
+        control?.markAsTouched();
+      });
+      this.toastService.info('Por favor completa los campos requeridos');
+    }
+  }
+
+  // Getter for insufficient amount
+  get isCashAmountInsufficient(): boolean {
+    if (this.paymentState.selectedMethod?.type === 'cash') {
+      const total = this.cartState?.summary?.total || 0;
+      const received = this.paymentState.cashReceived || 0;
+      return received < total;
+    }
+    return false;
+  }
+
+  get missingAmount(): number {
+    if (this.isCashAmountInsufficient) {
+      const total = this.cartState?.summary?.total || 0;
+      const received = this.paymentState.cashReceived || 0;
+      return total - received;
+    }
+    return 0;
   }
 
   navigateToSettings(): void {
