@@ -11,15 +11,13 @@ import { ShippingSettingsForm } from './components/shipping-settings-form/shippi
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
-import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
-
 
 @Component({
   selector: 'app-general-settings',
   standalone: true,
   imports: [
-    CommonModule, LucideAngularModule,
+    CommonModule,
     IconComponent,
     ButtonComponent,
     GeneralSettingsForm,

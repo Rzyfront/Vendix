@@ -1,120 +1,102 @@
-<div class="general-settings">
-  <div class="w-full">
-    <div class="mb-6">
-      <h1 class="text-3xl font-bold text-gray-900 mb-2">
-        Configuración General de Tienda
-      </h1>
-      <p class="text-gray-600">
-        Configura las preferencias administrativas y flujos de negocio de tu
-        tienda
-      </p>
-    </div>
-
-    @if (isLoading) {
-      <div class="bg-white rounded-lg shadow-sm border p-8">
-        <div class="text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
-          ></div>
-          <p class="mt-2 text-gray-600">Cargando configuraciones...</p>
+<div class="general-settings min-h-screen">
+  <!-- Sticky Header -->
+  <div
+    class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 md:px-6 md:py-4 shadow-sm mb-6 rounded-b-xl">
+    <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <!-- Left: Info & Badge -->
+      <div class="flex items-center gap-4">
+        <div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
+          <app-icon name="settings" size="24" class="text-blue-600"></app-icon>
         </div>
-      </div>
-    } @else {
-      <div class="bg-white rounded-lg shadow-sm border">
-        <!-- Tabs Navigation -->
-        <div class="border-b border-gray-200">
-          <nav class="flex space-x-8 px-6" role="tablist">
-            @for (tab of tabs; track tab.value) {
-              <button
-                (click)="currentTab = tab.value"
-                [class.active]="currentTab === tab.value"
-                [class.inactive]="currentTab !== tab.value"
-                class="py-4 px-1 border-b-2 font-medium text-sm transition-colors"
-                role="tab"
-                [attr.aria-selected]="currentTab === tab.value"
-              >
-                {{ tab.label }}
-              </button>
+        <div>
+          <div class="flex items-center gap-3">
+            <h1 class="text-xl font-bold text-gray-900">Configuración General</h1>
+            @if (hasUnsavedChanges) {
+            <span
+              class="px-2 py-1 bg-orange-100 text-orange-700 text-[10px] font-bold uppercase rounded-lg animate-pulse">Pendiente
+              de Guardar</span>
+            } @else {
+            <span
+              class="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase rounded-lg">Sincronizado</span>
             }
-          </nav>
-        </div>
-
-        <!-- Tab Content -->
-        <div class="p-6">
-          @if (currentTab === 0) {
-            <app-general-settings-form
-              [settings]="settings.general"
-              (settingsChange)="onSectionChange('general', $event)"
-            />
-          } @else if (currentTab === 1) {
-            <app-inventory-settings-form
-              [settings]="settings.inventory"
-              (settingsChange)="onSectionChange('inventory', $event)"
-            />
-          } @else if (currentTab === 2) {
-            <app-checkout-settings-form
-              [settings]="settings.checkout"
-              (settingsChange)="onSectionChange('checkout', $event)"
-            />
-          } @else if (currentTab === 3) {
-            <app-shipping-settings-form
-              [settings]="settings.shipping"
-              (settingsChange)="onSectionChange('shipping', $event)"
-            />
-          } @else if (currentTab === 4) {
-            <app-notifications-settings-form
-              [settings]="settings.notifications"
-              (settingsChange)="onSectionChange('notifications', $event)"
-            />
-          } @else if (currentTab === 5) {
-            <app-pos-settings-form
-              [settings]="settings.pos"
-              (settingsChange)="onSectionChange('pos', $event)"
-            />
-          } @else if (currentTab === 6) {
-            <app-receipts-settings-form
-              [settings]="settings.receipts"
-              (settingsChange)="onSectionChange('receipts', $event)"
-            />
-          }
+          </div>
+          <p class="text-sm text-gray-500">Configura las preferencias administrativas y flujos de negocio</p>
         </div>
       </div>
 
-      <!-- Status Bar -->
-      <div class="mt-4 mb-8 flex items-center justify-between">
-        <div class="flex items-center space-x-4">
-          @if (lastSaved) {
-            <span class="text-sm text-green-600">
-              ✓ Guardado a las {{ lastSaved | date: "short" }}
-            </span>
-          } @else if (hasUnsavedChanges) {
-            <span class="text-sm text-orange-600">
-              Hay cambios sin guardar
-            </span>
-          }
-        </div>
+      <!-- Right: Actions -->
+      <div class="flex items-center gap-3">
+        @if (lastSaved) {
+        <span class="hidden md:block text-xs text-gray-400 italic mr-2">
+          Último guardado: {{ lastSaved | date: 'HH:mm:ss' }}
+        </span>
+        }
 
-        <div class="flex items-center space-x-3">
-          <app-button
-            variant="outline-danger"
-            size="sm"
-            (click)="resetToDefaults()"
-          >
-            Restablecer valores por defecto
-          </app-button>
+        <app-button variant="outline-danger" size="sm" (clicked)="resetToDefaults()" class="flex-shrink-0">
+          <app-icon name="rotate-ccw" size="16" class="mr-2"></app-icon>
+          Restablecer
+        </app-button>
 
-          @if (hasUnsavedChanges) {
-            <app-button
-              variant="primary"
-              size="sm"
-              [loading]="isSaving"
-              (click)="saveAllSettings()"
-            >
-              Guardar Cambios
-            </app-button>
-          }
-        </div>
+        <app-button variant="primary" size="sm" [loading]="isSaving" [disabled]="!hasUnsavedChanges && !isSaving"
+          (clicked)="saveAllSettings()" class="flex-shrink-0">
+          <app-icon name="save" size="16" class="mr-2"></app-icon>
+          Guardar Cambios
+        </app-button>
       </div>
+    </div>
+  </div>
+
+  <!-- Main Content Area -->
+  <div class="max-w-[1600px] mx-auto p-4 md:p-6 pb-20">
+    @if (isLoading) {
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12">
+      <div class="text-center">
+        <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-100 border-t-blue-600 mb-4">
+        </div>
+        <p class="text-gray-500 font-medium">Cargando configuraciones...</p>
+      </div>
+    </div>
+    } @else {
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <!-- Tabs Navigation -->
+      <div class="border-b border-gray-100 bg-gray-50/50">
+        <nav class="flex space-x-1 p-2" role="tablist">
+          @for (tab of tabs; track tab.value) {
+          <button (click)="currentTab = tab.value" [class.active]="currentTab === tab.value"
+            [class.inactive]="currentTab !== tab.value"
+            class="py-2.5 px-4 rounded-lg font-semibold text-sm transition-all duration-200" role="tab"
+            [attr.aria-selected]="currentTab === tab.value">
+            {{ tab.label }}
+          </button>
+          }
+        </nav>
+      </div>
+
+      <!-- Tab Content -->
+      <div class="p-6 md:p-8 animate-fadeIn">
+        @if (currentTab === 0) {
+        <app-general-settings-form [settings]="settings.general"
+          (settingsChange)="onSectionChange('general', $event)" />
+        } @else if (currentTab === 1) {
+        <app-inventory-settings-form [settings]="settings.inventory"
+          (settingsChange)="onSectionChange('inventory', $event)" />
+        } @else if (currentTab === 2) {
+        <app-checkout-settings-form [settings]="settings.checkout"
+          (settingsChange)="onSectionChange('checkout', $event)" />
+        } @else if (currentTab === 3) {
+        <app-shipping-settings-form [settings]="settings.shipping"
+          (settingsChange)="onSectionChange('shipping', $event)" />
+        } @else if (currentTab === 4) {
+        <app-notifications-settings-form [settings]="settings.notifications"
+          (settingsChange)="onSectionChange('notifications', $event)" />
+        } @else if (currentTab === 5) {
+        <app-pos-settings-form [settings]="settings.pos" (settingsChange)="onSectionChange('pos', $event)" />
+        } @else if (currentTab === 6) {
+        <app-receipts-settings-form [settings]="settings.receipts"
+          (settingsChange)="onSectionChange('receipts', $event)" />
+        }
+      </div>
+    </div>
     }
   </div>
 </div>
