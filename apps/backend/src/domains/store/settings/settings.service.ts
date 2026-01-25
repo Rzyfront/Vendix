@@ -10,6 +10,7 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppSettingsDto } from './dto/settings-schemas.dto';
@@ -25,6 +26,7 @@ export class SettingsService {
     private organizationPrisma: OrganizationPrismaService,
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
+    private auditService: AuditService,
   ) { }
 
   async getSettings(): Promise<StoreSettings> {
@@ -77,12 +79,16 @@ export class SettingsService {
   async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
+    const user_id = context?.user_id;
 
     if (!store_id) {
       throw new ForbiddenException('Store context required');
     }
 
     const currentSettings = await this.getSettings();
+
+    // Guardar valores antiguos para auditoría
+    const oldValues = { ...currentSettings };
 
     // Solo validar las secciones que se están actualizando
     await this.validatePartialSettings(dto);
@@ -143,7 +149,7 @@ export class SettingsService {
       }
     }
 
-    return this.prisma.store_settings.upsert({
+    const result = await this.prisma.store_settings.upsert({
       where: { store_id },
       update: {
         settings: updatedSettings,
@@ -154,6 +160,37 @@ export class SettingsService {
         settings: updatedSettings,
       },
     });
+
+    // Registrar auditoría de actualización de settings
+    try {
+      // Solo guardar las secciones que cambiaron (no todo el objeto de settings)
+      const changedSections: Record<string, any> = {};
+      for (const key of Object.keys(dto)) {
+        if (dto[key as keyof UpdateSettingsDto] !== undefined) {
+          changedSections[key] = {
+            old: (oldValues as any)[key],
+            new: (updatedSettings as any)[key],
+          };
+        }
+      }
+
+      await this.auditService.logUpdate(
+        user_id!,
+        AuditResource.SETTINGS,
+        store_id!, // Validado arriba, siempre existe aquí
+        null, // No guardamos el objeto completo de oldValues
+        changedSections, // Solo las secciones que cambiaron
+        {
+          sections_updated: Object.keys(dto),
+          store_id,
+        }
+      );
+      this.logger.log(`Audit log created for settings update by user ${user_id}`);
+    } catch (error) {
+      this.logger.error(`Failed to create audit log for settings update: ${error.message}`);
+    }
+
+    return result.settings as StoreSettings;
   }
 
   async resetToDefault(): Promise<StoreSettings> {
