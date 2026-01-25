@@ -8,6 +8,11 @@ import {
   IsArray,
   IsOptional,
   ValidateNested,
+  IsUrl,
+  Matches,
+  IsIn,
+  IsNotEmpty,
+  MaxLength,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -241,4 +246,44 @@ export class ReceiptsSettingsDto {
   @ApiProperty({ example: '¡Gracias por su compra!' })
   @IsString()
   receipt_footer: string;
+}
+
+export class AppSettingsDto {
+  @ApiProperty({ example: 'Vendix', description: 'Nombre de la aplicación' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name: string;
+
+  @ApiProperty({ example: '#7ED7A5', description: 'Color primario en formato HEX' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'primary_color must be a valid hex color (e.g., #7ED7A5)' })
+  primary_color: string;
+
+  @ApiProperty({ example: '#2F6F4E', description: 'Color secundario en formato HEX' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'secondary_color must be a valid hex color' })
+  secondary_color: string;
+
+  @ApiProperty({ example: '#FFFFFF', description: 'Color de acento en formato HEX' })
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'accent_color must be a valid hex color' })
+  accent_color: string;
+
+  @ApiProperty({ enum: ['default', 'aura', 'monocromo'], example: 'default' })
+  @IsIn(['default', 'aura', 'monocromo'], { message: 'theme must be either "default", "aura", or "monocromo"' })
+  theme: 'default' | 'aura' | 'monocromo';
+
+  @ApiProperty({ example: 'https://example.com/logo.png', required: false })
+  @IsOptional()
+  @IsUrl({}, { message: 'logo_url must be a valid URL' })
+  logo_url?: string | null;
+
+  @ApiProperty({ example: 'https://example.com/favicon.ico', required: false })
+  @IsOptional()
+  @IsUrl({}, { message: 'favicon_url must be a valid URL' })
+  favicon_url?: string | null;
 }

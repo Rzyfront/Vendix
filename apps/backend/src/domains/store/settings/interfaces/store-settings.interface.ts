@@ -1,3 +1,13 @@
+export interface AppSettings {
+  name: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  theme: 'default' | 'aura' | 'monocromo';
+  logo_url: string | null;
+  favicon_url: string | null;
+}
+
 export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -6,6 +16,7 @@ export interface StoreSettings {
   notifications: NotificationsSettings;
   pos: PosSettings;
   receipts: ReceiptsSettings;
+  app: AppSettings;
 }
 
 export interface GeneralSettings {

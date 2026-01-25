@@ -9,7 +9,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
 export interface NotificationsSettings {
   email_enabled: boolean;
@@ -22,10 +22,11 @@ export interface NotificationsSettings {
   new_order_alerts_phone?: string | null;
 }
 
+
 @Component({
   selector: 'app-notifications-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, SettingToggleComponent],
   templateUrl: './notifications-settings-form.component.html',
   styleUrls: ['./notifications-settings-form.component.scss'],
 })

@@ -53,6 +53,15 @@ export function getDefaultStoreSettings(): StoreSettings {
       receipt_header: '',
       receipt_footer: '¡Gracias por su compra!',
     },
+    app: {
+      name: 'Vendix',
+      primary_color: '#7ED7A5',
+      secondary_color: '#2F6F4E',
+      accent_color: '#FFFFFF',
+      theme: 'default',
+      logo_url: null,
+      favicon_url: null,
+    },
   };
 }
 

@@ -10,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 
 export interface InventorySettings {
   low_stock_threshold: number;
@@ -18,10 +19,13 @@ export interface InventorySettings {
   allow_negative_stock: boolean;
 }
 
+import { IconComponent } from '../../../../../../../shared/components/index';
+import { LucideAngularModule } from 'lucide-angular';
+
 @Component({
   selector: 'app-inventory-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
   templateUrl: './inventory-settings-form.component.html',
   styleUrls: ['./inventory-settings-form.component.scss'],
 })
@@ -36,7 +40,7 @@ export class InventorySettingsForm implements OnInit, OnChanges {
     allow_negative_stock: new FormControl(false),
   });
 
-  outOfStockActions = [
+  outOfStockActions: SelectorOption[] = [
     { value: 'hide', label: 'Ocultar producto' },
     { value: 'show', label: 'Mostrar como agotado' },
     { value: 'disable', label: 'Deshabilitar compras' },

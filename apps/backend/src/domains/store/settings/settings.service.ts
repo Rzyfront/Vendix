@@ -12,6 +12,7 @@ import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { AppSettingsDto } from './dto/settings-schemas.dto';
 import { validateSync } from 'class-validator';
 import { getDefaultStoreSettings } from './defaults/default-store-settings';
 
@@ -38,13 +39,39 @@ export class SettingsService {
       where: { store_id },
     });
 
+    // Get domain config for the app section
+    const domainConfig = await this.getDomainConfig(store_id);
+    const branding = domainConfig?.branding || {};
+
     if (!storeSettings || !storeSettings.settings) {
-      return getDefaultStoreSettings();
+      return {
+        ...getDefaultStoreSettings(),
+        app: {
+          name: branding.name || 'Vendix',
+          primary_color: branding.primary_color || '#7ED7A5',
+          secondary_color: branding.secondary_color || '#2F6F4E',
+          accent_color: branding.accent_color || '#FFFFFF',
+          theme: branding.theme || 'default',
+          logo_url: branding.logo_url || null,
+          favicon_url: branding.favicon_url || null,
+        }
+      };
     }
 
-    // Retornar los settings guardados directamente sin validación estricta
-    // Esto permite que los settings antiguos sigan funcionando
-    return storeSettings.settings as StoreSettings;
+    // Merge existing settings with app config from domain
+    const settings = storeSettings.settings as StoreSettings;
+    return {
+      ...settings,
+      app: {
+        name: branding.name || 'Vendix',
+        primary_color: branding.primary_color || '#7ED7A5',
+        secondary_color: branding.secondary_color || '#2F6F4E',
+        accent_color: branding.accent_color || '#FFFFFF',
+        theme: branding.theme || 'default',
+        logo_url: branding.logo_url || null,
+        favicon_url: branding.favicon_url || null,
+      }
+    };
   }
 
   async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
@@ -59,6 +86,12 @@ export class SettingsService {
 
     // Solo validar las secciones que se están actualizando
     await this.validatePartialSettings(dto);
+
+    // Handle app section separately (domain_settings)
+    if (dto.app) {
+      await this.updateDomainBranding(store_id, dto.app);
+      delete (dto as any).app; // Remove from dto to not save in store_settings
+    }
 
     // Merge solo las secciones enviadas
     const updatedSettings = { ...currentSettings };
@@ -285,6 +318,86 @@ export class SettingsService {
       this.logger.error(`Error in generateFaviconForStore for store ${storeId}: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Gets the domain configuration for a store.
+   * Prioritizes the primary domain, falls back to any domain associated with the store.
+   *
+   * @param storeId - Store ID
+   * @returns Domain config object or empty object if no domain found
+   */
+  private async getDomainConfig(storeId: number): Promise<any> {
+    // Try to find primary domain first
+    const domain = await this.organizationPrisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        is_primary: true,
+      },
+      select: { config: true }
+    });
+
+    // If no primary domain, try to find any domain associated with the store
+    if (!domain) {
+      const anyDomain = await this.organizationPrisma.domain_settings.findFirst({
+        where: { store_id: storeId },
+        select: { config: true }
+      });
+      return anyDomain?.config || {};
+    }
+
+    return domain?.config || {};
+  }
+
+  /**
+   * Updates the branding configuration in domain_settings.
+   *
+   * @param storeId - Store ID
+   * @param appSettings - App settings containing branding configuration
+   */
+  private async updateDomainBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
+    // Try to find primary domain first
+    let domain = await this.organizationPrisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        is_primary: true,
+      }
+    });
+
+    // If no primary domain, try to find any domain associated with the store
+    if (!domain) {
+      domain = await this.organizationPrisma.domain_settings.findFirst({
+        where: { store_id: storeId }
+      });
+    }
+
+    if (!domain) {
+      this.logger.warn(`No domain found for store ${storeId}, skipping branding update`);
+      return;
+    }
+
+    // Merge with existing config to preserve other settings
+    const existingConfig = (domain.config as any) || {};
+    const updatedConfig = {
+      ...existingConfig,
+      branding: {
+        ...existingConfig.branding,
+        name: appSettings.name,
+        primary_color: appSettings.primary_color,
+        secondary_color: appSettings.secondary_color,
+        accent_color: appSettings.accent_color,
+        theme: appSettings.theme,
+        logo_url: appSettings.logo_url,
+        favicon_url: appSettings.favicon_url,
+      }
+    };
+
+    await this.organizationPrisma.domain_settings.update({
+      where: { id: domain.id },
+      data: { config: updatedConfig }
+    });
+
+    this.logger.log(`Branding updated for domain ${domain.hostname} (store ${storeId})`);
   }
 
   private async validatePartialSettings(dto: UpdateSettingsDto): Promise<void> {

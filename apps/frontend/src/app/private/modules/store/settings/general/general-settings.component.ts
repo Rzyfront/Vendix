@@ -6,11 +6,10 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { GeneralSettingsForm } from './components/general-settings-form/general-settings-form.component';
 import { InventorySettingsForm } from './components/inventory-settings-form/inventory-settings-form.component';
-import { CheckoutSettingsForm } from './components/checkout-settings-form/checkout-settings-form.component';
-import { ShippingSettingsForm } from './components/shipping-settings-form/shipping-settings-form.component';
 import { NotificationsSettingsForm } from './components/notifications-settings-form/notifications-settings-form.component';
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
+import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 
@@ -24,11 +23,10 @@ import { IconComponent } from '../../../../../shared/components/index';
     ButtonComponent,
     GeneralSettingsForm,
     InventorySettingsForm,
-    CheckoutSettingsForm,
-    ShippingSettingsForm,
     NotificationsSettingsForm,
     PosSettingsForm,
     ReceiptsSettingsForm,
+    AppSettingsForm,
   ],
   templateUrl: './general-settings.component.html',
   styleUrls: ['./general-settings.component.scss'],
@@ -43,19 +41,8 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
   hasUnsavedChanges = false;
   lastSaved: Date | null = null;
 
-  currentTab = 0;
   showTemplates = false;
   templates: any[] = [];
-
-  tabs = [
-    { label: 'General', value: 0 },
-    { label: 'Inventario', value: 1 },
-    { label: 'Checkout', value: 2 },
-    { label: 'Envíos', value: 3 },
-    { label: 'Notificaciones', value: 4 },
-    { label: 'POS', value: 5 },
-    { label: 'Recibos', value: 6 },
-  ];
 
   ngOnInit() {
     this.loadSettings();

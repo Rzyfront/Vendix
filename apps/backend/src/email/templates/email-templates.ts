@@ -1,4 +1,5 @@
 import { EmailBranding } from '../interfaces/branding.interface';
+import { DomainConfigService } from '../../common/config/domain.config';
 
 export interface EmailTemplateData {
   username: string;
@@ -19,15 +20,16 @@ export interface EmailTemplateData {
 }
 
 export class EmailTemplates {
-  private static readonly BASE_URL =
-    process.env.FRONTEND_URL || 'http://localhost:4200';
+  public static get BASE_URL() {
+    return process.env.FRONTEND_URL || 'http://localhost:4200';
+  }
   private static readonly COMPANY_NAME = 'Vendix';
   private static readonly SUPPORT_EMAIL = 'soporte@vendix.com';
 
   static getVerificationTemplate(data: EmailTemplateData) {
     const verificationUrl = `${this.BASE_URL}/auth/verify-email?token=${data.token}`;
     const loginUrl = data.vlink
-      ? `https://${data.vlink}.vendix.online`
+      ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;
 
     return {
@@ -119,16 +121,15 @@ export class EmailTemplates {
                     <span class="login-label">📧 Tu correo:</span>
                     <span class="login-value">${data.email}</span>
                   </div>
-                  ${
-                    data.password
-                      ? `
+                  ${data.password
+          ? `
                   <div class="login-item">
                     <span class="login-label">🔑 Tu contraseña:</span>
                     <span class="login-value">${'•'.repeat(data.password.length)}</span>
                   </div>
                   `
-                      : ''
-                  }
+          : ''
+        }
                 </div>
                 <div style="color: #92400E; font-size: 14px; margin-top: 15px;">
                   💡 <strong>Consejo:</strong> Guarda esta información en un lugar seguro.
@@ -183,9 +184,9 @@ export class EmailTemplates {
             <div class="footer">
               <div class="footer-logo">${this.COMPANY_NAME}</div>
               <div class="footer-links">
-                <a href="https://vendix.online">Sitio Web</a>
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
-                <a href="https://help.vendix.online">Ayuda</a>
+                <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
@@ -227,7 +228,7 @@ ${data.password ? `🔑 Tu contraseña: ${data.password}` : ''}
 
 Si tienes preguntas, estamos aquí para ayudarte.
 Soporte: ${this.SUPPORT_EMAIL}
-Web: https://vendix.online
+Web: https://${DomainConfigService.getBaseDomain()}
 
 ¡Bienvenido al futuro del comercio! 🚀
 
@@ -239,7 +240,7 @@ El equipo de ${this.COMPANY_NAME}
   static getPasswordResetTemplate(data: EmailTemplateData) {
     const resetUrl = `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
     const loginUrl = data.vlink
-      ? `https://${data.vlink}.vendix.online`
+      ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;
 
     return {
@@ -344,16 +345,16 @@ El equipo de ${this.COMPANY_NAME}
                 <div style="color: #6B7280; font-size: 14px;">
                   ¿Necesitas ayuda adicional?<br>
                   📧 <a href="mailto:${this.SUPPORT_EMAIL}" style="color: #2F6F4E;">${this.SUPPORT_EMAIL}</a><br>
-                  🌐 <a href="https://help.vendix.online" style="color: #2F6F4E;">Centro de Ayuda</a>
+                  🌐 <a href="https://help.${DomainConfigService.getBaseDomain()}" style="color: #2F6F4E;">Centro de Ayuda</a>
                 </div>
               </div>
             </div>
             <div class="footer">
               <div class="footer-logo">${this.COMPANY_NAME}</div>
               <div class="footer-links">
-                <a href="https://vendix.online">Sitio Web</a>
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
-                <a href="https://help.vendix.online">Ayuda</a>
+                <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
@@ -388,7 +389,7 @@ Contraseña: [Tu nueva contraseña]
 
 ¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
-🌐 Centro de Ayuda: https://help.vendix.online
+🌐 Centro de Ayuda: https://help.${DomainConfigService.getBaseDomain()}
 
 Mantén tu cuenta segura usando contraseñas únicas y complejas.
 
@@ -400,7 +401,7 @@ El equipo de ${this.COMPANY_NAME}
   static getWelcomeTemplate(data: EmailTemplateData) {
     const dashboardUrl = `${this.BASE_URL}/dashboard`;
     const loginUrl = data.vlink
-      ? `https://${data.vlink}.vendix.online`
+      ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;
 
     // Dynamic branding with fallback to Vendix defaults
@@ -706,23 +707,23 @@ El equipo de ${this.COMPANY_NAME}
                 </div>
                 <div style="color: #4B5563; font-size: 14px;">
                   📧 <a href="mailto:${this.SUPPORT_EMAIL}" style="color: ${secondaryColor};">${this.SUPPORT_EMAIL}</a><br>
-                  🌐 <a href="https://help.vendix.online" style="color: ${secondaryColor};">Centro de Ayuda</a><br>
-                  ${userType !== 'customer' ? '💬 <a href="https://vendix.online/chat" style="color: ' + secondaryColor + ';">Chat en vivo</a>' : ''}
+                  🌐 <a href="https://help.${DomainConfigService.getBaseDomain()}" style="color: ${secondaryColor};">Centro de Ayuda</a><br>
+                  ${userType !== 'customer' ? '💬 <a href="https://${DomainConfigService.getBaseDomain()}/chat" style="color: ' + secondaryColor + ';">Chat en vivo</a>' : ''}
                 </div>
               </div>
             </div>
             <div class="footer">
               <div class="footer-logo">${companyName}</div>
               <div class="footer-links">
-                <a href="https://vendix.online">Sitio Web</a>
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
-                <a href="https://help.vendix.online">Ayuda</a>
+                <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.<br>
                 ${userType === 'owner' ? '¡Estás listo para transformar tu negocio! 🚀' :
-                  userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-                  '¡Gracias por elegirnos! 🛍️'}
+          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
+            '¡Gracias por elegirnos! 🛍️'}
               </div>
             </div>
           </div>
@@ -746,8 +747,8 @@ ${dashboardUrl}
 
 ✨ ¿QUÉ PUEDES HACER AHORA?
 ${userType === 'staff' ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas' :
-  userType === 'customer' ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas' :
-  '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'}
+          userType === 'customer' ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas' :
+            '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'}
 
 ${userType !== 'customer' ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
 1. ${userType === 'staff' ? 'Explora el panel de staff' : 'Completa tu perfil de organización'}
@@ -757,12 +758,12 @@ ${userType !== 'customer' ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
 
 ` : ''}¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
-🌐 Ayuda: https://help.vendix.online
-${userType !== 'customer' ? '💬 Chat: https://vendix.online/chat' : ''}
+🌐 Ayuda: https://help.${DomainConfigService.getBaseDomain()}
+${userType !== 'customer' ? '💬 Chat: https://' + DomainConfigService.getBaseDomain() + '/chat' : ''}
 
 ${userType === 'owner' ? '¡Bienvenido al futuro del comercio! 🚀' :
-  userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-  '¡Gracias por elegirnos! 🛍️'}
+          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
+            '¡Gracias por elegirnos! 🛍️'}
 
 El equipo de ${companyName}
       `,
@@ -772,7 +773,7 @@ El equipo de ${companyName}
   static getOnboardingTemplate(data: EmailTemplateData & { step: string }) {
     const dashboardUrl = `${this.BASE_URL}/onboarding`;
     const loginUrl = data.vlink
-      ? `https://${data.vlink}.vendix.online`
+      ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;
 
     const stepMessages = {
@@ -917,15 +918,15 @@ El equipo de ${companyName}
               <div class="benefits">
                 <div class="benefits-title">✨ Beneficios de completar este paso</div>
                 ${stepInfo.benefits
-                  .map(
-                    (benefit) => `
+          .map(
+            (benefit) => `
                   <div class="benefit-item">
                     <span class="benefit-icon">✓</span>
                     <span>${benefit}</span>
                   </div>
                 `,
-                  )
-                  .join('')}
+          )
+          .join('')}
               </div>
 
               <div class="timeline">
@@ -960,17 +961,17 @@ El equipo de ${companyName}
                 <div style="color: #6B7280; font-size: 14px;">
                   ¿Necesitas ayuda durante el setup?<br>
                   📧 <a href="mailto:${this.SUPPORT_EMAIL}" style="color: #2F6F4E;">${this.SUPPORT_EMAIL}</a><br>
-                  🌐 <a href="https://help.vendix.online/onboarding" style="color: #2F6F4E;">Guía de onboarding</a><br>
-                  💬 <a href="https://vendix.online/chat" style="color: #2F6F4E;">Chat de soporte</a>
+                  🌐 <a href="https://help.${DomainConfigService.getBaseDomain()}/onboarding" style="color: #2F6F4E;">Guía de onboarding</a><br>
+                  💬 <a href="https://${DomainConfigService.getBaseDomain()}/chat" style="color: #2F6F4E;">Chat de soporte</a>
                 </div>
               </div>
             </div>
             <div class="footer">
               <div class="footer-logo">${this.COMPANY_NAME}</div>
               <div class="footer-links">
-                <a href="https://vendix.online">Sitio Web</a>
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
-                <a href="https://help.vendix.online">Ayuda</a>
+                <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
@@ -1010,8 +1011,8 @@ ${dashboardUrl}
 
 ¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
-🌐 Guía: https://help.vendix.online/onboarding
-💬 Chat: https://vendix.online/chat
+🌐 Guía: https://help.${DomainConfigService.getBaseDomain()}/onboarding
+💬 Chat: https://${DomainConfigService.getBaseDomain()}/chat
 
 Tu progreso se guarda automáticamente. ¡Sigue así! 🚀
 

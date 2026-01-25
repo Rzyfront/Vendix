@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DomainConfigService } from '../common/config/domain.config';
 import {
   EmailProvider,
   EmailResult,
@@ -68,7 +69,7 @@ export class EmailService implements OnModuleInit {
       fromEmail:
         process.env.EMAIL_FROM ||
         this.configService.get<string>('EMAIL_FROM') ||
-        'noreply@vendix.online',
+        `noreply@${DomainConfigService.getBaseDomain()}`,
       fromName:
         process.env.EMAIL_FROM_NAME ||
         this.configService.get<string>('EMAIL_FROM_NAME') ||
@@ -80,8 +81,8 @@ export class EmailService implements OnModuleInit {
           '',
         port: parseInt(
           process.env.SMTP_PORT ||
-            this.configService.get<string>('SMTP_PORT') ||
-            '587',
+          this.configService.get<string>('SMTP_PORT') ||
+          '587',
         ),
         secure:
           (process.env.SMTP_SECURE ||

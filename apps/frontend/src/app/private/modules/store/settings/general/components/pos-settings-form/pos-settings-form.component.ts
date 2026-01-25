@@ -9,7 +9,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
 export interface BusinessHours {
   open: string;
@@ -29,10 +29,11 @@ export interface PosSettings {
   allow_refund_without_approval: boolean;
 }
 
+
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })

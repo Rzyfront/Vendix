@@ -1,79 +1,16 @@
 <div class="inventory-settings-form">
-  <div class="space-y-6">
-    <!-- Section Header -->
-    <div class="border-b border-gray-200 pb-4">
-      <h3 class="text-lg font-semibold text-gray-900">
-        Configuración de Inventario
-      </h3>
-      <p class="text-sm text-gray-600 mt-1">
-        Administra cómo se controla y muestra el inventario de productos
-      </p>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Control de Stock</h4>
+      <app-input [formControl]="lowStockThresholdControl" type="number" label="Umbral de Stock Bajo" placeholder="10"
+        min="0" (inputChange)="onFieldChange()"></app-input>
     </div>
 
-    <!-- Track Inventory Toggle -->
-    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-      <div>
-        <label class="text-sm font-medium text-gray-900"
-          >Rastrear Inventario</label
-        >
-        <p class="text-sm text-gray-600 mt-1">
-          Habilita el control automático de stock para todos los productos
-        </p>
-      </div>
-      <app-toggle
-        [formControl]="trackInventoryControl"
-        (changed)="onFieldChange()"
-        ariaLabel="Rastrear inventario"
-      ></app-toggle>
-    </div>
-
-    <!-- Low Stock Threshold -->
-    <div>
-      <app-input
-        [formControl]="lowStockThresholdControl"
-        type="number"
-        label="Umbral de Stock Bajo"
-        placeholder="10"
-        helperText="Cantidad mínima de stock antes de mostrar alerta"
-        min="0"
-        (inputChange)="onFieldChange()"
-      ></app-input>
-    </div>
-
-    <!-- Out of Stock Action -->
-    <div>
-      <label class="block text-sm font-medium text-gray-900 mb-2">
-        Acción cuando no hay stock
-      </label>
-      <select
-        [formControl]="outOfStockActionControl"
-        (change)="onFieldChange()"
-        class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-      >
-        @for (action of outOfStockActions; track action.value) {
-          <option [value]="action.value">{{ action.label }}</option>
-        }
-      </select>
-      <p class="mt-2 text-sm text-gray-600">
-        Qué hacer cuando un producto se agota
-      </p>
-    </div>
-
-    <!-- Allow Negative Stock Toggle -->
-    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-      <div>
-        <label class="text-sm font-medium text-gray-900">
-          Permitir Stock Negativo
-        </label>
-        <p class="text-sm text-gray-600 mt-1">
-          Permite vender productos incluso cuando no hay stock disponible
-        </p>
-      </div>
-      <app-toggle
-        [formControl]="allowNegativeStockControl"
-        (changed)="onFieldChange()"
-        ariaLabel="Permitir stock negativo"
-      ></app-toggle>
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Comportamiento</h4>
+      <app-selector [formControl]="outOfStockActionControl" label="Acción sin stock" [options]="outOfStockActions"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
     </div>
   </div>
+
 </div>

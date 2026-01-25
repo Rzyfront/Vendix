@@ -1,155 +1,27 @@
 <div class="general-settings-form">
-  <div class="space-y-6">
-    <!-- Section Header -->
-    <div class="border-b border-gray-200 pb-4">
-      <h3 class="text-lg font-semibold text-gray-900">Configuración General</h3>
-      <p class="text-sm text-gray-600 mt-1">
-        Configura la información básica y preferencias generales de tu tienda
-      </p>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Store Information -->
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Información Básica</h4>
+
+      <app-input [formControl]="nameControl" type="text" label="Nombre de la Tienda" placeholder="Mi Tienda"
+        (inputChange)="onFieldChange()"></app-input>
+
+      <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
     </div>
 
-    <!-- Store Information (Campos de tabla stores) -->
-    <div class="border-t border-gray-200 pt-6">
-      <h4 class="text-sm font-semibold text-gray-900 mb-4">
-        Información de la Tienda
-      </h4>
+    <!-- Preferences -->
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Preferencias y Localización</h4>
 
-      <div class="space-y-4">
-        <!-- Store Name -->
-        <div>
-          <app-input
-            [formControl]="nameControl"
-            type="text"
-            label="Nombre de la Tienda"
-            placeholder="Mi Tienda"
-            helperText="El nombre público de tu tienda"
-            (inputChange)="onFieldChange()"
-          ></app-input>
-        </div>
+      <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
 
-        <!-- Store Type -->
-        <div>
-          <label class="block text-sm font-medium text-gray-900 mb-2">
-            Tipo de Tienda
-          </label>
-          <select
-            [formControl]="storeTypeControl"
-            (change)="onFieldChange()"
-            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            @for (type of storeTypes; track type.value) {
-              <option [value]="type.value">{{ type.label }}</option>
-            }
-          </select>
-          <p class="mt-2 text-sm text-gray-600">
-            Define el tipo de operación de tu negocio
-          </p>
-        </div>
+      <app-selector [formControl]="timezoneControl" label="Zona Horaria" [options]="commonTimezones"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
 
-        <!-- Logo URL -->
-        <div>
-          <app-input
-            [formControl]="logoUrlControl"
-            type="url"
-            label="URL del Logo"
-            placeholder="https://example.com/logo.png"
-            helperText="URL de la imagen del logo de tu tienda"
-            (inputChange)="onFieldChange()"
-          ></app-input>
-        </div>
-      </div>
-    </div>
 
-    <!-- Location & Timezone -->
-    <div class="border-t border-gray-200 pt-6">
-      <h4 class="text-sm font-semibold text-gray-900 mb-4">
-        Ubicación y Zona Horaria
-      </h4>
-
-      <div class="space-y-4">
-        <!-- Timezone -->
-        <div>
-          <label class="block text-sm font-medium text-gray-900 mb-2">
-            Zona Horaria
-          </label>
-          <select
-            [formControl]="timezoneControl"
-            (change)="onFieldChange()"
-            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            @for (tz of commonTimezones; track tz) {
-              <option [value]="tz">{{ tz }}</option>
-            }
-          </select>
-          <p class="mt-2 text-sm text-gray-600">
-            La zona horaria se usa para calcular fechas y horas en tu tienda
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Currency & Language (Campos de store_settings) -->
-    <div class="border-t border-gray-200 pt-6">
-      <h4 class="text-sm font-semibold text-gray-900 mb-4">Moneda e Idioma</h4>
-
-      <div class="space-y-4">
-        <!-- Currency -->
-        <div>
-          <label class="block text-sm font-medium text-gray-900 mb-2">
-            Moneda
-          </label>
-          <select
-            [formControl]="currencyControl"
-            (change)="onFieldChange()"
-            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            @for (curr of currencies; track curr.value) {
-              <option [value]="curr.value">{{ curr.label }}</option>
-            }
-          </select>
-          <p class="mt-2 text-sm text-gray-600">
-            Moneda predeterminada para mostrar precios
-          </p>
-        </div>
-
-        <!-- Language -->
-        <div>
-          <label class="block text-sm font-medium text-gray-900 mb-2">
-            Idioma
-          </label>
-          <select
-            [formControl]="languageControl"
-            (change)="onFieldChange()"
-            class="block w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            @for (lang of languages; track lang.value) {
-              <option [value]="lang.value">{{ lang.label }}</option>
-            }
-          </select>
-          <p class="mt-2 text-sm text-gray-600">
-            Idioma predeterminado de la interfaz
-          </p>
-        </div>
-
-        <!-- Tax Included Toggle -->
-        <div
-          class="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
-        >
-          <div>
-            <label class="text-sm font-medium text-gray-900">
-              Impuestos Incluidos
-            </label>
-            <p class="text-sm text-gray-600 mt-1">
-              Los precios mostrados ya incluyen el impuesto
-            </p>
-          </div>
-          <app-toggle
-            [formControl]="taxIncludedControl"
-            (changed)="onFieldChange()"
-            ariaLabel="Impuestos incluidos"
-          ></app-toggle>
-        </div>
-      </div>
     </div>
   </div>
 </div>

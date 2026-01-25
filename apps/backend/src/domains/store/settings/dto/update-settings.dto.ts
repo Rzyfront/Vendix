@@ -9,6 +9,7 @@ import {
   NotificationsSettingsDto,
   PosSettingsDto,
   ReceiptsSettingsDto,
+  AppSettingsDto,
 } from './settings-schemas.dto';
 
 export class UpdateSettingsDto {
@@ -53,4 +54,10 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ReceiptsSettingsDto)
   receipts?: ReceiptsSettingsDto;
+
+  @ApiProperty({ type: AppSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AppSettingsDto)
+  app?: AppSettingsDto;
 }

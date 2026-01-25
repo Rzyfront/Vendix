@@ -9,6 +9,7 @@ import {
   EmailTemplateData,
 } from '../templates/email-templates';
 import { WelcomeEmailOptions } from '../interfaces/branding.interface';
+import { DomainConfigService } from '../../common/config/domain.config';
 
 @Injectable()
 export class ConsoleProvider implements EmailProvider {
@@ -54,14 +55,14 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 VERIFICATION LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/verify-email?token=${token}`,
+      `🔗 VERIFICATION LINK: ${EmailTemplates.BASE_URL}/auth/verify-email?token=${token}`,
     );
 
     // Log del vlink para debugging
     if (organizationSlug) {
       this.logger.log(`🏢 ORGANIZATION SLUG (vLink): ${organizationSlug}`);
       this.logger.log(
-        `🌐 LOGIN URL: https://${organizationSlug}.vendix.online`,
+        `🌐 LOGIN URL: https://${organizationSlug}.${DomainConfigService.getBaseDomain()}`,
       );
     } else {
       this.logger.log(`⚠️ NO ORGANIZATION SLUG PROVIDED - Using default URL`);
@@ -88,7 +89,7 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 PASSWORD RESET LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/reset-owner-password?token=${token}`,
+      `🔗 PASSWORD RESET LINK: ${EmailTemplates.BASE_URL}/auth/reset-owner-password?token=${token}`,
     );
 
     return this.sendEmail(to, template.subject, template.html, template.text);

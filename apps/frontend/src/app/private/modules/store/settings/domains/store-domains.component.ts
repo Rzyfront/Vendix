@@ -27,6 +27,7 @@ import {
   UpdateStoreDomainDto,
   StoreDomainQueryDto,
 } from './domain.interface';
+import { environment } from '../../../../../../environments/environment';
 
 @Component({
   selector: 'app-store-domains',
@@ -128,7 +129,7 @@ import {
               [(ngModel)]="form_data.hostname"
               [disabled]="is_editing"
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="mi-tienda.vendix.com"
+              placeholder="{{ 'mi-tienda.' + environment.vendixDomain }}"
             />
           </div>
 
@@ -233,6 +234,7 @@ import {
 export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   @ViewChild('hostnameTemplate') hostnameTemplate!: TemplateRef<any>;
 
+  protected readonly environment = environment;
   private destroy$ = new Subject<void>();
 
   domains: StoreDomain[] = [];
@@ -314,7 +316,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   constructor(
     private domains_service: StoreDomainsService,
     private toast_service: ToastService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadDomains();

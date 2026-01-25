@@ -10,6 +10,7 @@ import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 
 export interface GeneralSettings {
   // Campos de store_settings (existentes)
@@ -27,7 +28,7 @@ export interface GeneralSettings {
 @Component({
   selector: 'app-general-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
@@ -47,7 +48,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     tax_included: new FormControl(false),
   });
 
-  storeTypes = [
+  storeTypes: SelectorOption[] = [
     { value: 'physical', label: 'Tienda Física' },
     { value: 'online', label: 'Tienda Online' },
     { value: 'hybrid', label: 'Híbrida (Física + Online)' },
@@ -55,7 +56,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     { value: 'kiosko', label: 'Kiosco' },
   ];
 
-  currencies = [
+  currencies: SelectorOption[] = [
     { value: 'COP', label: 'Peso Colombiano (COP)' },
     { value: 'USD', label: 'Dólar Americano (USD)' },
     { value: 'EUR', label: 'Euro (EUR)' },
@@ -65,13 +66,13 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     { value: 'CLP', label: 'Peso Chileno (CLP)' },
   ];
 
-  languages = [
+  languages: SelectorOption[] = [
     { value: 'es', label: 'Español' },
     { value: 'en', label: 'Inglés' },
     { value: 'pt', label: 'Portugués' },
   ];
 
-  commonTimezones = [
+  commonTimezones: SelectorOption[] = [
     'America/Bogota',
     'America/Mexico_City',
     'America/Lima',
@@ -82,7 +83,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     'America/Los_Angeles',
     'Europe/Madrid',
     'Europe/London',
-  ];
+  ].map(tz => ({ value: tz, label: tz }));
 
   // Typed getters for FormControls
   get nameControl(): FormControl<string> {

@@ -19,6 +19,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../shared/components/input/input.component';
 import { SelectorComponent } from '../../../../shared/components/selector/selector.component';
+import { SettingToggleComponent } from '../../../../shared/components/setting-toggle/setting-toggle.component';
 
 @Component({
   selector: 'app-ecommerce',
@@ -30,6 +31,7 @@ import { SelectorComponent } from '../../../../shared/components/selector/select
     ButtonComponent,
     InputComponent,
     SelectorComponent,
+    SettingToggleComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
@@ -142,15 +144,51 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         terms_required: [false],
         guest_newsletter_opt_in: [false],
       }),
-
-      // Envíos
-      shipping: this.fb.group({
-        free_shipping_threshold: [null],
-        calculate_tax_before_shipping: [true],
-        multiple_shipping_addresses: [false],
-      }),
     });
   }
+
+  // --- Typed Getters for Form Controls ---
+  get inicioGroup(): FormGroup { return this.settingsForm.get('inicio') as FormGroup; }
+  get catalogGroup(): FormGroup { return this.settingsForm.get('catalog') as FormGroup; }
+  get cartGroup(): FormGroup { return this.settingsForm.get('cart') as FormGroup; }
+  get checkoutGroup(): FormGroup { return this.settingsForm.get('checkout') as FormGroup; }
+  get generalGroup(): FormGroup { return this.settingsForm.get('general') as FormGroup; }
+
+  // Inicio
+  get tituloControl() { return this.inicioGroup.get('titulo') as any; }
+  get parrafoControl() { return this.inicioGroup.get('parrafo') as any; }
+  get primaryColorControl() { return this.inicioGroup.get('colores.primary_color') as any; }
+  get secondaryColorControl() { return this.inicioGroup.get('colores.secondary_color') as any; }
+  get accentColorControl() { return this.inicioGroup.get('colores.accent_color') as any; }
+
+  // General
+  get currencyControl() { return this.generalGroup.get('currency') as any; }
+  get localeControl() { return this.generalGroup.get('locale') as any; }
+  get timezoneControl() { return this.generalGroup.get('timezone') as any; }
+
+  // Slider
+  get sliderEnableControl() { return this.settingsForm.get('slider.enable') as any; }
+
+  // Catalog
+  get productsPerPageControl() { return this.catalogGroup.get('products_per_page') as any; }
+  get showOutOfStockControl() { return this.catalogGroup.get('show_out_of_stock') as any; }
+  get allowReviewsControl() { return this.catalogGroup.get('allow_reviews') as any; }
+  get showVariantsControl() { return this.catalogGroup.get('show_variants') as any; }
+  get showRelatedProductsControl() { return this.catalogGroup.get('show_related_products') as any; }
+  get enableFiltersControl() { return this.catalogGroup.get('enable_filters') as any; }
+
+  // Cart
+  get cartExpirationHoursControl() { return this.cartGroup.get('cart_expiration_hours') as any; }
+  get maxQuantityPerItemControl() { return this.cartGroup.get('max_quantity_per_item') as any; }
+  get allowGuestCheckoutControl() { return this.cartGroup.get('allow_guest_checkout') as any; }
+  get saveForLaterControl() { return this.cartGroup.get('save_for_later') as any; }
+
+  // Checkout
+  get requireRegistrationControl() { return this.checkoutGroup.get('require_registration') as any; }
+  get guestEmailRequiredControl() { return this.checkoutGroup.get('guest_email_required') as any; }
+  get createAccountAfterOrderControl() { return this.checkoutGroup.get('create_account_after_order') as any; }
+  get termsRequiredControl() { return this.checkoutGroup.get('terms_required') as any; }
+  get guestNewsletterOptInControl() { return this.checkoutGroup.get('guest_newsletter_opt_in') as any; }
 
   /**
    * Load settings and determine mode (setup vs edit)
