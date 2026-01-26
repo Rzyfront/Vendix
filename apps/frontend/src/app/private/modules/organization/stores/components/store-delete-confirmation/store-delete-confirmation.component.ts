@@ -32,7 +32,7 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
   @Input() isOpen = false;
   @Input() store: StoreListItem | null = null;
 
-  @Output() openChange = new EventEmitter<boolean>();
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() confirm = new EventEmitter<void>();
   @Output() cancel = new EventEmitter<void>();
 
@@ -81,13 +81,14 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
   }
 
   onCancel(): void {
+    this.isOpenChange.emit(false);
     this.cancel.emit();
     this.slugInput.reset();
     this.showError = false;
   }
 
   onOpenChange(isOpen: boolean): void {
-    this.openChange.emit(isOpen);
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.slugInput.reset();
       this.showError = false;
