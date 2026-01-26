@@ -364,6 +364,18 @@ export class PosCartComponent implements OnInit, OnDestroy {
     return item.taxAmount;
   }
 
+  getItemTaxRate(item: CartItem): number {
+    const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return rate;
+  }
+
+  getItemTaxAmount(item: CartItem): number {
+    return item.taxAmount;
+  }
+
   handleImageError(event: any): void {
     // Handle broken product images
     event.target.style.display = 'none';
