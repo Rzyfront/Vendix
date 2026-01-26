@@ -71,7 +71,7 @@ export interface StoreCreateModalData {
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nueva Tienda"
@@ -395,6 +395,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
   }
 
   onCancel(): void {
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
