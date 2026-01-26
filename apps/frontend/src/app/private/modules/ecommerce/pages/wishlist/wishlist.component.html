@@ -1,0 +1,72 @@
+<div class="wishlist-page">
+  <h1>Mis Favoritos</h1>
+
+  @if (is_loading) {
+  <div class="loading">
+    <div class="spinner"></div>
+    <p>Cargando favoritos...</p>
+  </div>
+  } @else if (!wishlist || wishlist.items.length === 0) {
+  <div class="empty-wishlist">
+    <app-icon name="heart" [size]="64" class="text-muted"></app-icon>
+    <h2>No tienes favoritos aún</h2>
+    <p>Guarda los productos que te gustan para verlos aquí</p>
+    <button class="primary-btn" (click)="continueShopping()">
+      Ver productos
+    </button>
+  </div>
+  } @else {
+  <div class="wishlist-content">
+    <div class="wishlist-items">
+      @for (item of wishlist.items; track item.id) {
+      <div class="wishlist-item" [class.removing]="removing_id === item.product_id">
+        <div class="item-image" (click)="goToProduct(item.product.slug)">
+          @if (item.product.image_url) {
+          <img [src]="item.product.image_url" [alt]="item.product.name">
+          } @else {
+          <div class="no-image">
+            <app-icon name="image" [size]="24" class="text-muted"></app-icon>
+          </div>
+          }
+        </div>
+
+        <div class="item-details">
+          <h3 (click)="goToProduct(item.product.slug)">{{ item.product.name }}</h3>
+          @if (item.variant) {
+          <span class="variant">{{ item.variant.name }}</span>
+          }
+          <span class="sku">SKU: {{ item.variant?.sku || item.product.sku }}</span>
+        </div>
+
+        <div class="item-price">
+          @if (item.variant?.price_override !== null && item.variant?.price_override !== undefined) {
+          <span class="price">{{ item.variant!.price_override | currency }}</span>
+          } @else {
+          <span class="price">{{ item.product.base_price | currency }}</span>
+          }
+        </div>
+
+        <div class="item-stock">
+          @if (item.product.stock_quantity === 0) {
+          <span class="out-of-stock">Agotado</span>
+          } @else if (item.product.stock_quantity !== null && item.product.stock_quantity <= 5) {
+          <span class="low-stock">¡Últimas {{ item.product.stock_quantity }} unidades!</span>
+          } @else {
+          <span class="in-stock">Disponible</span>
+          }
+        </div>
+
+        <div class="item-actions">
+          <button class="add-to-cart-btn" (click)="addToCart(item)" [disabled]="item.product.stock_quantity === 0" title="Agregar al carrito">
+            <app-icon name="shopping-cart" [size]="16"></app-icon>
+          </button>
+          <button class="remove-btn" (click)="removeFromWishlist(item.product_id)" title="Eliminar de favoritos">
+            <app-icon name="trash-2" [size]="18"></app-icon>
+          </button>
+        </div>
+      </div>
+      }
+    </div>
+  </div>
+  }
+</div>

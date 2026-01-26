@@ -39,11 +39,15 @@ export class UsersService {
     // Hash password
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(createUserDto.first_name || '');
+    const formatted_last_name = toTitleCase(createUserDto.last_name || '');
+
     const user = await this.prisma.users.create({
       data: {
         email: createUserDto.email,
-        first_name: createUserDto.first_name,
-        last_name: createUserDto.last_name,
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
         username: createUserDto.username,
         password: hashedPassword,
         organization_id: createUserDto.organization_id,
@@ -434,14 +438,82 @@ export class UsersService {
       throw new NotFoundException('User not found');
     }
 
-    await this.prisma.users.update({
+    const updatedUser = await this.prisma.users.update({
       where: { id },
       data: {
         email_verified: true,
-        state: user.state === user_state_enum.pending_verification ? user_state_enum.active : undefined
+        state:
+          user.state === user_state_enum.pending_verification
+            ? user_state_enum.active
+            : undefined,
+      },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
       },
     });
 
-    return { message: 'Email verified successfully' };
+    // Remove password from response
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async toggle2FA(id: number, enabled: boolean) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.users.update({
+      where: { id },
+      data: { two_factor_enabled: enabled },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async unlock(id: number) {
+    const user = await this.prisma.users.findUnique({
+      where: { id },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.users.update({
+      where: { id },
+      data: {
+        locked_until: null,
+        failed_login_attempts: 0,
+      },
+      include: {
+        organizations: true,
+        user_roles: {
+          include: {
+            roles: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
   }
 }

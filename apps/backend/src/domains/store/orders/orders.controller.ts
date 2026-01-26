@@ -27,7 +27,7 @@ export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get()
   @Permissions('store:orders:read')
@@ -101,6 +101,24 @@ export class OrdersController {
     }
   }
 
+  @Get(':id/timeline')
+  @Permissions('store:orders:read')
+  async getTimeline(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.ordersService.getTimeline(id);
+      return this.responseService.success(
+        result,
+        'Línea de tiempo de la orden obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la línea de tiempo de la orden',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id')
   @Permissions('store:orders:update')
   async update(
@@ -136,6 +154,4 @@ export class OrdersController {
       );
     }
   }
-
-  
 }

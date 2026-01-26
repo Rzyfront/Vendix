@@ -18,6 +18,53 @@ export class TaxesService {
     private prisma: StorePrismaService,
   ) { }
 
+  /**
+   * Calculates taxes for a product based on its assignments.
+   * Logic: Sums all tax rates from assigned categories.
+   */
+  async calculateProductTaxes(productId: number, basePrice: number) {
+    const assignments = await this.prisma.product_tax_assignments.findMany({
+      where: { product_id: productId },
+      include: {
+        tax_categories: {
+          include: {
+            tax_rates: {
+              where: {
+                // In a multi-tenant environment, rates should belong to the store or be global.
+                // StorePrismaService filters by store_id automatically.
+              },
+            },
+          },
+        },
+      },
+    });
+
+    let totalRate = 0;
+    const taxes: { tax_rate_id: number; name: string; rate: number; amount: number }[] = [];
+
+    for (const assignment of assignments) {
+      if (assignment.tax_categories?.tax_rates) {
+        for (const rate of assignment.tax_categories.tax_rates) {
+          const rateVal = Number(rate.rate);
+          const amount = basePrice * rateVal;
+          totalRate += rateVal;
+          taxes.push({
+            tax_rate_id: rate.id,
+            name: rate.name,
+            rate: rateVal,
+            amount,
+          });
+        }
+      }
+    }
+
+    return {
+      total_rate: totalRate,
+      total_tax_amount: basePrice * totalRate,
+      taxes,
+    };
+  }
+
   async create(createTaxCategoryDto: CreateTaxCategoryDto, user: any) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;

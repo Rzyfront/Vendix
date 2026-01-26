@@ -13,15 +13,240 @@ import {
 } from '../../interfaces/store.interface';
 import {
   ButtonComponent,
-  IconComponent,
+  ModalComponent,
 } from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-edit-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent],
-  templateUrl: './store-edit-modal.component.html',
-  styleUrls: ['./store-edit-modal.component.scss'],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
+  template: `
+    <app-modal
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
+      title="Editar Tienda"
+      subtitle="Actualiza la información de la tienda seleccionada"
+    >
+      @if (store) {
+        <ng-container>
+      <form [formGroup]="editForm" class="space-y-6">
+        <!-- Store Information -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Información de la Tienda
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Store Name -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Nombre de la Tienda *</label
+              >
+              <input
+                type="text"
+                formControlName="name"
+                [class]="
+                  isFieldInvalid('name') ? 'border-red-500' : 'border-border'
+                "
+                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Ingresa el nombre de la tienda"
+              />
+              <div
+                *ngIf="isFieldInvalid('name')"
+                class="mt-1 text-sm text-destructive"
+              >
+                {{ getErrorMessage("name") }}
+              </div>
+            </div>
+
+            <!-- Domain -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Dominio *</label
+              >
+              <input
+                type="text"
+                formControlName="domain"
+                [class]="
+                  isFieldInvalid('domain')
+                    ? 'border-red-500'
+                    : 'border-border'
+                "
+                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="dominio-tienda"
+              />
+              <div
+                *ngIf="isFieldInvalid('domain')"
+                class="mt-1 text-sm text-destructive"
+              >
+                {{ getErrorMessage("domain") }}
+              </div>
+            </div>
+
+            <!-- Email -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Correo Electrónico *</label
+              >
+              <input
+                type="email"
+                formControlName="email"
+                [class]="
+                  isFieldInvalid('email') ? 'border-red-500' : 'border-border'
+                "
+                class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="contacto@tienda.com"
+              />
+              <div
+                *ngIf="isFieldInvalid('email')"
+                class="mt-1 text-sm text-destructive"
+              >
+                {{ getErrorMessage("email") }}
+              </div>
+            </div>
+
+            <!-- Phone -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Teléfono</label
+              >
+              <input
+                type="tel"
+                formControlName="phone"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="+57 (1) 000-0000"
+              />
+            </div>
+
+            <!-- Status -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Estado</label
+              >
+              <select
+                formControlName="status"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+              >
+                <option value="active">Activa</option>
+                <option value="inactive">Inactiva</option>
+                <option value="maintenance">En Mantenimiento</option>
+              </select>
+            </div>
+
+            <!-- Description -->
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Descripción</label
+              >
+              <textarea
+                formControlName="description"
+                rows="3"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Breve descripción de tu tienda"
+              ></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Address Information -->
+        <div>
+          <h3 class="text-lg font-medium text-text-primary mb-4">
+            Información de Dirección
+          </h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Street -->
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Dirección</label
+              >
+              <input
+                type="text"
+                formControlName="address.street"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Calle 123 #45-67"
+              />
+            </div>
+
+            <!-- City -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Ciudad</label
+              >
+              <input
+                type="text"
+                formControlName="address.city"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Bogotá"
+              />
+            </div>
+
+            <!-- State -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Departamento</label
+              >
+              <input
+                type="text"
+                formControlName="address.state"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Cundinamarca"
+              />
+            </div>
+
+            <!-- ZIP Code -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >Código Postal</label
+              >
+              <input
+                type="text"
+                formControlName="address.zipCode"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="110111"
+              />
+            </div>
+
+            <!-- Country -->
+            <div>
+              <label class="block text-sm font-medium text-text-primary mb-2"
+                >País</label
+              >
+              <input
+                type="text"
+                formControlName="address.country"
+                class="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text-primary"
+                placeholder="Colombia"
+              />
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button (clicked)="onCancel()" variant="outline">
+          Cancelar
+        </app-button>
+        <app-button
+          (clicked)="onSubmit()"
+          [disabled]="!editForm.valid || !settingsForm.valid || isSubmitting"
+          variant="primary"
+          [loading]="isSubmitting"
+        >
+          Actualizar Tienda
+        </app-button>
+      </div>
+        </ng-container>
+      } 
+    </app-modal>
+  `,
 })
 export class StoreEditModalComponent {
   @Input() isOpen = false;
@@ -118,14 +343,8 @@ export class StoreEditModalComponent {
     }
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onCancel(): void {
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
@@ -165,12 +384,12 @@ export class StoreEditModalComponent {
 
     if (!field) return '';
 
-    if (field.errors?.['required']) return 'This field is required';
+    if (field.errors?.['required']) return 'Este campo es requerido';
     if (field.errors?.['minlength'])
-      return `Minimum ${field.errors['minlength'].requiredLength} characters`;
-    if (field.errors?.['email']) return 'Please enter a valid email';
-    if (field.errors?.['pattern']) return 'Invalid format';
+      return `Mínimo ${field.errors['minlength'].requiredLength} caracteres`;
+    if (field.errors?.['email']) return 'Email inválido';
+    if (field.errors?.['pattern']) return 'Formato inválido';
 
-    return 'Invalid field';
+    return 'Campo inválido';
   }
 }

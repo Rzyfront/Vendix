@@ -40,4 +40,4 @@ import { StoreDomainsModule } from './domains/domains.module';
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule { }
+export class StoreDomainModule {}

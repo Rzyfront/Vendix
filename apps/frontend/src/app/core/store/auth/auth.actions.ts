@@ -16,6 +16,7 @@ export const loginSuccess = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -29,9 +30,44 @@ export const loginFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
-export const logout = createAction('[Auth] Logout');
+// Login Customer Actions
+export const loginCustomer = createAction(
+  '[Auth] Login Customer',
+  props<{
+    email: string;
+    password: string;
+    store_id: number;
+  }>(),
+);
 
-export const logoutSuccess = createAction('[Auth] Logout Success');
+export const loginCustomerSuccess = createAction(
+  '[Auth] Login Customer Success',
+  props<{
+    user: any;
+    user_settings?: any;
+    store_settings?: any;
+    tokens: { access_token: string; refresh_token: string };
+    permissions?: string[];
+    roles?: string[];
+    message?: string;
+    updated_environment?: string;
+  }>(),
+);
+
+export const loginCustomerFailure = createAction(
+  '[Auth] Login Customer Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
+export const logout = createAction(
+  '[Auth] Logout',
+  props<{ redirect?: boolean }>()
+);
+
+export const logoutSuccess = createAction(
+  '[Auth] Logout Success',
+  props<{ redirect?: boolean }>()
+);
 
 export const refreshToken = createAction(
   '[Auth] Refresh Token',
@@ -74,6 +110,7 @@ export const restoreAuthState = createAction(
   props<{
     user: any;
     user_settings?: any;
+    store_settings?: any;
     tokens: { access_token: string; refresh_token: string };
     permissions?: string[];
     roles?: string[];
@@ -150,6 +187,39 @@ export const resendVerificationEmailSuccess = createAction(
 
 export const resendVerificationEmailFailure = createAction(
   '[Auth] Resend Verification Email Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
+// Register Customer Actions
+export const registerCustomer = createAction(
+  '[Auth] Register Customer',
+  props<{
+    email: string;
+    password?: string;
+    first_name: string;
+    last_name: string;
+    store_id: number;
+    phone?: string;
+    document_type?: string;
+    document_number?: string;
+  }>(),
+);
+
+export const registerCustomerSuccess = createAction(
+  '[Auth] Register Customer Success',
+  props<{
+    user: any;
+    user_settings?: any;
+    store_settings?: any;
+    tokens: { access_token: string; refresh_token: string };
+    permissions?: string[];
+    roles?: string[];
+    updated_environment?: string;
+  }>(),
+);
+
+export const registerCustomerFailure = createAction(
+  '[Auth] Register Customer Failure',
   props<{ error: NormalizedApiPayload | string }>(),
 );
 

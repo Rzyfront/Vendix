@@ -9,6 +9,7 @@ export interface Product {
   sku: string;
   description?: string;
   price: number;
+  final_price: number;
   cost?: number;
   stock_quantity: number;
   category_id?: number;
@@ -78,7 +79,7 @@ export interface ProductSearchResponse {
 export class ProductsService {
   private baseUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   searchProducts(
     request: ProductSearchRequest,

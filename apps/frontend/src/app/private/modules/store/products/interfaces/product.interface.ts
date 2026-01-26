@@ -21,6 +21,7 @@ export interface Product {
   sku?: string;
   stock_quantity?: number;
   state: ProductState;
+  final_price: number;
   created_at: Date;
   updated_at: Date;
 

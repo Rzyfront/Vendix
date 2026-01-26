@@ -13,6 +13,8 @@ export enum AuditAction {
     ACCOUNT_UNLOCKED = 'ACCOUNT_UNLOCKED',
     SUSPICIOUS_ACTIVITY = 'SUSPICIOUS_ACTIVITY',
     PASSWORD_RESET = 'PASSWORD_RESET',
+    VIEW = 'VIEW',
+    SEARCH = 'SEARCH',
 }
 
 export enum AuditResource {
@@ -26,6 +28,7 @@ export enum AuditResource {
     ROLES = 'roles',
     PERMISSIONS = 'permissions',
     SYSTEM = 'system',
+    SETTINGS = 'settings',
 }
 
 export interface AuditLog {
@@ -59,6 +62,7 @@ export interface AuditStats {
     total_logs: number;
     logs_by_action: Record<string, number>;
     logs_by_resource: Record<string, number>;
+    logs_by_action_and_resource: Record<string, number>; // Formato: "CREATE_users", "UPDATE_settings", etc.
 }
 
 export interface AuditQueryDto {

@@ -28,10 +28,11 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nueva Tienda"
       subtitle="Completa los detalles para crear una nueva tienda"
-      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6">
         <!-- Basic Information -->
@@ -318,13 +319,6 @@ export class StoreCreateModalComponent {
     });
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onSubmit(): void {
     if (this.storeForm.invalid) {
       // Mark all fields as touched to trigger validation messages
@@ -361,7 +355,8 @@ export class StoreCreateModalComponent {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
+    this.resetForm();
   }
 
   resetForm(): void {

@@ -37,8 +37,7 @@ export class DomainsService implements OnModuleInit {
     private eventEmitter: EventEmitter2,
   ) { }
 
-  async onModuleInit() {
-  }
+  async onModuleInit() { }
 
   // ==================== VALIDATION METHODS ====================
 
@@ -262,8 +261,10 @@ export class DomainsService implements OnModuleInit {
 
     // Handle primary domain logic
     const is_primary = data.is_primary || false;
-    if (is_primary) {
-      await this.clearExistingPrimary(
+    const status = is_primary ? ('active' as any) : ('pending_dns' as any);
+
+    if (is_primary || status === 'active') {
+      await this.ensureSingleActiveType(
         data.organization_id,
         data.store_id,
         inferred_type,
@@ -281,7 +282,7 @@ export class DomainsService implements OnModuleInit {
         store_id: data.store_id,
         config: data.config as any,
         domain_type: inferred_type as any,
-        status: 'pending_dns' as any,
+        status,
         ssl_status: 'pending' as any,
         is_primary,
         ownership: inferred_ownership as any,
@@ -291,6 +292,28 @@ export class DomainsService implements OnModuleInit {
     });
 
     return domainSetting;
+  }
+
+  private async ensureSingleActiveType(
+    organizationId: number | undefined,
+    storeId: number | undefined,
+    domainType: string,
+    excludeId?: number,
+  ) {
+    await this.prisma.domain_settings.updateMany({
+      where: {
+        organization_id: organizationId || null,
+        store_id: storeId || null,
+        domain_type: domainType as any,
+        status: 'active',
+        id: excludeId ? { not: excludeId } : undefined,
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
+    });
   }
 
   async getAllDomainSettings(filters: any) {
@@ -370,19 +393,49 @@ export class DomainsService implements OnModuleInit {
   ) {
     const existing_record = await this.getDomainSettingByHostname(hostname);
 
-    // Handle primary domain changes
-    if (updateData.is_primary && !existing_record.is_primary) {
-      await this.clearExistingPrimary(
+    const domain_type = updateData.domain_type || existing_record.domain_type;
+
+    // Handle activation logic
+    if (updateData.status === 'active' || updateData.is_primary === true) {
+      await this.ensureSingleActiveType(
         existing_record.organization_id,
         existing_record.store_id,
-        existing_record.domain_type,
+        domain_type,
+        existing_record.id,
       );
+
+      if (updateData.is_primary === true) {
+        updateData.status = 'active';
+      }
     }
 
     const updates: any = {
       ...updateData,
       updated_at: new Date(),
     };
+
+    // Si se está actualizando la configuración, sincronizar con otros dominios del mismo tipo
+    if (updateData.config) {
+      const { organization_id, store_id, domain_type: record_type } = existing_record;
+
+      // Actualizar TODOS los dominios del mismo tipo para esta organización/tienda
+      await this.prisma.domain_settings.updateMany({
+        where: {
+          organization_id,
+          store_id,
+          domain_type: record_type,
+        },
+        data: {
+          config: updateData.config as any,
+          updated_at: new Date(),
+        },
+      });
+
+      this.logger.log(
+        `Configuration synchronized across all ${record_type} domains for ${store_id ? 'store ' + store_id : 'org ' + organization_id
+        }`,
+      );
+    }
 
     const updated = await this.prisma.domain_settings.update({
       where: { hostname },
@@ -405,7 +458,7 @@ export class DomainsService implements OnModuleInit {
 
     // Check if new hostname is available
     const available = await this.checkHostnameAvailability(newHostname);
-    if (!available) {
+    if (!available.available) {
       throw new ConflictException(`Hostname ${newHostname} is not available`);
     }
 
@@ -413,7 +466,7 @@ export class DomainsService implements OnModuleInit {
       hostname: newHostname,
       organization_id: source.organization_id,
       store_id: source.store_id,
-      config: source.config,
+      config: source.config as any,
       domain_type: source.domain_type,
       ownership: source.ownership,
       is_primary: false, // Duplicates are not primary by default

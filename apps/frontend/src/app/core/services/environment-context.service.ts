@@ -1,9 +1,11 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
-import { take, map } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { Observable, of } from 'rxjs';
+import { take, map, catchError, tap } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { GlobalFacade } from '../store/global.facade';
 import { AppEnvironment } from '../models/domain-config.interface';
+import { environment } from '../../../environments/environment';
 
 export interface EnvironmentContext {
   currentEnvironment: AppEnvironment;
@@ -16,12 +18,23 @@ export interface EnvironmentContext {
   availableStores: any[];
 }
 
+export interface UpgradeAccountTypeResponse {
+  success: boolean;
+  data: {
+    account_type: string;
+    message: string;
+  };
+  message: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class EnvironmentContextService {
   private authFacade = inject(AuthFacade);
   private globalFacade = inject(GlobalFacade);
+  private http = inject(HttpClient);
+  private apiUrl = `${environment.apiUrl}/organization/organizations`;
 
   /**
    * Obtiene el contexto completo del entorno actual
@@ -73,10 +86,42 @@ export class EnvironmentContextService {
     // Verificar la configuración permanente del usuario
     const currentEnv = userSettings.config.app;
 
+    // Verificar account_type de la organización
+    // Solo permitir switch a ORG_ADMIN si la organización es MULTI_STORE_ORG
+
+    // Robust account_type detection (handles objects and arrays)
+    const userOrg = currentUser.organization || currentUser.organizations;
+    const accountType =
+      currentUser.organization?.account_type ||
+      (Array.isArray(userOrg)
+        ? userOrg[0]?.account_type
+        : userOrg?.account_type) ||
+      'SINGLE_STORE';
+    const allowOrgSwitch = accountType === 'MULTI_STORE_ORG';
+
     // Para cambiar a organización, debe:
     // 1. Tener rol de organización
     // 2. Estar actualmente en el entorno STORE_ADMIN
-    return hasOrgRole && currentEnv === 'STORE_ADMIN';
+    // 3. La organización debe ser MULTI_STORE_ORG
+    return hasOrgRole && currentEnv === 'STORE_ADMIN' && allowOrgSwitch;
+  }
+
+  /**
+   * Verifica si el usuario puede convertir su cuenta a organización multi-tienda
+   * Solo los owners con cuentas SINGLE_STORE pueden hacer esto
+   */
+  canUpgradeAccountType(user?: any): boolean {
+    const currentUser = user || this.getCurrentUserFromAuth();
+    if (!currentUser) return false;
+
+    // Verificar que sea owner
+    const isOwner = currentUser.roles?.includes('owner');
+    if (!isOwner) return false;
+
+    // Verificar que la cuenta sea SINGLE_STORE
+    const accountType =
+      currentUser.organization?.account_type || 'SINGLE_STORE';
+    return accountType === 'SINGLE_STORE';
   }
 
   /**
@@ -202,5 +247,26 @@ export class EnvironmentContextService {
 
     // Fallback solo si no hay configuración (caso extremo)
     return AppEnvironment.VENDIX_LANDING;
+  }
+
+  /**
+   * Upgrade organization account type from SINGLE_STORE to MULTI_STORE_ORG
+   * Only owners can perform this action
+   */
+  upgradeAccountType(): Observable<UpgradeAccountTypeResponse> {
+    return this.http
+      .patch<UpgradeAccountTypeResponse>(
+        `${this.apiUrl}/upgrade-account-type`,
+        { account_type: 'MULTI_STORE_ORG' },
+      )
+      .pipe(
+        tap((response) => {
+          console.log('Account type upgraded successfully:', response);
+        }),
+        catchError((error) => {
+          console.error('Error upgrading account type:', error);
+          throw error;
+        }),
+      );
   }
 }

@@ -25,4 +25,4 @@ import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],
 })
-export class SuperadminDomainModule { }
+export class SuperadminDomainModule {}

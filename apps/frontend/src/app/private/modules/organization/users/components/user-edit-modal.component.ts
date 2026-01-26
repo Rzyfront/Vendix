@@ -36,10 +36,12 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Usuario"
-      
+      subtitle="Actualiza la información del usuario seleccionado"
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()" *ngIf="user">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

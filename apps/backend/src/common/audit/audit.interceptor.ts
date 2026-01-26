@@ -12,6 +12,25 @@ import { AuditService, AuditAction, AuditResource } from './audit.service';
 export class AuditInterceptor implements NestInterceptor {
     constructor(private readonly auditService: AuditService) { }
 
+    // Rutas que NO deben ser auditadas para evitar bucles infinito
+    // Solo se excluyen endpoints que causarían recursividad infinita o problemas de rendimiento
+    private readonly EXCLUDED_PATTERNS = [
+        '/audit',           // Audit endpoints (evita bucle infinito)
+        '/health',          // Health checks
+        '/stats',           // Statistics endpoints (evita bucle infinito)
+        '/dashboard',       // Dashboard data (evita problemas de rendimiento)
+        '/metrics',         // Metrics endpoints
+    ];
+
+    private shouldExclude(url: string): boolean {
+        const cleanUrl = url.split('?')[0].toLowerCase();
+
+        // Solo excluir patrones específicos que causan bucles
+        return this.EXCLUDED_PATTERNS.some(pattern =>
+            cleanUrl.includes(pattern.toLowerCase())
+        );
+    }
+
     intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
         const request = context.switchToHttp().getRequest();
         const method = request.method;
@@ -21,7 +40,13 @@ export class AuditInterceptor implements NestInterceptor {
         const user = request.user;
         const userId = user?.id;
 
+        // No auditar si no hay usuario autenticado
         if (!userId) {
+            return next.handle();
+        }
+
+        // No auditar peticiones a endpoints excluidos (evita bucle infinito)
+        if (this.shouldExclude(url)) {
             return next.handle();
         }
 
@@ -178,15 +203,17 @@ export class AuditInterceptor implements NestInterceptor {
         userAgent: string
     ) {
         const resource = this.extractResourceFromUrl(url);
-        if (resource && data?.id) {
+        // Handle ResponseService wrapper: { success: true, message: "...", data: {...} }
+        const actualData = data?.data || data;
+        if (resource && actualData?.id) {
             await this.auditService.log({
                 userId,
                 organizationId,
                 storeId,
                 action: AuditAction.CREATE,
                 resource,
-                resourceId: data.id,
-                newValues: data,
+                resourceId: actualData.id,
+                newValues: actualData,
                 ipAddress,
                 userAgent,
             });
@@ -204,7 +231,9 @@ export class AuditInterceptor implements NestInterceptor {
         userAgent: string
     ) {
         const resource = this.extractResourceFromUrl(url);
-        const resourceId = this.extractIdFromUrl(url) || newData?.id || oldData?.id;
+        // Handle ResponseService wrapper: { success: true, message: "...", data: {...} }
+        const actualNewData = newData?.data || newData;
+        const resourceId = this.extractIdFromUrl(url) || actualNewData?.id || oldData?.id;
 
         if (resource && resourceId) {
             await this.auditService.log({
@@ -215,7 +244,7 @@ export class AuditInterceptor implements NestInterceptor {
                 resource,
                 resourceId,
                 oldValues: oldData,
-                newValues: newData,
+                newValues: actualNewData,
                 metadata: { method: 'UPDATE' },
                 ipAddress,
                 userAgent,

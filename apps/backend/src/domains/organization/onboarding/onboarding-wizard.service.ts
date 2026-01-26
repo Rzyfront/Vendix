@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
@@ -97,9 +98,9 @@ export class OnboardingWizardService {
 
   /**
    * Select application type for the user
+   * Also sets the organization's account_type based on selection
    */
   async selectAppType(userId: number, selectAppTypeDto: SelectAppTypeDto) {
-
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       include: { user_settings: true },
@@ -107,6 +108,23 @@ export class OnboardingWizardService {
 
     if (!user) {
       throw new BadRequestException('User not found');
+    }
+
+    // Map app_type to organization account_type
+    const accountType =
+      selectAppTypeDto.app_type === 'ORG_ADMIN'
+        ? 'MULTI_STORE_ORG'
+        : 'SINGLE_STORE';
+
+    // Update organization's account_type if user has an organization
+    if (user.organization_id) {
+      await this.prismaService.organizations.update({
+        where: { id: user.organization_id },
+        data: {
+          account_type: accountType,
+          updated_at: new Date(),
+        },
+      });
     }
 
     // Update or create user_settings with selected app type
@@ -142,6 +160,7 @@ export class OnboardingWizardService {
     return {
       success: true,
       app_type: selectAppTypeDto.app_type,
+      account_type: accountType,
       message: 'Application type selected successfully',
     };
   }
@@ -150,7 +169,6 @@ export class OnboardingWizardService {
    * Setup user with address
    */
   async setupUser(userId: number, setupUserDto: SetupUserWizardDto) {
-
     // Update user data
     const updatedUser = await this.prismaService.users.update({
       where: { id: userId },
@@ -213,7 +231,6 @@ export class OnboardingWizardService {
     userId: number,
     setupOrgDto: SetupOrganizationWizardDto,
   ) {
-
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -362,7 +379,6 @@ export class OnboardingWizardService {
    * Setup store with address
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
-
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -423,7 +439,6 @@ export class OnboardingWizardService {
     userId: number,
     setupAppConfigDto: SetupAppConfigWizardDto,
   ) {
-
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: {
@@ -621,16 +636,25 @@ export class OnboardingWizardService {
 
     // 4. Handle Custom Domain (Optional)
     let customDomainRecord = null;
-    if (setupAppConfigDto.use_custom_domain && setupAppConfigDto.custom_domain) {
+    if (
+      setupAppConfigDto.use_custom_domain &&
+      setupAppConfigDto.custom_domain
+    ) {
       const customDomain = setupAppConfigDto.custom_domain.toLowerCase().trim();
 
       // Check for ownership conflict
-      const existingCustom = await this.prismaService.domain_settings.findUnique({
-        where: { hostname: customDomain },
-      });
+      const existingCustom =
+        await this.prismaService.domain_settings.findUnique({
+          where: { hostname: customDomain },
+        });
 
-      if (existingCustom && existingCustom.organization_id !== user.organization_id) {
-        throw new ConflictException(`The domain ${customDomain} is already in use by another organization.`);
+      if (
+        existingCustom &&
+        existingCustom.organization_id !== user.organization_id
+      ) {
+        throw new ConflictException(
+          `The domain ${customDomain} is already in use by another organization.`,
+        );
       }
 
       // Generate standardized branding config for custom domain
@@ -714,6 +738,38 @@ export class OnboardingWizardService {
    * Complete wizard and activate all entities
    */
   async completeWizard(userId: number) {
+    // ✅ NUEVO: Verificar términos OBLIGATORIOS antes de completar
+    const termsCheck = await this.globalPrisma.legal_documents.findMany({
+      where: {
+        is_system: true,
+        document_type: {
+          in: ['TERMS_OF_SERVICE', 'PRIVACY_POLICY'],
+        },
+        is_active: true,
+        organization_id: null,
+        store_id: null,
+      },
+    });
+
+    // Verificar aceptaciones para cada documento requerido
+    for (const document of termsCheck) {
+      const acceptance = await this.globalPrisma.document_acceptances.findFirst(
+        {
+          where: {
+            user_id: userId,
+            document_id: document.id,
+            acceptance_version: document.version,
+          },
+        },
+      );
+
+      if (!acceptance) {
+        throw new BadRequestException(
+          `Debe aceptar los ${document.title} (versión ${document.version}) antes de completar la configuración`,
+        );
+      }
+    }
+
     // Validate completion
     const validation = await this.validateWizardCompletion(userId);
     if (!validation.isValid) {

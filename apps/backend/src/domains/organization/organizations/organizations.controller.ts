@@ -1,6 +1,10 @@
 import { Controller, Get, Patch, Body, Query, UseGuards } from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
-import { UpdateOrganizationDto, OrganizationDashboardDto } from './dto';
+import {
+  UpdateOrganizationDto,
+  OrganizationDashboardDto,
+  UpgradeAccountTypeDto,
+} from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -11,7 +15,7 @@ export class OrganizationsController {
   constructor(
     private readonly organizationsService: OrganizationsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('profile')
   @Permissions('organization:organizations:read')
@@ -65,5 +69,12 @@ export class OrganizationsController {
         error.message,
       );
     }
+  }
+
+  @Patch('upgrade-account-type')
+  @Permissions('organization:organizations:update')
+  async upgradeAccountType(@Body() dto: UpgradeAccountTypeDto) {
+    const result = await this.organizationsService.upgradeAccountType(dto);
+    return this.responseService.success(result, result.message);
   }
 }

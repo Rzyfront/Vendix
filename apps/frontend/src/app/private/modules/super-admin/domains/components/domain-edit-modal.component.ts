@@ -37,34 +37,13 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
-      (isOpenChange)="onOpenChange($event)"
+      title="Editar Dominio"
+      [subtitle]="domain ? 'Editando: ' + domain.hostname : ''"
     >
-      <div slot="header" class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold text-text-primary">Editar Dominio</h3>
-        <button
-          type="button"
-          class="text-text-tertiary hover:text-text-secondary transition-colors"
-          (click)="onCancel()"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </button>
-      </div>
-
-      <div slot="content" class="space-y-4">
-        <form [formGroup]="domainForm">
+      <form [formGroup]="domainForm" class="space-y-4">
           <div class="grid grid-cols-1 gap-4">
             <app-input
               formControlName="hostname"
@@ -161,21 +140,20 @@ import {
             </div>
           </div>
         </form>
-      </div>
 
-      <div slot="footer" class="flex justify-end gap-3">
-        <app-button variant="outline" size="sm" (clicked)="onCancel()">
-          Cancelar
-        </app-button>
-        <app-button
-          variant="primary"
-          size="sm"
-          [loading]="isLoading"
-          (clicked)="onSubmit()"
-        >
-          Actualizar Dominio
-        </app-button>
-      </div>
+        <div slot="footer" class="flex justify-end gap-3">
+          <app-button variant="outline" size="sm" (clicked)="onCancel()">
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            size="sm"
+            [loading]="isLoading"
+            (clicked)="onSubmit()"
+          >
+            Actualizar Dominio
+          </app-button>
+        </div>
     </app-modal>
   `,
 })
@@ -237,15 +215,15 @@ export class DomainEditModalComponent implements OnChanges {
   }
 
   onOpenChange(isOpen: boolean): void {
-    this.isOpen = isOpen;
+    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
-      this.cancel.emit();
+      this.resetForm();
     }
   }
 
   onCancel(): void {
-    this.close();
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
+    this.resetForm();
   }
 
   onSubmit(): void {

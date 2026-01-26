@@ -9,6 +9,7 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { TaxesService } from '../taxes/taxes.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import {
   CreatePaymentDto,
@@ -26,7 +27,8 @@ export class PaymentsService {
   constructor(
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
-    private stockLevelManager: StockLevelManager,
+    private readonly stockLevelManager: StockLevelManager,
+    private readonly taxes_service: TaxesService,
   ) { }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -233,7 +235,7 @@ export class PaymentsService {
       // Redundant if store_id == context.store_id, but harmless.
       // If storeId != context.store_id, query returns empty (correct).
       where.orders = {
-        store_id: storeId
+        store_id: storeId,
       };
     } else {
       // Ensure we are filtering by orders relevant to this context
@@ -477,20 +479,28 @@ export class PaymentsService {
         orderNumber = await this.generateOrderNumber(tx, dto.store_id);
 
         // Create order items
-        const orderItems = dto.items.map((item) => {
+        const orderItems = await Promise.all(dto.items.map(async (item) => {
+          let item_tax_rate = item.tax_rate;
+          let item_tax_amount = item.tax_amount_item;
+
+          // If taxes are missing or 0, calculate them
+          if (!item_tax_rate || item_tax_rate === 0) {
+            const taxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, item.unit_price);
+            item_tax_rate = taxInfo.total_rate;
+            item_tax_amount = taxInfo.total_tax_amount;
+          }
+
           const orderItem: any = {
             product_name: item.product_name,
-            variant_sku: item.product_sku, // Mapear product_sku del frontend a variant_sku del backend
+            variant_sku: item.product_sku,
             variant_attributes: item.variant_attributes
               ? JSON.stringify(item.variant_attributes)
               : undefined,
             quantity: item.quantity,
             unit_price: item.unit_price,
             total_price: item.total_price,
-            tax_rate: item.tax_rate,
-            tax_amount_item: item.tax_amount_item,
-            cost: item.cost,
-            notes: item.notes,
+            tax_rate: item_tax_rate,
+            tax_amount_item: item_tax_amount,
           };
 
           if (item.product_id) {
@@ -504,27 +514,34 @@ export class PaymentsService {
           }
 
           return orderItem;
-        });
+        }));
+
+        // Build order data - only include customer_id if provided (for anonymous sales)
+        const orderData: any = {
+          store_id: dto.store_id,
+          order_number: orderNumber,
+          state: 'processing', // Match enum order_state_enum
+          subtotal_amount: dto.subtotal,
+          tax_amount: dto.tax_amount || 0,
+          discount_amount: dto.discount_amount || 0,
+          grand_total: dto.total_amount,
+          currency: dto.currency || 'USD',
+          billing_address_id: dto.billing_address_id,
+          shipping_address_id: dto.shipping_address_id,
+          internal_notes: dto.internal_notes,
+          order_items: {
+            create: orderItems,
+          },
+        };
+
+        // Only include customer_id if provided (for anonymous sales, this will be undefined/null)
+        if (dto.customer_id !== undefined && dto.customer_id !== null) {
+          orderData.customer_id = dto.customer_id;
+        }
 
         // Create the order
         const order = await tx.orders.create({
-          data: {
-            customer_id: dto.customer_id,
-            store_id: dto.store_id,
-            order_number: orderNumber,
-            state: 'processing', // Match enum order_state_enum
-            subtotal_amount: dto.subtotal,
-            tax_amount: dto.tax_amount || 0,
-            discount_amount: dto.discount_amount || 0,
-            grand_total: dto.total_amount,
-            currency: dto.currency || 'USD',
-            billing_address_id: dto.billing_address_id,
-            shipping_address_id: dto.shipping_address_id,
-            internal_notes: dto.internal_notes,
-            order_items: {
-              create: orderItems,
-            },
-          },
+          data: orderData,
           include: {
             order_items: true,
             stores: true,
@@ -533,12 +550,17 @@ export class PaymentsService {
 
         return order;
       } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
           const target = error.meta?.target as string[];
           if (Array.isArray(target) && target.includes('order_number')) {
             retries--;
             if (retries === 0) {
-              throw new ConflictException('Failed to generate unique POS order number after multiple attempts');
+              throw new ConflictException(
+                'Failed to generate unique POS order number after multiple attempts',
+              );
             }
             // Retry with new order number
             continue;

@@ -10,6 +10,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
+import { TaxesModule } from '../taxes/taxes.module';
 import {
   PaymentGatewayService,
   PaymentValidatorService,
@@ -38,6 +39,7 @@ import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.
     PaypalModule,
     BankTransferModule,
     forwardRef(() => OrdersModule),
+    TaxesModule,
   ],
   controllers: [
     PaymentsController,
@@ -76,7 +78,7 @@ export class PaymentsModule implements OnModuleInit {
     private stripeProcessor: StripeProcessor,
     private paypalProcessor: PaypalProcessor,
     private bankTransferProcessor: BankTransferProcessor,
-  ) {}
+  ) { }
 
   onModuleInit() {
     this.paymentGateway.registerProcessor('cash', this.cashProcessor);

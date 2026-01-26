@@ -28,7 +28,7 @@ interface ApiResponse<T> {
 export class ProductsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) { }
+  constructor(private http: HttpClient) {}
 
   // CRUD Básico
   getProducts(

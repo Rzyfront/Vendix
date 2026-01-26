@@ -63,12 +63,12 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
           >
             <div class="flex items-center gap-3">
               <div
-                class="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-lg shadow-primary-600/20"
+                class="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center"
               >
                 <app-icon
-                  name="shopping-cart"
+                  name="shopping-bag"
                   [size]="24"
-                  class="text-white"
+                  class="text-primary"
                 ></app-icon>
               </div>
               <div class="flex flex-col">
@@ -76,7 +76,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                   Vendix POS
                 </h1>
                 <span class="text-xs text-text-secondary font-medium">
-                  Point of Sale
+                  Punto de venta
                 </span>
               </div>
             </div>
@@ -208,6 +208,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (requestRegisterConfig)="onOpenRegisterConfigModal()"
+        (customerSelected)="onPaymentCustomerSelected($event)"
       ></app-pos-payment-interface>
 
       <app-pos-order-confirmation
@@ -268,7 +269,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.setupSubscriptions();
@@ -365,6 +366,17 @@ export class PosComponent implements OnInit, OnDestroy {
       });
   }
 
+  onPaymentCustomerSelected(customer: PosCustomer): void {
+    // Customer selected from the payment modal's internal selector
+    this.customerService.selectCustomer(customer);
+    this.cartService
+      .setCustomer(customer)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.toastService.success('Cliente asignado correctamente');
+      });
+  }
+
   onProductSelected(product: any): void {
     // Product selected from POS product selection
     // console.log('Product selected:', product);
@@ -440,6 +452,7 @@ export class PosComponent implements OnInit, OnDestroy {
       this.completedOrder = {
         ...(paymentData.order || {}),
         isCreditSale: !!paymentData.isCreditSale,
+        isAnonymousSale: !!paymentData.isAnonymousSale,
         // Ensure we have current cart details for the ticket
         items:
           paymentData.order?.items ||
@@ -455,11 +468,21 @@ export class PosComponent implements OnInit, OnDestroy {
         discount_amount:
           paymentData.order?.discount_amount || this.cartSummary.discountAmount,
         total_amount: paymentData.order?.total_amount || this.cartSummary.total,
-        customer_name: this.selectedCustomer
-          ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
-          : paymentData.order?.customer_name,
-        customer_email:
-          this.selectedCustomer?.email || paymentData.order?.customer_email,
+        // For anonymous sales, use "Consumidor Final" as customer name
+        // For regular sales, use customer data from backend or selected customer
+        customer_name: paymentData.isAnonymousSale
+          ? 'Consumidor Final'
+          : (paymentData.order?.customer_name || (this.selectedCustomer
+              ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
+              : '')),
+        customer_email: (!paymentData.isAnonymousSale && this.selectedCustomer?.email)
+          ? this.selectedCustomer.email
+          : paymentData.order?.customer_email || '',
+        // For anonymous sales, use "000" as tax ID
+        customer_tax_id: paymentData.isAnonymousSale
+          ? '000'
+          : (paymentData.order?.customer_tax_id || this.selectedCustomer?.document_number || ''),
+        customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
       };
 

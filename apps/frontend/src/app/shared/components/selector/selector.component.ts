@@ -46,8 +46,28 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
         *ngIf="label"
         [class]="labelClasses"
         [for]="id"
+        class="label-with-tooltip"
       >
-        {{ label }}
+        <span>{{ label }}</span>
+        <span
+          *ngIf="tooltipText"
+          class="help-icon"
+          [attr.data-tooltip]="tooltipText"
+        >
+          <svg
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        </span>
         <span
           *ngIf="required"
           class="text-[var(--color-destructive)] ml-0.5"
@@ -109,6 +129,7 @@ export class SelectorComponent
   @Input() size: SelectorSize = 'md';
   @Input() variant: SelectorVariant = 'default';
   @Input() options: SelectorOption[] = [];
+  @Input() tooltipText?: string;
 
   @Output() valueChange = new EventEmitter<string | number | null>();
   @Output() blur = new EventEmitter<void>();
@@ -171,8 +192,7 @@ export class SelectorComponent
   get containerClasses(): string {
     return [
       'w-full',
-      // 'mt-4' removed to allow proper alignment in tables. 
-      // Add margin in parent if needed (e.g. forms).
+      'mt-4', // Add margin-top to align with InputComponent
     ]
       .filter(Boolean)
       .join(' ');
@@ -229,7 +249,7 @@ export class SelectorComponent
       stateClasses = [
         'border-border',
         'hover:border-border',
-        'focus:ring-primary/50',
+        'focus:ring-secondary/40',
         'focus:border-primary',
       ];
     }

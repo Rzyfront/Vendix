@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
 import {
@@ -15,7 +16,9 @@ import {
   ButtonComponent,
   InputsearchComponent,
   ToastService,
+  DialogService,
 } from '../../../../../shared/components';
+import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
 import {
@@ -27,11 +30,20 @@ import {
   selectAccessToken,
   selectUser,
 } from '../../../../../core/store/auth/auth.selectors';
+import { ProductFilterDropdownComponent } from '../../products/components/product-filter-dropdown/product-filter-dropdown.component';
+import { ProductQueryDto, Brand } from '../../products/interfaces';
 
 @Component({
   selector: 'app-pos-product-selection',
   standalone: true,
-  imports: [CommonModule, IconComponent, ButtonComponent, InputsearchComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    IconComponent,
+    ButtonComponent,
+    InputsearchComponent,
+    ProductFilterDropdownComponent,
+  ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
     <div
@@ -49,27 +61,29 @@ import {
           </div>
 
           <div
-            class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            class="flex flex-col lg:flex-row items-start lg:items-center gap-3 w-full lg:w-auto"
           >
-            <!-- Input de búsqueda compacto -->
+            <!-- Input de búsqueda -->
             <app-inputsearch
-              class="w-full sm:w-64"
+              class="w-full lg:w-64"
               size="sm"
               placeholder="Buscar productos..."
               [debounceTime]="300"
+              [(ngModel)]="searchQuery"
               (searchChange)="onSearch($event)"
             />
 
-            <!-- Filtro de categoría -->
-            <select
-              class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-              (change)="onCategoryChange($event)"
-              [value]="selectedCategory?.id || 'all'"
-            >
-              <option *ngFor="let category of categories" [value]="category.id">
-                {{ category.name }}
-              </option>
-            </select>
+            <!-- Componente de filtros -->
+            <app-product-filter-dropdown
+              [categories]="categories"
+              [brands]="brands"
+              [isLoading]="loading"
+              [searchTerm]="searchQuery"
+              [selectedCategory]="selectedCategory?.id?.toString() || ''"
+              [selectedBrand]="selectedBrand?.id?.toString() || ''"
+              (filterChange)="onFilterChange($event)"
+              class="w-full lg:w-auto"
+            ></app-product-filter-dropdown>
 
             <app-button
               variant="outline"
@@ -146,8 +160,8 @@ import {
             >
               <!-- Product Image -->
               <img
-                *ngIf="product.image || product.image_url"
-                [src]="product.image || product.image_url"
+                *ngIf="product.image_url || product.image"
+                [src]="product.image_url || product.image"
                 [alt]="product.name"
                 class="w-full h-full object-cover"
                 (error)="onImageError($event)"
@@ -209,16 +223,7 @@ import {
                 <!-- Price -->
                 <div class="flex flex-col">
                   <span class="text-text-primary font-bold text-lg">
-                    {{ product.price }}
-                  </span>
-                  <span
-                    *ngIf="
-                      product.compare_at_price &&
-                      product.compare_at_price > product.price
-                    "
-                    class="text-text-muted text-xs line-through"
-                  >
-                    {{ product.compare_at_price }}
+                    {{ product.final_price | currency }}
                   </span>
                 </div>
 
@@ -320,8 +325,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   loading = false;
   searchQuery = '';
   selectedCategory: any = null;
+  selectedBrand: any = null;
   filteredProducts: any[] = [];
   categories: any[] = [];
+  brands: any[] = [];
   addingToCart = new Set<string>();
 
   @Output() productSelected = new EventEmitter<any>();
@@ -337,12 +344,15 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     private productService: PosProductService,
     private cartService: PosCartService,
     private toastService: ToastService,
+    private dialogService: DialogService,
+    private router: Router,
     private store: Store,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.checkAuthState();
     this.initializeCategories();
+    this.initializeBrands();
     this.setupSearchSubscription();
 
     this.loadProducts();
@@ -354,9 +364,24 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private initializeCategories(): void {
-    this.categories = [{ id: 'all', name: 'Todos', icon: 'grid' }];
+    this.categories = [{ id: '', name: 'Todos', icon: 'grid' }];
     this.selectedCategory = this.categories[0];
     this.loadCategories();
+  }
+
+  private initializeBrands(): void {
+    this.brands = [
+      {
+        id: '',
+        name: 'Todas',
+        slug: 'all',
+        store_id: 0,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    ];
+    this.selectedBrand = this.brands[0];
+    this.loadBrands();
   }
 
   private loadCategories(): void {
@@ -378,6 +403,24 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       });
   }
 
+  private loadBrands(): void {
+    this.productService
+      .getBrands()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (brands) => {
+          const backendBrands = brands.map((brand) => ({
+            ...brand,
+            id: brand.id.toString(),
+          }));
+          this.brands = [this.brands[0], ...backendBrands];
+        },
+        error: (error) => {
+          // Error loading brands, using defaults
+        },
+      });
+  }
+
   private setupSearchSubscription(): void {
     this.searchSubject$
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
@@ -393,18 +436,23 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private filterProducts(): void {
+    this.loading = true;
     const filters: any = {
-      // pos_optimized: true,
-      // include_stock: true,
       state: 'active',
+      pos_optimized: true,
+      include_stock: true,
     };
 
     if (this.searchQuery) {
-      filters.search = this.searchQuery;
+      filters.query = this.searchQuery;
     }
 
-    if (this.selectedCategory && this.selectedCategory.id !== 'all') {
-      filters.category_id = this.selectedCategory.id;
+    if (this.selectedCategory && this.selectedCategory.id !== '') {
+      filters.category = this.selectedCategory.id;
+    }
+
+    if (this.selectedBrand && this.selectedBrand.id !== '') {
+      filters.brand = this.selectedBrand.id.toString();
     }
 
     this.productService
@@ -431,6 +479,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   onClearSearch(): void {
+    this.searchQuery = '';
     this.searchSubject$.next('');
   }
 
@@ -443,6 +492,37 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   onSelectCategory(category: any): void {
     this.selectedCategory = category;
+    this.filterProducts();
+  }
+
+  onSelectBrand(brand: Brand): void {
+    this.selectedBrand = brand;
+    this.filterProducts();
+  }
+
+  onFilterChange(filters: ProductQueryDto): void {
+    // Update selected category and brand for UI consistency
+    if (filters.category_id) {
+      this.selectedCategory =
+        this.categories.find((c) => c.id === filters.category_id!.toString()) ||
+        this.categories[0];
+    } else {
+      this.selectedCategory = this.categories[0];
+    }
+
+    if (filters.brand_id) {
+      this.selectedBrand =
+        this.brands.find((b) => b.id.toString() === filters.brand_id!.toString()) ||
+        this.brands[0];
+    } else {
+      this.selectedBrand = this.brands[0];
+    }
+
+    // Update search query if it was changed in filters (for future extensibility)
+    if (filters.search !== undefined && filters.search !== this.searchQuery) {
+      this.searchQuery = filters.search;
+    }
+
     this.filterProducts();
   }
 

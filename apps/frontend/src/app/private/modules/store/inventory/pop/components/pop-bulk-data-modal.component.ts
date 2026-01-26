@@ -15,10 +15,12 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'md'"
       title="Carga Masiva de Productos al Pedido"
-      [isOpen]="isOpen"
-      (closed)="onCancel()"
+      subtitle="Importa múltiples productos desde un archivo Excel"
     >
       <div class="space-y-6">
         <!-- Template Download Section -->
@@ -249,6 +251,7 @@ import {
 })
 export class PopBulkDataModalComponent {
   @Input() isOpen = false;
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() close = new EventEmitter<void>();
   @Output() dataLoaded = new EventEmitter<any[]>();
 

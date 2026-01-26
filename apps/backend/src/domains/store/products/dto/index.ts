@@ -861,13 +861,10 @@ export class BulkProductItemDto {
   slug?: string;
 
   @IsOptional()
-  @IsInt()
-  brand_id?: number;
+  brand_id?: number | string;
 
   @IsOptional()
-  @IsArray()
-  @IsInt({ each: true })
-  category_ids?: number[];
+  category_ids?: (number | string)[] | string;
 
   @IsOptional()
   @IsNumber({}, { message: 'Stock quantity must be a number' })
@@ -883,6 +880,19 @@ export class BulkProductItemDto {
   @IsNumber({}, { message: 'Weight must be a number' })
   @Min(0, { message: 'Weight must be positive' })
   weight?: number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'Profit margin must be a number' })
+  @Min(0, { message: 'Profit margin must be positive' })
+  profit_margin?: number;
+
+  @IsOptional()
+  @IsString()
+  state?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  available_for_ecommerce?: boolean;
 
   @IsOptional()
   @IsArray()

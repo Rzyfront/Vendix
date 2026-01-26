@@ -22,7 +22,7 @@ export class ProductVariantService {
     private readonly prisma: StorePrismaService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
-  ) { }
+  ) {}
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
     const variant = await this.prisma.product_variants.findFirst({

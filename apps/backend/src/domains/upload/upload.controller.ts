@@ -7,16 +7,23 @@ import {
     Get,
     Query,
     Param,
+    BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Upload')
 @Controller('upload')
 export class UploadController {
-    constructor(private readonly s3Service: S3Service) { }
+    constructor(
+        private readonly s3Service: S3Service,
+        private readonly s3PathHelper: S3PathHelper,
+        private readonly prisma: GlobalPrismaService,
+    ) { }
 
     @Post()
     @ApiOperation({ summary: 'Upload a file to S3 with structured path' })
@@ -58,36 +65,53 @@ export class UploadController {
         const storeId = context?.store_id;
 
         if (!orgId) {
-            throw new Error('Organization context is required for uploads');
+            throw new BadRequestException('Organization context is required for uploads');
         }
 
-        // 1. Construct Hierarchical Path
-        let path = `organizations/${orgId}`;
+        // Obtener organización con slug
+        const org = await this.prisma.organizations.findUnique({
+            where: { id: orgId },
+            select: { id: true, slug: true },
+        });
+
+        if (!org) {
+            throw new BadRequestException('Organization not found');
+        }
+
+        // Construir path según el tipo de entidad
+        let path: string;
 
         switch (entityType) {
-            case 'products':
-                if (!storeId) throw new Error('Store context required for product uploads');
-                path += `/stores/${storeId}/products`;
+            case 'products': {
+                if (!storeId) throw new BadRequestException('Store context required for product uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildProductPath(org, store);
                 break;
-            case 'categories':
-                if (!storeId) throw new Error('Store context required for category uploads');
-                path += `/stores/${storeId}/categories`;
+            }
+            case 'categories': {
+                if (!storeId) throw new BadRequestException('Store context required for category uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildCategoryPath(org, store);
                 break;
-            case 'store_logos':
-                if (!storeId) throw new Error('Store context required for store logo uploads');
-                path += `/stores/${storeId}/logos`;
+            }
+            case 'store_logos': {
+                if (!storeId) throw new BadRequestException('Store context required for store logo uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildStoreLogoPath(org, store);
                 break;
-            case 'avatars':
+            }
+            case 'avatars': {
                 const userId = context?.user_id;
-                if (!userId) throw new Error('User context required for avatar uploads');
-                path += `/users/${userId}/avatars`;
+                if (!userId) throw new BadRequestException('User context required for avatar uploads');
+                path = this.s3PathHelper.buildAvatarPath(org, userId);
                 break;
+            }
             case 'brands':
             case 'logos':
-                path += `/${entityType}`;
+                path = this.s3PathHelper.buildOrgEntityPath(org, entityType);
                 break;
             default:
-                path += `/others`;
+                path = this.s3PathHelper.buildOrgEntityPath(org, 'others');
         }
 
         if (entityId) {
@@ -135,4 +159,21 @@ export class UploadController {
         const url = await this.s3Service.getPresignedUrl(key);
         return { url };
     }
+
+    /**
+     * Helper to get store with slug for S3 path building
+     */
+    private async getStoreWithSlug(storeId: number): Promise<{ id: number; slug: string }> {
+        const store = await this.prisma.stores.findUnique({
+            where: { id: storeId },
+            select: { id: true, slug: true },
+        });
+
+        if (!store) {
+            throw new BadRequestException('Store not found');
+        }
+
+        return store;
+    }
 }
+

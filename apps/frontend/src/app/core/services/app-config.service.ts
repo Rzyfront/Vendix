@@ -20,6 +20,7 @@ import { storeAdminRoutes } from '../../routes/private/store_admin.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
 import { environment } from '../../../environments/environment';
+import { Router } from '@angular/router';
 import { Routes } from '@angular/router';
 import { ThemeService } from './theme.service';
 
@@ -45,17 +46,48 @@ export class AppConfigService {
   async setupConfig(): Promise<AppConfig> {
     // 1. Detectar la configuración base del dominio.
     let domainConfig = await this.detectDomain();
+    console.log('[AppConfigService] Domain detected:', {
+      hostname: domainConfig.hostname,
+      environment: domainConfig.environment,
+      domainType: domainConfig.domainType,
+    });
 
     // 2. Revisar si hay un entorno de usuario guardado (de un login previo).
     const cachedUserEnv = this.getCachedUserEnvironment();
 
-    // 3. Si existe, este tiene prioridad sobre el entorno por defecto del dominio.
-    if (cachedUserEnv) {
+    // 3. Lógica de Decisión de Entorno (ROBUSTA)
+    // El dominio resuelto es la autoridad para entornos públicos.
+    // Pero si el usuario tiene un entorno administrativo guardado (ADMIN), este debe prevalecer.
+    const isTargetAdmin =
+      cachedUserEnv &&
+      [
+        AppEnvironment.ORG_ADMIN,
+        AppEnvironment.STORE_ADMIN,
+        AppEnvironment.VENDIX_ADMIN,
+      ].includes(cachedUserEnv);
+
+    if (cachedUserEnv && isTargetAdmin) {
       domainConfig.environment = cachedUserEnv;
+    } else {
+      const isPublicEnvironment = [
+        AppEnvironment.VENDIX_LANDING,
+        AppEnvironment.ORG_LANDING,
+        AppEnvironment.STORE_LANDING,
+        AppEnvironment.STORE_ECOMMERCE,
+      ].includes(domainConfig.environment);
+
+      if (cachedUserEnv && !isPublicEnvironment) {
+        domainConfig.environment = cachedUserEnv;
+      }
     }
 
     // 4. Construir la configuración final con el entorno definitivo.
     const appConfig = this.buildAppConfig(domainConfig);
+    console.log('[AppConfigService] Final App Config build:', {
+      environment: appConfig.environment,
+      store: domainConfig.store_id,
+      org: domainConfig.organization_id,
+    });
     this.cacheAppConfig(appConfig);
     return appConfig;
   }
@@ -72,7 +104,28 @@ export class AppConfigService {
     const newConfig = this.buildAppConfig(domainConfig);
     this.cacheUserEnvironment(newEnv);
     this.cacheAppConfig(newConfig);
+
+    // Notify router of environment change
+    this.notifyEnvironmentChange(newEnv);
+
     return newConfig;
+  }
+
+  private notifyEnvironmentChange(newEnv: AppEnvironment): void {
+    // Navigate to reload the app with new environment
+    // This is a workaround to properly update routes
+    setTimeout(() => {
+      this.router
+        .navigate([], {
+          queryParams: { env: newEnv, refresh: Date.now() },
+        })
+        .catch((error) => {
+          console.error(
+            '[AppConfigService] Error notifying environment change:',
+            error,
+          );
+        });
+    }, 100);
   }
 
   private buildAppConfig(domainConfig: DomainConfig): AppConfig {
@@ -160,7 +213,7 @@ export class AppConfigService {
     return {
       hostname,
       domainType: domainInfo.domain_type as DomainType,
-      environment: domainInfo.config.app as AppEnvironment,
+      environment: this.normalizeEnvironment(domainInfo.config.app),
       organization_slug: domainInfo.organization_slug,
       store_slug: domainInfo.store_slug,
       organization_id: domainInfo.organization_id,
@@ -170,12 +223,20 @@ export class AppConfigService {
     };
   }
 
+  private normalizeEnvironment(env: string): AppEnvironment {
+    if (!env) return AppEnvironment.VENDIX_LANDING;
+    const normalized = env.toUpperCase() as AppEnvironment;
+    return normalized;
+  }
+
   private getCachedUserEnvironment(): AppEnvironment | null {
     try {
       if (typeof localStorage === 'undefined') return null;
 
       // 🔒 SECURITY CHECK: Verificar si el usuario acaba de cerrar sesión recientemente
-      const loggedOutRecently = localStorage.getItem('vendix_logged_out_recently');
+      const loggedOutRecently = localStorage.getItem(
+        'vendix_logged_out_recently',
+      );
       if (loggedOutRecently) {
         const logoutTime = parseInt(loggedOutRecently);
         const currentTime = Date.now();

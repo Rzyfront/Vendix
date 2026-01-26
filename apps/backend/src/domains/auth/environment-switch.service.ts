@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -21,7 +22,7 @@ export class EnvironmentSwitchService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
-  ) { }
+  ) {}
 
   async switchEnvironment(
     userId: number,
@@ -97,14 +98,17 @@ export class EnvironmentSwitchService {
             where: { id: user.main_store_id },
           });
 
-          if (main_store && main_store.organization_id === user.organization_id) {
+          if (
+            main_store &&
+            main_store.organization_id === user.organization_id
+          ) {
             const has_access = await this.prismaService.store_users.findUnique({
               where: {
                 store_id_user_id: {
                   store_id: main_store.id,
-                  user_id: user.id
-                }
-              }
+                  user_id: user.id,
+                },
+              },
             });
 
             if (has_access || has_high_privilege) {
@@ -113,7 +117,7 @@ export class EnvironmentSwitchService {
               // AUTO-RELATION
               if (has_high_privilege && !has_access) {
                 await this.prismaService.store_users.create({
-                  data: { store_id: main_store.id, user_id: user.id }
+                  data: { store_id: main_store.id, user_id: user.id },
                 });
               }
             }
@@ -122,13 +126,14 @@ export class EnvironmentSwitchService {
 
         // Estrategia 2: Primera tienda disponible (donde YA tiene acceso)
         if (!effective_store_slug) {
-          const first_store_user = await this.prismaService.store_users.findFirst({
-            where: {
-              user_id: user.id,
-              store: { organization_id: user.organization_id }
-            },
-            include: { store: true }
-          });
+          const first_store_user =
+            await this.prismaService.store_users.findFirst({
+              where: {
+                user_id: user.id,
+                store: { organization_id: user.organization_id },
+              },
+              include: { store: true },
+            });
           if (first_store_user?.store) {
             effective_store_slug = first_store_user.store.slug;
           }
@@ -137,13 +142,13 @@ export class EnvironmentSwitchService {
         // Estrategia 3: High Privilege Fallback
         if (!effective_store_slug && has_high_privilege) {
           const first_org_store = await this.prismaService.stores.findFirst({
-            where: { organization_id: user.organization_id }
+            where: { organization_id: user.organization_id },
           });
           if (first_org_store) {
             effective_store_slug = first_org_store.slug;
             // AUTO-RELATION
             await this.prismaService.store_users.create({
-              data: { store_id: first_org_store.id, user_id: user.id }
+              data: { store_id: first_org_store.id, user_id: user.id },
             });
           }
         }
@@ -191,20 +196,18 @@ export class EnvironmentSwitchService {
       }
 
       // Verificar acceso final (redundante pero seguro)
-      const has_access =
-        has_high_privilege ||
-        store.store_users.length > 0;
+      const has_access = has_high_privilege || store.store_users.length > 0;
 
       if (!has_access) {
         // Doble check por si se acaba de crear la relación y prisma no la trajo en el include anterior
         const specific_access = await this.prismaService.store_users.findFirst({
-          where: { store_id: store.id, user_id: userId }
+          where: { store_id: store.id, user_id: userId },
         });
 
         if (!specific_access) {
           if (has_high_privilege) {
             await this.prismaService.store_users.create({
-              data: { store_id: store.id, user_id: userId }
+              data: { store_id: store.id, user_id: userId },
             });
           } else {
             throw new UnauthorizedException('No tienes acceso a esta tienda');
@@ -225,6 +228,18 @@ export class EnvironmentSwitchService {
       if (!has_org_role) {
         throw new UnauthorizedException(
           'No tienes permisos para acceder al entorno de organización',
+        );
+      }
+
+      // Validate organization account_type allows ORG_ADMIN access
+      const organization = await this.prismaService.organizations.findUnique({
+        where: { id: user.organization_id },
+        select: { account_type: true },
+      });
+
+      if (organization?.account_type === 'SINGLE_STORE') {
+        throw new ForbiddenException(
+          'Tu cuenta está configurada como tienda única. Para acceder al entorno de organización, actualiza tu tipo de cuenta desde la configuración.',
         );
       }
     }
@@ -270,7 +285,8 @@ export class EnvironmentSwitchService {
       where: { user_id: userId },
     });
 
-    const currentConfig = (currentSettings?.config as Record<string, any>) || {};
+    const currentConfig =
+      (currentSettings?.config as Record<string, any>) || {};
     const newConfig = {
       ...currentConfig,
       app: targetEnvironment,
@@ -352,8 +368,7 @@ export class EnvironmentSwitchService {
     });
 
     // Remover password del response
-    const { password, ...user_with_roles_and_password } =
-      user_with_roles_array;
+    const { password, ...user_with_roles_and_password } = user_with_roles_array;
 
     // Agregar active_store al usuario para consistencia con login
     const user_with_store = {

@@ -13,6 +13,11 @@ export const selectUserSettings = createSelector(
   (state: AuthState) => state.user_settings,
 );
 
+export const selectStoreSettings = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.store_settings,
+);
+
 export const selectPermissions = createSelector(
   selectAuthState,
   (state: AuthState) => state.permissions,
@@ -205,6 +210,11 @@ export const selectUserStoreName = createSelector(
 export const selectUserStoreSlug = createSelector(
   selectUserStore,
   (store: any) => store?.slug || null,
+);
+
+export const selectUserStoreType = createSelector(
+  selectUserStore,
+  (store: any) => store?.store_type || null,
 );
 
 // Onboarding selectors

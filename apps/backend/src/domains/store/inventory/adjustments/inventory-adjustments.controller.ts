@@ -24,6 +24,7 @@ import {
 } from './interfaces/inventory-adjustment.interface';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RequirePermissions } from '../../../auth/decorators/permissions.decorator';
+import { ResponseService } from '@common/responses/response.service';
 
 @ApiTags('Inventory Adjustments')
 @Controller('store/inventory/adjustments')
@@ -32,7 +33,8 @@ import { RequirePermissions } from '../../../auth/decorators/permissions.decorat
 export class InventoryAdjustmentsController {
   constructor(
     private readonly adjustmentsService: InventoryAdjustmentsService,
-  ) { }
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -40,7 +42,12 @@ export class InventoryAdjustmentsController {
   @ApiResponse({ status: 201, description: 'Adjustment created successfully' })
   @RequirePermissions('store:inventory:adjustments:create')
   async createAdjustment(@Body() createAdjustmentDto: CreateAdjustmentDto) {
-    return await this.adjustmentsService.createAdjustment(createAdjustmentDto);
+    const result =
+      await this.adjustmentsService.createAdjustment(createAdjustmentDto);
+    return this.responseService.success(
+      result,
+      'Adjustment created successfully',
+    );
   }
 
   @Patch(':id/approve')
@@ -51,9 +58,13 @@ export class InventoryAdjustmentsController {
     @Param('id') id: number,
     @Body('approvedByUserId') approvedByUserId: number,
   ) {
-    return await this.adjustmentsService.approveAdjustment(
+    const result = await this.adjustmentsService.approveAdjustment(
       parseInt(id.toString()),
       approvedByUserId,
+    );
+    return this.responseService.success(
+      result,
+      'Adjustment approved successfully',
     );
   }
 
@@ -65,7 +76,8 @@ export class InventoryAdjustmentsController {
   })
   @RequirePermissions('store:inventory:adjustments:read')
   async getAdjustments(@Query() query: AdjustmentQueryDto) {
-    return await this.adjustmentsService.getAdjustments(query);
+    const result = await this.adjustmentsService.getAdjustments(query);
+    return this.responseService.success(result);
   }
 
   @Get(':id')
@@ -76,9 +88,10 @@ export class InventoryAdjustmentsController {
   })
   @RequirePermissions('store:inventory:adjustments:read')
   async getAdjustmentById(@Param('id') id: number) {
-    return await this.adjustmentsService.getAdjustmentById(
+    const result = await this.adjustmentsService.getAdjustmentById(
       parseInt(id.toString()),
     );
+    return this.responseService.success(result);
   }
 
   @Get('summary/:organizationId')
@@ -93,11 +106,12 @@ export class InventoryAdjustmentsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return await this.adjustmentsService.getAdjustmentSummary(
+    const result = await this.adjustmentsService.getAdjustmentSummary(
       parseInt(organizationId.toString()),
       startDate ? new Date(startDate) : undefined,
       endDate ? new Date(endDate) : undefined,
     );
+    return this.responseService.success(result);
   }
 
   @Delete(':id')
@@ -106,5 +120,9 @@ export class InventoryAdjustmentsController {
   @RequirePermissions('store:inventory:adjustments:delete')
   async deleteAdjustment(@Param('id') id: number) {
     await this.adjustmentsService.deleteAdjustment(parseInt(id.toString()));
+    return this.responseService.success(
+      null,
+      'Adjustment deleted successfully',
+    );
   }
 }

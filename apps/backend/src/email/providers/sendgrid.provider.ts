@@ -8,6 +8,7 @@ import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
+import { WelcomeEmailOptions } from '../interfaces/branding.interface';
 
 @Injectable()
 export class SendGridProvider implements EmailProvider {
@@ -102,11 +103,20 @@ export class SendGridProvider implements EmailProvider {
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendWelcomeEmail(to: string, username: string): Promise<EmailResult> {
+  async sendWelcomeEmail(
+    to: string,
+    username: string,
+    options?: WelcomeEmailOptions,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
-      companyName: 'Vendix',
+      companyName: options?.organizationName || 'Vendix',
+      storeName: options?.storeName,
+      organizationName: options?.organizationName,
+      branding: options?.branding,
+      userType: options?.userType || 'owner',
+      vlink: options?.organizationSlug,
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
     };

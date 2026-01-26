@@ -1,5 +1,8 @@
 import { Routes } from '@angular/router';
+import { provideState } from '@ngrx/store';
+import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
+
 
 export const storeAdminRoutes: Routes = [
   {
@@ -69,57 +72,57 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'inventory',
         loadComponent: () =>
-          import('../../private/modules/store/inventory/inventory.component').then(
-            (c) => c.InventoryComponent
-          ),
+          import(
+            '../../private/modules/store/inventory/inventory.component'
+          ).then((c) => c.InventoryComponent),
         children: [
           {
             path: '',
             loadComponent: () =>
-              import('../../private/modules/store/inventory/inventory-dashboard.component').then(
-                (c) => c.InventoryDashboardComponent
-              ),
+              import(
+                '../../private/modules/store/inventory/inventory-dashboard.component'
+              ).then((c) => c.InventoryDashboardComponent),
           },
           // Punto de Compra (POP) - Creating purchase orders
           {
             path: 'pop',
             loadComponent: () => {
               console.log('Attempting to load PopComponent for /pop');
-              return import('../../private/modules/store/inventory/pop/pop.component').then(
-                (c) => c.PopComponent
-              );
+              return import(
+                '../../private/modules/store/inventory/pop/pop.component'
+              ).then((c) => c.PopComponent);
             },
           },
           {
             path: 'pop/:id',
             loadComponent: () => {
               console.log('Attempting to load PopComponent for /pop/:id');
-              return import('../../private/modules/store/inventory/pop/pop.component').then(
-                (c) => c.PopComponent
-              );
+              return import(
+                '../../private/modules/store/inventory/pop/pop.component'
+              ).then((c) => c.PopComponent);
             },
           },
           {
             path: 'suppliers',
             loadComponent: () =>
-              import('../../private/modules/store/inventory/suppliers/suppliers.component').then(
-                (c) => c.SuppliersComponent
-              ),
+              import(
+                '../../private/modules/store/inventory/suppliers/suppliers.component'
+              ).then((c) => c.SuppliersComponent),
           },
           /* Orders removed (moved to Orders module) */
           {
             path: 'locations',
             loadComponent: () =>
-              import('../../private/modules/store/inventory/locations/locations.component').then(
-                (c) => c.LocationsComponent
-              ),
+              import(
+                '../../private/modules/store/inventory/locations/locations.component'
+              ).then((c) => c.LocationsComponent),
           },
           {
             path: 'adjustments',
             loadComponent: () =>
-              import('../../private/modules/store/inventory/operations/stock-adjustments.component').then(
-                (c) => c.StockAdjustmentsComponent
-              ),
+              import(
+                '../../private/modules/store/inventory/operations/stock-adjustments.component'
+              ).then((c) => c.StockAdjustmentsComponent),
           },
         ],
       },
@@ -142,23 +145,23 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'purchase-orders',
             loadComponent: () =>
-              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
-                (c) => c.PurchaseOrdersComponent
-              ),
+              import(
+                '../../private/modules/store/orders/purchase-orders/purchase-orders.component'
+              ).then((c) => c.PurchaseOrdersComponent),
           },
           {
             path: 'purchase-orders',
             loadComponent: () =>
-              import('../../private/modules/store/orders/purchase-orders/purchase-orders.component').then(
-                (c) => c.PurchaseOrdersComponent
-              ),
+              import(
+                '../../private/modules/store/orders/purchase-orders/purchase-orders.component'
+              ).then((c) => c.PurchaseOrdersComponent),
           },
           {
             path: ':id',
             loadComponent: () =>
               import(
-                '../../private/modules/store/orders/components/order-details'
-              ).then((c) => c.OrderDetailsComponent),
+                '../../private/modules/store/orders/pages/order-details/order-details-page.component'
+              ).then((c) => c.OrderDetailsPageComponent),
           },
         ],
       },
@@ -304,6 +307,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.StoreDomainsComponent),
           },
         ],
+      },
+      // Expenses Routes
+      {
+        path: 'expenses',
+        loadChildren: () =>
+          import('../../private/modules/store/expenses/expenses.routes').then(
+            (m) => m.expensesRoutes
+          ),
       },
     ],
   },

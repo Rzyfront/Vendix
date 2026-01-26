@@ -1,4 +1,3 @@
-
 import {
   Component,
   Input,
@@ -28,15 +27,12 @@ import { Subject, takeUntil } from 'rxjs';
 @Component({
   selector: 'app-user-config-modal',
   standalone: true,
-  imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    ButtonComponent,
-    ModalComponent,
-  ],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title=""
       
@@ -95,7 +91,9 @@ import { Subject, takeUntil } from 'rxjs';
           <!-- General Tab -->
           <div *ngSwitchCase="'general'" class="space-y-4">
             <div class="space-y-2">
-              <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+              <label
+                class="block text-sm font-medium text-[var(--color-text-primary)]"
+              >
                 Aplicación Asignada
               </label>
               <select
@@ -108,7 +106,8 @@ import { Subject, takeUntil } from 'rxjs';
                 <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
               </select>
               <p class="text-xs text-gray-500">
-                Selecciona la aplicación principal a la que tendrá acceso el usuario.
+                Selecciona la aplicación principal a la que tendrá acceso el
+                usuario.
               </p>
             </div>
           </div>
@@ -116,45 +115,56 @@ import { Subject, takeUntil } from 'rxjs';
           <!-- Roles Tab -->
           <div *ngSwitchCase="'roles'" class="space-y-4">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-               <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
-               <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-                 <p class="text-sm text-gray-500 italic">
-                   La gestión dinámica de roles se implementará conectando con el servicio de roles.
-                   Por ahora, puedes ingresar IDs de roles manualmente (separados por coma).
-                 </p>
-                 <label class="block text-sm font-medium mt-2">Role IDs</label>
-                 <input type="text" formControlName="rolesInput" 
-                        placeholder="Ej: 1, 2, 3"
-                        class="w-full mt-1 px-3 py-2 border rounded text-sm"/>
-               </div>
+              <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
+              <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
+                <p class="text-sm text-gray-500 italic">
+                  La gestión dinámica de roles se implementará conectando con el
+                  servicio de roles. Por ahora, puedes ingresar IDs de roles
+                  manualmente (separados por coma).
+                </p>
+                <label class="block text-sm font-medium mt-2">Role IDs</label>
+                <input
+                  type="text"
+                  formControlName="rolesInput"
+                  placeholder="Ej: 1, 2, 3"
+                  class="w-full mt-1 px-3 py-2 border rounded text-sm"
+                />
+              </div>
             </div>
           </div>
 
           <!-- Stores Tab -->
           <div *ngSwitchCase="'stores'" class="space-y-4">
-             <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-                 <p class="text-sm text-gray-500 italic">
-                   La selección de tiendas se conectará con el servicio de tiendas.
-                   Por ahora, ingresa IDs de tiendas manualmente.
-                 </p>
-                 <label class="block text-sm font-medium mt-2">Store IDs</label>
-                 <input type="text" formControlName="storesInput" 
-                        placeholder="Ej: 10, 20"
-                        class="w-full mt-1 px-3 py-2 border rounded text-sm"/>
-             </div>
+            <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
+              <p class="text-sm text-gray-500 italic">
+                La selección de tiendas se conectará con el servicio de tiendas.
+                Por ahora, ingresa IDs de tiendas manualmente.
+              </p>
+              <label class="block text-sm font-medium mt-2">Store IDs</label>
+              <input
+                type="text"
+                formControlName="storesInput"
+                placeholder="Ej: 10, 20"
+                class="w-full mt-1 px-3 py-2 border rounded text-sm"
+              />
+            </div>
           </div>
 
           <!-- Panel UI Tab -->
           <div *ngSwitchCase="'panel_ui'" class="space-y-4">
             <div class="space-y-2">
-              <label class="block text-sm font-medium">Configuración JSON</label>
+              <label class="block text-sm font-medium"
+                >Configuración JSON</label
+              >
               <textarea
                 formControlName="panelUiInput"
                 rows="10"
                 class="w-full px-3 py-2 font-mono text-sm border rounded bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200"
                 placeholder='{"dashboard": true, "settings": false}'
               ></textarea>
-              <p *ngIf="jsonError" class="text-xs text-red-500">{{ jsonError }}</p>
+              <p *ngIf="jsonError" class="text-xs text-red-500">
+                {{ jsonError }}
+              </p>
             </div>
           </div>
         </div>
@@ -216,9 +226,10 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
     });
 
     // Validate JSON on change
-    this.configForm.get('panelUiInput')?.valueChanges
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(value => {
+    this.configForm
+      .get('panelUiInput')
+      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      .subscribe((value) => {
         try {
           JSON.parse(value);
           this.jsonError = null;
@@ -228,7 +239,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       });
   }
 
-  ngOnInit(): void { }
+  ngOnInit(): void {}
 
   onCancel(): void {
     this.isOpen = false;
@@ -312,7 +323,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       panelUiInput: JSON.stringify(defaultPanelUi, null, 2),
     });
 
-    this.usersService.getUserConfiguration(this.user.id)
+    this.usersService
+      .getUserConfiguration(this.user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (config: any) => {
@@ -353,10 +365,11 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       app: formVal.app,
       roles,
       store_ids,
-      panel_ui: JSON.parse(formVal.panelUiInput)
+      panel_ui: JSON.parse(formVal.panelUiInput),
     };
 
-    this.usersService.updateUserConfiguration(this.user.id, payload)
+    this.usersService
+      .updateUserConfiguration(this.user.id, payload)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -385,7 +398,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         error: (err: any) => {
           console.error('Failed to save config', err);
           this.isSaving = false;
-        }
+        },
       });
   }
 }

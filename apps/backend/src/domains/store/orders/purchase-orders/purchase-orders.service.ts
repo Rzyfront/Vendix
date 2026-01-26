@@ -50,23 +50,151 @@ export class PurchaseOrdersService {
             throw new BadRequestException('Cannot create new product: No store found for this organization.');
           }
 
-          const newProduct = await tx.products.create({
-            data: {
-              name: item.product_name,
-              slug: item.product_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
-              description: item.product_description || '',
-              sku: item.sku || `GEN-${Date.now()}`,
-              base_price: 0, // 'base_price' is required, setting to 0 as it's a new product
-              stock_quantity: 0, // 'stock_quantity' correct field name
-              state: 'active', // 'state' enum (using 'active' or 'inactive')
-              store_id: storeId, // 'store_id' is required
+          // Check if product with SKU exists to avoid duplicates
+          const existingProduct = await tx.products.findFirst({
+            where: {
+              sku: item.sku,
+              store_id: storeId,
+              state: { not: 'archived' }
             }
           });
-          finalProductId = newProduct.id;
+
+          // Normalize Data first
+          // Normalize Booleanos (Si/No -> true/false)
+          const normalizeBool = (val: any) => {
+            if (typeof val === 'boolean') return val;
+            if (typeof val === 'string') {
+              const s = val.trim().toLowerCase();
+              return s === 'si' || s === 'yes' || s === 'verdadero' || s === 'true';
+            }
+            return !!val;
+          };
+
+          const availableForEcommerce = normalizeBool(item.available_for_ecommerce ?? true);
+          const isOnSale = normalizeBool((item as any).is_on_sale ?? false);
+
+          // Normalize State
+          let productState: any = 'active';
+          if (item.state && typeof item.state === 'string') {
+            const s = item.state.trim().toLowerCase();
+            if (s === 'activo' || s === 'active' || s === 'habilitado') productState = 'active';
+            else if (s === 'inactivo' || s === 'inactive' || s === 'deshabilitado') productState = 'inactive';
+            else if (s === 'archivado' || s === 'archived') productState = 'archived';
+          }
+
+          // Price calculation
+          let basePrice = item.base_price || 0;
+          const cost = item.unit_price || 0;
+          let margin = item.profit_margin || 0;
+          if (margin > 0 && margin < 1) margin = margin * 100;
+
+          if (margin > 0 && cost > 0 && (!item.base_price || item.base_price === 0)) {
+            basePrice = cost * (1 + margin / 100);
+          }
+
+          // Resolve Brand
+          let brandId: number | undefined;
+          if (item.brand_name) {
+            const brandName = item.brand_name.trim();
+            const brand = await tx.brands.findFirst({
+              where: { name: { equals: brandName, mode: 'insensitive' } }
+            });
+            if (brand) {
+              brandId = brand.id;
+            } else {
+              const newBrand = await tx.brands.create({
+                data: {
+                  name: brandName,
+                  description: 'Creada automáticamente por carga masiva PO',
+                  state: 'active'
+                }
+              });
+              brandId = newBrand.id;
+            }
+          }
+
+          // Resolve Categories
+          const categoryIds: number[] = [];
+          if (item.category_names) {
+            const names = item.category_names.split(',').map(n => n.trim()).filter(n => n);
+            for (const name of names) {
+              const cat = await tx.categories.findFirst({
+                where: { name: { equals: name, mode: 'insensitive' }, store_id: storeId }
+              });
+              if (cat) {
+                categoryIds.push(cat.id);
+              } else {
+                const newCat = await tx.categories.create({
+                  data: {
+                    name: name,
+                    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''),
+                    store_id: storeId,
+                    state: 'active'
+                  }
+                });
+                categoryIds.push(newCat.id);
+              }
+            }
+          }
+
+          if (existingProduct) {
+            finalProductId = existingProduct.id;
+            // Update existing product with new metadata if provided
+            // Only update fields that are meaningful from the bulk load
+            await tx.products.update({
+              where: { id: existingProduct.id },
+              data: {
+                state: productState,
+                weight: item.weight || existingProduct.weight,
+                available_for_ecommerce: availableForEcommerce,
+                is_on_sale: isOnSale,
+                sale_price: item.sale_price !== undefined ? item.sale_price : existingProduct.sale_price,
+                brand_id: brandId !== undefined ? brandId : existingProduct.brand_id,
+                // Re-link categories? simpler to just add new ones or replace?
+                // For bulk update, usually we want to ensure these categories exist.
+                // We'll simplisticly add new relations if not exist, or replace.
+                // Replace: delete many then create. Safe for bulk update logic.
+                product_categories: {
+                  deleteMany: {},
+                  create: categoryIds.map(id => ({ category_id: id }))
+                },
+                // Update prices if they were provided/calculated and differ?
+                // User wants "full information uploaded", implies overwriting.
+                base_price: basePrice > 0 ? basePrice : existingProduct.base_price,
+                profit_margin: margin > 0 ? margin : existingProduct.profit_margin,
+                cost_price: cost > 0 ? cost : existingProduct.cost_price,
+                description: item.product_description || existingProduct.description
+              }
+            });
+
+          } else {
+            const newProduct = await tx.products.create({
+              data: {
+                name: item.product_name,
+                slug: item.product_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
+                description: item.product_description || '',
+                sku: item.sku || `GEN-${Date.now()}`,
+                base_price: basePrice,
+                cost_price: cost,
+                profit_margin: margin,
+                stock_quantity: 0,
+                state: productState,
+                store_id: storeId,
+                weight: item.weight || 0,
+                available_for_ecommerce: availableForEcommerce,
+                is_on_sale: isOnSale,
+                sale_price: item.sale_price || 0,
+                brand_id: brandId,
+                product_categories: {
+                  create: categoryIds.map(id => ({ category_id: id }))
+                }
+              }
+            });
+            finalProductId = newProduct.id;
+          }
 
           // Optionally create a supplier_product entry?
           // For now, minimal valid product creation.
-          finalProductId = newProduct.id;
         }
 
         // If we still don't have a valid ID and it was supposed to be new, throw error? 

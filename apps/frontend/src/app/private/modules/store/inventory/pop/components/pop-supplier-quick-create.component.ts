@@ -1,8 +1,26 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  inject,
+  OnInit,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
 
-import { ModalComponent, ButtonComponent, InputComponent } from '../../../../../../shared/components';
+import {
+  ModalComponent,
+  ButtonComponent,
+  InputComponent,
+  ToastService,
+} from '../../../../../../shared/components';
 
 import { SuppliersService } from '../../services/suppliers.service';
 
@@ -16,6 +34,7 @@ import { SuppliersService } from '../../services/suppliers.service';
   imports: [
     CommonModule,
     FormsModule,
+    ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -28,73 +47,85 @@ import { SuppliersService } from '../../services/suppliers.service';
       subtitle="Agrega un nuevo proveedor sin salir del punto de compra"
       (close)="onClose()"
     >
-      <form (ngSubmit)="onSubmit()" #supplierForm="ngForm">
-        <div class="space-y-4">
+      <form
+        [formGroup]="supplierForm"
+        (ngSubmit)="onSubmit()"
+        class="mt-4 h-full flex flex-col"
+      >
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
           <!-- Name -->
-          <app-input
-            label="Nombre del Proveedor"
-            [(ngModel)]="form.name"
-            name="name"
-            [required]="true"
-            placeholder="Ej: Distribuidora Central S.A."
-          ></app-input>
+          <div class="md:col-span-2">
+            <app-input
+              label="Nombre del Proveedor"
+              formControlName="name"
+              [required]="true"
+              placeholder="Ej: Distribuidora Central S.A."
+              [control]="supplierForm.get('name')"
+              customWrapperClass="!mt-0"
+            ></app-input>
+          </div>
 
           <!-- Code -->
           <app-input
             label="Código"
-            [(ngModel)]="form.code"
-            name="code"
+            formControlName="code"
             [required]="true"
             placeholder="Ej: PROV-001"
+            [control]="supplierForm.get('code')"
+            customWrapperClass="!mt-0"
           ></app-input>
 
           <!-- Email -->
           <app-input
             label="Email"
             type="email"
-            [(ngModel)]="form.email"
-            name="email"
+            formControlName="email"
             placeholder="contacto@proveedor.com"
+            [control]="supplierForm.get('email')"
+            customWrapperClass="!mt-0"
           ></app-input>
 
           <!-- Phone -->
           <app-input
             label="Teléfono"
             type="tel"
-            [(ngModel)]="form.phone"
-            name="phone"
+            formControlName="phone"
             placeholder="+57 300 123 4567"
+            [control]="supplierForm.get('phone')"
+            customWrapperClass="!mt-0"
           ></app-input>
 
           <!-- Tax ID -->
           <app-input
             label="RUT/NIT"
-            [(ngModel)]="form.tax_id"
-            name="tax_id"
+            formControlName="tax_id"
             placeholder="900123456-7"
+            [control]="supplierForm.get('tax_id')"
+            helperText="Puedes ingresar 'test' si es necesario"
+            customWrapperClass="!mt-0"
           ></app-input>
 
           <!-- Payment Terms -->
-          <app-input
-            label="Términos de Pago"
-            [(ngModel)]="form.payment_terms"
-            name="payment_terms"
-            placeholder="Ej: 30 días"
-          ></app-input>
+          <div class="md:col-span-2">
+            <app-input
+              label="Términos de Pago"
+              formControlName="payment_terms"
+              placeholder="Ej: 30 días"
+              [control]="supplierForm.get('payment_terms')"
+              customWrapperClass="!mt-0"
+            ></app-input>
+          </div>
         </div>
 
         <!-- Footer Actions -->
         <div slot="footer" class="flex justify-end gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()"
-          >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             type="submit"
-            [disabled]="!isFormValid() || isLoading"
+            [disabled]="supplierForm.invalid || isLoading"
           >
             <span *ngIf="!isLoading">Crear Proveedor</span>
             <span *ngIf="isLoading">Creando...</span>
@@ -105,52 +136,92 @@ import { SuppliersService } from '../../services/suppliers.service';
   `,
   styleUrls: ['./pop-supplier-quick-create.component.scss'],
 })
-export class PopSupplierQuickCreateComponent {
+export class PopSupplierQuickCreateComponent implements OnInit {
   @Input() isOpen = false;
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() close = new EventEmitter<void>();
   @Output() supplierCreated = new EventEmitter<number>();
 
-  isLoading = false;
-  form = {
-    name: '',
-    code: '',
-    email: '',
-    phone: '',
-    tax_id: '',
-    payment_terms: '',
-  };
+  private fb = inject(FormBuilder);
+  private suppliersService = inject(SuppliersService);
+  private toastService = inject(ToastService);
 
-  constructor(private suppliersService: SuppliersService) { }
+  supplierForm!: FormGroup;
+  isLoading = false;
+
+  ngOnInit(): void {
+    this.initForm();
+  }
+
+  private initForm(): void {
+    this.supplierForm = this.fb.group({
+      name: ['', [Validators.required, Validators.minLength(3)]],
+      code: ['', [Validators.required]],
+      email: ['', [Validators.email]],
+      phone: [''],
+      tax_id: [''],
+      payment_terms: [''],
+    });
+  }
 
   // ============================================================
   // Form Actions
   // ============================================================
 
   onSubmit(): void {
-    if (!this.isFormValid()) {
+    if (this.supplierForm.invalid) {
+      this.supplierForm.markAllAsTouched();
       return;
     }
 
     this.isLoading = true;
 
-    const createDto = {
-      ...this.form,
+    // Clean data: remove empty strings and only send valid fields
+    const formValues = this.supplierForm.value;
+    const createDto: any = {
       is_active: true,
     };
+
+    // Only add non-empty values to the DTO
+    Object.keys(formValues).forEach((key) => {
+      const value = formValues[key];
+      if (value !== null && value !== undefined && value !== '') {
+        createDto[key] = value;
+      }
+    });
 
     this.suppliersService.createSupplier(createDto).subscribe({
       next: (response: any) => {
         if (response.success && response.data) {
+          this.toastService.success('Proveedor creado correctamente');
           this.supplierCreated.emit(response.data.id);
           this.resetForm();
           this.isOpenChange.emit(false);
           this.close.emit();
+        } else {
+          this.toastService.error(
+            response.message || 'Error al crear el proveedor',
+          );
         }
         this.isLoading = false;
       },
       error: (error: any) => {
         console.error('Error creating supplier:', error);
+
+        // Handle backend validation errors
+        let errorMessage = 'Error al crear el proveedor';
+
+        if (error.error?.message) {
+          if (Array.isArray(error.error.message)) {
+            errorMessage = error.error.message.join(', ');
+          } else {
+            errorMessage = error.error.message;
+          }
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+
+        this.toastService.error(errorMessage);
         this.isLoading = false;
       },
     });
@@ -166,21 +237,9 @@ export class PopSupplierQuickCreateComponent {
   // Helpers
   // ============================================================
 
-  public isFormValid(): boolean {
-    return !!(
-      this.form.name &&
-      this.form.code
-    );
-  }
-
   private resetForm(): void {
-    this.form = {
-      name: '',
-      code: '',
-      email: '',
-      phone: '',
-      tax_id: '',
-      payment_terms: '',
-    };
+    if (this.supplierForm) {
+      this.supplierForm.reset();
+    }
   }
 }

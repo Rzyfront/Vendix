@@ -1,7 +1,8 @@
 import { Injectable, Inject, DOCUMENT } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
-import { AppConfig } from './app-config.service'; // Import AppConfig
+import { AppConfig } from './app-config.service';
+import { ColorUtils } from '../utils/color.utils';
 
 @Injectable({
   providedIn: 'root',
@@ -12,6 +13,8 @@ export class ThemeService {
 
   private loadedFonts = new Set<string>();
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
+  private currentBranding: BrandingConfig | null = null;
+  private activeUserTheme: string = 'default';
 
   constructor(@Inject(DOCUMENT) private document: Document) { }
 
@@ -62,6 +65,7 @@ export class ThemeService {
    * Aplica la configuración de branding, sobreescribiendo los valores por defecto del CSS.
    */
   async applyBranding(brandingConfig: BrandingConfig): Promise<void> {
+    this.currentBranding = brandingConfig;
     if (brandingConfig.colors) {
       const colorStyles: { [key: string]: string | undefined } = {
         '--color-primary': brandingConfig.colors.primary,
@@ -97,6 +101,11 @@ export class ThemeService {
     if (brandingConfig.favicon) {
       this.updateFavicon(brandingConfig.favicon);
     }
+
+    // Re-aplicar el tema del usuario (default, aura, etc.) sobre el nuevo branding cargado.
+    // Esto es crucial para solucionar condiciones de carrera donde applyBranding sobreescribe 
+    // las modificaciones de applyUserTheme (como transparency en Aura).
+    await this.applyUserTheme(this.activeUserTheme);
   }
 
   /**

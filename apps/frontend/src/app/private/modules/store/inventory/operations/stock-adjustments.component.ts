@@ -19,6 +19,9 @@ import {
 } from '../../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../../shared/components/confirmation-modal/confirmation-modal.component';
 
+// Local Components
+import { AdjustmentDetailModalComponent } from './components/adjustment-detail-modal.component';
+
 // Services
 import { InventoryService } from '../services';
 
@@ -38,11 +41,14 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
     IconComponent,
     SelectorComponent,
     ConfirmationModalComponent,
+    AdjustmentDetailModalComponent,
   ],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
+      <div
+        class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
+      >
         <app-stats
           title="Total Ajustes"
           [value]="stats.total"
@@ -77,16 +83,22 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
       </div>
 
       <!-- Adjustments List Container -->
-      <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
+      <div
+        class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+      >
         <div class="px-6 py-4 border-b border-border">
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
                 Ajustes de Inventario ({{ stats.total }})
               </h2>
             </div>
 
-            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+            <div
+              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            >
               <app-inputsearch
                 class="w-full sm:w-48 flex-shrink-0"
                 size="sm"
@@ -113,7 +125,7 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
-                
+
                 <app-button
                   variant="primary"
                   size="sm"
@@ -130,15 +142,26 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
 
         <!-- Loading State -->
         <div *ngIf="is_loading" class="p-8 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
           <p class="mt-2 text-text-secondary">Cargando ajustes...</p>
         </div>
 
         <!-- Empty State -->
-        <div *ngIf="!is_loading && filtered_adjustments.length === 0" class="p-12 text-center text-gray-500">
-          <app-icon name="clipboard-list" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
+        <div
+          *ngIf="!is_loading && filtered_adjustments.length === 0"
+          class="p-12 text-center text-gray-500"
+        >
+          <app-icon
+            name="clipboard-list"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
           <h3 class="text-lg font-medium text-gray-900">No hay ajustes</h3>
-          <p class="mt-1">Registra ajustes de inventario cuando sea necesario.</p>
+          <p class="mt-1">
+            Registra ajustes de inventario cuando sea necesario.
+          </p>
           <div class="mt-6">
             <app-button variant="primary" (clicked)="openCreateModal()">
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
@@ -162,8 +185,6 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         </div>
       </div>
 
-
-
       <!-- Instruction Modal -->
       <app-confirmation-modal
         *ngIf="is_info_modal_open"
@@ -176,6 +197,14 @@ import { InventoryAdjustment, AdjustmentType } from '../interfaces';
         (confirm)="navigateToProducts()"
         (cancel)="closeInfoModal()"
       ></app-confirmation-modal>
+
+      <!-- Detail Modal -->
+      <app-adjustment-detail-modal
+        [isOpen]="is_detail_modal_open"
+        [adjustment]="selected_adjustment"
+        (isOpenChange)="is_detail_modal_open = $event"
+        (close)="closeDetailModal()"
+      ></app-adjustment-detail-modal>
     </div>
   `,
 })
@@ -217,15 +246,15 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       transform: (value: string) => new Date(value).toLocaleDateString('es-CO'),
     },
     {
-      key: 'product.name',
+      key: 'products.name',
       label: 'Producto',
       sortable: true,
       defaultValue: '-',
       priority: 1,
     },
     {
-      key: 'location.name',
-      label: 'Ubicación',
+      key: 'inventory_locations.name',
+      label: 'Ubicacion',
       defaultValue: '-',
       priority: 2,
     },
@@ -250,9 +279,15 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     },
     {
       key: 'quantity_after',
-      label: 'Después',
+      label: 'Despues',
       align: 'right',
       priority: 3,
+    },
+    {
+      key: 'created_by_user.user_name',
+      label: 'Creado por',
+      defaultValue: '-',
+      priority: 4,
     },
   ];
 
@@ -268,14 +303,16 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   // UI State
   is_loading = false;
   is_info_modal_open = false;
+  is_detail_modal_open = false;
+  selected_adjustment: InventoryAdjustment | null = null;
 
   private subscriptions: Subscription[] = [];
 
   constructor(
     private inventoryService: InventoryService,
     private toastService: ToastService,
-    private router: Router
-  ) { }
+    private router: Router,
+  ) {}
 
   ngOnInit(): void {
     this.loadAdjustments();
@@ -291,7 +328,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   loadAdjustments(): void {
     this.is_loading = true;
-    const query = this.current_type !== 'all' ? { type: this.current_type } : {};
+    const query =
+      this.current_type !== 'all' ? { type: this.current_type } : {};
 
     const sub = this.inventoryService.getAdjustments(query).subscribe({
       next: (response) => {
@@ -314,15 +352,18 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     let filtered = [...this.adjustments];
 
     if (this.current_type !== 'all') {
-      filtered = filtered.filter((a) => a.adjustment_type === this.current_type);
+      filtered = filtered.filter(
+        (a) => a.adjustment_type === this.current_type,
+      );
     }
 
     if (this.search_term) {
       const term = this.search_term.toLowerCase();
       filtered = filtered.filter(
         (a) =>
+          a.products?.name?.toLowerCase().includes(term) ||
           a.product?.name?.toLowerCase().includes(term) ||
-          a.description?.toLowerCase().includes(term)
+          a.description?.toLowerCase().includes(term),
       );
     }
 
@@ -331,10 +372,14 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   calculateStats(): void {
     this.stats.total = this.adjustments.length;
-    this.stats.losses = this.adjustments.filter((a) => a.adjustment_type === 'loss').length;
-    this.stats.damages = this.adjustments.filter((a) => a.adjustment_type === 'damage').length;
+    this.stats.losses = this.adjustments.filter(
+      (a) => a.adjustment_type === 'loss',
+    ).length;
+    this.stats.damages = this.adjustments.filter(
+      (a) => a.adjustment_type === 'damage',
+    ).length;
     this.stats.corrections = this.adjustments.filter(
-      (a) => a.adjustment_type === 'manual_correction'
+      (a) => a.adjustment_type === 'manual_correction',
     ).length;
   }
 
@@ -366,8 +411,13 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   viewDetail(adjustment: InventoryAdjustment): void {
-    // Could open a detail modal
-    console.log('View detail:', adjustment);
+    this.selected_adjustment = adjustment;
+    this.is_detail_modal_open = true;
+  }
+
+  closeDetailModal(): void {
+    this.is_detail_modal_open = false;
+    this.selected_adjustment = null;
   }
 
   // ============================================================
@@ -393,7 +443,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   getFilterClasses(type: AdjustmentType | 'all'): string {
-    const base = 'flex items-center px-3 py-1.5 text-sm font-medium rounded-full transition-colors';
+    const base =
+      'flex items-center px-3 py-1.5 text-sm font-medium rounded-full transition-colors';
     if (type === this.current_type) {
       return `${base} bg-primary text-white`;
     }

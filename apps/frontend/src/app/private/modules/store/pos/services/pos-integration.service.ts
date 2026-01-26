@@ -30,7 +30,7 @@ import { Product } from './pos-product.service';
   providedIn: 'root',
 })
 export class PosIntegrationService {
-  constructor(private posApi: PosApiService) {}
+  constructor(private posApi: PosApiService) { }
 
   // Customer Integration
   createCustomer(request: CreatePosCustomerRequest): Observable<PosCustomer> {
@@ -258,6 +258,7 @@ export class PosIntegrationService {
       name: apiProduct.name,
       sku: apiProduct.sku,
       price: apiProduct.price,
+      final_price: apiProduct.final_price || apiProduct.price,
       cost: apiProduct.cost,
       category: apiProduct.category,
       brand: apiProduct.brand,

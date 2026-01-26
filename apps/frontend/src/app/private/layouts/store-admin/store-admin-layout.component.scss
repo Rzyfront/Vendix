@@ -49,3 +49,115 @@ main {
     padding: 1rem;
   }
 }
+
+/* Sidebar Footer Styles */
+.sidebar-footer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.footer-info-item {
+  padding: 0.5rem;
+  background: linear-gradient(135deg,
+    rgba(var(--color-primary-rgb, 99 102 241), 0.08) 0%,
+    rgba(var(--color-secondary-rgb, 236 72 153), 0.08) 100%
+  );
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(var(--color-primary-rgb, 99 102 241), 0.15);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  position: relative;
+  overflow: hidden;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      transparent 100%
+    );
+  }
+}
+
+.footer-info-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.375rem;
+  position: relative;
+  z-index: 1;
+}
+
+.footer-info-block {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 0.25rem;
+  transition: all 0.2s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.footer-block-gradient-primary {
+  background: linear-gradient(135deg,
+    rgba(99, 102, 241, 0.15) 0%,
+    rgba(139, 92, 246, 0.1) 100%
+  );
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.footer-block-gradient-secondary {
+  background: linear-gradient(135deg,
+    rgba(236, 72, 153, 0.15) 0%,
+    rgba(244, 114, 182, 0.1) 100%
+  );
+  border: 1px solid rgba(236, 72, 153, 0.2);
+}
+
+.footer-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.footer-info-header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-bottom: 0.0625rem;
+}
+
+.footer-info-label {
+  font-size: 0.55rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.footer-info-value {
+  font-size: 0.65rem;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.footer-divider {
+  width: 1px;
+  height: 12px;
+  background-color: var(--color-border);
+  flex-shrink: 0;
+}

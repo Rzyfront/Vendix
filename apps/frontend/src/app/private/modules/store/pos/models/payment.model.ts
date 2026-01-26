@@ -18,6 +18,7 @@ export interface PaymentRequest {
   customerPhone?: string;
   customerId?: number | string;
   customerName?: string;
+  isAnonymousSale?: boolean;
 }
 
 export interface PaymentResponse {

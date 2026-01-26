@@ -20,6 +20,8 @@ export interface PopProduct {
     image_url?: string;
     category_id?: number;
     is_active?: boolean;
+    is_on_sale?: boolean;
+    sale_price?: number;
 }
 
 /**
@@ -90,6 +92,15 @@ export interface PreBulkData {
     name: string;
     code?: string;
     description?: string;
+    state?: string;
+    weight?: number;
+    available_for_ecommerce?: boolean;
+    base_price?: number;
+    profit_margin?: number;
+    brand_id?: number | string;
+    category_ids?: number[] | string;
+    is_on_sale?: boolean;
+    sale_price?: number;
 }
 
 /**

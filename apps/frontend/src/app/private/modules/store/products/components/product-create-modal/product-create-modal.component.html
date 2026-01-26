@@ -1,5 +1,11 @@
-<app-modal [size]="'md'" [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'" [isOpen]="isOpen"
-  (closed)="onCancel()">
+<app-modal
+  [isOpen]="isOpen"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  [size]="'md'"
+  [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'"
+  subtitle="Configura los productos esenciales"
+>
 
   <div class="p-6">
     <form [formGroup]="productForm" class="space-y-5">

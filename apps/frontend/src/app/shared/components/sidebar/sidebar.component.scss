@@ -293,6 +293,19 @@
   font-weight: 500;
 }
 
+/* Footer Section */
+.sidebar-footer {
+  padding: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+/* Hide footer when collapsed */
+.sidebar.collapsed .sidebar-footer {
+  display: none;
+}
+
 /* Mobile Responsive Styles */
 @media (max-width: 768px) {
   :host {

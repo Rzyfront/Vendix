@@ -292,7 +292,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
       ? new Date(this.orderData.created_at).toLocaleString('es-AR')
       : new Date().toLocaleString('es-AR');
 
-    this.customerName = this.orderData.customer_name || '';
+    // Show "Consumidor Final" if customer_name is empty or undefined (anonymous sale)
+    this.customerName = this.orderData.customer_name || 'Consumidor Final';
     this.customerEmail = this.orderData.customer_email || '';
     this.customerTaxId = this.orderData.customer_tax_id || this.orderData.customer?.tax_id || this.orderData.customer?.document_number || '';
 

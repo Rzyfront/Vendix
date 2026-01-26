@@ -42,10 +42,11 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Create New Order"
       subtitle="Fill in the details to create a new order"
-      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="orderForm" class="space-y-6">
         <!-- Order Information -->

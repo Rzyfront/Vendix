@@ -138,6 +138,10 @@ export class PosTicketService {
     `;
 
     if (ticketData.customer) {
+      // Show customer name, or "Consumidor Final" if empty/undefined (anonymous sale)
+      const displayName = ticketData.customer.name || 'Consumidor Final';
+      // For anonymous sales (empty name), show "000" as tax ID
+      const displayTaxId = ticketData.customer.name ? (ticketData.customer.taxId || '') : '000';
       html += `
         <div style="margin-bottom: 15px;">
           <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${ticketData.customer.name}</p>

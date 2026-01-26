@@ -30,10 +30,11 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Edit Organization"
       subtitle="Update the organization information"
-      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="organizationForm" class="space-y-6">
         <!-- Basic Information -->
@@ -211,13 +212,6 @@ export class OrganizationEditModalComponent implements OnChanges {
     }
   }
 
-  onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onSubmit(): void {
     if (this.organizationForm.invalid) {
       // Mark all fields as touched to trigger validation messages
@@ -244,7 +238,8 @@ export class OrganizationEditModalComponent implements OnChanges {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
+    this.resetForm();
   }
 
   resetForm(): void {
