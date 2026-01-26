@@ -233,7 +233,7 @@ export class ProductVariantService {
           user_id,
         );
       });
-    });
+    }
   } catch(error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {

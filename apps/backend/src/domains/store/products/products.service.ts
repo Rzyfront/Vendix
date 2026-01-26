@@ -800,7 +800,6 @@ export class ProductsService {
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
 
-<<<<<<< HEAD
       if (
         !user_id &&
         (updateProductDto.stock_quantity !== undefined ||
@@ -810,10 +809,6 @@ export class ProductsService {
         throw new ForbiddenException(
           'User context required for stock operations',
         );
-=======
-      if (!user_id && (updateProductDto.stock_quantity !== undefined || (updateProductDto.stock_by_location && updateProductDto.stock_by_location.length > 0))) {
-        throw new ForbiddenException('User context required for stock operations');
->>>>>>> 4bd1fdd (V 0.0.2)
       }
 
       const {
@@ -1001,11 +996,7 @@ export class ProductsService {
                   location_id: defaultLocation.id,
                   quantity_change: stockDifference,
                   movement_type: 'adjustment',
-<<<<<<< HEAD
                   reason: 'Stock quantity updated from product edit (legacy)',
-=======
-                  reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
->>>>>>> 4bd1fdd (V 0.0.2)
                   user_id: user_id!, // Non-null assertion safe because we checked above
                   create_movement: true,
                   validate_availability: false,
@@ -1015,37 +1006,10 @@ export class ProductsService {
             }
           }
 
-<<<<<<< HEAD
           return product;
         },
         { timeout: 30000 },
       );
-=======
-          if (stockDifference !== 0) {
-            const defaultLocation =
-              await this.inventoryLocationsService.getDefaultLocation(
-                product.store_id,
-              );
-
-            await this.stockLevelManager.updateStock(
-              {
-                product_id: id,
-                location_id: defaultLocation.id,
-                quantity_change: stockDifference,
-                movement_type: 'adjustment',
-                reason: 'Stock quantity updated from product edit (legacy)',
-                user_id: user_id!, // Non-null assertion safe because we checked above
-                create_movement: true,
-                validate_availability: false,
-              },
-              prisma,
-            );
-          }
-        }
-
-        return product;
-      });
->>>>>>> 4bd1fdd (V 0.0.2)
 
       return await this.findOne(result.id);
     } catch (error) {
@@ -1176,10 +1140,15 @@ export class ProductsService {
   }
 
   // Gestión de variantes
-<<<<<<< HEAD
-=======
-
->>>>>>> 4bd1fdd (V 0.0.2)
+  async createVariant(
+    productId: number,
+    createVariantDto: CreateProductVariantDto,
+  ) {
+    return this.productVariantService.createVariant(
+      productId,
+      createVariantDto,
+    );
+  }
 
   // Gestión de imágenes
   async addImage(productId: number, imageDto: ProductImageDto) {
@@ -1315,17 +1284,6 @@ export class ProductsService {
     }
   }
 
-  async createVariant(
-    productId: number,
-    createVariantDto: CreateProductVariantDto,
-  ) {
-<<<<<<< HEAD
-    return this.productVariantService.createVariant(
-      productId,
-      createVariantDto,
-    );
-  }
-
   private async handleImageUploads(
     images: ProductImageDto[],
     productSlug: string,
@@ -1378,8 +1336,5 @@ export class ProductsService {
         }
       }
     }
-=======
-    return this.productVariantService.createVariant(productId, createVariantDto);
->>>>>>> 4bd1fdd (V 0.0.2)
   }
 }
