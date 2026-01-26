@@ -292,7 +292,6 @@ export class ProductVariantService {
 
     return variant;
   }
-
   async removeVariant(variantId: number) {
     const existingVariant = await this.prisma.product_variants.findUnique({
       where: { id: variantId },
@@ -302,9 +301,9 @@ export class ProductVariantService {
       throw new NotFoundException('Variante no encontrada');
     }
 
-    return await this.prisma.$transaction(async (prisma) => {
+    return await this.prisma.$transaction(async (tx) => {
       // Verificar que no haya stock en ninguna ubicación
-      const stockLevels = await prisma.stock_levels.findMany({
+      const stockLevels = await tx.stock_levels.findMany({
         where: {
           product_id: existingVariant.product_id,
           product_variant_id: variantId,
@@ -323,7 +322,7 @@ export class ProductVariantService {
 
       // Eliminación lógica: archivar variante (si tuviera estado)
       // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
-      return await prisma.product_variants.delete({
+      return await tx.product_variants.delete({
         where: { id: variantId },
       });
     });

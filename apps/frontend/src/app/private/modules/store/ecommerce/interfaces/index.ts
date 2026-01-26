@@ -3,31 +3,9 @@
  * Matches backend EcommerceSettingsDto structure
  */
 
-/**
- * Colores de la sección inicio
- */
-export interface InicioColores {
-  primary_color?: string;
-  secondary_color?: string;
-  accent_color?: string;
-}
-
-/**
- * Sección Inicio de e-commerce
- */
-export interface InicioSettings {
-  titulo?: string;
-  parrafo?: string;
-  logo_url?: string | null;
-  colores?: InicioColores;
-}
-
 export interface EcommerceSettings {
   // App type identifier
   app?: string;
-
-  // Sección Inicio
-  inicio?: InicioSettings;
 
   // Configuración General
   general?: {
@@ -38,7 +16,6 @@ export interface EcommerceSettings {
 
   // Slider Principal
   slider?: {
-    enable?: boolean;
     photos?: SliderPhoto[];
   };
 
@@ -76,8 +53,28 @@ export interface EcommerceSettings {
     multiple_shipping_addresses?: boolean;
   };
 
-  // Branding (deprecated - migrado a inicio.colores)
-  branding?: any;
+  // Lista de deseos
+  wishlist?: {
+    enabled?: boolean;
+    public_wishlist?: boolean;
+    share_wishlist?: boolean;
+  };
+
+  // Personalización - Colores (Original sections)
+  primary_color?: string;
+  secondary_color?: string;
+  accent_color?: string;
+
+  // Personalización - Logo
+  logo_url?: string;
+
+  // Personalización - Product Slider
+  product_slider_enabled?: boolean;
+
+  // Personalización - Dominio
+  use_custom_domain?: boolean;
+  custom_domain?: string;
+  subdomain?: string;
 }
 
 /**
@@ -85,7 +82,6 @@ export interface EcommerceSettings {
  */
 export interface SliderPhoto {
   url?: string | null;
-  key?: string | null; // S3 key
   title?: string;
   caption?: string;
 }
@@ -95,7 +91,6 @@ export interface SliderPhoto {
  */
 export interface SliderImage {
   url?: string;
-  key?: string; // S3 key
   thumbnail?: string;
   uploading?: boolean;
   title?: string;
@@ -108,7 +103,6 @@ export interface SliderImage {
 export interface SettingsResponse {
   exists: boolean;
   config?: EcommerceSettings;
-  ecommerceUrl?: string; // URL del dominio de Ecommerce activo
 }
 
 /**
@@ -123,6 +117,5 @@ export interface UpdateEcommerceSettingsDto {
  */
 export interface UploadImageResponse {
   key: string;
-  url?: string;
   thumbKey?: string;
 }

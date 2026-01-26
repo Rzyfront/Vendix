@@ -29,6 +29,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
+
   constructor() { }
 
   // Observable getters
@@ -230,24 +231,15 @@ export class PosCartService {
       };
     } else {
       // Add new item
-      const rateSum =
-        request.product.tax_assignments?.reduce((rateSum, assignment) => {
-          const assignmentRate =
-            assignment.tax_categories?.tax_rates?.reduce(
-              (sum, tr) => sum + parseFloat(tr.rate || '0'),
-              0,
-            ) || 0;
-          return rateSum + assignmentRate;
-        }, 0) || 0;
-      const finalUnitPrice = request.product.final_price || this.calculateItemFinalPrice(request.product);
+      const finalPrice = this.calculateItemFinalPrice(request.product);
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
         unitPrice: request.product.price,
+        finalPrice: finalPrice,
         taxAmount: this.calculateItemTax(request.product, request.quantity),
-        finalPrice: finalUnitPrice,
-        totalPrice: request.quantity * finalUnitPrice,
+        totalPrice: request.quantity * finalPrice,
         addedAt: new Date(),
         notes: request.notes,
       };
@@ -285,13 +277,13 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
-    const finalUnitPrice = item.finalPrice;
-    const newTotalPrice = request.quantity * finalUnitPrice;
+    const finalPrice = this.calculateItemFinalPrice(item.product);
+    const newTotalPrice = request.quantity * finalPrice;
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
+      finalPrice: finalPrice,
       taxAmount: this.calculateItemTax(item.product, request.quantity),
-      finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       notes: request.notes || item.notes,
     };
@@ -390,7 +382,7 @@ export class PosCartService {
       0,
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
-    const total = subtotal - discountAmount; // subtotal ya tiene el taxAmount sumado en cada item.totalPrice
+    const total = subtotal - discountAmount + taxAmount;
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -415,33 +407,22 @@ export class PosCartService {
    * Calculate tax for a single item
    */
   private calculateItemTax(product: any, quantity: number): number {
-    const rateSum = this.calculateRateSum(product);
-    return product.price * quantity * rateSum;
+    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return (product.price * quantity) * rateSum;
   }
 
   /**
-   * Calculate final price for a single item (unit)
+   * Calculate final price for a single item (price with tax included)
    */
   private calculateItemFinalPrice(product: any): number {
-    if (product.final_price) return product.final_price;
-    const rateSum = this.calculateRateSum(product);
-    return product.price * (1 + rateSum);
-  }
-
-  /**
-   * Helper to calculate sum of tax rates
-   */
-  private calculateRateSum(product: any): number {
-    return (
-      product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
-        const assignmentRate =
-          assignment.tax_categories?.tax_rates?.reduce(
-            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
-            0,
-          ) || 0;
-        return rateSum + assignmentRate;
-      }, 0) || 0
-    );
+    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return product.price + (product.price * rateSum);
   }
 
   /**

@@ -9,10 +9,6 @@ import { AuditModule } from './audit/audit.module';
 import { StoresModule } from './stores/stores.module';
 import { UsersModule } from './users/users.module';
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
-import { TemplatesModule } from './templates/templates.module';
-import { CurrenciesModule } from './currencies/currencies.module';
-import { ShippingModule } from './shipping/shipping.module';
-import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
 
 @Module({
   imports: [
@@ -25,10 +21,6 @@ import { LegalDocumentsModule } from './legal-documents/legal-documents.module';
     UsersModule,
     AuditModule,
     PaymentMethodsModule,
-    TemplatesModule,
-    CurrenciesModule,
-    ShippingModule,
-    LegalDocumentsModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

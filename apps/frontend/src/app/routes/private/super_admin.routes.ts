@@ -85,13 +85,6 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/templates/templates.component'
           ).then((c) => c.TemplatesComponent),
       },
-      {
-        path: 'settings/shipping',
-        loadComponent: () =>
-          import(
-            '../../private/modules/super-admin/shipping/shipping.component'
-          ).then((c) => c.ShippingLayoutComponent),
-      },
     ],
   },
 ];

@@ -18,9 +18,10 @@ import { IconComponent } from '../../../../../shared/components/index';
   selector: 'app-general-settings',
   standalone: true,
   imports: [
-    CommonModule, LucideAngularModule,
-    IconComponent,
+    CommonModule,
     ButtonComponent,
+    IconComponent,
+    LucideAngularModule,
     GeneralSettingsForm,
     InventorySettingsForm,
     NotificationsSettingsForm,

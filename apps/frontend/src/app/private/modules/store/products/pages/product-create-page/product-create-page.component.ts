@@ -746,14 +746,6 @@ export class ProductCreatePageComponent implements OnInit {
     this.openAdjustmentModal();
   }
 
-  goToPurchase(): void {
-    if (this.productId) {
-      this.router.navigate(['/admin/inventory/pop'], {
-        queryParams: { product_id: this.productId },
-      });
-    }
-  }
-
   closeAdjustmentModal(): void {
     this.isAdjustmentModalOpen = false;
   }
@@ -817,5 +809,9 @@ export class ProductCreatePageComponent implements OnInit {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+
+  goToPurchase(): void {
+    this.router.navigate(['/admin/orders/purchase-orders']);
   }
 }

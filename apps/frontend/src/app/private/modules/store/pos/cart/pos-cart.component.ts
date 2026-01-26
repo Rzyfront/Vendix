@@ -23,12 +23,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [
-    CommonModule,
-    ButtonComponent,
-    IconComponent,
-    QuantityControlComponent,
-  ],
+  imports: [CommonModule, ButtonComponent, IconComponent, QuantityControlComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -61,9 +56,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
-              <span class="font-medium">{{
-                formatCurrency((summary$ | async)?.taxAmount || 0)
-              }}</span>
+              <span class="font-medium">{{ formatCurrency((summary$ | async)?.taxAmount || 0) }}</span>
             </div>
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
@@ -76,14 +69,12 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           </div>
 
           <!-- Checkout Actions -->
-          <div
-            class="flex flex-col sm:flex-row items-center justify-between gap-4"
-          >
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
             <app-button
               variant="outline"
               size="md"
               (clicked)="saveCart()"
-              [disabled]="(isEmpty$ | async) ?? false"
+              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
               class="!h-10 text-sm font-medium px-3"
             >
               <app-icon name="save" [size]="16" slot="icon"></app-icon>
@@ -93,7 +84,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               variant="primary"
               size="md"
               (clicked)="proceedToPayment()"
-              [disabled]="(isEmpty$ | async) ?? false"
+              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
               class="!h-10 text-sm font-bold px-6"
             >
               <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
@@ -184,7 +175,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 
               <!-- Item Info -->
               <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2 mb-1">
+                <div class="flex justify-between items-start gap-2 mb-0.5">
                   <h4
                     class="text-sm font-semibold text-text-primary truncate leading-tight"
                   >
@@ -198,23 +189,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
-
-                <div class="flex justify-between items-end mt-2">
-                  <div class="flex flex-col gap-0.5">
-                    <div
-                      *ngIf="getItemTaxAmount(item) > 0"
-                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit mb-1"
-                    >
-                      Imp {{ formatCurrency(getItemTaxAmount(item)) }}
-                    </div>
-                    <span class="text-[10px] text-text-muted leading-none">
-                      Base: {{ formatCurrency(item.unitPrice) }}
-                    </span>
-                    <span class="text-xs font-bold text-text-primary">
-                      Unit. Final: {{ formatCurrency(item.finalPrice) }}
-                    </span>
-                  </div>
-                  <span class="text-base font-extrabold text-primary">
+                <div *ngIf="getItemTaxAmount(item) > 0" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit">
+                  Imp {{ formatCurrency(getItemTaxAmount(item)) }}
+                </div>
+                <div class="flex justify-between items-end">
+                  <span class="text-xs font-medium text-text-secondary">
+                    {{ formatCurrency(item.unitPrice) }}
+                  </span>
+                  <span class="text-sm font-bold text-primary">
                     {{ formatCurrency(item.totalPrice) }}
                   </span>
                 </div>
@@ -235,6 +217,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                 [min]="1"
                 [max]="item.product.stock"
                 [editable]="true"
+                [disabled]="(loading$ | async) ?? false"
                 [size]="'sm'"
                 (valueChange)="updateQuantity(item.id, $event)"
               ></app-quantity-control>
@@ -259,6 +242,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
   cartState$: Observable<CartState>;
   isEmpty$: Observable<boolean>;
   summary$: Observable<any>;
+  loading$: Observable<boolean>;
 
   @Output() saveDraft = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
@@ -271,6 +255,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
     this.summary$ = this.cartService.summary;
+    this.loading$ = this.cartService.loading;
   }
 
   ngOnInit(): void {
@@ -380,15 +365,10 @@ export class PosCartComponent implements OnInit, OnDestroy {
   }
 
   getItemTaxRate(item: CartItem): number {
-    const rate =
-      item.product.tax_assignments?.reduce((rateSum, assignment) => {
-        const assignmentRate =
-          assignment.tax_categories?.tax_rates?.reduce(
-            (sum, tr) => sum + parseFloat(tr.rate || '0'),
-            0,
-          ) || 0;
-        return rateSum + assignmentRate;
-      }, 0) || 0;
+    const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
     return rate;
   }
 

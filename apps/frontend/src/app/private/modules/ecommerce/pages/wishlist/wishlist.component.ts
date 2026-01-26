@@ -57,10 +57,7 @@ export class WishlistComponent implements OnInit {
   }
 
   addToCart(item: WishlistItem): void {
-    const result = this.cart_service.addToCart(item.product_id, 1, item.product_variant_id || undefined);
-    if (result) {
-      result.subscribe();
-    }
+    this.cart_service.addItem(item.product_id, 1, item.product_variant_id || undefined).subscribe();
   }
 
   goToProduct(slug: string): void {

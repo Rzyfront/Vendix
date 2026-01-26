@@ -13,8 +13,11 @@
 
   <div class="products-grid">
     @for (product of products; track product.id) {
-    <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
-      (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" />
+    <app-product-card
+      [product]="product"
+      (add_to_cart)="onAddToCart($event)"
+      (toggle_wishlist)="onToggleWishlist($event)"
+    />
     }
   </div>
 

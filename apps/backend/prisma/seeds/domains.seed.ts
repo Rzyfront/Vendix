@@ -1,8 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 
-const baseDomain = process.env.BASE_DOMAIN || 'vendix.com';
-
 export interface SeedDomainsResult {
   domainsCreated: number;
 }
@@ -54,7 +52,7 @@ export async function seedDomains(
   const domainSettings = [
     // Vendix core domains
     {
-      hostname: baseDomain,
+      hostname: 'vendix.online',
       organization_id: vendixOrg.id,
       store_id: null,
       domain_type: 'vendix_core',
@@ -76,10 +74,10 @@ export async function seedDomains(
         },
         security: {
           cors_origins: [
-            `http://${baseDomain}`,
-            `https://${baseDomain}`,
-            `http://api.${baseDomain}`,
-            `https://api.${baseDomain}`,
+            'http://vendix.online',
+            'https://vendix.online',
+            'http://api.vendix.online',
+            'https://api.vendix.online',
           ],
           session_timeout: 3600000,
           max_login_attempts: 5,
@@ -236,7 +234,7 @@ export async function seedDomains(
     let ownership = 'custom_domain';
     if (
       domain.hostname.endsWith('.vendix.com') ||
-      domain.hostname.endsWith(`.${baseDomain}`)
+      domain.hostname.endsWith('.vendix.online')
     ) {
       const parts = domain.hostname.split('.');
       if (parts.length === 2) {

@@ -24,7 +24,7 @@ import {
       subtitle="Importa múltiples productos desde un archivo Excel"
     >
       <!-- Initial State: Instructions & Upload -->
-      <div *ngIf="!uploadResults && !parsedData" class="space-y-6">
+      <div *ngIf="!uploadResults" class="space-y-6">
         <!-- Template Download Section -->
         <div>
           <h4 class="text-sm font-medium text-gray-700 mb-3">
@@ -144,95 +144,7 @@ import {
             <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
             Error en la carga
           </div>
-          <div *ngIf="isErrorMessageArray(); else singleError" class="mt-2">
-            <ul
-              class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto"
-            >
-              <li *ngFor="let msg of uploadError">{{ msg }}</li>
-            </ul>
-          </div>
-          <ng-template #singleError>
-            <p class="mt-1">{{ uploadError }}</p>
-          </ng-template>
-        </div>
-      </div>
-
-      <!-- Preview State -->
-      <div *ngIf="parsedData && !uploadResults" class="space-y-4">
-        <div
-          class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between"
-        >
-          <div class="flex items-center">
-            <app-icon
-              name="check-circle"
-              [size]="24"
-              class="text-green-500 mr-3"
-            ></app-icon>
-            <div>
-              <h4 class="text-sm font-medium text-green-900">
-                Archivo procesado correctamente
-              </h4>
-              <p class="text-sm text-green-700">
-                Se encontraron {{ parsedData.length }} productos para cargar.
-              </p>
-            </div>
-          </div>
-          <button
-            (click)="resetState()"
-            class="text-sm text-red-500 hover:text-red-700 font-medium"
-          >
-            Cambiar archivo
-          </button>
-        </div>
-
-        <!-- Preview Table -->
-        <div class="border rounded-md overflow-hidden">
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  Producto
-                </th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">
-                  SKU
-                </th>
-                <th class="px-3 py-2 text-right font-medium text-gray-500">
-                  Venta
-                </th>
-                <th class="px-3 py-2 text-right font-medium text-gray-500">
-                  Compra
-                </th>
-                <th class="px-3 py-2 text-right font-medium text-gray-500">
-                  Margen
-                </th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr *ngFor="let item of parsedData.slice(0, 5)">
-                <td class="px-3 py-2 text-gray-900">
-                  {{ item.name || '-' }}
-                </td>
-                <td class="px-3 py-2 text-gray-500 font-mono text-xs">
-                  {{ item.sku || '-' }}
-                </td>
-                <td class="px-3 py-2 text-right text-gray-700">
-                  {{ item.base_price | currency }}
-                </td>
-                <td class="px-3 py-2 text-right text-gray-700">
-                  {{ item.cost_price | currency }}
-                </td>
-                <td class="px-3 py-2 text-right text-gray-700">
-                  {{ item.profit_margin }}%
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div
-            class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center"
-            *ngIf="parsedData.length > 5"
-          >
-            ... y {{ parsedData.length - 5 }} más
-          </div>
+          {{ uploadError }}
         </div>
       </div>
 
@@ -365,12 +277,10 @@ export class BulkUploadModalComponent {
   parsedData: any[] | null = null;
   uploadResults: any = null;
 
-  private productsService = inject(ProductsService);
-  private toastService = inject(ToastService);
-
-  isErrorMessageArray(): boolean {
-    return Array.isArray(this.uploadError);
-  }
+  constructor(
+    private productsService: ProductsService,
+    private toastService: ToastService,
+  ) {}
 
   onCancel() {
     this.isOpenChange.emit(false);
@@ -569,9 +479,9 @@ export class BulkUploadModalComponent {
       },
       error: (error) => {
         this.isUploading = false;
-        this.uploadError = error;
-
-        if (error?.error?.details) {
+        this.uploadError =
+          typeof error === 'string' ? error : 'Error al procesar el archivo';
+        if (error.error && error.error.details) {
           this.uploadResults = error.error.details;
         } else if (error?.error?.data) {
           this.uploadResults = error.error.data;

@@ -51,7 +51,7 @@ export class StoreSettingsService {
           // Update local BehaviorSubject
           this.settings$$.next(response.data);
           // Dispatch success action directly to update NgRx store
-          this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings: response.data }));
+          this.store.dispatch(AuthActions.updateUserSettingsSuccess({ user_settings: response.data }));
         },
         error: (error) => console.error('Error saving settings:', error),
       });

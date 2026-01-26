@@ -31,7 +31,9 @@ export class ProductsBulkService {
     Nombre: 'name',
     SKU: 'sku',
     'Precio Venta': 'base_price',
+    'Precio Base': 'base_price', // Aliased for compatibility
     'Precio Compra': 'cost_price',
+    Costo: 'cost_price', // Aliased for compatibility
     Margen: 'profit_margin',
     'Cantidad Inicial': 'stock_quantity',
     Descripción: 'description',
@@ -68,67 +70,6 @@ export class ProductsBulkService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
   ) {}
-
-  /**
-   * Genera la plantilla de carga masiva en formato Excel (.xlsx)
-   */
-  async generateExcelTemplate(type: 'quick' | 'complete'): Promise<Buffer> {
-    let headers: string[] = [];
-    let exampleData: any[] = [];
-
-    if (type === 'quick') {
-      headers = ['Nombre', 'SKU', 'Precio Base', 'Costo', 'Cantidad Inicial'];
-      exampleData = [
-        {
-          Nombre: 'Camiseta Básica Blanca',
-          SKU: 'CAM-BAS-BLA-001',
-          'Precio Base': 15000,
-          Costo: 8000,
-          'Cantidad Inicial': 50,
-        },
-      ];
-    } else {
-      headers = [
-        'Nombre',
-        'SKU',
-        'Precio Base',
-        'Costo',
-        'Cantidad Inicial',
-        'Descripción',
-        'Marca',
-        'Categorías',
-        'Peso',
-        'En Oferta',
-        'Precio Oferta',
-      ];
-      exampleData = [
-        {
-          Nombre: 'Zapatillas Running Pro',
-          SKU: 'ZAP-RUN-PRO-42',
-          'Precio Base': 85000,
-          Costo: 45000,
-          'Cantidad Inicial': 20,
-          Descripción: 'Zapatillas ideales para correr largas distancias.',
-          Marca: 'Nike',
-          Categorías: 'Deportes, Calzado, Running',
-          Peso: 0.8,
-          'En Oferta': 'No',
-          'Precio Oferta': 0,
-        },
-      ];
-    }
-
-    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-
-    // Ajustar ancho de columnas
-    const colWidths = headers.map((h) => ({ wch: Math.max(h.length + 5, 20) }));
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Productos');
-
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  }
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -238,16 +179,12 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Buscar si existe por SKU para decidir si Crear o Actualizar
-        const existingProduct = await this.prisma.products.findFirst({
-          where: {
-            store_id: storeId,
-            sku: productData.sku,
-            state: { not: 'archived' },
-          },
-        });
-
         let resultProduct;
+
+        // Check for existing product by SKU
+        const existingProduct = await this.prisma.products.findFirst({
+          where: { store_id: storeId, sku: productData.sku },
+        });
 
         // Wrap operations in a transaction for data integrity
         await this.prisma.$transaction(async (tx) => {
@@ -257,7 +194,7 @@ export class ProductsBulkService {
           // Since we can't easily pass 'tx' to this.productsService.create/update without refactoring them,
           // we will do a best-effort approach or basic operations here if possible?
           // ACTUALLY: deeply refactoring productsService to accept TX is out of scope for "fixing bulk upload" safely.
-          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost", 
+          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost",
           // we should AT LEAST ensure that if variants/stock fail, we don't leave a partial product.
           // Given the constraints, we will rely on the fact that if this block throws, the transaction rolls back.
           // BUT - inner service calls using `this.prisma` (the global one) WON'T be part of `tx`.
@@ -265,7 +202,7 @@ export class ProductsBulkService {
           // We will catch errors and if manual rollback is needed we might need to delete.
           // BETTER: For this specific task, we will try to do it sequentially and if creation fails, it fails.
           // If variants fail, we should delete the product?
-          // Since the user explicitly asked "Adjust for complete load that no data is lost", 
+          // Since the user explicitly asked "Adjust for complete load that no data is lost",
           // truly atomic acts require 'tx'.
 
           // Let's implement a localized transaction approach:
@@ -307,7 +244,8 @@ export class ProductsBulkService {
             // We'll wrap creation + sub-steps in a try/catch to delete if subsequent steps fail
             let createdId = null;
             try {
-              resultProduct = await this.productsService.create(createProductDto);
+              resultProduct =
+                await this.productsService.create(createProductDto);
               createdId = (resultProduct as any).id;
 
               // Variantes
@@ -326,13 +264,14 @@ export class ProductsBulkService {
             } catch (createErr) {
               // Compensation logic: if we created the product but failed later (e.g. variants), delete it
               if (createdId) {
-                await this.prisma.products.delete({ where: { id: createdId } }).catch(e => console.error("Cleanup failed", e));
+                await this.prisma.products
+                  .delete({ where: { id: createdId } })
+                  .catch((e) => console.error('Cleanup failed', e));
               }
               throw createErr; // Re-throw to be caught by outer loop
             }
           }
         }); // End fake transaction scope (just scoping variables mainly)
-
 
         successful++;
       } catch (error) {
@@ -361,93 +300,36 @@ export class ProductsBulkService {
    */
   private async preprocessProductData(product: any, storeId: number) {
     // Procesar Marca (Brand)
-    if (product.brand_id) {
-      if (typeof product.brand_id === 'string') {
-        const brandName = (product.brand_id as string).trim();
-        if (/^\d+$/.test(brandName)) {
-          product.brand_id = parseInt(brandName, 10);
-        } else if (brandName) {
-          const brandId = await this.findOrCreateBrand(brandName, storeId);
-          product.brand_id = brandId;
-        } else {
-          delete product.brand_id;
-        }
+    if (product.brand_id && typeof product.brand_id === 'string') {
+      const brandName = (product.brand_id as string).trim();
+      if (brandName) {
+        const brandId = await this.findOrCreateBrand(brandName, storeId);
+        product.brand_id = brandId;
+      } else {
+        delete product.brand_id;
       }
     }
 
     // Procesar Categorías
-    if (product.category_ids) {
-      let rawCategories: any[] = [];
-      if (typeof product.category_ids === 'string') {
-        rawCategories = (product.category_ids as string).split(',');
-      } else if (Array.isArray(product.category_ids)) {
-        rawCategories = product.category_ids;
-      }
+    if (product.category_ids && typeof product.category_ids === 'string') {
+      const categoryNames = (product.category_ids as string).split(',');
+      const categoryIds: number[] = [];
 
-      if (rawCategories.length > 0) {
-        const categoryIds: number[] = [];
-        for (const cat of rawCategories) {
-          const catStr = cat.toString().trim();
-          if (!catStr) continue;
-
-          if (/^\d+$/.test(catStr)) {
-            categoryIds.push(parseInt(catStr, 10));
-          } else {
-            const catId = await this.findOrCreateCategory(catStr, storeId);
-            categoryIds.push(catId);
-          }
+      for (const name of categoryNames) {
+        const trimmedName = name.trim();
+        if (trimmedName) {
+          const catId = await this.findOrCreateCategory(trimmedName, storeId);
+          categoryIds.push(catId);
         }
-        product.category_ids = categoryIds;
       }
-    }
-
-    // Lógica de Precios: Margen tiene preferencia
-    const cost = parseFloat(product.cost_price || 0);
-    let margin = parseFloat(product.profit_margin || 0);
-    // Auto-fix for decimal margins (e.g. 0.3 -> 30%)
-    if (margin > 0 && margin < 1) {
-      margin = margin * 100;
-      product.profit_margin = margin;
-    }
-
-    if (margin > 0 && cost > 0) {
-      // Precio = Costo * (1 + Margen/100)
-      product.base_price = cost * (1 + margin / 100);
+      product.category_ids = categoryIds;
     }
 
     // Normalizar Booleanos (Si/No -> true/false)
-    const normalizeBool = (val: any) => {
-      if (typeof val === 'boolean') return val;
-      if (typeof val === 'string') {
-        return (
-          val.toLowerCase() === 'si' ||
-          val.toLowerCase() === 'yes' ||
-          val.toLowerCase() === 'verdadero' ||
-          val.toLowerCase() === 'true'
-        );
-      }
-      return !!val;
-    };
-
-    if (product.is_on_sale !== undefined) {
-      product.is_on_sale = normalizeBool(product.is_on_sale);
-    }
-
-    if (product.available_for_ecommerce !== undefined) {
-      product.available_for_ecommerce = normalizeBool(
-        product.available_for_ecommerce,
-      );
-    }
-
-    // Normalizar Estado
-    if (product.state && typeof product.state === 'string') {
-      const s = product.state.toLowerCase();
-      if (s === 'activo' || s === 'active' || s === 'habilitado')
-        product.state = 'active';
-      else if (s === 'inactivo' || s === 'inactive' || s === 'deshabilitado')
-        product.state = 'inactive';
-      else if (s === 'archivado' || s === 'archived')
-        product.state = 'archived';
+    if (typeof product.is_on_sale === 'string') {
+      product.is_on_sale =
+        product.is_on_sale.toLowerCase() === 'si' ||
+        product.is_on_sale.toLowerCase() === 'yes';
     }
   }
 
@@ -559,7 +441,15 @@ export class ProductsBulkService {
         continue;
       }
 
-      // Ya no bloqueamos si el SKU existe, porque ahora actualizamos
+      const existing = await this.prisma.products.findFirst({
+        where: { store_id: storeId, sku: product.sku },
+      });
+
+      if (existing) {
+        errors.push(`Fila ${index + 1}: El SKU ${product.sku} ya existe.`);
+        continue;
+      }
+
       validProducts.push(product);
     }
 
@@ -616,10 +506,8 @@ export class ProductsBulkService {
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       weight: product.weight,
-      is_on_sale: product['is_on_sale'],
+      is_on_sale: product['is_on_sale'], // Acceso dinámico por si acaso
       sale_price: product['sale_price'],
-      state: product.state,
-      available_for_ecommerce: product.available_for_ecommerce,
     };
   }
 
@@ -637,8 +525,6 @@ export class ProductsBulkService {
       weight: product.weight,
       is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
-      state: product.state,
-      available_for_ecommerce: product.available_for_ecommerce,
     };
   }
 

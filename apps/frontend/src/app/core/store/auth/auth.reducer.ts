@@ -359,17 +359,20 @@ export const authReducer = createReducer(
     loading: true,
   })),
 
-  on(AuthActions.updateUserSettingsSuccess, (state, { user_settings }) => {
-    const newState = {
-      ...state,
-      user_settings,
-      loading: false,
-      error: null,
-    };
-    // Save to localStorage to persist changes
-    saveAuthState(newState);
-    return newState;
-  }),
+  on(
+    AuthActions.updateUserSettingsSuccess,
+    (state, { user_settings }) => {
+      const newState = {
+        ...state,
+        user_settings,
+        loading: false,
+        error: null,
+      };
+      // Save to localStorage to persist changes
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
 
   on(AuthActions.updateUserSettingsFailure, (state, { error }) => ({
     ...state,
@@ -379,17 +382,4 @@ export const authReducer = createReducer(
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
-
-  // Update Store Settings
-  on(AuthActions.updateStoreSettingsSuccess, (state, { store_settings }) => {
-    const newState = {
-      ...state,
-      store_settings,
-      loading: false,
-      error: null,
-    };
-    // Save to localStorage to persist changes
-    saveAuthState(newState);
-    return newState;
-  }),
 );

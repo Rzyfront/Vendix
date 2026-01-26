@@ -231,8 +231,7 @@
     }
 
     input,
-    textarea,
-    select {
+    textarea {
         width: 100%;
         padding: var(--control-padding);
         border: 1px solid var(--color-border);
@@ -245,29 +244,7 @@
         &:focus {
             outline: none;
             border-color: var(--color-primary);
-            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
         }
-
-        &:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            background: var(--color-background);
-        }
-
-        &.checkout-select {
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
-            background-position: right 0.75rem center;
-            background-repeat: no-repeat;
-            background-size: 1.25rem;
-            padding-right: 2.5rem;
-        }
-    }
-
-    .error-text {
-        font-size: var(--fs-xs);
-        color: var(--color-error);
-        margin-top: 0.25rem;
     }
 }
 

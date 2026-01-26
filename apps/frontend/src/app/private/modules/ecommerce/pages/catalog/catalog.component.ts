@@ -6,24 +6,23 @@ import { Subject } from 'rxjs';
 import { takeUntil, debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import {
   CatalogService,
-  EcommerceProduct,
+  Product,
   Category,
   Brand,
   CatalogQuery,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
-import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 
 @Component({
   selector: 'app-catalog-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ProductCardComponent],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
 })
 export class CatalogComponent implements OnInit, OnDestroy {
-  products: EcommerceProduct[] = [];
+  products: Product[] = [];
   categories: Category[] = [];
   brands: Brand[] = [];
 
@@ -33,7 +32,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
   selected_brand_id: number | null = null;
   min_price: number | null = null;
   max_price: number | null = null;
-  sort_by: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest' = 'newest';
+  sort_by: 'name' | 'price_asc' | 'price_desc' | 'newest' = 'newest';
 
   // Pagination
   current_page = 1;
@@ -44,10 +43,6 @@ export class CatalogComponent implements OnInit, OnDestroy {
   is_loading = false;
   show_filters = false;
 
-  // Quick View Modal
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
-
   private destroy$ = new Subject<void>();
   private search_subject = new Subject<string>();
 
@@ -56,7 +51,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     private cart_service: CartService,
     private route: ActivatedRoute,
     private router: Router,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     // Load categories and brands
@@ -212,21 +207,13 @@ export class CatalogComponent implements OnInit, OnDestroy {
     }
   }
 
-  onAddToCart(product: EcommerceProduct): void {
-    const result = this.cart_service.addToCart(product.id, 1);
-    if (result) {
-      result.subscribe();
-    }
+  onAddToCart(product: Product): void {
+    this.cart_service.addToLocalCart(product.id, 1);
     // TODO: Show toast notification
   }
 
-  onToggleWishlist(product: EcommerceProduct): void {
+  onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
-  }
-
-  onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
   }
 
   private updateUrl(): void {

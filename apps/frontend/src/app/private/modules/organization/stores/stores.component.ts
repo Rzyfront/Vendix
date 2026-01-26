@@ -219,10 +219,11 @@ interface StatItem {
 
       <!-- Settings Store Modal -->
       <app-store-configuration-modal
-        [(isOpen)]="isSettingsModalOpen"
+        [isOpen]="isSettingsModalOpen"
         [storeId]="selectedStoreForSettings?.id || null"
         [storeName]="selectedStoreForSettings?.name || ''"
-        (settingsSaved)="onSettingsSaved($event)"
+        (openChange)="onSettingsModalChange($event)"
+        (settingsSaved)="updateStoreSettings($event)"
       ></app-store-configuration-modal>
 
       <!-- Delete Store Confirmation Modal -->
@@ -643,6 +644,10 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isEditModalOpen = false;
   }
 
+  onSettingsModalCancel(): void {
+    this.isSettingsModalOpen = false;
+  }
+
   updateStore(storeData: any): void {
     if (!this.selectedStore) return;
 
@@ -726,6 +731,21 @@ export class StoresComponent implements OnInit, OnDestroy {
   deleteStore(store: StoreListItem): void {
     this.selectedStoreForDelete = store;
     this.isDeleteModalOpen = true;
+  }
+
+  onDeleteModalChange(isOpen: boolean | Event): void {
+    this.isDeleteModalOpen = isOpen as boolean;
+    if (!isOpen) {
+      this.selectedStoreForDelete = null;
+    }
+  }
+
+  onSettingsModalChange(isOpen: boolean | Event): void {
+    this.isSettingsModalOpen = isOpen as boolean;
+  }
+
+  updateStoreSettings(event: SettingsSavedEvent): void {
+    this.onSettingsSaved(event);
   }
 
   onDeleteModalCancel(): void {

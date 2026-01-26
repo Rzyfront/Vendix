@@ -216,6 +216,34 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.organization_settings;
   }
 
+  get legal_documents() {
+    return this.baseClient.legal_documents;
+  }
+
+  get document_acceptances() {
+    return this.baseClient.document_acceptances;
+  }
+
+  get expenses() {
+    return this.baseClient.expenses;
+  }
+
+  get expense_categories() {
+    return this.baseClient.expense_categories;
+  }
+
+  get shipping_zones() {
+    return this.baseClient.shipping_zones;
+  }
+
+  get shipping_methods() {
+    return this.baseClient.shipping_methods;
+  }
+
+  get shipping_rates() {
+    return this.baseClient.shipping_rates;
+  }
+
   // Global models (no scoping ever applied)
   get organizations() {
     return this.baseClient.organizations;
@@ -257,34 +285,5 @@ export class GlobalPrismaService extends BasePrismaService {
   // Default templates
   get default_templates() {
     return this.baseClient.default_templates;
-  }
-
-  // Shipping & Logistics models
-  get shipping_methods() {
-    return this.baseClient.shipping_methods;
-  }
-
-  get shipping_zones() {
-    return this.baseClient.shipping_zones;
-  }
-
-  get shipping_rates() {
-    return this.baseClient.shipping_rates;
-  }
-
-  get legal_documents() {
-    return this.baseClient.legal_documents;
-  }
-
-  get document_acceptances() {
-    return this.baseClient.document_acceptances;
-  }
-
-  get expenses() {
-    return this.baseClient.expenses;
-  }
-
-  get expense_categories() {
-    return this.baseClient.expense_categories;
   }
 }

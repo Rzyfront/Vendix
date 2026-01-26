@@ -1,64 +1,36 @@
 <div class="home-page">
   <!-- Hero Section -->
-  @if (show_slider) {
-  <app-hero-banner [slides]="slider_config?.photos || []" [banner]="{
-        title: banner_content.title,
-        subtitle: banner_content.paragraph,
-      }" />
-  } @else {
-  <div class="static-banner-wrapper">
-    <div class="static-banner">
-      <div class="banner-content">
-        <h1>{{ banner_content.title }}</h1>
-        <p>{{ banner_content.paragraph }}</p>
-      </div>
-    </div>
-  </div>
-  }
+  <app-hero-banner [slides]="slider_config?.photos || []" />
 
   <!-- Featured Products -->
   <section class="products-section">
     <div class="section-header">
       <h2>Productos destacados</h2>
-      <p class="subtitle">Nuestros productos más populares del mes</p>
     </div>
 
     @if (is_loading_featured) {
-    <div class="loading-grid">
-      @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
-      <div class="skeleton-card">
-        <div class="skeleton-image"></div>
-        <div class="skeleton-text"></div>
-        <div class="skeleton-text short"></div>
+      <div class="loading-grid">
+        @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+          <div class="skeleton-card">
+            <div class="skeleton-image"></div>
+            <div class="skeleton-text"></div>
+            <div class="skeleton-text short"></div>
+          </div>
+        }
       </div>
-      }
-    </div>
     } @else {
-    @if (featured_products.length > 0) {
-    <div class="products-grid">
-      @for (product of featured_products; track product.id) {
-      <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
-        (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" />
-      }
-    </div>
-    <div class="view-more-container">
-      <button class="btn-view-more" (click)="onViewMore()">
-        Descubre más productos
-      </button>
-    </div>
-    } @else {
-    <div class="empty-state">
-      <div class="empty-icon">
-        <i class="pi pi-box"></i>
+      <div class="products-grid">
+        @for (product of featured_products; track product.id) {
+          <app-product-card
+            [product]="product"
+            (add_to_cart)="onAddToCart($event)"
+            (toggle_wishlist)="onToggleWishlist($event)"
+          />
+        }
       </div>
-      <h3>¡Ups! Aún no hay productos destacados</h3>
-      <p>Estamos preparando las mejores ofertas para ti.</p>
-    </div>
-    }
+      <div class="view-more-container">
+        <button class="btn-view-more" routerLink="/products">Ver más</button>
+      </div>
     }
   </section>
 </div>
-
-<!-- Product Quick View Modal -->
-<app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-  (closed)="quickViewOpen = false" (addedToCart)="onAddToCart($event)" />

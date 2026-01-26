@@ -639,38 +639,6 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
-    // Store Settings
-    {
-      name: 'store:settings:read',
-      description: 'Leer configuración de tienda',
-      path: '/api/store/settings',
-      method: 'GET',
-    },
-    {
-      name: 'store:settings:update',
-      description: 'Actualizar configuración de tienda',
-      path: '/api/store/settings',
-      method: 'PATCH',
-    },
-    {
-      name: 'store:settings:reset',
-      description: 'Restablecer configuración de tienda',
-      path: '/api/store/settings/reset',
-      method: 'POST',
-    },
-    {
-      name: 'store:settings:templates:read',
-      description: 'Leer plantillas de configuración',
-      path: '/api/store/settings/templates',
-      method: 'GET',
-    },
-    {
-      name: 'store:settings:templates:apply',
-      description: 'Aplicar plantilla de configuración',
-      path: '/api/store/settings/apply-template',
-      method: 'POST',
-    },
-
     // Direcciones
     {
       name: 'organization:addresses:create',

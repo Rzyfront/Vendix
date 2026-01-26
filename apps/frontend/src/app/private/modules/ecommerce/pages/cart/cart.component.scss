@@ -181,15 +181,6 @@
 .item-price {
     font-size: var(--fs-sm);
     color: var(--color-text-secondary);
-    display: flex;
-    flex-direction: column;
-
-    .tax-note {
-        font-size: 10px;
-        color: var(--color-text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
 }
 
 .item-quantity {

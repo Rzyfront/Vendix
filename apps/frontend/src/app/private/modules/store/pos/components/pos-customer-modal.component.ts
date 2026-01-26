@@ -51,6 +51,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
+      (closed)="onModalClosed()"
       [showCloseButton]="false"
     >
       <!-- Modal Header -->

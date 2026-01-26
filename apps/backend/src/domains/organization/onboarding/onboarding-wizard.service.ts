@@ -32,7 +32,7 @@ export class OnboardingWizardService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
-  ) { }
+  ) {}
 
   /**
    * Get wizard status for a user
@@ -266,7 +266,6 @@ export class OnboardingWizardService {
     }
 
     // Update organization
-    // Note: This step is only for ORG_ADMIN flow, so ensure account_type is MULTI_STORE_ORG
     let updatedOrg;
     try {
       updatedOrg = await this.prismaService.organizations.update({
@@ -278,7 +277,6 @@ export class OnboardingWizardService {
           phone: setupOrgDto.phone,
           website: setupOrgDto.website,
           tax_id: setupOrgDto.tax_id,
-          account_type: 'MULTI_STORE_ORG', // Ensure multi-store for organization flow
           updated_at: new Date(),
         },
       });
@@ -370,20 +368,6 @@ export class OnboardingWizardService {
       DomainContext.STORE,
       existingHostnames,
     );
-
-    // Ensure only one active domain of this type
-    await this.prismaService.domain_settings.updateMany({
-      where: {
-        store_id: storeId,
-        domain_type: 'store',
-        status: 'active',
-      },
-      data: {
-        status: 'disabled',
-        is_primary: false,
-        updated_at: new Date(),
-      },
-    });
 
     // Create domain settings for the store
     await this.prismaService.domain_settings.create({
@@ -581,22 +565,7 @@ export class OnboardingWizardService {
         name: user.organizations?.name || 'Organization',
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
-        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
-      });
-
-      // Ensure only one active domain of this type
-      await this.prismaService.domain_settings.updateMany({
-        where: {
-          organization_id: user.organization_id,
-          domain_type: 'organization',
-          status: 'active',
-        },
-        data: {
-          status: 'disabled',
-          is_primary: false,
-          updated_at: new Date(),
-        },
       });
 
       await this.prismaService.domain_settings.create({
@@ -637,7 +606,6 @@ export class OnboardingWizardService {
         name: store.name,
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
-        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
       });
 
@@ -669,20 +637,6 @@ export class OnboardingWizardService {
           DomainContext.STORE,
           existingHostnames,
         );
-
-        // Ensure only one active domain of this type
-        await this.prismaService.domain_settings.updateMany({
-          where: {
-            store_id: store.id,
-            domain_type: 'store',
-            status: 'active',
-          },
-          data: {
-            status: 'disabled',
-            is_primary: false,
-            updated_at: new Date(),
-          },
-        });
 
         // Create new store domain with branding config
         storeDomainRecord = await this.prismaService.domain_settings.create({
@@ -733,7 +687,6 @@ export class OnboardingWizardService {
         name: user.organizations?.name || 'Organization',
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
-        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
       });
 
@@ -1166,20 +1119,6 @@ export class OnboardingWizardService {
       DomainContext.ECOMMERCE,
       existingHostnames,
     );
-
-    // Ensure only one active domain of this type
-    await this.prismaService.domain_settings.updateMany({
-      where: {
-        store_id: storeId,
-        domain_type: 'ecommerce',
-        status: 'active',
-      },
-      data: {
-        status: 'disabled',
-        is_primary: false,
-        updated_at: new Date(),
-      },
-    });
 
     // Create domain settings for e-commerce
     await this.prismaService.domain_settings.create({

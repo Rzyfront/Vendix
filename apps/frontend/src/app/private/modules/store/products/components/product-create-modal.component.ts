@@ -228,7 +228,6 @@ export class ProductCreateModalComponent implements OnChanges {
 
     // Remove legacy field if it exists in val but not needed in DTO
     // delete dto.category_id;
-
     this.submit.emit(dto);
   }
 

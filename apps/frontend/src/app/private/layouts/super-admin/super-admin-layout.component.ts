@@ -126,11 +126,6 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/currencies',
     },
     {
-      label: 'Envíos del Sistema',
-      icon: 'truck',
-      route: '/super-admin/settings/shipping',
-    },
-    {
       label: 'Auditoría',
       icon: 'eye',
       route: '/super-admin/audit',

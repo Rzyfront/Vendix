@@ -6,8 +6,6 @@ export enum ProductSortBy {
   PRICE_ASC = 'price_asc',
   PRICE_DESC = 'price_desc',
   NEWEST = 'newest',
-  OLDEST = 'oldest',
-  BEST_SELLING = 'best_selling',
 }
 
 export class CatalogQueryDto {
@@ -51,10 +49,6 @@ export class CatalogQueryDto {
   @Min(1)
   @Max(100)
   limit?: number = 20;
-
-  @IsOptional()
-  @IsString()
-  ids?: string;
 
   @IsOptional()
   @IsString()

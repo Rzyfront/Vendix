@@ -16,7 +16,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { CatalogService, ProductDetail, EcommerceProduct } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, Product } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 
 @Component({
@@ -521,10 +521,7 @@ export class ProductQuickViewModalComponent implements OnChanges {
 
   onAddToCart(): void {
     if (!this.product) return;
-    const result = this.cartService.addToCart(this.product.id, this.quantity);
-    if (result) {
-      result.subscribe();
-    }
+    this.cartService.addItem(this.product.id, this.quantity).subscribe();
     this.addedToCart.emit(this.product);
     // Optionally close modal after adding
     // this.onClose();

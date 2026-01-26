@@ -23,9 +23,6 @@ export class ShippingService {
 
   async getMethods() {
     return this.globalPrisma.shipping_methods.findMany({
-      where: {
-        is_system: true,
-      },
       orderBy: {
         name: 'asc',
       },
@@ -40,7 +37,6 @@ export class ShippingService {
     const method = await this.globalPrisma.shipping_methods.findFirst({
       where: {
         id,
-        is_system: true,
       },
       include: {
         _count: {
@@ -60,10 +56,8 @@ export class ShippingService {
     return this.globalPrisma.shipping_methods.create({
       data: {
         ...createDto,
-        is_system: true,
-        store_id: null,
         is_active: createDto.is_active ?? true,
-      },
+      } as any,
     });
   }
 
@@ -79,9 +73,9 @@ export class ShippingService {
   async deleteMethod(id: number) {
     const method = await this.getMethod(id);
 
-    if (method._count.shipping_rates > 0) {
+    if ((method as any)._count?.shipping_rates > 0) {
       throw new ConflictException(
-        `Cannot delete shipping method because it is being used by ${method._count.shipping_rates} rate(s)`,
+        `Cannot delete shipping method because it is being used by ${(method as any)._count.shipping_rates} rate(s)`,
       );
     }
 
@@ -92,14 +86,12 @@ export class ShippingService {
 
   async getMethodStats() {
     const [total, active, inactive] = await Promise.all([
+      this.globalPrisma.shipping_methods.count(),
       this.globalPrisma.shipping_methods.count({
-        where: { is_system: true },
+        where: { is_active: true },
       }),
       this.globalPrisma.shipping_methods.count({
-        where: { is_system: true, is_active: true },
-      }),
-      this.globalPrisma.shipping_methods.count({
-        where: { is_system: true, is_active: false },
+        where: { is_active: false },
       }),
     ]);
 
@@ -116,13 +108,10 @@ export class ShippingService {
 
   async getZones() {
     return this.globalPrisma.shipping_zones.findMany({
-      where: {
-        is_system: true,
-      },
       include: {
         shipping_rates: {
           include: {
-            shipping_method: true,
+            shipping_methods: true,
           },
         },
         _count: {
@@ -143,12 +132,11 @@ export class ShippingService {
     const zone = await this.globalPrisma.shipping_zones.findFirst({
       where: {
         id,
-        is_system: true,
       },
       include: {
         shipping_rates: {
           include: {
-            shipping_method: true,
+            shipping_methods: true,
           },
         },
         _count: {
@@ -168,10 +156,8 @@ export class ShippingService {
     return this.globalPrisma.shipping_zones.create({
       data: {
         ...createDto,
-        is_system: true,
-        store_id: null,
         is_active: createDto.is_active ?? true,
-      },
+      } as any,
     });
   }
 
@@ -187,9 +173,9 @@ export class ShippingService {
   async deleteZone(id: number) {
     const zone = await this.getZone(id);
 
-    if (zone._count.shipping_rates > 0) {
+    if ((zone as any)._count?.shipping_rates > 0) {
       throw new ConflictException(
-        `Cannot delete shipping zone because it has ${zone._count.shipping_rates} rate(s)`,
+        `Cannot delete shipping zone because it has ${(zone as any)._count.shipping_rates} rate(s)`,
       );
     }
 
@@ -200,14 +186,12 @@ export class ShippingService {
 
   async getZoneStats() {
     const [total, active, inactive] = await Promise.all([
+      this.globalPrisma.shipping_zones.count(),
       this.globalPrisma.shipping_zones.count({
-        where: { is_system: true },
+        where: { is_active: true },
       }),
       this.globalPrisma.shipping_zones.count({
-        where: { is_system: true, is_active: true },
-      }),
-      this.globalPrisma.shipping_zones.count({
-        where: { is_system: true, is_active: false },
+        where: { is_active: false },
       }),
     ]);
 
@@ -229,12 +213,9 @@ export class ShippingService {
     return this.globalPrisma.shipping_rates.findMany({
       where: {
         shipping_zone_id: zoneId,
-        shipping_zone: {
-          is_system: true,
-        },
       },
       include: {
-        shipping_method: true,
+        shipping_methods: true,
       },
       orderBy: {
         name: 'asc',
@@ -250,13 +231,10 @@ export class ShippingService {
     const rate = await this.globalPrisma.shipping_rates.findFirst({
       where: {
         id,
-        shipping_zone: {
-          is_system: true,
-        },
       },
       include: {
-        shipping_method: true,
-        shipping_zone: true,
+        shipping_methods: true,
+        shipping_zones: true,
       },
     });
 
@@ -272,7 +250,6 @@ export class ShippingService {
     const zone = await this.globalPrisma.shipping_zones.findFirst({
       where: {
         id: createDto.shipping_zone_id,
-        is_system: true,
       },
     });
 
@@ -284,7 +261,6 @@ export class ShippingService {
     const method = await this.globalPrisma.shipping_methods.findFirst({
       where: {
         id: createDto.shipping_method_id,
-        is_system: true,
       },
     });
 
@@ -308,7 +284,6 @@ export class ShippingService {
       const zone = await this.globalPrisma.shipping_zones.findFirst({
         where: {
           id: updateDto.shipping_zone_id,
-          is_system: true,
         },
       });
 
@@ -322,7 +297,6 @@ export class ShippingService {
       const method = await this.globalPrisma.shipping_methods.findFirst({
         where: {
           id: updateDto.shipping_method_id,
-          is_system: true,
         },
       });
 

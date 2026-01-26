@@ -277,11 +277,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/settings/domains',
         },
-        {
-          label: 'Envíos',
-          icon: 'circle',
-          route: '/admin/settings/shipping',
-        },
       ],
     },
   ];
@@ -317,9 +312,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
 
     // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
-      this.filteredMenuItems = items;
-    });
+    this.menuItems$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((items) => {
+        this.filteredMenuItems = items;
+      });
 
     // Subscribe to domain hostname for sidebar vlink
     this.storeDomainHostname$
@@ -362,19 +359,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
-
-  formatStoreType(type: string | null): string {
-    if (!type) return 'Not defined';
-
-    const typeMap: Record<string, string> = {
-      'physical': 'Physical Store',
-      'online': 'Online Store',
-      'hybrid': 'Hybrid Store',
-    };
-
-    return typeMap[type] || type;
-  }
-
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();
@@ -399,6 +383,18 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       // Desktop: toggle collapsed state
       this.sidebarCollapsed = !this.sidebarCollapsed;
     }
+  }
+
+  formatStoreType(storeType: string | null | undefined): string {
+    if (!storeType) return 'N/A';
+    const typeMap: { [key: string]: string } = {
+      'retail': 'Retail',
+      'restaurant': 'Restaurante',
+      'warehouse': 'Almacén',
+      'ecommerce': 'E-commerce',
+      'wholesale': 'Mayorista',
+    };
+    return typeMap[storeType] || storeType;
   }
 
   onOnboardingCompleted(event: any): void {

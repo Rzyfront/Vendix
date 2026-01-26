@@ -23,34 +23,22 @@ export class AuthGuard implements CanActivate {
     route: ActivatedRouteSnapshot,
     state: RouterStateSnapshot,
   ): Observable<boolean | UrlTree> {
-    const path = state.url;
-
-    // 1. Check if route is public (no auth required)
-    if (this.isPublicRoute(path)) {
-      return of(true);
-    }
-
-    // 2. Check localStorage flag first for immediate logout detection
+    // Check localStorage flag first for immediate logout detection
     if (this.wasRecentlyLoggedOut()) {
-      this.toastService.warning(
-        'Debes iniciar sesión para acceder a esta página',
-      );
+      this.toastService.warning('No tienes permisos para ver esa ruta');
       return of(this.router.createUrlTree(['/auth/login']));
     }
 
-    // 3. Check if authenticated
     return this.authFacade.isAuthenticated$.pipe(
       take(1),
       switchMap((isAuthenticated) => {
         if (!isAuthenticated) {
-          this.toastService.warning(
-            'Debes iniciar sesión para acceder a esta página',
-          );
+          this.toastService.warning('No tienes permisos para ver esa ruta');
           return of(this.router.createUrlTree(['/auth/login']));
         }
 
         // 4. Check role-based permissions
-        if (!this.hasRolePermission(path)) {
+        if (!this.hasRolePermission(state.url)) {
           this.toastService.error(
             'No tienes permisos para acceder a esta página',
           );
@@ -61,35 +49,37 @@ export class AuthGuard implements CanActivate {
         return of(true);
       }),
       catchError((error) => {
-        console.error('[AUTH GUARD] Error:', error);
-        this.toastService.error('Error verificando autenticación');
-        return of(this.router.createUrlTree(['/']));
+        console.error('[AUTH GUARD] Error in auth guard:', error);
+        this.toastService.error('Error verificando permisos');
+        return of(this.router.createUrlTree(['/auth/login']));
       }),
     );
   }
 
   /**
-   * Check if a route is public (doesn't require authentication)
+   * Check if the user was recently logged out to prevent stale state navigation
    */
-  private isPublicRoute(path: string): boolean {
-    // Rutas exactas que son públicas
-    const exactPublicRoutes = ['/', ''];
-    if (exactPublicRoutes.includes(path)) {
-      return true;
+  private wasRecentlyLoggedOut(): boolean {
+    if (typeof localStorage === 'undefined') return false;
+
+    const loggedOutRecently = localStorage.getItem(
+      'vendix_logged_out_recently',
+    );
+    if (loggedOutRecently) {
+      const logoutTime = parseInt(loggedOutRecently, 10);
+      const currentTime = Date.now();
+      // Consider "recently logged out" within 5 minutes
+      if (currentTime - logoutTime < 5 * 60 * 1000) {
+        return true;
+      }
     }
+    return false;
+  }
 
-    // Prefijos de rutas públicas
-    const publicPrefixes = [
-      '/auth/', // Todas las rutas de autenticación
-      '/landing', // Landing pages
-      '/home', // Home público
-      '/catalog', // Catálogo público
-      '/product/', // Detalle de producto
-      '/cart', // Carrito
-      '/checkout', // Checkout
-    ];
-
-    return publicPrefixes.some((prefix) => path.startsWith(prefix));
+  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
+    // Siempre redirigir al login contextual unificado
+    const loginPath = '/auth/login';
+    return of(this.router.createUrlTree([loginPath], { queryParams: { returnUrl } }));
   }
 
   /**
@@ -156,25 +146,5 @@ export class AuthGuard implements CanActivate {
 
     // Default fallback
     return this.router.createUrlTree(['/']);
-  }
-
-  /**
-   * Check if the user was recently logged out to prevent stale state navigation
-   */
-  private wasRecentlyLoggedOut(): boolean {
-    if (typeof localStorage === 'undefined') return false;
-
-    const loggedOutRecently = localStorage.getItem(
-      'vendix_logged_out_recently',
-    );
-    if (loggedOutRecently) {
-      const logoutTime = parseInt(loggedOutRecently, 10);
-      const currentTime = Date.now();
-      // Consider "recently logged out" within 5 minutes
-      if (currentTime - logoutTime < 5 * 60 * 1000) {
-        return true;
-      }
-    }
-    return false;
   }
 }

@@ -123,6 +123,7 @@ export class ProductListComponent {
       },
       transform: (value: ProductState) => this.formatProductState(value),
     },
+
   ];
 
   tableActions: TableAction[] = [

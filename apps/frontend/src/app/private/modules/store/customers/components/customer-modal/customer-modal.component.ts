@@ -26,8 +26,8 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
+      (closed)="onClose()"
       [title]="customer ? 'Editar cliente' : 'Nuevo cliente'"
-      subtitle="Administra la información del cliente"
     >
       <div class="p-6">
         <form [formGroup]="form" class="space-y-4">

@@ -13,160 +13,27 @@ metadata:
 
 ### Rule 1: ALWAYS Use Task Tools
 
-**🚨 CRITICAL:** Use Task tools for ANY operation involving multiple files, research, or complex analysis. NEVER attempt complex operations without proper task management.
+**YOU MUST USE Task tools for:**
+- Complex, multi-step operations
+- Codebase exploration and research
+- Architectural decisions and planning
+- Any task affecting multiple files
 
----
+**NEVER attempt complex operations without proper task management.**
 
-## 📊 Decision Matrix: When to Use Task Tools
+```bash
+# ✅ CORRECTO: Usar Task tool para explorar
+Task tool → Explore agent → "Find all payment-related files"
 
-| Scenario | Files Affected | Use Task Tool? | Agent Type |
-|----------|---------------|----------------|------------|
-| Single file edit | 1 | ❌ No | N/A (Edit directly) |
-| Rename across codebase | 5+ | ✅ **YES** | general-purpose |
-| Find pattern in unknown locations | Unknown | ✅ **YES** | Explore |
-| Understand architecture | Research | ✅ **YES** | Explore |
-| Plan new feature | Design | ✅ **YES** | Plan |
-| Debug complex issue | 3+ | ✅ **YES** | general-purpose |
-| Add simple field to DTO | 1 | ❌ No | N/A |
-| Refactor multi-file logic | 3+ | ✅ **YES** | general-purpose |
-| Search how X works | Research | ✅ **YES** | Explore |
-
----
-
-## 🤖 Agent Selection Guide
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     TASK SELECTION FLOW                         │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Start Task                                                     │
-│      │                                                          │
-│      ▼                                                          │
-│  ┌─────────────────┐                                           │
-│  │ Need to explore  │──── YES ──→ Use Explore agent             │
-│  │ or understand?  │                                           │
-│  └────────┬────────┘                                           │
-│           │ NO                                                  │
-│           ▼                                                     │
-│  ┌─────────────────┐                                           │
-│  │ Planning needed │──── YES ──→ Use Plan agent                 │
-│  │ for feature?    │                                           │
-│  └────────┬────────┘                                           │
-│           │ NO                                                  │
-│           ▼                                                     │
-│  ┌─────────────────┐                                           │
-│  │ Affects 3+      │──── YES ──→ Use general-purpose agent     │
-│  │ files?          │                                           │
-│  └────────┬────────┘                                           │
-│           │ NO                                                  │
-│           ▼                                                     │
-│     Use direct tools (Edit, Read, Grep, Glob, Bash)            │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+# ❌ INCORRECTO: Usar Grep/Glob directamente para tareas complejas
+Grep tool → Search "payment" (para análisis complejo)
 ```
 
-### Explore Agent
-**Use for:** Fast codebase exploration, finding files by patterns, understanding how things work
-```
-Examples:
-• "Find all files related to user authentication"
-• "Where are order payment methods handled?"
-• "Show me the inventory adjustment flow"
-• "How does multi-tenancy work in this codebase?"
-```
-
-### Plan Agent
-**Use for:** Designing implementation strategies before coding
-```
-Examples:
-• "Plan how to add product variant pricing"
-• "Design the refund flow integration"
-• "Plan the store settings restructure"
-```
-
-### General-Purpose Agent
-**Use for:** Complex multi-step tasks requiring multiple tools
-```
-Examples:
-• "Rename UserService to CustomerService across all files"
-• "Add error handling to all inventory endpoints"
-• "Refactor the cart calculation logic"
-```
-
----
-
-## ✅ ❌ Real Examples from Vendix
-
-### ✅ CORRECT: Using Task Tool
-
-```typescript
-// ❌ DON'T DO THIS: Manual search across codebase
-// Grep → Search "payment" → Grep → Search "stripe" → Read → Read...
-
-// ✅ DO THIS: Use Explore agent
-Task tool → Explore agent → "Find all payment processing files and explain the flow"
-```
-
-```typescript
-// ❌ DON'T DO THIS: Manually finding all references
-// Grep "UserService" → Edit → Edit → Edit... (10+ files)
-
-// ✅ DO THIS: Use general-purpose agent
-Task tool → general-purpose agent → "Rename UserService to CustomerService in all files"
-```
-
-```typescript
-// ❌ DON'T DO THIS: Guessing architecture
-// Read random files hoping to understand the pattern
-
-// ✅ DO THIS: Use Explore agent
-Task tool → Explore agent → "Explain how multi-tenant context is managed across domains"
-```
-
-### ❌ INCORRECT: Using Task Tool Unnecessarily
-
-```typescript
-// ❌ DON'T DO THIS: Overkill for simple tasks
-Task tool → "Add one field to CreateUserDto"
-
-// ✅ DO THIS: Direct Edit tool
-Edit tool → Add field directly
-```
-
-```typescript
-// ❌ DON'T DO THIS: Task for single command
-Task tool → "Run docker compose restart"
-
-// ✅ DO THIS: Direct Bash tool
-Bash tool → docker compose restart
-```
-
----
-
-## 🎯 Quick Reference Table
-
-| Need | Use | Pattern |
-|------|-----|---------|
-| Find where X is defined | Explore | "Find where {interface/class} is defined" |
-| Understand flow | Explore | "Explain the {feature} flow from start to end" |
-| Plan implementation | Plan | "Plan how to implement {feature} with {constraints}" |
-| Multi-file refactor | general-purpose | "Refactor {pattern} across all {domain} files" |
-| Find bug across files | general-purpose | "Find why {symptom} happens in {context}" |
-| Single file change | Direct tools | Edit tool directly |
-| Run command | Direct tools | Bash tool directly |
-| Read specific file | Direct tools | Read tool directly |
-
----
-
-## ⚠️ Common Mistakes to Avoid
-
-| Mistake | Why It's Wrong | Correct Approach |
-|---------|----------------|------------------|
-| Using Grep to find all usages | Slow, error-prone, incomplete | `Task → Explore agent` |
-| Manually editing 10+ files | Time-consuming, easy to miss one | `Task → general-purpose agent` |
-| Reading random files to understand | Inefficient, misses context | `Task → Explore agent` |
-| Starting coding without planning | Creates wrong patterns | `Task → Plan agent` first |
+**When to use each agent:**
+- **Explore agent**: Fast codebase exploration, finding files by patterns
+- **Plan agent**: Design implementation strategies before coding
+- **general-purpose agent**: Complex multi-step tasks requiring multiple tools
+- **Bash**: Simple terminal operations only (git, npm, docker)
 
 ---
 metadata:

@@ -1,23 +1,15 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store';
-import { StoreUiService } from '../../services/store-ui.service';
-import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
-
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
-import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
-import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ProductCarouselComponent, ProductQuickViewModalComponent],
+  imports: [CommonModule, RouterModule],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
 })
@@ -27,20 +19,12 @@ export class CartComponent implements OnInit, OnDestroy {
   is_authenticated = false;
   updating_item_id: number | null = null;
 
-  // Recommendations
-  recommendedProducts = signal<EcommerceProduct[]>([]);
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
-
   private destroy$ = new Subject<void>();
-  private catalogService = inject(CatalogService);
-  private destroyRef = inject(DestroyRef);
 
   constructor(
     private cart_service: CartService,
     private auth_facade: AuthFacade,
     private router: Router,
-    private store_ui_service: StoreUiService,
   ) { }
 
   ngOnInit(): void {
@@ -52,8 +36,6 @@ export class CartComponent implements OnInit, OnDestroy {
         this.loadLocalCart();
       }
     });
-
-    this.loadRecommendations();
   }
 
   ngOnDestroy(): void {
@@ -84,71 +66,49 @@ export class CartComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadRecommendations(): void {
-    this.catalogService.getProducts({ limit: 10, sort_by: 'newest', has_discount: true }).subscribe({
-      next: (response) => {
-        if (response.data.length > 0) {
-          this.recommendedProducts.set(response.data);
-        } else {
-          // Fallback if no sales
-          this.catalogService.getProducts({ limit: 10, sort_by: 'newest' }).subscribe(res => {
-            this.recommendedProducts.set(res.data);
-          });
-        }
-      }
-    });
-  }
-
-  updateQuantity(item: CartItem, new_quantity: number): void {
-    if (new_quantity <= 0) {
-      this.removeItem(item);
-      return;
-    }
-
-    if (new_quantity === item.quantity) return;
+  updateQuantity(item: CartItem, delta: number): void {
+    const new_quantity = item.quantity + delta;
+    if (new_quantity < 1) return;
 
     this.updating_item_id = item.id;
 
-    const result = this.cart_service.updateCartItem(
-      {
-        item_id: item.id,
-        product_id: item.product_id,
-        product_variant_id: item.product_variant_id || undefined
-      },
-      new_quantity
-    );
-
-    if (result) {
-      result.subscribe({
-        next: () => { this.updating_item_id = null; },
-        error: () => { this.updating_item_id = null; },
+    if (this.is_authenticated) {
+      this.cart_service.updateItem(item.id, new_quantity).subscribe({
+        next: () => {
+          this.updating_item_id = null;
+        },
+        error: () => {
+          this.updating_item_id = null;
+        },
       });
     } else {
+      this.cart_service.updateLocalCartItem(item.product_id, new_quantity, item.product_variant_id || undefined);
       this.updating_item_id = null;
     }
   }
 
   removeItem(item: CartItem): void {
-    const result = this.cart_service.removeCartItem({
-      item_id: item.id,
-      product_id: item.product_id,
-      product_variant_id: item.product_variant_id || undefined
-    });
-    if (result) {
-      result.subscribe();
+    if (this.is_authenticated) {
+      this.cart_service.removeItem(item.id).subscribe();
+    } else {
+      this.cart_service.removeFromLocalCart(item.product_id, item.product_variant_id || undefined);
     }
   }
 
   clearCart(): void {
-    const result = this.cart_service.clearAllCart();
-    if (result) {
-      result.subscribe();
+    if (this.is_authenticated) {
+      this.cart_service.clearCart().subscribe(() => {
+        this.cart = null;
+      });
+    } else {
+      this.cart_service.clearLocalCart();
     }
   }
 
   proceedToCheckout(): void {
     if (!this.is_authenticated) {
-      this.store_ui_service.openLoginModal();
+      // Redirect to login with return URL
+      this.router.navigate(['/auth/login'], { queryParams: { returnUrl: '/checkout' } });
     } else {
       this.router.navigate(['/checkout']);
     }
@@ -156,15 +116,5 @@ export class CartComponent implements OnInit, OnDestroy {
 
   continueShopping(): void {
     this.router.navigate(['/catalog']);
-  }
-
-  onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
-  }
-
-  onAddToCartFromSlider(product: EcommerceProduct): void {
-    const result = this.cart_service.addToCart(product.id, 1);
-    if (result) result.subscribe();
   }
 }

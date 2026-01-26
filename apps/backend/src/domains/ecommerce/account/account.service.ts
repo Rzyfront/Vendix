@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto, UpdateAddressDto } from './dto/account.dto';
+import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto } from './dto/account.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -21,7 +21,6 @@ export class AccountService {
             where: { id: user_id },
             select: {
                 id: true,
-                username: true,
                 email: true,
                 first_name: true,
                 last_name: true,
@@ -30,9 +29,6 @@ export class AccountService {
                 document_number: true,
                 avatar_url: true,
                 created_at: true,
-                addresses: {
-                    orderBy: { is_primary: 'desc' },
-                },
             },
         });
 
@@ -68,8 +64,6 @@ export class AccountService {
                 phone: dto.phone,
                 document_type: dto.document_type,
                 document_number: dto.document_number,
-                avatar_url: dto.avatar_url,
-                username: dto.username,
                 updated_at: new Date(),
             },
             select: {
@@ -81,7 +75,6 @@ export class AccountService {
                 document_type: true,
                 document_number: true,
                 avatar_url: true,
-                username: true,
             },
         });
     }
@@ -292,82 +285,5 @@ export class AccountService {
         });
 
         return { message: 'Address deleted' };
-    }
-
-    async updateAddress(address_id: number, dto: UpdateAddressDto) {
-        const context = RequestContextService.getContext();
-        const user_id = context?.user_id;
-
-        if (!user_id) {
-            throw new BadRequestException('User context required');
-        }
-
-        // Verify address belongs to user
-        const address = await this.prisma.addresses.findFirst({
-            where: {
-                id: address_id,
-                user_id,
-            },
-        });
-
-        if (!address) {
-            throw new NotFoundException('Address not found');
-        }
-
-        // If is_primary, unset other primary addresses
-        if (dto.is_primary) {
-            await this.prisma.addresses.updateMany({
-                where: { user_id, is_primary: true },
-                data: { is_primary: false },
-            });
-        }
-
-        return this.prisma.addresses.update({
-            where: { id: address_id },
-            data: {
-                address_line1: dto.address_line1,
-                address_line2: dto.address_line2,
-                city: dto.city,
-                state_province: dto.state_province,
-                country_code: dto.country_code,
-                postal_code: dto.postal_code,
-                phone_number: dto.phone_number,
-                is_primary: dto.is_primary,
-                type: dto.type,
-            },
-        });
-    }
-
-    async setAddressPrimary(address_id: number) {
-        const context = RequestContextService.getContext();
-        const user_id = context?.user_id;
-
-        if (!user_id) {
-            throw new BadRequestException('User context required');
-        }
-
-        // Verify address belongs to user
-        const address = await this.prisma.addresses.findFirst({
-            where: {
-                id: address_id,
-                user_id,
-            },
-        });
-
-        if (!address) {
-            throw new NotFoundException('Address not found');
-        }
-
-        // Unset all primary addresses for this user
-        await this.prisma.addresses.updateMany({
-            where: { user_id },
-            data: { is_primary: false },
-        });
-
-        // Set new primary
-        return this.prisma.addresses.update({
-            where: { id: address_id },
-            data: { is_primary: true },
-        });
     }
 }

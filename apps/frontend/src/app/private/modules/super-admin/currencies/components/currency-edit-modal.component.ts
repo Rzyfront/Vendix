@@ -30,11 +30,12 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   template: `
     <app-modal
       [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
-      (cancel)="onCancel()"
-      [size]="'md'"
+      (isOpenChange)="onOpenChange($event)"
       title="Editar Moneda"
-      [subtitle]="currency ? 'Editando: ' + currency.code : ''"
+      subtitle="Modifica los detalles de la moneda"
+      size="md"
+      [showCloseButton]="true"
+      (closed)="onCancel()"
     >
       <form [formGroup]="currencyForm" (ngSubmit)="onSubmit()">
         <div class="space-y-6">
@@ -317,10 +318,10 @@ export class CurrencyEditModalComponent implements OnChanges {
   }
 
   onOpenChange(isOpen: any): void {
-    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
-      this.resetForm();
+      this.onCancel();
     }
+    this.isOpenChange.emit(isOpen);
   }
 
   ngOnChanges(): void {
@@ -347,16 +348,6 @@ export class CurrencyEditModalComponent implements OnChanges {
   }
 
   onCancel(): void {
-    this.isOpenChange.emit(false);
-    this.resetForm();
-  }
-
-  resetForm(): void {
-    this.currencyForm.reset({
-      name: '',
-      symbol: '',
-      decimal_places: 2,
-      state: 'active',
-    });
+    this.cancel.emit();
   }
 }

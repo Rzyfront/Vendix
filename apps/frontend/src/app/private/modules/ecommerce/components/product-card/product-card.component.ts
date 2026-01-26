@@ -1,25 +1,24 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
-import { EcommerceProduct } from '../../services/catalog.service';
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { RouterModule } from '@angular/router';
+import { Product } from '../../services/catalog.service';
 
 @Component({
-  selector: 'app-product-card',
-  standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
-  template: `
-    <article class="product-card" (click)="onQuickView($event)">
+    selector: 'app-product-card',
+    standalone: true,
+    imports: [CommonModule, RouterModule],
+    template: `
+    <article class="product-card" [routerLink]="['/catalog', product.slug]">
       <div class="product-image">
         @if (product.image_url) {
           <img [src]="product.image_url" [alt]="product.name" loading="lazy">
         } @else {
           <div class="no-image">
-            <app-icon name="image" [size]="24" class="text-muted"></app-icon>
+            <i class="pi pi-image"></i>
           </div>
         }
         <button class="wishlist-btn" (click)="onWishlistClick($event)" [class.active]="in_wishlist">
-          <app-icon name="heart" [size]="18"></app-icon>
+          <i class="pi" [class.pi-heart-fill]="in_wishlist" [class.pi-heart]="!in_wishlist"></i>
         </button>
       </div>
       <div class="product-info">
@@ -28,10 +27,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         }
         <h3 class="product-name">{{ product.name }}</h3>
         <div class="product-price">
-          <span class="price">{{ product.final_price | currency }}</span>
-          @if (product.is_on_sale) {
-            <span class="original-price">{{ product.base_price | currency }}</span>
-          }
+          <span class="price">{{ product.base_price | currency }}</span>
         </div>
         @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
           <span class="low-stock">¡Últimas {{ product.stock_quantity }} unidades!</span>
@@ -40,17 +36,13 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
           <span class="out-of-stock">Agotado</span>
         }
       </div>
-      <div class="actions-container">
-        <button class="buy-now-btn" (click)="onBuyNow($event)" [disabled]="product.stock_quantity === 0">
-          Comprar
-        </button>
-        <button class="add-btn" (click)="onAddToCart($event)" [disabled]="product.stock_quantity === 0" title="Agregar al carrito">
-          <app-icon name="shopping-cart" [size]="16"></app-icon>
-        </button>
-      </div>
+      <button class="add-to-cart-btn" (click)="onAddToCart($event)" [disabled]="product.stock_quantity === 0">
+        <i class="pi pi-shopping-cart"></i>
+        Agregar
+      </button>
     </article>
   `,
-  styles: [`
+    styles: [`
     .product-card {
       background: var(--color-surface);
       border-radius: var(--radius-lg);
@@ -146,20 +138,11 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 
     .product-price {
       margin-top: 0.5rem;
-      display: flex;
-      align-items: baseline;
-      gap: 0.5rem;
 
       .price {
         font-size: var(--fs-lg);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
-      }
-
-      .original-price {
-        font-size: var(--fs-xs);
-        color: var(--color-text-muted);
-        text-decoration: line-through;
       }
     }
 
@@ -175,14 +158,8 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       font-weight: var(--fw-medium);
     }
 
-    .actions-container {
+    .add-to-cart-btn {
       margin: 0 1rem 1rem;
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .buy-now-btn {
-      flex: 1;
       padding: 0.75rem 1rem;
       background: var(--color-primary);
       color: var(--color-text-on-primary);
@@ -194,6 +171,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       display: flex;
       align-items: center;
       justify-content: center;
+      gap: 0.5rem;
       transition: background var(--transition-fast);
 
       &:hover:not(:disabled) {
@@ -205,69 +183,23 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         cursor: not-allowed;
       }
     }
-
-    .add-btn {
-      width: 42px;
-      padding: 0;
-      background: var(--color-surface-variant);
-      color: var(--color-primary);
-      border: 1px solid var(--color-primary);
-      border-radius: var(--radius-md);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all var(--transition-fast);
-
-      &:hover:not(:disabled) {
-        background: var(--color-primary-light);
-      }
-
-      &:disabled {
-        border-color: var(--color-text-muted);
-        color: var(--color-text-muted);
-        cursor: not-allowed;
-      }
-      
-      i { font-size: 1.2rem; }
-    }
   `],
 })
 export class ProductCardComponent {
-  @Input() product!: EcommerceProduct;
-  @Input() in_wishlist = false;
-  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
-  @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
-  @Output() quick_view = new EventEmitter<EcommerceProduct>();
+    @Input() product!: Product;
+    @Input() in_wishlist = false;
+    @Output() add_to_cart = new EventEmitter<Product>();
+    @Output() toggle_wishlist = new EventEmitter<Product>();
 
-  private router = inject(Router);
-
-  onQuickView(event: Event): void {
-    // Let clicks on buttons/links propagate normally to their handlers
-    const target = event.target as HTMLElement;
-    if (target.closest('button') || target.closest('a')) {
-      return;
+    onAddToCart(event: Event): void {
+        event.stopPropagation();
+        event.preventDefault();
+        this.add_to_cart.emit(this.product);
     }
-    event.preventDefault();
-    this.quick_view.emit(this.product);
-  }
 
-  onBuyNow(event: Event): void {
-    event.stopPropagation();
-    event.preventDefault();
-    this.add_to_cart.emit(this.product);
-    this.router.navigate(['/cart']);
-  }
-
-  onAddToCart(event: Event): void {
-    event.stopPropagation();
-    event.preventDefault();
-    this.add_to_cart.emit(this.product);
-  }
-
-  onWishlistClick(event: Event): void {
-    event.stopPropagation();
-    event.preventDefault();
-    this.toggle_wishlist.emit(this.product);
-  }
+    onWishlistClick(event: Event): void {
+        event.stopPropagation();
+        event.preventDefault();
+        this.toggle_wishlist.emit(this.product);
+    }
 }

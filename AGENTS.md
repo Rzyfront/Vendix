@@ -10,36 +10,35 @@ Skills provide on-demand context and patterns for this codebase.
 
 When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
-| Action | Skill |
-|--------|-------|
-| After creating/modifying a skill | `skill-sync` |
-| Configuring middleware | `vendix-backend-middleware` |
-| Creating API endpoints | `vendix-backend-api` |
-| Creating API tests (Bruno) | `vendix-bruno-test` |
-| Creating Angular components | `vendix-frontend-component` |
-| Creating Frontend Modules | `vendix-frontend-module` |
-| Creating Seeds | `vendix-prisma-seed` |
-| Creating or modifying modals in frontend | `vendix-frontend-modal` |
-| Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
-| Editing Schema | `vendix-prisma-schema` |
-| Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
-| General Development | `vendix-development-rules` |
-| Handling Errors | `vendix-error-handling` |
-| Handling store context | `vendix-multi-tenant-context` |
-| Implementing authentication | `vendix-backend-auth` |
-| Implementing multi-tenant logic | `vendix-multi-tenant-context` |
-| Managing Routes | `vendix-frontend-routing` |
-| Managing State | `vendix-frontend-state` |
-| Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
-| Styling and Theming | `vendix-frontend-theme` |
-| Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
-| Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
-| Verifying Build | `vendix-build-verification` |
-| Working on backend domains | `vendix-backend-domain` |
-| Working on frontend domains | `vendix-frontend-domain` |
-| Working with Prisma services | `vendix-backend-prisma` |
-| Writing Code (Naming) | `vendix-naming-conventions` |
-| Writing Validation Logic | `vendix-validation` |
+| Action                                                         | Skill                         |
+| -------------------------------------------------------------- | ----------------------------- |
+| After creating/modifying a skill                               | `skill-sync`                  |
+| Configuring middleware                                         | `vendix-backend-middleware`   |
+| Creating API endpoints                                         | `vendix-backend-api`          |
+| Creating API tests (Bruno)                                     | `vendix-bruno-test`           |
+| Creating Angular components                                    | `vendix-frontend-component`   |
+| Creating Frontend Modules                                      | `vendix-frontend-module`      |
+| Creating Seeds                                                 | `vendix-prisma-seed`          |
+| Editing Schema                                                 | `vendix-prisma-schema`        |
+| Fixing Forbidden/403 errors in scoped services                 | `vendix-multi-tenant-context` |
+| General Development                                            | `vendix-development-rules`    |
+| Handling Errors                                                | `vendix-error-handling`       |
+| Handling store context                                         | `vendix-multi-tenant-context` |
+| Implementing authentication                                    | `vendix-backend-auth`         |
+| Implementing multi-tenant logic                                | `vendix-multi-tenant-context` |
+| Managing Routes                                                | `vendix-frontend-routing`     |
+| Managing State                                                 | `vendix-frontend-state`       |
+| Managing product pricing                                       | `vendix-product-pricing`      |
+| Regenerate AGENTS.md Auto-invoke tables (sync.sh)              | `skill-sync`                  |
+| Styling and Theming                                            | `vendix-frontend-theme`       |
+| Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync`                  |
+| Understanding Public/Private Apps and Domains                  | `vendix-app-architecture`     |
+| Verifying Build                                                | `vendix-build-verification`   |
+| Working on backend domains                                     | `vendix-backend-domain`       |
+| Working on frontend domains                                    | `vendix-frontend-domain`      |
+| Working with Prisma services                                   | `vendix-backend-prisma`       |
+| Writing Code (Naming)                                          | `vendix-naming-conventions`   |
+| Writing Validation Logic                                       | `vendix-validation`           |
 
 ---
 

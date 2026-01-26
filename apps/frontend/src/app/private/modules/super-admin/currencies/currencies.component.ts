@@ -247,10 +247,6 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     this.isCreateModalOpen = true;
   }
 
-  onCreateModalChange(isOpen: boolean): void {
-    this.isCreateModalOpen = isOpen;
-  }
-
   onCreateModalCancel(): void {
     this.isCreateModalOpen = false;
   }
@@ -279,13 +275,6 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
   editCurrency(currency: Currency): void {
     this.selectedCurrency = currency;
     this.isEditModalOpen = true;
-  }
-
-  onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
-    if (!isOpen) {
-      this.selectedCurrency = null;
-    }
   }
 
   onEditModalCancel(): void {

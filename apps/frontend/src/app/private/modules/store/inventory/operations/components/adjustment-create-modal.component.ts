@@ -574,14 +574,17 @@ interface LocationStockOption {
           </div>
 
           <!-- Description -->
-          <app-textarea
+          <div>
+            <app-textarea
             label="Descripcion"
             formControlName="description"
             [rows]="3"
             placeholder="Describir el motivo del ajuste..."
             [control]="form.get('description')"
           ></app-textarea>
-        </form>
+
+        </div>
+      </form>
       }
 
       <!-- Footer -->
