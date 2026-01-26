@@ -243,18 +243,13 @@ export class PosCustomerService {
       errors.push({ field: 'lastName', message: 'Apellido es requerido' });
     }
 
-    // Document fields are mandatory per requirements
-    if (!request.document_type?.trim()) {
+    // Document fields are optional for quick POS customer creation
+    // Only validate if at least one is provided
+    if ((request.document_type && !request.document_number?.trim()) ||
+        (!request.document_type?.trim() && request.document_number)) {
       errors.push({
-        field: 'documentType',
-        message: 'Tipo de documento es requerido',
-      });
-    }
-
-    if (!request.document_number?.trim()) {
-      errors.push({
-        field: 'documentNumber',
-        message: 'Número de documento es requerido',
+        field: 'document',
+        message: 'Si ingresas documento, debes completar tipo y número',
       });
     }
 

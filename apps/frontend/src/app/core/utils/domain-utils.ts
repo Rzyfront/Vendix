@@ -1,4 +1,5 @@
 import { DomainType, AppEnvironment } from '../models/environment.enum';
+import { environment } from '../../../environments/environment';
 
 export class DomainUtils {
   /**
@@ -29,7 +30,7 @@ export class DomainUtils {
     const subdomain = this.getSubdomain();
 
     // Vendix domains
-    if (hostname === 'vendix.com' || hostname === 'www.vendix.com') {
+    if (hostname === environment.vendixDomain || hostname === `www.${environment.vendixDomain}`) {
       return DomainType.VENDIX_CORE;
     }
 
@@ -60,8 +61,8 @@ export class DomainUtils {
     // En desarrollo, asumimos que cualquier dominio que no sea Vendix es una tienda
     // En producción, esto se consultaría con la API
     const vendixDomains = [
-      'vendix.com',
-      'www.vendix.com',
+      environment.vendixDomain,
+      `www.${environment.vendixDomain}`,
       'localhost',
       '127.0.0.1',
     ];

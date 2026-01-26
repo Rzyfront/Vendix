@@ -7,6 +7,7 @@ import {
     Body,
     Param,
     UseGuards,
+    Header,
 } from '@nestjs/common';
 import { CartService } from './cart.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
@@ -18,6 +19,7 @@ export class CartController {
     constructor(private readonly cart_service: CartService) { }
 
     @Get()
+    @Header('Cache-Control', 'no-store')
     async getCart() {
         // store_id y user_id se resuelven automáticamente desde el dominio y el JWT
         const data = await this.cart_service.getCart();
@@ -25,6 +27,7 @@ export class CartController {
     }
 
     @Post('items')
+    @Header('Cache-Control', 'no-store')
     async addItem(@Body() dto: AddToCartDto) {
         // store_id y user_id se resuelven automáticamente
         const data = await this.cart_service.addItem(dto);
@@ -32,6 +35,7 @@ export class CartController {
     }
 
     @Put('items/:id')
+    @Header('Cache-Control', 'no-store')
     async updateItem(
         @Param('id') item_id: string,
         @Body() dto: UpdateCartItemDto,
@@ -45,6 +49,7 @@ export class CartController {
     }
 
     @Delete('items/:id')
+    @Header('Cache-Control', 'no-store')
     async removeItem(@Param('id') item_id: string) {
         // store_id y user_id se resuelven automáticamente
         const data = await this.cart_service.removeItem(parseInt(item_id, 10));
@@ -52,12 +57,14 @@ export class CartController {
     }
 
     @Delete()
+    @Header('Cache-Control', 'no-store')
     async clearCart() {
         // store_id y user_id se resuelven automáticamente
         return this.cart_service.clearCart();
     }
 
     @Post('sync')
+    @Header('Cache-Control', 'no-store')
     async syncCart(@Body() dto: SyncCartDto) {
         // store_id y user_id se resuelven automáticamente
         const data = await this.cart_service.syncFromLocalStorage(dto);

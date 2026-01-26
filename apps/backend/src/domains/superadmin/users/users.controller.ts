@@ -29,7 +29,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new user' })
@@ -160,5 +160,23 @@ export class UsersController {
   async verifyEmail(@Param('id') id: string) {
     const result = await this.usersService.verifyEmail(+id);
     return this.responseService.success(result, 'Email verified successfully');
+  }
+
+  @Patch(':id/2fa')
+  @ApiOperation({ summary: 'Toggle 2FA for a user' })
+  @ApiResponse({ status: 200, description: '2FA toggled successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async toggle2FA(@Param('id') id: string, @Body('enabled') enabled: boolean) {
+    const result = await this.usersService.toggle2FA(+id, enabled);
+    return this.responseService.success(result, '2FA toggled successfully');
+  }
+
+  @Post(':id/unlock')
+  @ApiOperation({ summary: 'Unlock a user' })
+  @ApiResponse({ status: 200, description: 'User unlocked successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async unlock(@Param('id') id: string) {
+    const result = await this.usersService.unlock(+id);
+    return this.responseService.success(result, 'User unlocked successfully');
   }
 }

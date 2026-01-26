@@ -13,6 +13,7 @@ import { OrganizationsModule } from '../organization/organizations/organizations
 // import { AuditModule } from '../superadmin/audit/audit.module';
 import { OnboardingModule } from '../organization/onboarding/onboarding.module';
 import { ResponseModule } from '@common/responses/response.module';
+import { LegalAcceptancesModule } from './legal-acceptances/legal-acceptances.module';
 import {
   RateLimitMiddleware,
   LoginRateLimitMiddleware,
@@ -28,6 +29,7 @@ import {
     OrganizationsModule,
     // AuditModule, // Removed to use global CommonAuditModule
     OnboardingModule,
+    LegalAcceptancesModule,
     ResponseModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({

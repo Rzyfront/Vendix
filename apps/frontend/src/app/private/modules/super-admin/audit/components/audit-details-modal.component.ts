@@ -300,9 +300,11 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   template: `
     <app-modal
       [isOpen]="isOpen"
-      [title]="'Detalles del Log de Auditoría'"
-      size="lg"
-      (isOpenChange)="onOpenChange($event)"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'md'"
+      title="Detalles del Log de Auditoría"
+      subtitle="Visualiza la información completa del registro de auditoría"
     >
       <div class="audit-details-container" *ngIf="log">
         <!-- Información General -->
@@ -454,7 +456,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 
       <!-- Footer -->
       <div slot="footer" class="audit-modal-footer">
-        <app-button variant="primary" (clicked)="close()"> Cerrar </app-button>
+        <app-button variant="primary" (clicked)="onCancel()">
+          Cerrar
+        </app-button>
       </div>
     </app-modal>
   `,
@@ -464,13 +468,9 @@ export class AuditDetailsModalComponent {
   @Input() log: AuditLog | null = null;
 
   @Output() isOpenChange = new EventEmitter<boolean>();
+  @Output() cancel = new EventEmitter<void>();
 
-  onOpenChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-  }
-
-  close(): void {
-    this.isOpen = false;
+  onCancel(): void {
     this.isOpenChange.emit(false);
   }
 

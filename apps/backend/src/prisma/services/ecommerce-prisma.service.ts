@@ -23,6 +23,11 @@ export class EcommercePrismaService extends BasePrismaService {
     'addresses',
   ];
 
+  // Modelos que NO tienen store_id pero sí customer_id (heredan scope vía relación)
+  private readonly customer_only_models = [
+    'payments',
+  ];
+
   constructor() {
     super();
     this.setupEcommerceScoping();
@@ -48,7 +53,7 @@ export class EcommercePrismaService extends BasePrismaService {
       'createMany',
     ];
 
-    const all_models = [...this.store_only_models, ...this.store_user_models];
+    const all_models = [...this.store_only_models, ...this.store_user_models, ...this.customer_only_models];
 
     for (const model of all_models) {
       extensions[model] = {};
@@ -86,42 +91,62 @@ export class EcommercePrismaService extends BasePrismaService {
 
     // Handle Create Operations
     if (operation === 'create' || operation === 'createMany') {
+      const applyToData = (data: any) => {
+        const item = { ...data };
+
+        // Solo agregar store_id si el modelo lo tiene
+        if (!this.customer_only_models.includes(model)) {
+          item.store_id = store_id;
+        }
+
+        // Agregar user_id/customer_id según corresponda
+        if (user_id) {
+          if (this.store_user_models.includes(model)) {
+            if (model === 'orders') {
+              item.customer_id = user_id;
+            } else {
+              item.user_id = user_id;
+            }
+          } else if (this.customer_only_models.includes(model)) {
+            item.customer_id = user_id;
+          }
+        }
+        return item;
+      };
+
       if (operation === 'create') {
-        scoped_args.data = {
-          ...scoped_args.data,
-          store_id,
-          ...(this.store_user_models.includes(model) && user_id
-            ? { user_id }
-            : {}),
-        };
+        scoped_args.data = applyToData(scoped_args.data);
       } else if (operation === 'createMany') {
         if (Array.isArray(scoped_args.data)) {
-          scoped_args.data = scoped_args.data.map((item: any) => ({
-            ...item,
-            store_id,
-            ...(this.store_user_models.includes(model) && user_id
-              ? { user_id }
-              : {}),
-          }));
+          scoped_args.data = scoped_args.data.map((item: any) => applyToData(item));
         } else {
-          scoped_args.data = {
-            ...scoped_args.data,
-            store_id,
-            ...(this.store_user_models.includes(model) && user_id
-              ? { user_id }
-              : {}),
-          };
+          scoped_args.data = applyToData(scoped_args.data);
         }
       }
       return query(scoped_args);
     }
 
     // Handle Read/Update/Delete Operations
-    const security_filter: Record<string, any> = { store_id };
+    // Solo aplicar store_id si el modelo lo tiene
+    const security_filter: Record<string, any> = {};
+
+    if (!this.customer_only_models.includes(model)) {
+      security_filter.store_id = store_id;
+    }
 
     if (this.store_user_models.includes(model)) {
       if (user_id) {
-        security_filter.user_id = user_id;
+        // En orders el campo se llama customer_id
+        if (model === 'orders') {
+          security_filter.customer_id = user_id;
+        } else {
+          security_filter.user_id = user_id;
+        }
+      }
+    } else if (this.customer_only_models.includes(model)) {
+      // payments hereda scope vía orders, pero podemos filtrar por customer_id
+      if (user_id) {
+        security_filter.customer_id = user_id;
       }
     }
 

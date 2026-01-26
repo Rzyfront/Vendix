@@ -15,6 +15,7 @@ import { NavigationService } from '../../services/navigation.service';
 import { AppConfigService } from '../../services/app-config.service';
 import { ConfigFacade } from '../config';
 import { AuthFacade } from './auth.facade';
+import { ThemeService } from '../../services/theme.service';
 import * as AuthActions from './auth.actions';
 import * as ConfigActions from '../config/config.actions';
 
@@ -28,6 +29,7 @@ export class AuthEffects {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private appConfigService = inject(AppConfigService);
+  private themeService = inject(ThemeService);
   private onboardingWizardService = inject(OnboardingWizardService);
   private store = inject(Store);
 
@@ -43,6 +45,7 @@ export class AuthEffects {
               return AuthActions.loginSuccess({
                 user: response.data.user,
                 user_settings: response.data.user_settings,
+                store_settings: response.data.store_settings,
                 tokens: {
                   access_token: response.data.access_token,
                   refresh_token: response.data.refresh_token,
@@ -63,10 +66,43 @@ export class AuthEffects {
     ),
   );
 
+  loginCustomer$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.loginCustomer),
+      mergeMap((loginData) =>
+        this.authService.loginCustomer(loginData).pipe(
+          map((response) => {
+            if (!response.data) throw new Error('Invalid response data');
+            return AuthActions.loginCustomerSuccess({
+              user: response.data.user,
+              user_settings: response.data.user_settings,
+              store_settings: response.data.store_settings,
+              tokens: {
+                access_token: response.data.access_token,
+                refresh_token: response.data.refresh_token,
+              },
+              permissions: response.data.permissions || [],
+              roles: response.data.user.roles || [],
+              message: response.message,
+              updated_environment: response.updatedEnvironment,
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.loginCustomerFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   loginSuccess$ = createEffect(
     () =>
       this.actions$.pipe(
-        ofType(AuthActions.loginSuccess),
+        ofType(AuthActions.loginSuccess, AuthActions.loginCustomerSuccess),
         tap(async ({ roles, message, updated_environment }) => {
           // CRITICAL: Clear the logout flag on successful login
           if (typeof localStorage !== 'undefined') {
@@ -76,11 +112,12 @@ export class AuthEffects {
           if (message) this.toast.success(message);
           try {
             const currentConfig = this.configFacade.getCurrentConfig();
+            // Si no hay environment actualizado, asumimos que no hay cambio de entorno
+            // Pero para customers, queremos que se queden donde estan si es STORE_ECOMMERCE
+
             if (!currentConfig || !updated_environment) {
-              console.error(
-                '[AuthEffects] No config or updated environment for redirection.',
-              );
-              await this.router.navigateByUrl('/');
+              // Normal flow if no environment update is needed (e.g. standard login)
+              // But we should check if we are in ecommerce and user is customer
               return;
             }
 
@@ -95,8 +132,8 @@ export class AuthEffects {
               ConfigActions.initializeAppSuccess({ config: newConfig }),
             );
 
-            // 3. Esperar un tick para que el router procese las nuevas rutas
-            await new Promise((resolve) => setTimeout(resolve, 0));
+            // 3. Esperar para que el router procese las nuevas rutas
+            await new Promise((resolve) => setTimeout(resolve, 150));
 
             // 4. Calcular la ruta de destino usando la NUEVA configuración
             const targetRoute = this.navigationService.redirectAfterLogin(
@@ -113,6 +150,49 @@ export class AuthEffects {
             );
             await this.router.navigateByUrl('/');
           }
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  registerCustomer$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.registerCustomer),
+      mergeMap(({ type, ...registerData }) =>
+        this.authService.registerCustomer(registerData).pipe(
+          map((response) => {
+            if (!response.data) throw new Error('Invalid response data');
+            return AuthActions.registerCustomerSuccess({
+              user: response.data.user,
+              user_settings: response.data.user_settings,
+              store_settings: response.data.store_settings,
+              tokens: {
+                access_token: response.data.access_token,
+                refresh_token: response.data.refresh_token,
+              },
+              permissions: response.data.permissions || [],
+              roles: response.data.user.roles || [],
+              updated_environment: response.updatedEnvironment,
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.registerCustomerFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  registerCustomerSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.registerCustomerSuccess),
+        tap(() => {
+          this.toast.success('Cuenta creada exitosamente');
         }),
       ),
     { dispatch: false },
@@ -152,19 +232,15 @@ export class AuthEffects {
   logout$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.logout),
-      mergeMap(() =>
-        this.authService.logout().pipe(
-          map(() => AuthActions.logoutSuccess()),
-          catchError(() => of(AuthActions.logoutSuccess())),
-        ),
-      ),
-    ),
+      tap(({ redirect }) => this.authService.logout({ redirect })),
+      map(({ redirect }) => AuthActions.logoutSuccess({ redirect }))
+    )
   );
   logoutSuccess$ = createEffect(
     () =>
       this.actions$.pipe(
         ofType(AuthActions.logoutSuccess),
-        tap(() => {
+        tap(({ redirect }) => {
           // CRITICAL: Clear store state FIRST before clearing localStorage
           this.store.dispatch(AuthActions.clearAuthState());
 
@@ -194,8 +270,11 @@ export class AuthEffects {
             console.log('[LOGOUT] All auth data cleared from localStorage');
           }
 
-          // Navigate AFTER everything is cleared
-          this.router.navigateByUrl('/auth/login');
+          // Navigate AFTER everything is cleared, only if redirect is true (default)
+          // Explicit check against false because undefined should be treated as true (backward compatibility)
+          if (redirect !== false) {
+            this.router.navigateByUrl('/auth/login');
+          }
         }),
       ),
     { dispatch: false },
@@ -259,6 +338,7 @@ export class AuthEffects {
               return AuthActions.restoreAuthState({
                 user: parsedState.user,
                 user_settings: parsedState.user_settings,
+                store_settings: parsedState.store_settings,
                 tokens: parsedState.tokens,
                 permissions: parsedState.permissions || [],
                 roles: parsedState.roles || [],
@@ -447,6 +527,48 @@ export class AuthEffects {
           const errorMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           this.toast.error(errorMessage, 'Error al actualizar configuración');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  updateStoreSettingsSuccess$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(AuthActions.updateStoreSettingsSuccess),
+        tap(() => {
+          this.toast.success('Configuración de tienda actualizada correctamente');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  // 🔥 Apply Theme Preset
+  applyThemeEffect$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          AuthActions.loginSuccess,
+          AuthActions.loginCustomerSuccess,
+          AuthActions.restoreAuthState,
+          AuthActions.updateUserSettingsSuccess,
+        ),
+        tap((action: any) => {
+          let theme = 'default';
+
+          if (action.user_settings) {
+            // Check for config.preferences.theme (as per prompt/new structure)
+            if (action.user_settings.config?.preferences?.theme) {
+              theme = action.user_settings.config.preferences.theme;
+            }
+            // Fallback/Legacy: preferences directly on user_settings?
+            else if (action.user_settings.preferences?.theme) {
+              theme = action.user_settings.preferences.theme;
+            }
+          }
+
+          console.log('🎨 Applying user theme:', theme);
+          this.themeService.applyUserTheme(theme);
         }),
       ),
     { dispatch: false },

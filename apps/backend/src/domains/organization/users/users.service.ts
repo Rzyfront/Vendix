@@ -17,9 +17,14 @@ import * as bcrypt from 'bcryptjs';
 import { EmailService } from '../../../email/email.service';
 import * as crypto from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
+import {
+  AuditService,
+  AuditAction,
+  AuditResource,
+} from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class UsersService {
@@ -29,7 +34,7 @@ export class UsersService {
     private auditService: AuditService,
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     const {
@@ -51,7 +56,6 @@ export class UsersService {
     const existing_user = await this.prisma.users.findFirst({
       where: {
         email,
-
       },
     });
     if (existing_user) {
@@ -62,9 +66,15 @@ export class UsersService {
 
     const hashed_password = await bcrypt.hash(password, 10);
 
+    // Convertir nombres a Title Case
+    const formatted_first_name = toTitleCase(rest.first_name || '');
+    const formatted_last_name = toTitleCase(rest.last_name || '');
+
     const user = await this.prisma.users.create({
       data: {
         ...rest,
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
         email,
         password: hashed_password,
         ...(target_organization_id && {
@@ -186,10 +196,12 @@ export class UsersService {
       this.prisma.users.count({ where }),
     ]);
 
-    const signedUsers = await Promise.all(users.map(async (user) => ({
-      ...user,
-      avatar_url: await this.s3Service.signUrl(user.avatar_url, true),
-    })));
+    const signedUsers = await Promise.all(
+      users.map(async (user) => ({
+        ...user,
+        avatar_url: await this.s3Service.signUrl(user.avatar_url, true),
+      })),
+    );
 
     return {
       data: signedUsers,
@@ -467,7 +479,6 @@ export class UsersService {
     return updated_user;
   }
 
-
   async findConfiguration(id: number) {
     const user = await this.prisma.users.findUnique({
       where: { id },
@@ -487,8 +498,7 @@ export class UsersService {
     }
 
     const config: UserConfigDto = {
-      app:
-        (user.user_settings[0]?.config as any)?.app || 'VENDIX_LANDING',
+      app: (user.user_settings[0]?.config as any)?.app || 'VENDIX_LANDING',
       roles: user.user_roles.map((ur) => ur.role_id),
       store_ids: user.store_users.map((su) => su.store_id),
       panel_ui: (user.user_settings[0]?.config as any)?.panel_ui || {},

@@ -83,9 +83,6 @@ export interface UserMenuOption {
         </div>
       </div>
     </div>
-    
-
-
   `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
@@ -255,15 +252,9 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   }
 
   private logout() {
-    this.authService.logout().subscribe({
-      next: () => {
-        this.router.navigate(['/auth/login']);
-      },
-      error: (error) => {
-        console.error('Error en logout:', error);
-        this.router.navigate(['/auth/login']);
-      },
-    });
+    this.authService.logout();
+    this.isOpen = false;
+    this.closeDropdown.emit();
   }
 
   private generateInitials(name: string): string {

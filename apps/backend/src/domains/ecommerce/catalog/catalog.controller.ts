@@ -1,14 +1,15 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, Header } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
 import { CatalogQueryDto } from './dto/catalog-query.dto';
 import { Public } from '@common/decorators/public.decorator';
 
 @Controller('ecommerce/catalog')
 export class CatalogController {
-  constructor(private readonly catalog_service: CatalogService) {}
+  constructor(private readonly catalog_service: CatalogService) { }
 
   @Public()
   @Get()
+  @Header('Cache-Control', 'no-store')
   async getProducts(@Query() query: CatalogQueryDto) {
     // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware
     const result = await this.catalog_service.getProducts(query);
@@ -17,6 +18,7 @@ export class CatalogController {
 
   @Public()
   @Get('categories')
+  @Header('Cache-Control', 'no-store')
   async getCategories() {
     // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware
     const data = await this.catalog_service.getCategories();
@@ -25,6 +27,7 @@ export class CatalogController {
 
   @Public()
   @Get('brands')
+  @Header('Cache-Control', 'no-store')
   async getBrands() {
     // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware
     const data = await this.catalog_service.getBrands();
@@ -33,6 +36,7 @@ export class CatalogController {
 
   @Public()
   @Get(':slug')
+  @Header('Cache-Control', 'no-store')
   async getProductBySlug(@Param('slug') slug: string) {
     // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware
     const data = await this.catalog_service.getProductBySlug(slug);
@@ -41,6 +45,7 @@ export class CatalogController {
 
   @Public()
   @Get('config/public')
+  @Header('Cache-Control', 'no-store')
   async getPublicConfig() {
     const data = await this.catalog_service.getPublicConfig();
     return { success: true, data };

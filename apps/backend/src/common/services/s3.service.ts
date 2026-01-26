@@ -179,6 +179,8 @@ export class S3Service {
             return keyOrUrl || undefined;
         }
 
+        const EXPIRATION_TIME = 24 * 60 * 60; // 24 hours
+
         let targetKey = keyOrUrl;
         if (useThumbnail) {
             const pathParts = keyOrUrl.split('/');
@@ -186,13 +188,92 @@ export class S3Service {
             targetKey = [...pathParts, `thumb_${fileName}`].join('/');
 
             try {
-                return await this.getPresignedUrl(targetKey);
+                return await this.getPresignedUrl(targetKey, EXPIRATION_TIME);
             } catch {
                 // Return original key signature as fallback
-                return this.getPresignedUrl(keyOrUrl);
+                return this.getPresignedUrl(keyOrUrl, EXPIRATION_TIME);
             }
         }
 
-        return this.getPresignedUrl(targetKey);
+        return this.getPresignedUrl(targetKey, EXPIRATION_TIME);
+    }
+
+    /**
+     * Generates and uploads favicon files in multiple sizes from a logo buffer.
+     * Creates 16x16, 32x32, and 192x192 PNG favicons optimized for browsers and PWA.
+     *
+     * @param logoBuffer - Buffer of the logo image
+     * @param basePath - S3 base path for favicons (caller should use S3PathHelper)
+     * @returns Object with favicon key and generated sizes, or null if failed
+     */
+    async generateAndUploadFaviconFromLogo(
+        logoBuffer: Buffer,
+        basePath: string,
+    ): Promise<{ faviconKey: string; sizes: number[] } | null> {
+        try {
+            const sizes = [16, 32, 192];
+            let mainFaviconKey: string | undefined;
+
+            for (const size of sizes) {
+                // Resize image to square using cover fit mode
+                const resized = await sharp(logoBuffer)
+                    .resize(size, size, { fit: 'cover' })
+                    .png() // Use PNG format for better browser support
+                    .toBuffer();
+
+                const fileName = `favicon-${size}.png`;
+                const key = `${basePath}/${fileName}`;
+
+                // Upload to S3
+                await this.uploadToS3(resized, key, 'image/png');
+
+                // Track the main favicon (16x16) for storage in domain config
+                if (size === 16) {
+                    mainFaviconKey = key;
+                }
+
+                this.logger.log(`Favicon generated: ${key} (${size}x${size})`);
+            }
+
+            if (!mainFaviconKey) {
+                throw new Error('Failed to generate main favicon');
+            }
+
+            return { faviconKey: mainFaviconKey, sizes };
+        } catch (error) {
+            this.logger.error(`Error generating favicon: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Downloads an image from S3 and returns it as a Buffer.
+     * Useful for processing images that are already stored.
+     *
+     * @param key - S3 key of the image to download
+     * @returns Buffer of the image data
+     */
+    async downloadImage(key: string): Promise<Buffer> {
+        try {
+            const command = new GetObjectCommand({
+                Bucket: this.bucketName,
+                Key: key,
+            });
+
+            const response = await this.s3Client.send(command);
+
+            // Convert stream to buffer
+            const chunks: Uint8Array[] = [];
+            const stream = response.Body as any;
+
+            for await (const chunk of stream) {
+                chunks.push(chunk);
+            }
+
+            return Buffer.concat(chunks);
+        } catch (error) {
+            this.logger.error(`Error downloading image from S3: ${error.message}`);
+            throw error;
+        }
     }
 }

@@ -6,6 +6,7 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
@@ -21,6 +22,7 @@ import { takeUntil } from 'rxjs/operators';
     RouterModule,
     SidebarComponent,
     HeaderComponent,
+    IconComponent,
     OnboardingModalComponent,
   ],
   template: `
@@ -34,8 +36,35 @@ import { takeUntil } from 'rxjs/operators';
         [vlink]="(organizationSlug$ | async) || 'slug'"
         [domainHostname]="storeDomainHostname"
         [collapsed]="sidebarCollapsed"
+        [showFooter]="true"
         (expandSidebar)="toggleSidebar()"
       >
+        <!-- Footer Content -->
+        <div slot="footer" class="sidebar-footer-content">
+          <div class="footer-info-item">
+            <div class="footer-info-row">
+              <div class="footer-info-block footer-block-gradient-primary">
+                <div class="footer-info-content">
+                  <div class="footer-info-header">
+                    <app-icon name="store" [size]="9"></app-icon>
+                    <span class="footer-info-label">Type</span>
+                  </div>
+                  <span class="footer-info-value">{{ formatStoreType((storeType$ | async)) }}</span>
+                </div>
+              </div>
+              <div class="footer-divider"></div>
+              <div class="footer-info-block footer-block-gradient-secondary">
+                <div class="footer-info-content">
+                  <div class="footer-info-header">
+                    <app-icon name="tag" [size]="9"></app-icon>
+                    <span class="footer-info-label">Plan</span>
+                  </div>
+                  <span class="footer-info-value">Early Access Free Plan</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </app-sidebar>
 
       <!-- Main Content -->
@@ -56,7 +85,7 @@ import { takeUntil } from 'rxjs/operators';
 
         <!-- Page Content -->
         <main
-          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 py-2 transition-all duration-300 ease-in-out"
+          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
           <div class="w-full">
@@ -87,6 +116,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   organizationSlug$: Observable<string | null>;
   storeDomainHostname$: Observable<string | null>;
   storeDomainHostname: string | null = null;
+  storeType$: Observable<string | null>;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -214,6 +244,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       ],
     },
     {
+      label: 'Gastos',
+      icon: 'wallet',
+      route: '/admin/expenses',
+    },
+    {
       label: 'Configuración',
       icon: 'settings',
       children: [
@@ -242,6 +277,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
           icon: 'circle',
           route: '/admin/settings/domains',
         },
+        {
+          label: 'Envíos',
+          icon: 'circle',
+          route: '/admin/settings/shipping',
+        },
       ],
     },
   ];
@@ -260,6 +300,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeSlug$ = this.authFacade.userStoreSlug$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
     this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
+    this.storeType$ = this.authFacade.userStoreType$;
   }
 
   ngOnInit(): void {
@@ -276,11 +317,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
 
     // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((items) => {
-        this.filteredMenuItems = items;
-      });
+    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
+      this.filteredMenuItems = items;
+    });
 
     // Subscribe to domain hostname for sidebar vlink
     this.storeDomainHostname$
@@ -323,6 +362,19 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
+
+  formatStoreType(type: string | null): string {
+    if (!type) return 'Not defined';
+
+    const typeMap: Record<string, string> = {
+      'physical': 'Physical Store',
+      'online': 'Online Store',
+      'hybrid': 'Hybrid Store',
+    };
+
+    return typeMap[type] || type;
+  }
+
   ngOnDestroy(): void {
     this.destroy$.next();
     this.destroy$.complete();

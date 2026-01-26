@@ -7,6 +7,7 @@ import { environment } from '../../../../../environments/environment';
 
 export interface UserProfile {
     id: number;
+    username: string | null;
     email: string;
     first_name: string | null;
     last_name: string | null;
@@ -15,6 +16,7 @@ export interface UserProfile {
     document_number: string | null;
     avatar_url: string | null;
     created_at: string;
+    addresses: Address[];
 }
 
 export interface Address {
@@ -27,6 +29,7 @@ export interface Address {
     postal_code: string | null;
     phone_number: string | null;
     is_primary: boolean;
+    type: string;
 }
 
 export interface Order {
@@ -137,6 +140,22 @@ export class AccountService {
     deleteAddress(address_id: number): Observable<{ success: boolean; message: string }> {
         return this.http.delete<{ success: boolean; message: string }>(
             `${this.api_url}/addresses/${address_id}`,
+            { headers: this.getHeaders() },
+        );
+    }
+
+    updateAddress(address_id: number, address: Partial<Address>): Observable<{ success: boolean; data: Address }> {
+        return this.http.put<{ success: boolean; data: Address }>(
+            `${this.api_url}/addresses/${address_id}`,
+            address,
+            { headers: this.getHeaders() },
+        );
+    }
+
+    setAddressPrimary(address_id: number): Observable<{ success: boolean; data: Address }> {
+        return this.http.patch<{ success: boolean; data: Address }>(
+            `${this.api_url}/addresses/${address_id}/set-primary`,
+            {},
             { headers: this.getHeaders() },
         );
     }

@@ -35,31 +35,21 @@ async function bootstrap() {
   const corsOrigins = process.env.CORS_ORIGIN?.split(',') || [
     'http://localhost:4200',
     'http://localhost',
-    // HTTP origins for local development
-    'http://vendix.com',
-    'http://www.vendix.com',
-    // HTTPS origins for local development
-    'https://vendix.com',
-    'https://www.vendix.com',
-    // Production origins for base domain
+    // Production - Dynamically generated using BASE_DOMAIN env var
     `https://${baseDomain}`,
     `https://www.${baseDomain}`,
     `https://api.${baseDomain}`,
-    // Frontend domain: vendix.online and subdomains
-    'https://vendix.online',
-    'https://www.vendix.online',
-    /^https:\/\/([a-zA-Z0-9-]+\.)?vendix\.online$/,
-    // CloudFront distributions
+    // CloudFront distributions (infrastructure)
     'https://d10fsx06e3z6rc.cloudfront.net',
     'https://d1y0m1duatgngc.cloudfront.net',
-    // AWS EC2 deployment
-    'https://api.vendix.online',
-    // Allow any subdomain for multi-tenant (dynamic based on base domain)
+    // Allow any subdomain for multi-tenant
     new RegExp(
       `^https://([a-zA-Z0-9-]+\\.)?${baseDomain.replace('.', '\\.')}$`,
     ),
     // Allow any CloudFront distribution
     /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
+    // Additional origins from environment variable
+    ...(process.env.ADDITIONAL_CORS_ORIGINS?.split(',') || []),
   ];
 
   // CORS configuration

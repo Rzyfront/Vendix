@@ -746,6 +746,14 @@ export class ProductCreatePageComponent implements OnInit {
     this.openAdjustmentModal();
   }
 
+  goToPurchase(): void {
+    if (this.productId) {
+      this.router.navigate(['/admin/inventory/pop'], {
+        queryParams: { product_id: this.productId },
+      });
+    }
+  }
+
   closeAdjustmentModal(): void {
     this.isAdjustmentModalOpen = false;
   }

@@ -61,6 +61,9 @@ export class MenuFilterService {
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',
 
+    // Gastos
+    Gastos: 'expenses',
+
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:
     Configuración: 'settings',
@@ -69,6 +72,7 @@ export class MenuFilterService {
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     Dominios: 'settings_domains',
+    Envíos: 'settings_shipping',
   };
 
   /**
@@ -79,11 +83,13 @@ export class MenuFilterService {
    * @returns Observable of filtered menu items
    */
   filterMenuItems(menuItems: MenuItem[]): Observable<MenuItem[]> {
-    return this.authFacade.getVisibleModules$().pipe(
-      map((visibleModules) =>
-        this.filterItemsRecursive(menuItems, visibleModules),
-      ),
-    );
+    return this.authFacade
+      .getVisibleModules$()
+      .pipe(
+        map((visibleModules) =>
+          this.filterItemsRecursive(menuItems, visibleModules),
+        ),
+      );
   }
 
   /**

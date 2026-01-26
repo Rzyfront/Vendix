@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -29,10 +29,11 @@ import {
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Tienda"
       subtitle="Actualizar la información de la tienda"
-      (isOpenChange)="onModalChange($event)"
     >
       <form [formGroup]="storeForm" class="space-y-6" *ngIf="store">
         <!-- Basic Information -->
@@ -276,7 +277,7 @@ import {
     </app-modal>
   `,
 })
-export class StoreEditModalComponent {
+export class StoreEditModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() isSubmitting = false;
   @Input() store?: StoreListItem;
@@ -321,8 +322,8 @@ export class StoreEditModalComponent {
     });
   }
 
-  ngOnChanges(): void {
-    if (this.store && this.isOpen) {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['store'] && changes['store'].currentValue) {
       this.populateForm();
     }
   }
@@ -359,7 +360,6 @@ export class StoreEditModalComponent {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
     if (!isOpen) {
       this.resetForm();
     }
@@ -398,7 +398,7 @@ export class StoreEditModalComponent {
   }
 
   onCancel(): void {
-    this.cancel.emit();
+    this.isOpenChange.emit(false);
   }
 
   resetForm(): void {

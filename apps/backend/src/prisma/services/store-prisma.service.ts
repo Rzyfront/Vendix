@@ -20,11 +20,29 @@ export class StorePrismaService extends BasePrismaService {
     'store_payment_methods',
     'addresses',
     'domain_settings',
+    'shipping_zones',
+    'shipping_methods',
+    'expenses',
   ];
 
   constructor() {
     super();
     this.setupStoreScoping();
+  }
+
+  get organizationWhere() {
+    const context = RequestContextService.getContext();
+    return {
+      organization_id: context?.organization_id,
+    };
+  }
+
+  get storeWhere() {
+    const context = RequestContextService.getContext();
+    return {
+      organization_id: context?.organization_id,
+      store_id: context?.store_id,
+    };
   }
 
   private setupStoreScoping() {
@@ -67,6 +85,9 @@ export class StorePrismaService extends BasePrismaService {
       'stock_reservations', // Relational
       'inventory_transactions', // Relational
       'purchase_orders', // Relational
+      'shipping_rates', // Relational
+      'expense_categories', // Org scoped
+      'product_tax_assignments', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -81,7 +102,12 @@ export class StorePrismaService extends BasePrismaService {
     return extensions;
   }
 
-  private applyStoreScoping(model: string, operation: string, args: any, query: any) {
+  private applyStoreScoping(
+    model: string,
+    operation: string,
+    args: any,
+    query: any,
+  ) {
     const context = RequestContextService.getContext();
 
     if (!context) {
@@ -96,24 +122,26 @@ export class StorePrismaService extends BasePrismaService {
     if (operation === 'create' || operation === 'createMany') {
       if (this.store_scoped_models.includes(model)) {
         if (!context.store_id) {
-          throw new ForbiddenException('Access denied - store context required for creation');
+          throw new ForbiddenException(
+            'Access denied - store context required for creation',
+          );
         }
 
         if (operation === 'create') {
           scoped_args.data = {
             ...scoped_args.data,
-            store_id: context.store_id
+            store_id: context.store_id,
           };
         } else if (operation === 'createMany') {
           if (Array.isArray(scoped_args.data)) {
             scoped_args.data = scoped_args.data.map((item: any) => ({
               ...item,
-              store_id: context.store_id
+              store_id: context.store_id,
             }));
           } else {
             scoped_args.data = {
               ...scoped_args.data,
-              store_id: context.store_id
+              store_id: context.store_id,
             };
           }
         }
@@ -123,26 +151,44 @@ export class StorePrismaService extends BasePrismaService {
 
     // Handle Read/Update/Delete Operations (Where clause)
     const relational_scopes: Record<string, any> = {
-      'stock_levels': { inventory_locations: { store_id: context.store_id } },
-      'inventory_batches': { inventory_locations: { store_id: context.store_id } },
-      'inventory_serial_numbers': { inventory_locations: { store_id: context.store_id } },
-      'order_items': { orders: { store_id: context.store_id } },
-      'product_variants': { products: { store_id: context.store_id } },
-      'payments': { orders: { store_id: context.store_id } },
-      'product_images': { products: { store_id: context.store_id } },
-      'sales_order_items': { sales_orders: { organization_id: context.organization_id } }, // Changed to Org Scope
-      'refunds': { orders: { store_id: context.store_id } },
-      'inventory_adjustments': { inventory_locations: { store_id: context.store_id } },
-      'stock_reservations': { inventory_locations: { store_id: context.store_id } },
-      'purchase_orders': { location: { store_id: context.store_id } },
-      'inventory_movements': { products: { store_id: context.store_id } },
-      'inventory_transactions': { products: { store_id: context.store_id } },
+      stock_levels: { inventory_locations: { store_id: context.store_id } },
+      inventory_batches: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      inventory_serial_numbers: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      order_items: { orders: { store_id: context.store_id } },
+      product_variants: { products: { store_id: context.store_id } },
+      payments: { orders: { store_id: context.store_id } },
+      product_images: { products: { store_id: context.store_id } },
+      sales_order_items: {
+        sales_orders: { organization_id: context.organization_id },
+      }, // Changed to Org Scope
+      refunds: { orders: { store_id: context.store_id } },
+      inventory_adjustments: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      stock_reservations: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      purchase_orders: { location: { store_id: context.store_id } },
+      inventory_movements: { products: { store_id: context.store_id } },
+      inventory_transactions: { products: { store_id: context.store_id } },
+      shipping_rates: { shipping_zone: { store_id: context.store_id } },
+      product_tax_assignments: { products: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
 
     // Models requiring Organization scope (no store_id, but owned by Org)
-    const org_scoped_models = ['suppliers', 'stock_transfers', 'sales_orders', 'return_orders'];
+    const org_scoped_models = [
+      'suppliers',
+      'stock_transfers',
+      'sales_orders',
+      'return_orders',
+      'expense_categories',
+    ];
 
     if (this.store_scoped_models.includes(model)) {
       if (!context.store_id) {
@@ -156,7 +202,9 @@ export class StorePrismaService extends BasePrismaService {
       Object.assign(security_filter, relational_scopes[model]);
     } else if (org_scoped_models.includes(model)) {
       if (!context.organization_id) {
-        throw new ForbiddenException('Access denied - organization context required');
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
       }
       security_filter.organization_id = context.organization_id;
     }
@@ -185,7 +233,6 @@ export class StorePrismaService extends BasePrismaService {
   get inventory_locations() {
     return this.scoped_client.inventory_locations;
   }
-
 
   get categories() {
     return this.scoped_client.categories;
@@ -231,7 +278,6 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.inventory_serial_numbers;
   }
 
-
   get payments() {
     return this.scoped_client.payments;
   }
@@ -258,6 +304,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get return_orders() {
     return this.scoped_client.return_orders;
+  }
+
+  get product_tax_assignments() {
+    return this.scoped_client.product_tax_assignments;
   }
 
   get inventory_adjustments() {
@@ -372,8 +422,28 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.organization_settings;
   }
 
+  get expense_categories() {
+    return this.scoped_client.expense_categories;
+  }
+
   get domain_settings() {
     return this.scoped_client.domain_settings;
+  }
+
+  get shipping_zones() {
+    return this.scoped_client.shipping_zones;
+  }
+
+  get shipping_methods() {
+    return this.scoped_client.shipping_methods;
+  }
+
+  get shipping_rates() {
+    return this.scoped_client.shipping_rates;
+  }
+
+  get expenses() {
+    return this.scoped_client.expenses;
   }
 
   // Global tables (no store scoping)

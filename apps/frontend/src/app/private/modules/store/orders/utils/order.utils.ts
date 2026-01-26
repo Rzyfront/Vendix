@@ -35,7 +35,7 @@ export class OrderUtils {
     return (
       refundableStates.includes(order.state) &&
       (order.payments || []).some((payment) =>
-        refundablePaymentStatuses.includes(payment.status),
+        refundablePaymentStatuses.includes(payment.state),
       )
     );
   }

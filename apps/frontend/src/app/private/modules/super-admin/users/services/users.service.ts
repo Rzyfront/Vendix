@@ -102,8 +102,9 @@ export class UsersService {
     this.isCreatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/superadmin/users`, userData)
+      .post<any>(`${this.apiUrl}/superadmin/users`, userData)
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isCreatingUser$.next(false)),
         catchError((error) => {
           console.error('Error creating user:', error);
@@ -119,8 +120,9 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .patch<User>(`${this.apiUrl}/superadmin/users/${id}`, userData)
+      .patch<any>(`${this.apiUrl}/superadmin/users/${id}`, userData)
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
           console.error('Error updating user:', error);
@@ -151,8 +153,9 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/superadmin/users/${id}/archive`, {})
+      .post<any>(`${this.apiUrl}/superadmin/users/${id}/deactivate`, {})
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
           console.error('Error archiving user:', error);
@@ -168,8 +171,9 @@ export class UsersService {
     this.isUpdatingUser$.next(true);
 
     return this.http
-      .post<User>(`${this.apiUrl}/superadmin/users/${id}/reactivate`, {})
+      .post<any>(`${this.apiUrl}/superadmin/users/${id}/activate`, {})
       .pipe(
+        map((response) => response.data),
         finalize(() => this.isUpdatingUser$.next(false)),
         catchError((error) => {
           console.error('Error reactivating user:', error);
@@ -249,8 +253,9 @@ export class UsersService {
    */
   toggleUser2FA(id: number, enabled: boolean): Observable<User> {
     return this.http
-      .patch<User>(`${this.apiUrl}/superadmin/users/${id}/2fa`, { enabled })
+      .patch<any>(`${this.apiUrl}/superadmin/users/${id}/2fa`, { enabled })
       .pipe(
+        map((response) => response.data),
         catchError((error) => {
           console.error('Error toggling 2FA:', error);
           return throwError(() => error);
@@ -263,8 +268,9 @@ export class UsersService {
    */
   verifyUserEmail(id: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/superadmin/users/${id}/verify-email`, {})
+      .post<any>(`${this.apiUrl}/superadmin/users/${id}/verify-email`, {})
       .pipe(
+        map((response) => response.data),
         catchError((error) => {
           console.error('Error verifying email:', error);
           return throwError(() => error);
@@ -277,8 +283,9 @@ export class UsersService {
    */
   unlockUser(id: number): Observable<User> {
     return this.http
-      .post<User>(`${this.apiUrl}/superadmin/users/${id}/unlock`, {})
+      .post<any>(`${this.apiUrl}/superadmin/users/${id}/unlock`, {})
       .pipe(
+        map((response) => response.data),
         catchError((error) => {
           console.error('Error unlocking user:', error);
           return throwError(() => error);

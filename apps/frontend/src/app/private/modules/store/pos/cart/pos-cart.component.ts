@@ -23,7 +23,12 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, QuantityControlComponent],
+  imports: [
+    CommonModule,
+    ButtonComponent,
+    IconComponent,
+    QuantityControlComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -33,23 +38,16 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
       <div class="flex-none bg-surface border-b border-border shadow-sm">
         <!-- Header Row -->
         <div class="px-5 py-3 border-b border-border/50">
-          <div class="flex justify-between items-center gap-4">
-            <h2 class="text-base font-bold text-text-primary flex items-center gap-2">
-              <app-icon name="shopping-cart" [size]="18" class="text-primary"></app-icon>
-              Carrito ({{ (cartState$ | async)?.items?.length || 0 }})
-            </h2>
-            <app-button
-              *ngIf="((cartState$ | async)?.items?.length ?? 0) > 0"
-              variant="outline"
-              size="sm"
-              (clicked)="clearCart()"
-              [loading]="(loading$ | async) ?? false"
-              class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
-            >
-              <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
-              Vaciar
-            </app-button>
-          </div>
+          <h2
+            class="text-base font-bold text-text-primary flex items-center gap-2"
+          >
+            <app-icon
+              name="shopping-cart"
+              [size]="18"
+              class="text-primary"
+            ></app-icon>
+            Carrito ({{ (cartState$ | async)?.items?.length || 0 }})
+          </h2>
         </div>
 
         <!-- Totals Row (High Contrast) -->
@@ -57,13 +55,19 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
-              <span class="font-medium">{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
+              <span class="font-medium">{{
+                formatCurrency((summary$ | async)?.subtotal || 0)
+              }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
-              <span class="font-medium">{{ formatCurrency((summary$ | async)?.taxAmount || 0) }}</span>
+              <span class="font-medium">{{
+                formatCurrency((summary$ | async)?.taxAmount || 0)
+              }}</span>
             </div>
-            <div class="pt-2 border-t border-border/50 flex justify-between items-center">
+            <div
+              class="pt-2 border-t border-border/50 flex justify-between items-center"
+            >
               <span class="font-bold text-text-primary text-base">Total</span>
               <span class="font-extrabold text-2xl text-primary tracking-tight">
                 {{ formatCurrency((summary$ | async)?.total || 0) }}
@@ -72,12 +76,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           </div>
 
           <!-- Checkout Actions -->
-          <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div
+            class="flex flex-col sm:flex-row items-center justify-between gap-4"
+          >
             <app-button
               variant="outline"
               size="md"
               (clicked)="saveCart()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              [disabled]="(isEmpty$ | async) ?? false"
               class="!h-10 text-sm font-medium px-3"
             >
               <app-icon name="save" [size]="16" slot="icon"></app-icon>
@@ -87,7 +93,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               variant="primary"
               size="md"
               (clicked)="proceedToPayment()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              [disabled]="(isEmpty$ | async) ?? false"
               class="!h-10 text-sm font-bold px-6"
             >
               <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
@@ -101,11 +107,17 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           *ngIf="(cartState$ | async)?.customer"
           class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
         >
-          <div class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+          <div
+            class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
+          >
             <app-icon name="user" [size]="14"></app-icon>
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-[11px] text-text-secondary font-medium leading-none mb-0.5">Cliente</p>
+            <p
+              class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
+            >
+              Cliente
+            </p>
             <p class="text-xs font-bold text-text-primary truncate">
               {{ (cartState$ | async)?.customer?.name }}
             </p>
@@ -120,8 +132,14 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           *ngIf="isEmpty$ | async"
           class="flex flex-col items-center justify-center h-full min-h-[200px] text-center opacity-60"
         >
-          <div class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3">
-            <app-icon name="shopping-cart" [size]="24" class="text-muted"></app-icon>
+          <div
+            class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
+          >
+            <app-icon
+              name="shopping-cart"
+              [size]="24"
+              class="text-muted"
+            ></app-icon>
           </div>
           <h3 class="text-sm font-semibold text-text-primary mb-1">
             Tu carrito está vacío
@@ -146,7 +164,18 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               <div
                 class="w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
               >
+                <!-- Product Image -->
+                <img
+                  *ngIf="item.product.image_url || item.product.image"
+                  [src]="item.product.image_url || item.product.image"
+                  [alt]="item.product.name"
+                  class="absolute inset-0 w-full h-full object-cover"
+                  (error)="handleImageError($event)"
+                />
+                
+                <!-- Fallback Icon -->
                 <div
+                  *ngIf="!item.product.image_url && !item.product.image"
                   class="absolute inset-0 flex items-center justify-center text-text-secondary"
                 >
                   <app-icon name="image" [size]="14"></app-icon>
@@ -155,7 +184,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 
               <!-- Item Info -->
               <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2 mb-0.5">
+                <div class="flex justify-between items-start gap-2 mb-1">
                   <h4
                     class="text-sm font-semibold text-text-primary truncate leading-tight"
                   >
@@ -169,14 +198,23 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
-                <div *ngIf="getItemTaxAmount(item) > 0" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit">
-                  Imp {{ formatCurrency(getItemTaxAmount(item)) }}
-                </div>
-                <div class="flex justify-between items-end">
-                  <span class="text-xs font-medium text-text-secondary">
-                    {{ formatCurrency(item.unitPrice) }}
-                  </span>
-                  <span class="text-sm font-bold text-primary">
+
+                <div class="flex justify-between items-end mt-2">
+                  <div class="flex flex-col gap-0.5">
+                    <div
+                      *ngIf="getItemTaxAmount(item) > 0"
+                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit mb-1"
+                    >
+                      Imp {{ formatCurrency(getItemTaxAmount(item)) }}
+                    </div>
+                    <span class="text-[10px] text-text-muted leading-none">
+                      Base: {{ formatCurrency(item.unitPrice) }}
+                    </span>
+                    <span class="text-xs font-bold text-text-primary">
+                      Unit. Final: {{ formatCurrency(item.finalPrice) }}
+                    </span>
+                  </div>
+                  <span class="text-base font-extrabold text-primary">
                     {{ formatCurrency(item.totalPrice) }}
                   </span>
                 </div>
@@ -187,7 +225,9 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             <div
               class="flex items-center justify-between pt-2 border-t border-border/50"
             >
-              <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
+              <span
+                class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60"
+              >
                 Cantidad
               </span>
               <app-quantity-control
@@ -195,7 +235,6 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                 [min]="1"
                 [max]="item.product.stock"
                 [editable]="true"
-                [disabled]="(loading$ | async) ?? false"
                 [size]="'sm'"
                 (valueChange)="updateQuantity(item.id, $event)"
               ></app-quantity-control>
@@ -220,7 +259,6 @@ export class PosCartComponent implements OnInit, OnDestroy {
   cartState$: Observable<CartState>;
   isEmpty$: Observable<boolean>;
   summary$: Observable<any>;
-  loading$: Observable<boolean>;
 
   @Output() saveDraft = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
@@ -233,7 +271,6 @@ export class PosCartComponent implements OnInit, OnDestroy {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
     this.summary$ = this.cartService.summary;
-    this.loading$ = this.cartService.loading;
   }
 
   ngOnInit(): void {
@@ -259,9 +296,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {
-          this.toastService.success('Cantidad actualizada');
-        },
+        next: () => { },
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -289,7 +324,8 @@ export class PosCartComponent implements OnInit, OnDestroy {
   async clearCart(): Promise<void> {
     const confirm = await this.dialogService.confirm({
       title: 'Vaciar Carrito',
-      message: '¿Estás seguro de que quieres vaciar todos los productos del carrito?',
+      message:
+        '¿Estás seguro de que quieres vaciar todos los productos del carrito?',
       confirmText: 'Vaciar',
       cancelText: 'Cancelar',
       confirmVariant: 'danger',
@@ -336,6 +372,23 @@ export class PosCartComponent implements OnInit, OnDestroy {
       const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
       return rateSum + assignmentRate;
     }, 0) || 0;
+    return rate;
+  }
+
+  getItemTaxAmount(item: CartItem): number {
+    return item.taxAmount;
+  }
+
+  getItemTaxRate(item: CartItem): number {
+    const rate =
+      item.product.tax_assignments?.reduce((rateSum, assignment) => {
+        const assignmentRate =
+          assignment.tax_categories?.tax_rates?.reduce(
+            (sum, tr) => sum + parseFloat(tr.rate || '0'),
+            0,
+          ) || 0;
+        return rateSum + assignmentRate;
+      }, 0) || 0;
     return rate;
   }
 

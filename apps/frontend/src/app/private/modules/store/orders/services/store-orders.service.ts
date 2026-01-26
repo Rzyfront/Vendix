@@ -188,6 +188,17 @@ export class StoreOrdersService {
     );
   }
 
+  getOrderTimeline(orderId: string): Observable<any[]> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/timeline`;
+
+    return this.http.get<any[]>(url).pipe(
+      catchError((error) => {
+        console.error('Error fetching order timeline:', error);
+        return throwError(() => new Error('Failed to fetch order timeline'));
+      }),
+    );
+  }
+
   updateOrderStatus(orderId: string, status: OrderState): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}`;
 

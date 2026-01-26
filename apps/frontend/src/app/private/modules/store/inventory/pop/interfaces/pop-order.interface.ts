@@ -28,6 +28,15 @@ export interface PurchaseOrderItemRequest {
   product_name?: string;
   sku?: string;
   product_description?: string;
+  state?: string;
+  weight?: number;
+  available_for_ecommerce?: boolean;
+  base_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  brand_name?: string;
+  category_names?: string;
 }
 
 /**
@@ -75,6 +84,15 @@ export function cartToPurchaseOrderRequest(
         requestItem.product_name = item.prebulk_data.name;
         requestItem.sku = item.prebulk_data.code;
         requestItem.product_description = item.prebulk_data.description;
+        requestItem.state = item.prebulk_data.state;
+        requestItem.weight = item.prebulk_data.weight;
+        requestItem.available_for_ecommerce = item.prebulk_data.available_for_ecommerce;
+        requestItem.base_price = item.prebulk_data.base_price;
+        requestItem.profit_margin = item.prebulk_data.profit_margin;
+        requestItem.is_on_sale = item.prebulk_data.is_on_sale;
+        requestItem.sale_price = item.prebulk_data.sale_price;
+        requestItem.brand_name = typeof item.prebulk_data.brand_id === 'string' ? item.prebulk_data.brand_id : undefined;
+        requestItem.category_names = typeof item.prebulk_data.category_ids === 'string' ? item.prebulk_data.category_ids : undefined;
       }
 
       return requestItem;

@@ -10,6 +10,7 @@ import { Router, RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AuthService } from '../../../../core/services/auth.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import * as AuthActions from '../../../../core/store/auth/auth.actions';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { passwordValidator } from '../../../../core/utils/validators';
@@ -270,7 +271,7 @@ export class RegisterOwnerComponent {
     if (this.registerForm.valid) {
       this.isLoading = true;
       this.clearError();
-    
+
       this.authService.registerOwner(this.registerForm.value).subscribe({
         next: async (result) => {
           if (result.success && result.data) {
@@ -284,67 +285,21 @@ export class RegisterOwnerComponent {
               localStorage.removeItem('vendix_app_config');
             }
 
-            this.authFacade.restoreAuthState(
-              user,
-              { access_token, refresh_token },
-              result.data.permissions,
-              user.roles,
-              user_settings,
+            // 🚀 Usar la acción de loginSuccess para aprovechar toda la maquinaria de redirección
+            // y configuración de entorno que ya funciona en el login.
+            this.store.dispatch(
+              AuthActions.loginSuccess({
+                user,
+                user_settings,
+                tokens: { access_token, refresh_token },
+                permissions: result.data.permissions,
+                roles: user.roles,
+                message: '¡Registro exitoso! Bienvenido a Vendix.',
+                updated_environment: (result as any).updatedEnvironment,
+              }),
             );
 
-            // Redirigir al dashboard después del registro exitoso
             this.registrationState = 'success';
-            this.toast.success('¡Registro exitoso! Bienvenido a Vendix.');
-
-            // 🔄 ESPERAR CONFIRMACIÓN DE AUTENTICACIÓN y navegar correctamente
-            // Esperar a que el estado de autenticación se actualice completamente
-            
-            // Dar tiempo al store para procesar la acción de restoreAuthState
-            setTimeout(async () => {
-              try {
-                // Verificar que el usuario está autenticado en el store
-                const isAuthenticated = this.authFacade.isLoggedIn();
-
-                if (isAuthenticated) {
-                  
-                  // Obtener el environment del usuario
-                  const userEnvironment = user_settings?.config?.app;
-                  const userRoles = user.roles || [];
-                  
-
-                  // Forzar la actualización del environment usando el patrón de AuthEffects
-                  const currentConfig = this.configFacade.getCurrentConfig();
-                  if (currentConfig) {
-                    // Crear nueva configuración con el environment del usuario
-                    const newConfig = this.appConfigService.updateEnvironmentForUser(
-                      currentConfig,
-                      userEnvironment?.toUpperCase() as any,
-                    );
-
-                    // Despachar acción para actualizar el store con la nueva configuración
-                    this.store.dispatch(ConfigActions.initializeAppSuccess({ config: newConfig }));
-                  }
-
-                  // Esperar un tick más para que el router se actualice
-                  await new Promise(resolve => setTimeout(resolve, 300));
-
-                  // Navegar según el environment del usuario
-                  if (userEnvironment?.toUpperCase() === 'ORG_ADMIN') {
-                    await this.router.navigateByUrl('/admin/dashboard', { replaceUrl: true });
-                  } else {
-                    // Fallback al dashboard genérico
-                    await this.router.navigateByUrl('/admin', { replaceUrl: true });
-                  }
-                } else {
-                  this.toast.error('Error al iniciar sesión. Por favor, intenta manualmente.');
-                  // Redirigir al login como fallback
-                  await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
-                }
-              } catch (error) {
-                this.toast.error('Error al redirigir. Por favor, inicia sesión manualmente.');
-                await this.router.navigateByUrl('/auth/login', { replaceUrl: true });
-              }
-            }, 500);
           } else {
             // Manejar error (mostrar mensaje de error)
             if (result.message) {

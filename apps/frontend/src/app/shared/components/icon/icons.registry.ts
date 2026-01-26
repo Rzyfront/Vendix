@@ -103,6 +103,13 @@ import {
   LucideIconData,
   Heart,
   ExternalLink,
+  Layers,
+  ShieldOff,
+  CircleX,
+  TrendingDown,
+  Phone,
+  Printer,
+  Wallet,
 } from 'lucide-angular';
 
 /**
@@ -248,6 +255,13 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'upload-cloud': UploadCloud,
   copy: Copy,
   heart: Heart,
+  'trending-down': TrendingDown,
+  layers: Layers,
+  'shield-off': ShieldOff,
+  'circle-x': CircleX,
+  phone: Phone,
+  printer: Printer,
+  wallet: Wallet,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

@@ -159,6 +159,11 @@ export interface MenuItem {
           </li>
         </ul>
       </nav>
+
+      <!-- Footer Section -->
+      <div *ngIf="showFooter" class="sidebar-footer">
+        <ng-content select="[slot=footer]"></ng-content>
+      </div>
     </aside>
   `,
   styleUrls: ['./sidebar.component.scss'],
@@ -170,6 +175,7 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   @Input() domainHostname: string | null = null; // Nuevo input para el hostname del dominio
   @Input() collapsed: boolean = false;
   @Input() isOpen: boolean = false;
+  @Input() showFooter: boolean = false;
   @Output() expandSidebar = new EventEmitter<void>();
 
   isMobile = false;

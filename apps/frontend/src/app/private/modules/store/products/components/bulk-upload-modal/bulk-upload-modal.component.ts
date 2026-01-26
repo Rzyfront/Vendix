@@ -1,5 +1,6 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import * as XLSX from 'xlsx';
 import { ProductsService } from '../../services/products.service';
 import {
   ModalComponent,
@@ -14,12 +15,16 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [(isOpen)]="isOpen"
+      [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'md'"
       title="Carga Masiva de Productos"
+      (closed)="onCancel()"
+      subtitle="Importa múltiples productos desde un archivo Excel"
     >
       <!-- Initial State: Instructions & Upload -->
-      <div *ngIf="!uploadResults" class="space-y-6">
+      <div *ngIf="!uploadResults && !parsedData" class="space-y-6">
         <!-- Template Download Section -->
         <div>
           <h4 class="text-sm font-medium text-gray-700 mb-3">
@@ -112,26 +117,20 @@ import {
               <p class="text-gray-500 text-sm mt-1">
                 o haz clic para seleccionar
               </p>
+              <p class="text-xs text-indigo-500 mt-2 font-medium">
+                Máximo 1000 productos por archivo
+              </p>
             </div>
 
             <div *ngIf="selectedFile">
-              <app-icon
-                name="file-text"
-                [size]="48"
-                class="mx-auto text-green-500 mb-4"
-              ></app-icon>
-              <p class="text-gray-900 font-medium truncate">
-                {{ selectedFile.name }}
-              </p>
-              <p class="text-gray-500 text-sm mt-1">
-                {{ formatFileSize(selectedFile.size) }}
-              </p>
-              <button
-                (click)="clearFile($event)"
-                class="mt-4 text-red-500 text-sm hover:text-red-700 font-medium"
-              >
-                Eliminar archivo
-              </button>
+              <div class="animate-pulse flex flex-col items-center">
+                <app-icon
+                  name="loader"
+                  [size]="48"
+                  class="text-primary mb-4 animate-spin"
+                ></app-icon>
+                <p class="text-sm text-gray-500">Procesando archivo...</p>
+              </div>
             </div>
           </div>
         </div>
@@ -145,7 +144,95 @@ import {
             <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
             Error en la carga
           </div>
-          {{ uploadError }}
+          <div *ngIf="isErrorMessageArray(); else singleError" class="mt-2">
+            <ul
+              class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto"
+            >
+              <li *ngFor="let msg of uploadError">{{ msg }}</li>
+            </ul>
+          </div>
+          <ng-template #singleError>
+            <p class="mt-1">{{ uploadError }}</p>
+          </ng-template>
+        </div>
+      </div>
+
+      <!-- Preview State -->
+      <div *ngIf="parsedData && !uploadResults" class="space-y-4">
+        <div
+          class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between"
+        >
+          <div class="flex items-center">
+            <app-icon
+              name="check-circle"
+              [size]="24"
+              class="text-green-500 mr-3"
+            ></app-icon>
+            <div>
+              <h4 class="text-sm font-medium text-green-900">
+                Archivo procesado correctamente
+              </h4>
+              <p class="text-sm text-green-700">
+                Se encontraron {{ parsedData.length }} productos para cargar.
+              </p>
+            </div>
+          </div>
+          <button
+            (click)="resetState()"
+            class="text-sm text-red-500 hover:text-red-700 font-medium"
+          >
+            Cambiar archivo
+          </button>
+        </div>
+
+        <!-- Preview Table -->
+        <div class="border rounded-md overflow-hidden">
+          <table class="min-w-full divide-y divide-gray-200 text-sm">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">
+                  Producto
+                </th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">
+                  SKU
+                </th>
+                <th class="px-3 py-2 text-right font-medium text-gray-500">
+                  Venta
+                </th>
+                <th class="px-3 py-2 text-right font-medium text-gray-500">
+                  Compra
+                </th>
+                <th class="px-3 py-2 text-right font-medium text-gray-500">
+                  Margen
+                </th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              <tr *ngFor="let item of parsedData.slice(0, 5)">
+                <td class="px-3 py-2 text-gray-900">
+                  {{ item.name || '-' }}
+                </td>
+                <td class="px-3 py-2 text-gray-500 font-mono text-xs">
+                  {{ item.sku || '-' }}
+                </td>
+                <td class="px-3 py-2 text-right text-gray-700">
+                  {{ item.base_price | currency }}
+                </td>
+                <td class="px-3 py-2 text-right text-gray-700">
+                  {{ item.cost_price | currency }}
+                </td>
+                <td class="px-3 py-2 text-right text-gray-700">
+                  {{ item.profit_margin }}%
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div
+            class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center"
+            *ngIf="parsedData.length > 5"
+          >
+            ... y {{ parsedData.length - 5 }} más
+          </div>
         </div>
       </div>
 
@@ -246,14 +333,14 @@ import {
           {{ uploadResults ? 'Cerrar' : 'Cancelar' }}
         </app-button>
         <app-button
-          *ngIf="!uploadResults"
+          *ngIf="parsedData && !uploadResults"
           variant="primary"
-          (clicked)="uploadFile()"
-          [disabled]="!selectedFile || isUploading"
+          (clicked)="uploadData()"
+          [disabled]="isUploading"
           [loading]="isUploading"
         >
           <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-          Subir Productos
+          Iniciar Carga de {{ parsedData.length }} Productos
         </app-button>
       </div>
     </app-modal>
@@ -274,14 +361,16 @@ export class BulkUploadModalComponent {
   selectedFile: File | null = null;
   isDragging = false;
   isUploading = false;
-  uploadError: string | null = null;
-
+  uploadError: any = null;
+  parsedData: any[] | null = null;
   uploadResults: any = null;
 
-  constructor(
-    private productsService: ProductsService,
-    private toastService: ToastService,
-  ) {}
+  private productsService = inject(ProductsService);
+  private toastService = inject(ToastService);
+
+  isErrorMessageArray(): boolean {
+    return Array.isArray(this.uploadError);
+  }
 
   onCancel() {
     this.isOpenChange.emit(false);
@@ -294,6 +383,7 @@ export class BulkUploadModalComponent {
     this.isUploading = false;
     this.uploadError = null;
     this.uploadResults = null;
+    this.parsedData = null;
   }
 
   downloadTemplate(type: 'quick' | 'complete') {
@@ -332,18 +422,18 @@ export class BulkUploadModalComponent {
 
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
-      this.handleFile(files[0]);
+      this.processFile(files[0]);
     }
   }
 
   onFileSelected(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
-      this.handleFile(input.files[0]);
+      this.processFile(input.files[0]);
     }
   }
 
-  handleFile(file: File) {
+  processFile(file: File) {
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
     const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
     const isValidExtension = allowedExtensions.includes(fileExtension);
@@ -354,24 +444,114 @@ export class BulkUploadModalComponent {
       );
       return;
     }
+
     this.selectedFile = file;
     this.uploadError = null;
     this.uploadResults = null;
+
+    const reader: FileReader = new FileReader();
+
+    reader.onload = (e: any) => {
+      try {
+        const bstr: string = e.target.result;
+        const wb: XLSX.WorkBook = XLSX.read(bstr, { type: 'binary' });
+        const wsname: string = wb.SheetNames[0];
+        const ws: XLSX.WorkSheet = wb.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json(ws);
+
+        if (!rawData || rawData.length === 0) {
+          this.toastService.error(
+            'El archivo está vacío o tiene un formato incorrecto',
+          );
+          this.resetState();
+          return;
+        }
+
+        if (rawData.length > 1000) {
+          this.toastService.error(
+            `El archivo excede el límite de 1000 productos (tiene ${rawData.length}). Por favor divídelo en varios archivos.`,
+          );
+          this.resetState();
+          return;
+        }
+
+        // Mapeo de encabezados (similar al backend para consistencia)
+        this.parsedData = rawData
+          .map((item: any) => {
+            const name = item['Nombre'] || item['name'];
+            const sku = item['SKU'] || item['sku'];
+
+            const base_price = parseFloat(
+              item['Precio Venta'] || item['base_price'] || 0,
+            );
+            const cost_price = parseFloat(
+              item['Precio Compra'] || item['Costo'] || item['cost_price'] || 0,
+            );
+            let profit_margin = parseFloat(
+              item['Margen'] || item['profit_margin'] || 0,
+            );
+            // Auto-fix for decimal margins
+            if (profit_margin > 0 && profit_margin < 1) {
+              profit_margin = profit_margin * 100;
+            }
+            const stock_quantity = parseFloat(
+              item['Cantidad Inicial'] ||
+              item['Cantidad'] ||
+              item['stock_quantity'] ||
+              item['quantity'] ||
+              0,
+            );
+
+            const description = item['Descripción'] || item['description'];
+            const brand_id = item['Marca'] || item['brand_id'];
+            const category_ids = item['Categorías'] || item['category_ids'];
+            const state = item['Estado'] || item['state'];
+            const available_for_ecommerce =
+              item['Disponible Ecommerce'] || item['available_for_ecommerce'];
+            const weight = parseFloat(item['Peso'] || item['weight'] || 0);
+
+            return {
+              name,
+              sku,
+              base_price: isNaN(base_price) ? 0 : base_price,
+              cost_price: isNaN(cost_price) ? 0 : cost_price,
+              profit_margin: isNaN(profit_margin) ? 0 : profit_margin,
+              stock_quantity: isNaN(stock_quantity) ? 0 : stock_quantity,
+              description,
+              brand_id,
+              category_ids,
+              state,
+              available_for_ecommerce,
+              weight: isNaN(weight) ? 0 : weight,
+            };
+          })
+          .filter((item) => item.name || item.sku);
+
+        if (this.parsedData.length === 0) {
+          this.toastService.warning(
+            'No se encontraron productos válidos en el archivo',
+          );
+          this.resetState();
+        }
+      } catch (err) {
+        console.error('Error parsing file:', err);
+        this.toastService.error(
+          'Error al procesar el archivo. Verifica el formato.',
+        );
+        this.resetState();
+      }
+    };
+
+    reader.readAsBinaryString(file);
   }
 
-  clearFile(event: Event) {
-    event.stopPropagation();
-    this.selectedFile = null;
-    this.uploadError = null;
-  }
-
-  uploadFile() {
-    if (!this.selectedFile) return;
+  uploadData() {
+    if (!this.parsedData) return;
 
     this.isUploading = true;
     this.uploadError = null;
 
-    this.productsService.uploadBulkProducts(this.selectedFile).subscribe({
+    this.productsService.uploadBulkProductsJson(this.parsedData).subscribe({
       next: (response: any) => {
         this.isUploading = false;
         const data = response.data || response;
@@ -389,11 +569,11 @@ export class BulkUploadModalComponent {
       },
       error: (error) => {
         this.isUploading = false;
-        this.uploadError =
-          typeof error === 'string' ? error : 'Error al procesar el archivo';
-        if (error.error && error.error.details) {
+        this.uploadError = error;
+
+        if (error?.error?.details) {
           this.uploadResults = error.error.details;
-        } else if (error.error && error.error.data) {
+        } else if (error?.error?.data) {
           this.uploadResults = error.error.data;
         }
 

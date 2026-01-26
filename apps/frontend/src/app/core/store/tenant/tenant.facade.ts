@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { take } from 'rxjs/operators';
 import {
   DomainConfig,
   AppEnvironment,
@@ -105,43 +106,64 @@ export class TenantFacade {
   // Synchronous getters for templates
   getCurrentDomainConfig(): DomainConfig | null {
     let result: DomainConfig | null = null;
-    this.domainConfig$.subscribe((config) => (result = config)).unsubscribe();
+    this.domainConfig$.pipe(take(1)).subscribe((config) => (result = config));
     return result;
   }
 
   getCurrentTenantConfig(): TenantConfig | null {
     let result: TenantConfig | null = null;
-    this.tenantConfig$.subscribe((config) => (result = config)).unsubscribe();
+    this.tenantConfig$.pipe(take(1)).subscribe((config) => (result = config));
     return result;
   }
 
   getCurrentEnvironment(): AppEnvironment | null {
     let result: AppEnvironment | null = null;
-    this.currentEnvironment$.subscribe((env) => (result = env)).unsubscribe();
+    this.currentEnvironment$.pipe(take(1)).subscribe((env) => (result = env));
     return result;
   }
 
   getCurrentOrganization(): OrganizationConfig | null {
     let result: OrganizationConfig | null = null;
-    this.currentOrganization$.subscribe((org) => (result = org)).unsubscribe();
+    this.currentOrganization$.pipe(take(1)).subscribe((org) => (result = org));
     return result;
   }
 
   getCurrentStore(): StoreConfig | null {
     let result: StoreConfig | null = null;
-    this.currentStore$.subscribe((store) => (result = store)).unsubscribe();
+    this.currentStore$.pipe(take(1)).subscribe((store) => (result = store));
     return result;
+  }
+
+  /**
+   * Obtiene el ID de la tienda actual de forma robusta.
+   * Primero busca en la configuración del tenant, y si no está,
+   * busca en la configuración del dominio resuelto (caso e-commerce).
+   */
+  getCurrentStoreId(): number | null {
+    // 1. Intentar obtener desde el store config
+    const store = this.getCurrentStore();
+    if (store?.id) {
+      return parseInt(store.id.toString(), 10);
+    }
+
+    // 2. Intentar obtener desde el domain config
+    const domain = this.getCurrentDomainConfig();
+    if (domain?.store_id) {
+      return parseInt(domain.store_id.toString(), 10);
+    }
+
+    return null;
   }
 
   isInitialized(): boolean {
     let result = false;
-    this.initialized$.subscribe((init) => (result = init)).unsubscribe();
+    this.initialized$.pipe(take(1)).subscribe((init) => (result = init));
     return result;
   }
 
   isLoading(): boolean {
     let result = false;
-    this.loading$.subscribe((loading) => (result = loading)).unsubscribe();
+    this.loading$.pipe(take(1)).subscribe((loading) => (result = loading));
     return result;
   }
 }

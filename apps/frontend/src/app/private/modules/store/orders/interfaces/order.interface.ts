@@ -26,6 +26,14 @@ export interface Order {
   addresses_orders_billing_address_idToaddresses?: Address;
   addresses_orders_shipping_address_idToaddresses?: Address;
   payments?: Payment[];
+  users?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone?: string;
+    avatar_url?: string;
+  };
 }
 
 export interface OrderItem {
@@ -49,11 +57,13 @@ export interface OrderItem {
 
 export interface Address {
   id: number;
-  street: string;
+  address_line1: string;
+  address_line2?: string;
   city: string;
-  state: string;
-  zip_code: string;
-  country: string;
+  state_province: string;
+  postal_code: string;
+  country_code: string;
+  phone_number?: string;
 }
 
 export interface Product {
@@ -62,6 +72,8 @@ export interface Product {
   description?: string;
   sku: string;
   price: number;
+  final_price: number;
+  image_url?: string;
 }
 
 export interface ProductVariant {
@@ -74,13 +86,33 @@ export interface ProductVariant {
 export interface Payment {
   id: number;
   order_id: number;
+  customer_id?: number;
   amount: number;
   currency: string;
-  status: PaymentStatus;
-  payment_method: string;
+  state: PaymentStatus;
   transaction_id?: string;
+  gateway_response?: {
+    change?: number;
+    metadata?: {
+      register_id?: string;
+      is_pos_payment?: boolean;
+      seller_user_id?: string;
+      payment_method?: string;
+      amount_received?: number;
+      reference?: string;
+    };
+  };
   created_at: string;
   updated_at: string;
+  store_payment_method_id?: number;
+  users?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email: string;
+    phone?: string;
+    avatar_url?: string;
+  };
 }
 
 // Types and enums - Aligned with backend enums

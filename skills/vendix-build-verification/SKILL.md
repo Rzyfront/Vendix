@@ -13,11 +13,11 @@ metadata:
 
 **BEFORE marking ANY task as complete, you are ABSOLUTELY REQUIRED TO:**
 
-1. ✅ Check Docker logs for **ALL** modified components
-2. ✅ Verify that **ZERO errors** exist in any component
-3. ✅ Use appropriate Docker log commands
+1. ✅ **ALWAYS** use Docker logs with `--tail` to verify build watch in development
+2. ✅ Verify that **ZERO errors** exist in any container
+3. ✅ **ALWAYS** check container status (if running)
 4. ✅ **DO NOT finalize** until ALL errors are completely resolved
-5. ✅ Re-check logs **after** applying fixes
+5. ✅ Re-check logs **AFTER** applying fixes
 6. ✅ Verify **recursively** - check dependencies and related components
 
 ---
@@ -30,23 +30,32 @@ metadata:
 ### Step 1: Make Code Changes
 Apply your changes to the codebase.
 
-### Step 2: Check Docker Logs
+### Step 2: Check Docker Logs (WATCH MODE - Development)
+
+**⚠️ CRITICAL:** In development **ALWAYS** use watch mode with Docker logs. **DO NOT** run `npm run build` unless the human requests it EXPLICITLY for production.
+
 Run the appropriate log commands based on what you modified:
 
 ```bash
-# Backend changes
+# Backend changes - Check watch mode
 docker logs --tail 40 vendix_backend
 
-# Frontend changes
+# Frontend changes - Check watch mode
 docker logs --tail 40 vendix_frontend
 
-# Database/Prisma changes
+# Database/Prisma changes - Check container
 docker logs --tail 40 vendix_postgres
 
-# Multiple components affected
+# Multiple components affected - Check all containers
 docker logs --tail 40 vendix_backend
 docker logs --tail 40 vendix_frontend
 docker logs --tail 40 vendix_postgres
+```
+
+**Verify container status:**
+```bash
+# Always verify containers are running
+docker ps
 ```
 
 ### Step 3: Analyze Results
@@ -264,20 +273,65 @@ docker logs --tail 40 vendix_frontend
 
 ## 🔧 Development vs Production
 
-**DEVELOPMENT (Current Mode):**
-- Use: `docker logs --tail 40 <container>`
-- Watch mode enabled
-- Hot-reload active
-- Check logs after EVERY change
+### 🚨 DEVELOPMENT MODE (DEFAULT)
 
-**PRODUCTION:**
-- Use: `npm run build`
-- Full compilation
-- All optimizations
-- Check build output
+**⚠️ THIS IS THE DEFAULT MODE - ALWAYS ASSUME DEVELOPMENT**
 
-**CURRENT WORKFLOW:**
-We're in development mode, so ALWAYS use Docker logs.
+In development, **ALWAYS** use:
+
+```bash
+# Verify watch mode with Docker logs
+docker logs --tail 40 <container>
+
+# Verify container is running
+docker ps
+
+# If container is not running, restart it
+docker restart <container>
+```
+
+**Development mode characteristics:**
+- ✅ Watch mode enabled (hot-reload)
+- ✅ Changes reflect automatically
+- ✅ Compilation errors appear in logs
+- ✅ Check logs AFTER each change
+
+---
+
+### 🏭 PRODUCTION MODE (Only if human requests EXPLICITLY)
+
+**⚠️ ONLY run production build when:**
+- Human says it explicitly ("run production build")
+- Human asks if code compiles for production
+- Preparing for a deployment
+
+```bash
+# Backend - Production build
+cd apps/backend && npm run build
+
+# Frontend - Production build
+cd apps/frontend && npm run build
+```
+
+---
+
+### 📋 DEFAULT WORKFLOW
+
+**ALWAYS follow this order:**
+
+1. **Make code changes**
+2. **Check Docker logs (`--tail`) to see watch mode**
+3. **Verify container is running (`docker ps`)**
+4. **If errors, fix them**
+5. **Go back to step 2**
+6. **ONLY when NO errors, mark task complete**
+
+---
+
+### 🎯 GOLDEN RULE
+
+**Development → Docker logs (watch mode)**
+**Production → npm run build (ONLY if human requests)**
 
 ---
 

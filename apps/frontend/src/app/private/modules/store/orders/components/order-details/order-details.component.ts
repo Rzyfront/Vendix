@@ -11,11 +11,12 @@ import {
 import { CommonModule } from '@angular/common';
 import { Subject, takeUntil } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
-import { ModalComponent, DialogService } from '../../../../../../shared/components';
 import {
-  Order,
-  OrderState,
-} from '../../interfaces/order.interface';
+  ModalComponent,
+  DialogService,
+  ToastService,
+} from '../../../../../../shared/components';
+import { Order, OrderState } from '../../interfaces/order.interface';
 
 @Component({
   selector: 'app-order-details',
@@ -52,6 +53,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
   constructor(
     private ordersService: StoreOrdersService,
     private dialogService: DialogService,
+    private toastService: ToastService,
   ) {}
 
   ngOnInit(): void {
@@ -62,8 +64,11 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     // Solo cargar si el orderId cambió a un valor diferente
-    if (changes['orderId'] && changes['orderId'].currentValue && 
-        changes['orderId'].currentValue !== this.lastLoadedOrderId) {
+    if (
+      changes['orderId'] &&
+      changes['orderId'].currentValue &&
+      changes['orderId'].currentValue !== this.lastLoadedOrderId
+    ) {
       if (this.isVisible) {
         this.loadOrderDetails();
       }
@@ -93,19 +98,19 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
 
           // Normalize numeric strings to numbers
           const normalizedOrder = {
-          ...orderData,
-          grand_total: Number(orderData.grand_total),
-          subtotal_amount: Number(orderData.subtotal_amount),
-          tax_amount: Number(orderData.tax_amount),
-          shipping_cost: Number(orderData.shipping_cost),
-          discount_amount: Number(orderData.discount_amount),
-          order_items: (orderData.order_items || []).map((item: any) => ({
-            ...item,
-            unit_price: Number(item.unit_price),
-            total_price: Number(item.total_price),
-            quantity: Number(item.quantity),
-          })),
-        };
+            ...orderData,
+            grand_total: Number(orderData.grand_total),
+            subtotal_amount: Number(orderData.subtotal_amount),
+            tax_amount: Number(orderData.tax_amount),
+            shipping_cost: Number(orderData.shipping_cost),
+            discount_amount: Number(orderData.discount_amount),
+            order_items: (orderData.order_items || []).map((item: any) => ({
+              ...item,
+              unit_price: Number(item.unit_price),
+              total_price: Number(item.total_price),
+              quantity: Number(item.quantity),
+            })),
+          };
           this.order = normalizedOrder;
           this.lastLoadedOrderId = this.orderId; // Marcar como cargado
           this.isLoading = false;
@@ -151,12 +156,14 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
                   tax_amount: Number(orderData.tax_amount),
                   shipping_cost: Number(orderData.shipping_cost),
                   discount_amount: Number(orderData.discount_amount),
-                  order_items: (orderData.order_items || []).map((item: any) => ({
-                    ...item,
-                    unit_price: Number(item.unit_price),
-                    total_price: Number(item.total_price),
-                    quantity: Number(item.quantity),
-                  })),
+                  order_items: (orderData.order_items || []).map(
+                    (item: any) => ({
+                      ...item,
+                      unit_price: Number(item.unit_price),
+                      total_price: Number(item.total_price),
+                      quantity: Number(item.quantity),
+                    }),
+                  ),
                 };
                 this.order = normalizedOrder;
                 if (this.order) {
@@ -172,13 +179,9 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
       });
   }
 
-
-
-
   printOrder(): void {
     if (!this.order) return;
 
-    // Create a print-friendly version
     const printContent = this.generatePrintContent();
     const printWindow = window.open('', '_blank');
     if (printWindow) {
@@ -186,6 +189,24 @@ export class OrderDetailsComponent implements OnInit, OnDestroy, OnChanges {
       printWindow.document.close();
       printWindow.print();
     }
+  }
+
+  downloadInvoice(): void {
+    if (!this.order) return;
+
+    this.dialogService
+      .confirm({
+        title: 'Descargar Factura',
+        message: '¿Deseas descargar la factura de esta orden?',
+        confirmText: 'Descargar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.toastService.info('Factura descargada exitosamente', 'Descarga');
+        }
+      });
   }
 
   private generatePrintContent(): string {

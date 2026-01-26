@@ -27,9 +27,11 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
   template: `
     <app-modal
       [isOpen]="isOpen"
-      size="lg"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
+      [size]="'lg'"
       title="Agregar Producto Pre-Bulk"
-      (close)="onClose()"
+      subtitle="Producto temporal solo para esta orden de compra"
     >
       <div class="space-y-4">
         <!-- Warning Message -->
@@ -190,6 +192,11 @@ export class PopPreBulkModalComponent {
   }
 
   onClose(): void {
+    this.resetForm();
+    this.close.emit();
+  }
+
+  onCancel(): void {
     this.resetForm();
     this.isOpenChange.emit(false);
     this.close.emit();

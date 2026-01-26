@@ -9,6 +9,7 @@ import { saveAuthState, clearAuthState } from '../persistence';
 export interface AuthState {
   user: any | null;
   user_settings: any | null;
+  store_settings: any | null;
   tokens: { access_token: string; refresh_token: string } | null;
   permissions: string[];
   roles: string[];
@@ -23,6 +24,7 @@ export interface AuthState {
 export const initialAuthState: AuthState = {
   user: null,
   user_settings: null,
+  store_settings: null,
   tokens: null,
   permissions: [],
   roles: [],
@@ -36,7 +38,7 @@ export const initialAuthState: AuthState = {
 export const authReducer = createReducer(
   initialAuthState,
 
-  on(AuthActions.login, (state) => ({
+  on(AuthActions.login, AuthActions.loginCustomer, (state) => ({
     ...state,
     loading: true,
     error: null,
@@ -44,11 +46,13 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.loginSuccess,
-    (state, { user, user_settings, tokens, permissions, roles }) => {
+    AuthActions.loginCustomerSuccess,
+    (state, { user, user_settings, store_settings, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
         user_settings,
+        store_settings,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -62,25 +66,44 @@ export const authReducer = createReducer(
     },
   ),
 
-  on(AuthActions.loginFailure, (state, { error }) => ({
-    ...state,
-    loading: false,
-    // error may already be normalized by effects, but ensure fallback to string
-    error:
-      typeof error === 'string'
-        ? error
-        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
-    is_authenticated: false,
-  })),
+  on(
+    AuthActions.loginFailure,
+    AuthActions.loginCustomerFailure,
+    (state, { error }) => ({
+      ...state,
+      loading: false,
+      // error may already be normalized by effects, but ensure fallback to string
+      error:
+        typeof error === 'string'
+          ? error
+          : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+      is_authenticated: false,
+    }),
+  ),
 
   on(AuthActions.logout, (state) => ({
     ...state,
     loading: true,
   })),
 
-  on(AuthActions.logoutSuccess, (state) => ({
-    ...initialAuthState,
-  })),
+  on(AuthActions.logoutSuccess, (state) => {
+    // Clear localStorage
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('vendix_user_environment');
+        localStorage.removeItem('vendix_logged_out_recently');
+        localStorage.removeItem('vendix_app_config');
+        localStorage.removeItem('auth_state');
+      }
+    } catch (error) {
+      console.error('[AuthReducer] Error clearing localStorage:', error);
+    }
+
+    return {
+      ...initialAuthState,
+      loading: false,
+    };
+  }),
 
   on(AuthActions.refreshToken, (state) => ({
     ...state,
@@ -137,6 +160,7 @@ export const authReducer = createReducer(
 
   on(AuthActions.clearAuthState, (state) => ({
     ...initialAuthState,
+    loading: false,
   })),
 
   on(AuthActions.setLoading, (state, { loading }) => ({
@@ -151,11 +175,12 @@ export const authReducer = createReducer(
 
   on(
     AuthActions.restoreAuthState,
-    (state, { user, user_settings, tokens, permissions, roles }) => {
+    (state, { user, user_settings, store_settings, tokens, permissions, roles }) => {
       const newState = {
         ...state,
         user,
         user_settings,
+        store_settings,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
@@ -257,6 +282,44 @@ export const authReducer = createReducer(
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
 
+  // Register Customer
+  on(AuthActions.registerCustomer, (state) => ({
+    ...state,
+    loading: true,
+    error: null,
+  })),
+
+  on(
+    AuthActions.registerCustomerSuccess,
+    (state, { user, user_settings, store_settings, tokens, permissions, roles }) => {
+      const newState = {
+        ...state,
+        user,
+        user_settings,
+        store_settings,
+        tokens,
+        permissions: permissions || [],
+        roles: roles || [],
+        loading: false,
+        error: null,
+        is_authenticated: true,
+      };
+      // Save to localStorage for persistence
+      saveAuthState(newState);
+      return newState;
+    },
+  ),
+
+  on(AuthActions.registerCustomerFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+    is_authenticated: false,
+  })),
+
   // Onboarding Actions
   on(AuthActions.checkOnboardingStatus, (state) => ({
     ...state,
@@ -296,20 +359,17 @@ export const authReducer = createReducer(
     loading: true,
   })),
 
-  on(
-    AuthActions.updateUserSettingsSuccess,
-    (state, { user_settings }) => {
-      const newState = {
-        ...state,
-        user_settings,
-        loading: false,
-        error: null,
-      };
-      // Save to localStorage to persist changes
-      saveAuthState(newState);
-      return newState;
-    },
-  ),
+  on(AuthActions.updateUserSettingsSuccess, (state, { user_settings }) => {
+    const newState = {
+      ...state,
+      user_settings,
+      loading: false,
+      error: null,
+    };
+    // Save to localStorage to persist changes
+    saveAuthState(newState);
+    return newState;
+  }),
 
   on(AuthActions.updateUserSettingsFailure, (state, { error }) => ({
     ...state,
@@ -319,4 +379,17 @@ export const authReducer = createReducer(
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
   })),
+
+  // Update Store Settings
+  on(AuthActions.updateStoreSettingsSuccess, (state, { store_settings }) => {
+    const newState = {
+      ...state,
+      store_settings,
+      loading: false,
+      error: null,
+    };
+    // Save to localStorage to persist changes
+    saveAuthState(newState);
+    return newState;
+  }),
 );

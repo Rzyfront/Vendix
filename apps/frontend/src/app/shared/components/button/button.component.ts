@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, HostBinding } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 export type ButtonVariant =
@@ -77,6 +77,11 @@ export class ButtonComponent {
   @Input() showTextWhileLoading = false;
   @Input() fullWidth = false;
   @Input() customClasses = '';
+
+  @HostBinding('class.w-full')
+  get isFullWidth(): boolean {
+    return this.fullWidth;
+  }
 
   @Output() clicked = new EventEmitter<Event>();
 

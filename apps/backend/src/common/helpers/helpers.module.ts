@@ -1,5 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { DomainGeneratorHelper } from './domain-generator.helper';
+import { S3PathHelper } from './s3-path.helper';
 
 /**
  * Helpers Module
@@ -10,7 +11,7 @@ import { DomainGeneratorHelper } from './domain-generator.helper';
  */
 @Global()
 @Module({
-  providers: [DomainGeneratorHelper],
-  exports: [DomainGeneratorHelper],
+  providers: [DomainGeneratorHelper, S3PathHelper],
+  exports: [DomainGeneratorHelper, S3PathHelper],
 })
-export class HelpersModule {}
+export class HelpersModule { }

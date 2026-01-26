@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
 
 @Injectable()
 export class StoresService {
@@ -65,40 +66,35 @@ export class StoresService {
       },
     });
 
-    const signedStore = {
-      ...store,
-      logo_url: await this.s3Service.signUrl((store as any).logo_url),
+    // Always create store_settings with defaults or provided settings
+    const settingsToCreate = settings && Object.keys(settings).length > 0
+      ? settings
+      : getDefaultStoreSettings();
+
+    await this.prisma.store_settings.create({
+      data: {
+        store_id: store.id,
+        settings: settingsToCreate,
+      },
+    });
+
+    // Refetch to include settings
+    const refetched = await this.prisma.stores.findUnique({
+      where: { id: store.id },
+      include: {
+        organizations: { select: { id: true, name: true, slug: true } },
+        addresses: true,
+        store_settings: true,
+        _count: {
+          select: { products: true, orders: true, store_users: true },
+        },
+      },
+    });
+
+    return {
+      ...refetched,
+      logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
     };
-
-    // Create store settings if provided
-    if (settings && Object.keys(settings).length > 0) {
-      await this.prisma.store_settings.create({
-        data: {
-          store_id: store.id,
-          settings,
-        },
-      });
-
-      // Refetch to include settings
-      const refetched = await this.prisma.stores.findUnique({
-        where: { id: store.id },
-        include: {
-          organizations: { select: { id: true, name: true, slug: true } },
-          addresses: true,
-          store_settings: true,
-          _count: {
-            select: { products: true, orders: true, store_users: true },
-          },
-        },
-      });
-
-      return {
-        ...refetched,
-        logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
-      };
-    }
-
-    return signedStore;
   }
 
   async findAll(query: StoreQueryDto) {
@@ -196,6 +192,48 @@ export class StoresService {
       data: { ...storeData, updated_at: new Date() },
       include: { organizations: true, addresses: true, store_settings: true },
     });
+
+    // Sincronizar nombre en dominios y organización si el nombre cambió
+    if (storeData.name) {
+      try {
+        const organization_id = updated.organization_id;
+
+        // Actualizar TODOS los dominios de la tienda
+        const domains = await this.prisma.domain_settings.findMany({
+          where: { store_id: id }
+        });
+
+        for (const domain of domains) {
+          const config = (domain.config as any) || {};
+          const branding = config.branding || {};
+
+          await this.prisma.domain_settings.update({
+            where: { id: domain.id },
+            data: {
+              config: {
+                ...config,
+                branding: {
+                  ...branding,
+                  name: storeData.name
+                }
+              }
+            }
+          });
+        }
+
+        // Si es la tienda principal (o simplemente queremos consistencia), 
+        // actualizar el nombre de la organización también
+        if (organization_id) {
+          await this.prisma.organizations.update({
+            where: { id: organization_id },
+            data: { name: storeData.name }
+          });
+        }
+      } catch (error) {
+        // No fallar el update de la tienda si falla la sincronización
+        console.error('Failed to sync name across entities:', error);
+      }
+    }
 
     return {
       ...updated,

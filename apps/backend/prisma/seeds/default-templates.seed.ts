@@ -68,7 +68,8 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           ecommerce_enabled: false,
         },
       },
-      description: 'Configuración por defecto para dominios de tienda administrativa',
+      description:
+        'Configuración por defecto para dominios de tienda administrativa',
       is_system: true,
     },
     {
@@ -129,13 +130,14 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           social_links: true,
         },
       },
-      description: 'Configuración por defecto para landing pages de organización',
+      description:
+        'Configuración por defecto para landing pages de organización',
       is_system: true,
     },
 
     // ===== STORE SETTINGS TEMPLATES =====
     {
-      template_name: 'store_settings_retail',
+      template_name: 'store_default_settings',
       configuration_type: 'store_settings',
       template_data: {
         general: {
@@ -148,11 +150,101 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           low_stock_threshold: 10,
           out_of_stock_action: 'hide',
           track_inventory: true,
+          allow_negative_stock: false,
         },
         checkout: {
-          require_customer: true,
+          require_customer_data: true,
+          allow_guest_checkout: false,
           allow_partial_payments: false,
-          payment_terms_days: 0,
+          require_payment_confirmation: true,
+        },
+        shipping: {
+          enabled: true,
+          free_shipping_threshold: 0,
+          allow_pickup: true,
+          default_shipping_method: 'standard',
+          shipping_zones: [],
+          shipping_types: {
+            standard: {
+              enabled: true,
+              carriers: [
+                {
+                  id: 'correos',
+                  name: 'Correos de colombia',
+                  type: 'correos',
+                  enabled: true,
+                  config: {
+                    tracking_enabled: true,
+                    estimated_days_min: 2,
+                    estimated_days_max: 5,
+                    requires_signature: false,
+                    requires_insurance: false,
+                    max_weight: null,
+                    max_dimensions: null,
+                  },
+                },
+              ],
+            },
+            express: {
+              enabled: false,
+              carriers: [
+                {
+                  id: 'envia',
+                  name: 'Envia',
+                  type: 'correos',
+                  enabled: true,
+                  config: {
+                    tracking_enabled: true,
+                    estimated_days_min: 2,
+                    estimated_days_max: 9,
+                    requires_signature: true,
+                    requires_insurance: true,
+                    max_weight: 1000,
+                    max_dimensions: 1000,
+                  },
+                },
+              ],
+            },
+            local: {
+              enabled: false,
+              allow_manual: false,
+              delivery_providers: [
+                {
+                  id: 'deliveri',
+                  name: 'Deliveri',
+                  type: 'deliveri',
+                  enabled: false,
+                  config: {
+                    coverage_radius: 50,
+                    estimated_minutes: 30,
+                    tracking_enabled: true,
+                  },
+                },
+              ],
+            },
+          },
+        },
+        notifications: {
+          low_stock_alerts: true,
+          out_of_stock_alerts: true,
+          new_online_order: true,
+          new_customers_orders_alerts_email: true,
+        },
+        pos: {
+          allow_anonymous_sales: false,
+          anonymous_sales_as_default: false,
+          business_hours: {
+            monday: { open: '07:00', close: '20:00' },
+            tuesday: { open: '07:00', close: '20:00' },
+            wednesday: { open: '07:00', close: '20:00' },
+            thursday: { open: '07:00', close: '20:00' },
+            friday: { open: '07:00', close: '20:00' },
+            saturday: { open: '10:00', close: '20:00' },
+            sunday: { open: '10:00', close: '20:00' },
+          },
+          offline_mode_enabled: false,
+          require_cash_drawer_open: false,
+          auto_print_receipt: true,
         },
         receipts: {
           print_receipt: true,
@@ -164,50 +256,29 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
       description: 'Configuración por defecto para tiendas minoristas',
       is_system: true,
     },
-    {
-      template_name: 'store_settings_restaurant',
-      configuration_type: 'store_settings',
-      template_data: {
-        general: {
-          timezone: 'America/Bogota',
-          currency: 'USD',
-          language: 'es',
-          tax_included: false,
-        },
-        inventory: {
-          low_stock_threshold: 20,
-          out_of_stock_action: 'show',
-          track_inventory: true,
-        },
-        checkout: {
-          require_customer: false,
-          allow_partial_payments: true,
-          payment_terms_days: 0,
-          table_service: true,
-        },
-        receipts: {
-          print_receipt: true,
-          email_receipt: false,
-          receipt_header: 'Restaurante',
-          receipt_footer: '¡Buen provecho!',
-        },
-      },
-      description: 'Configuración por defecto para restaurantes',
-      is_system: true,
-    },
-
     // ===== E-COMMERCE TEMPLATES =====
     {
-      template_name: 'ecommerce_basic',
+      template_name: 'ecommerce_default_settings',
       configuration_type: 'ecommerce',
       template_data: {
         app: 'STORE_ECOMMERCE',
+        inicio: {
+          titulo: '',
+          parrafo: '',
+          logo_url: null,
+          colores: {
+            primary_color: '#3B82F6',
+            secondary_color: '#10B981',
+            accent_color: '#F59E0B',
+          },
+        },
         general: {
           currency: 'COP',
           locale: 'es-CO',
           timezone: 'America/Bogota',
         },
         slider: {
+          enable: false,
           photos: [
             { url: null, title: '', caption: '' },
             { url: null, title: '', caption: '' },
@@ -217,82 +288,34 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           ],
         },
         catalog: {
-          products_per_page: 12,
+          products_per_page: 16,
           show_out_of_stock: false,
           allow_reviews: true,
           show_variants: true,
+          show_related_products: false,
+          enable_filters: false,
         },
         cart: {
           allow_guest_checkout: true,
           cart_expiration_hours: 24,
           max_quantity_per_item: 10,
+          save_for_later: false,
         },
         checkout: {
           require_registration: false,
           guest_email_required: true,
           create_account_after_order: true,
           terms_required: false,
+          guest_newsletter_opt_in: false,
         },
         shipping: {
           free_shipping_threshold: null,
           calculate_tax_before_shipping: true,
-        },
-      },
-      description: 'Configuración básica de e-commerce',
-      is_system: true,
-    },
-    {
-      template_name: 'ecommerce_advanced',
-      configuration_type: 'ecommerce',
-      template_data: {
-        app: 'STORE_ECOMMERCE',
-        general: {
-          currency: 'COP',
-          locale: 'es-CO',
-          timezone: 'America/Bogota',
-        },
-        slider: {
-          photos: [
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-          ],
-        },
-        catalog: {
-          products_per_page: 24,
-          show_out_of_stock: true,
-          allow_reviews: true,
-          show_variants: true,
-          show_related_products: true,
-          enable_filters: true,
-        },
-        cart: {
-          allow_guest_checkout: true,
-          cart_expiration_hours: 48,
-          max_quantity_per_item: 99,
-          save_for_later: true,
-        },
-        checkout: {
-          require_registration: false,
-          guest_email_required: true,
-          create_account_after_order: true,
-          terms_required: true,
-          guest_newsletter_opt_in: true,
-        },
-        shipping: {
-          free_shipping_threshold: 100,
-          calculate_tax_before_shipping: true,
           multiple_shipping_addresses: false,
         },
-        wishlist: {
-          enabled: true,
-          public_wishlist: false,
-          share_wishlist: true,
-        },
       },
-      description: 'Configuración avanzada de e-commerce',
+      description:
+        'Configuración por defecto de e-commerce con sección de inicio',
       is_system: true,
     },
 
@@ -374,7 +397,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           {
             name: 'Nacional',
             countries: ['CO', 'US', 'CA'],
-            rate: 10.00,
+            rate: 10.0,
             free_threshold: 100,
           },
         ],
@@ -392,10 +415,10 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             name: 'Nacional',
             countries: ['CO'],
             tiers: [
-              { min_weight: 0, max_weight: 1, rate: 5.00 },
-              { min_weight: 1, max_weight: 5, rate: 10.00 },
-              { min_weight: 5, max_weight: 10, rate: 15.00 },
-              { min_weight: 10, max_weight: null, rate: 25.00 },
+              { min_weight: 0, max_weight: 1, rate: 5.0 },
+              { min_weight: 1, max_weight: 5, rate: 10.0 },
+              { min_weight: 5, max_weight: 10, rate: 15.0 },
+              { min_weight: 10, max_weight: null, rate: 25.0 },
             ],
           },
         ],
@@ -430,7 +453,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           },
           {
             name: 'IVA Exento',
-            rate: 0.00,
+            rate: 0.0,
           },
         ],
       },
@@ -508,6 +531,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             billing: true,
             ecommerce: true,
             orders: true,
+            expenses: true,
           },
           STORE_ADMIN: {
             dashboard: true,
@@ -532,20 +556,26 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             analytics_sales: true,
             analytics_traffic: true,
             analytics_performance: true,
+            expenses: true,
+            expenses_overview: true,
+            expenses_all: true,
+            expenses_categories: true,
+            expenses_reports: true,
             settings: true,
             settings_general: true,
             settings_payments: true,
             settings_appearance: true,
             settings_security: true,
             settings_domains: true,
-          }
+          },
         },
         preferences: {
           language: 'es',
           theme: 'default',
         },
       },
-      description: 'Default user settings for organization administrators - all 11 modules enabled',
+      description:
+        'Default user settings for organization administrators - all 11 modules enabled',
       is_system: true,
     },
     {
@@ -577,12 +607,19 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             analytics_sales: true,
             analytics_traffic: true,
             analytics_performance: true,
+            expenses: true,
+            expenses_overview: true,
+            expenses_all: true,
+            expenses_create: true,
+            expenses_categories: true,
+            expenses_reports: true,
             settings: true,
             settings_general: true,
             settings_payments: true,
             settings_appearance: true,
             settings_security: true,
             settings_domains: true,
+            settings_shipping: true,
           },
         },
         preferences: {
@@ -590,7 +627,8 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           theme: 'default',
         },
       },
-      description: 'Default user settings for store administrators - all 30+ modules including submodules enabled',
+      description:
+        'Default user settings for store administrators - all 30+ modules including submodules enabled',
       is_system: true,
     },
     {
@@ -629,7 +667,8 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           theme: 'default',
         },
       },
-      description: 'Default user settings for landing page customers - no panel UI needed',
+      description:
+        'Default user settings for landing page customers - no panel UI needed',
       is_system: true,
     },
 
@@ -709,7 +748,9 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
     }
   }
 
-  console.log(`✅ Default templates seeded: ${created} created, ${updated} updated`);
+  console.log(
+    `✅ Default templates seeded: ${created} created, ${updated} updated`,
+  );
 
   return { created, updated };
 }

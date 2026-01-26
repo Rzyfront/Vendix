@@ -5,6 +5,8 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  ViewChild,
+  ElementRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -20,7 +22,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
     <div
       *ngIf="isOpen"
       class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      (click)="onBackdropClick($event)"
+      (click)="onWrapperClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
       <div
@@ -31,13 +33,13 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
       <!-- Modal container con animación mejorada -->
       <div
+        #modalContainer
         class="relative transform transition-all duration-300 ease-out"
         [class]="modalClasses"
         [class.scale-100]="isOpen"
         [class.scale-95]="!isOpen"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
-        (click)="$event.stopPropagation()"
       >
         <!-- Modal content con diseño mejorado -->
         <div
@@ -46,22 +48,24 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
           <!-- Header con gradiente sutil -->
           <div
             *ngIf="hasHeader"
-            class="p-2 md:px-6 md:py-5 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
+            class="px-4 py-3 md:px-5 md:py-4 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
           >
-            <div class="flex-1 min-w-0">
-              <h3
-                *ngIf="title"
-                class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
-              >
-                {{ title }}
-              </h3>
-              <p
-                *ngIf="subtitle"
-                class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-1 truncate"
-              >
-                {{ subtitle }}
-              </p>
+            <div class="flex items-center gap-3 overflow-hidden flex-1">
               <ng-content select="[slot=header]"></ng-content>
+              <div class="min-w-0 flex-1">
+                <h3
+                  *ngIf="title"
+                  class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
+                >
+                  {{ title }}
+                </h3>
+                <p
+                  *ngIf="subtitle"
+                  class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-0.5 truncate"
+                >
+                  {{ subtitle }}
+                </p>
+              </div>
             </div>
 
             <!-- Close button mejorado -->
@@ -69,6 +73,10 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
               *ngIf="showCloseButton"
               type="button"
               class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+              [class.absolute]="overlayCloseButton"
+              [class.top-4]="overlayCloseButton"
+              [class.right-4]="overlayCloseButton"
+              [class.z-10]="overlayCloseButton"
               (click)="close()"
               aria-label="Cerrar modal"
             >
@@ -90,7 +98,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
           <!-- Body con scroll mejorado y padding consistente -->
           <div
-            class="p-2 md:px-6 md:py-5 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
+            class="px-4 py-3 md:px-5 md:py-4 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
             style="scroll-behavior: smooth;"
           >
             <ng-content></ng-content>
@@ -99,7 +107,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
           <!-- Footer con diseño mejorado -->
           <div
             *ngIf="hasFooter"
-            class="p-2 md:px-6 md:py-4 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
+            class="px-4 py-3 md:px-5 md:py-3 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
           >
             <ng-content select="[slot=footer]"></ng-content>
           </div>
@@ -110,12 +118,20 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 })
 export class ModalComponent implements OnInit, OnDestroy {
   private _isOpen = false;
+  private _isInternalChange = false;
+
+  @ViewChild('modalContainer') modalContainer!: ElementRef;
 
   @Input()
   set isOpen(value: boolean) {
     if (this._isOpen !== value) {
       this._isOpen = value;
-      this.isOpenChange.emit(value);
+      // Only emit isOpenChange if this is not an internal change (from X, Escape, backdrop)
+      if (!this._isInternalChange) {
+        this.isOpenChange.emit(value);
+      }
+      this._isInternalChange = false;
+
       if (value) {
         this.opened.emit();
       } else {
@@ -142,11 +158,13 @@ export class ModalComponent implements OnInit, OnDestroy {
   @Input() closeOnBackdrop = true;
   @Input() closeOnEscape = true;
   @Input() showCloseButton = true;
+  @Input() overlayCloseButton = false;
   @Input() customClasses = '';
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() opened = new EventEmitter<void>();
+  @Output() cancel = new EventEmitter<void>();
 
   private escapeListener?: (event: KeyboardEvent) => void;
 
@@ -178,8 +196,8 @@ export class ModalComponent implements OnInit, OnDestroy {
     const sizeClasses = {
       sm: ['max-w-sm'],
       md: ['max-w-2xl'],
-      lg: ['max-w-7xl', 'w-full', 'h-full', 'max-h-[90vh]'],
-      xl: ['max-w-[98vw]', 'w-full', 'h-full', 'max-h-[90vh]'],
+      lg: ['max-w-5xl', 'w-full', 'max-h-[90vh]'],
+      xl: ['max-w-[95vw]', 'w-full', 'max-h-[90vh]'],
     };
 
     const classes = [...baseClasses, ...sizeClasses[this.size]];
@@ -200,16 +218,26 @@ export class ModalComponent implements OnInit, OnDestroy {
   }
 
   open(): void {
+    this._isInternalChange = true;
     this.isOpen = true;
   }
 
   close(): void {
+    this._isInternalChange = true;
     this.isOpen = false;
+    // Also emit the cancel event for parent components to handle
+    this.cancel.emit();
   }
 
-  onBackdropClick(event: Event): void {
-    if (this.closeOnBackdrop && event.target === event.currentTarget) {
-      this.close();
+  onWrapperClick(event: MouseEvent): void {
+    if (!this.closeOnBackdrop) return;
+
+    // Check if the click target is the modal container or one of its descendants
+    if (this.modalContainer && this.modalContainer.nativeElement.contains(event.target)) {
+      return; // Click inside modal, ignore
     }
+
+    // Click outside modal (wrapper or backdrop overlay)
+    this.close();
   }
 }

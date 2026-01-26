@@ -1,7 +1,8 @@
 import { Injectable, Inject, DOCUMENT } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
-import { AppConfig } from './app-config.service'; // Import AppConfig
+import { AppConfig } from './app-config.service';
+import { ColorUtils } from '../utils/color.utils';
 
 @Injectable({
   providedIn: 'root',
@@ -12,8 +13,127 @@ export class ThemeService {
 
   private loadedFonts = new Set<string>();
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
+  private currentBranding: BrandingConfig | null = null;
+  private activeUserTheme: string = 'default';
 
   constructor(@Inject(DOCUMENT) private document: Document) { }
+
+  /**
+   * Aplica un ajuste preestablecido de tema (preset)
+   */
+  /**
+   * Aplica un tema basado en preferencia de usuario (default, aura, monocromo)
+   * Usa el branding actual como base para calcular los colores.
+   */
+  async applyUserTheme(theme: 'default' | 'aura' | 'monocromo' | string): Promise<void> {
+    this.activeUserTheme = theme;
+    const root = this.document.documentElement;
+    const body = this.document.body;
+
+    // Obtener colores base del branding actual (o defaults si falta)
+    const basePrimary = this.currentBranding?.colors?.primary || 
+                        getComputedStyle(root).getPropertyValue('--color-primary').trim() || 
+                        '#3b82f6';
+    
+    const baseSurface = this.currentBranding?.colors?.surface || 
+                        getComputedStyle(root).getPropertyValue('--color-surface').trim() || 
+                        '#ffffff';
+
+    const baseBackground = this.currentBranding?.colors?.background || 
+                           getComputedStyle(root).getPropertyValue('--color-background').trim() || 
+                           '#f4f4f4';
+
+    // Limpiar estilos previos del body (gradientes, etc) que ya no se piden
+    body.style.removeProperty('background-image');
+    body.style.removeProperty('background-attachment');
+    this.resetThemeOverrides();
+
+    // Restaurar base antes de aplicar overrides
+    if (!this.currentBranding) {
+         root.style.setProperty('--color-primary', basePrimary);
+         root.style.setProperty('--color-surface', baseSurface);
+         root.style.setProperty('--color-background', baseBackground);
+    } else if (this.currentBranding.colors) {
+         this.setCssVariables({
+             '--color-primary': this.currentBranding.colors.primary,
+             '--color-secondary': this.currentBranding.colors.secondary,
+             '--color-surface': this.currentBranding.colors.surface,
+             '--color-background': this.currentBranding.colors.background,
+         });
+    }
+
+    let overrides: { [key: string]: string | undefined } = {};
+
+    switch (theme) {
+      case 'aura':
+        // Aura: Recalcular --color-surface
+        // 90% color original del surface y 10% del primary_color
+        // mixColors(color1, color2, weight) -> weight es peso de color2
+        // color1: Primary, color2: BaseSurface. Weight: 0.90 (90% BaseSurface)
+        const auraSurface = ColorUtils.mixColors(basePrimary, baseSurface, 0.90);
+        
+        overrides = {
+          '--color-surface': auraSurface
+          // Background se queda como el original (no transparente)
+        };
+        break;
+
+      case 'monocromo':
+        // Monocromo: Relación de color respecto al primary
+        // Surface más claro (98% blanco/base), Background un poco más oscurito (94% blanco/base)
+        // Usamos baseSurface/baseBackground como referencia de "Blanco" o lo forzamos a blanco?
+        // El requerimiento dice: "parecida a la relación actual... surface es mas claro y background mas oscurito"
+        // Asumimos mezcla con blanco para garantizar limpieza, igual que la implementación previa aprobada.
+        
+        const monoSurface = ColorUtils.mixColors(basePrimary, '#FFFFFF', 0.98); 
+        const monoBackground = ColorUtils.mixColors(basePrimary, '#FFFFFF', 0.94);
+
+        overrides = {
+          '--color-background': monoBackground,
+          '--color-surface': monoSurface
+        };
+        break;
+
+      case 'default':
+      default:
+        // Default: Se queda con la configuración actual (restaurada arriba)
+        break;
+    }
+
+    if (Object.keys(overrides).length > 0) {
+      this.setCssVariables(overrides);
+    }
+
+    root.setAttribute('data-theme-preset', theme);
+  }
+
+  /**
+   * Resetea solo los overrides de temas, permitiendo que el branding base o CSS global vuelva a actuar.
+   */
+  private resetThemeOverrides(): void {
+    const root = this.document.documentElement;
+    root.removeAttribute('data-theme-preset');
+
+    // We need to remove the specific variables we set
+    const variablesToRemove = [
+      '--color-primary', // Legacy support
+      '--color-secondary', // Legacy support
+      '--color-accent', // Legacy support
+      '--color-ring', // Legacy support
+      '--color-primary-light', // Legacy support
+      '--color-background', // New dynamic override
+      '--color-surface' // New dynamic override
+    ];
+
+    variablesToRemove.forEach(varName => {
+      root.style.removeProperty(varName);
+    });
+
+    // If there was branding applied, re-apply it from current subject
+    const currentTheme = this.currentThemeSubject.value;
+    // Note: currentTheme might be null if only branding was applied via applyBranding
+    // In this codebase, branding seems to be the main way now.
+  }
 
   /**
    * Aplica la configuración completa de la app (theme, branding, seo)
@@ -62,6 +182,7 @@ export class ThemeService {
    * Aplica la configuración de branding, sobreescribiendo los valores por defecto del CSS.
    */
   async applyBranding(brandingConfig: BrandingConfig): Promise<void> {
+    this.currentBranding = brandingConfig;
     if (brandingConfig.colors) {
       const colorStyles: { [key: string]: string | undefined } = {
         '--color-primary': brandingConfig.colors.primary,
@@ -97,6 +218,11 @@ export class ThemeService {
     if (brandingConfig.favicon) {
       this.updateFavicon(brandingConfig.favicon);
     }
+
+    // Re-aplicar el tema del usuario (default, aura, etc.) sobre el nuevo branding cargado.
+    // Esto es crucial para solucionar condiciones de carrera donde applyBranding sobreescribe 
+    // las modificaciones de applyUserTheme (como transparency en Aura).
+    await this.applyUserTheme(this.activeUserTheme);
   }
 
   /**

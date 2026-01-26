@@ -8,6 +8,8 @@ import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
+import { WelcomeEmailOptions } from '../interfaces/branding.interface';
+import { DomainConfigService } from '../../common/config/domain.config';
 
 @Injectable()
 export class ConsoleProvider implements EmailProvider {
@@ -53,14 +55,14 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 VERIFICATION LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/verify-email?token=${token}`,
+      `🔗 VERIFICATION LINK: ${EmailTemplates.BASE_URL}/auth/verify-email?token=${token}`,
     );
 
     // Log del vlink para debugging
     if (organizationSlug) {
       this.logger.log(`🏢 ORGANIZATION SLUG (vLink): ${organizationSlug}`);
       this.logger.log(
-        `🌐 LOGIN URL: https://${organizationSlug}.vendix.online`,
+        `🌐 LOGIN URL: https://${organizationSlug}.${DomainConfigService.getBaseDomain()}`,
       );
     } else {
       this.logger.log(`⚠️ NO ORGANIZATION SLUG PROVIDED - Using default URL`);
@@ -87,22 +89,46 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 PASSWORD RESET LINK: ${process.env.FRONTEND_URL || 'http://localhost:4200'}/auth/reset-owner-password?token=${token}`,
+      `🔗 PASSWORD RESET LINK: ${EmailTemplates.BASE_URL}/auth/reset-owner-password?token=${token}`,
     );
 
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 
-  async sendWelcomeEmail(to: string, username: string): Promise<EmailResult> {
+  async sendWelcomeEmail(
+    to: string,
+    username: string,
+    options?: WelcomeEmailOptions,
+  ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
-      companyName: 'Vendix',
+      companyName: options?.organizationName || 'Vendix',
+      storeName: options?.storeName,
+      organizationName: options?.organizationName,
+      branding: options?.branding,
+      userType: options?.userType || 'owner',
+      vlink: options?.organizationSlug,
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
     };
 
     const template = EmailTemplates.getWelcomeTemplate(templateData);
+
+    // Log adicional para debugging
+    if (options?.userType) {
+      this.logger.log(`👤 USER TYPE: ${options.userType}`);
+    }
+    if (options?.storeName) {
+      this.logger.log(`🏪 STORE: ${options.storeName}`);
+    }
+    if (options?.branding?.logo_url) {
+      this.logger.log(`🖼️ LOGO: ${options.branding.logo_url}`);
+    }
+    if (options?.branding?.primary_color) {
+      this.logger.log(`🎨 PRIMARY COLOR: ${options.branding.primary_color}`);
+    }
+
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 

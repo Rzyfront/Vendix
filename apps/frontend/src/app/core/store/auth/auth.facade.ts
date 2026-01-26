@@ -83,6 +83,34 @@ export class AuthFacade {
   readonly userStoreSlug$ = this.store.select(
     AuthSelectors.selectUserStoreSlug,
   );
+  readonly userStoreType$ = this.store.select(
+    AuthSelectors.selectUserStoreType,
+  );
+
+  // Store settings observables
+  readonly storeSettings$ = this.store.select(AuthSelectors.selectStoreSettings);
+
+  // Panel UI observables
+  readonly panelUiConfig$ = this.store.select(
+    AuthSelectors.selectPanelUiConfig,
+  );
+  readonly selectedAppType$ = this.store.select(
+    AuthSelectors.selectSelectedAppType,
+  );
+  readonly currentAppPanelUi$ = this.store.select(
+    AuthSelectors.selectCurrentAppPanelUi,
+  );
+  readonly visibleModules$ = this.store.select(
+    AuthSelectors.selectVisibleModules,
+  );
+
+  // Domain settings observables
+  readonly userDomainSettings$ = this.store.select(
+    AuthSelectors.selectUserDomainSettings,
+  );
+  readonly userDomainHostname$ = this.store.select(
+    AuthSelectors.selectUserDomainHostname,
+  );
 
   // Panel UI observables
   readonly panelUiConfig$ = this.store.select(AuthSelectors.selectPanelUiConfig);
@@ -110,8 +138,27 @@ export class AuthFacade {
     );
   }
 
-  logout(): void {
-    this.store.dispatch(AuthActions.logout());
+  loginCustomer(email: string, password: string, store_id: number): void {
+    this.store.dispatch(
+      AuthActions.loginCustomer({ email, password, store_id }),
+    );
+  }
+
+  registerCustomer(data: {
+    email: string;
+    password?: string;
+    first_name: string;
+    last_name: string;
+    store_id: number;
+    phone?: string;
+    document_type?: string;
+    document_number?: string;
+  }): void {
+    this.store.dispatch(AuthActions.registerCustomer(data));
+  }
+
+  logout(options?: { redirect?: boolean }): void {
+    this.store.dispatch(AuthActions.logout({ redirect: options?.redirect ?? true }));
   }
 
   refreshToken(refresh_token: string): void {
@@ -346,7 +393,22 @@ export class AuthFacade {
   }
 
   updateUserSettings(userSettings: any): void {
-    this.store.dispatch(AuthActions.updateUserSettings({ user_settings: userSettings }));
+    this.store.dispatch(
+      AuthActions.updateUserSettings({ user_settings: userSettings }),
+    );
+  }
+
+  // Store settings methods
+  updateStoreSettings(storeSettings: any): void {
+    this.store.dispatch(
+      AuthActions.updateStoreSettingsSuccess({ store_settings: storeSettings }),
+    );
+  }
+
+  getStoreSettings(): any {
+    let result: any = null;
+    this.storeSettings$.pipe(take(1)).subscribe((settings) => (result = settings));
+    return result;
   }
 
   getUserId(): number | null {

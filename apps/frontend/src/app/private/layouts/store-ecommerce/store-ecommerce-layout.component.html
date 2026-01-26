@@ -4,22 +4,20 @@
     <div class="header-container">
       <div class="header-left">
         <!-- Logo -->
-        <a routerLink="/products" class="logo">
+        <a routerLink="/" class="logo">
           @if (store_logo) {
-            <img [src]="store_logo" [alt]="store_name" class="logo-img" />
+          <img [src]="store_logo" [alt]="store_name" class="logo-img" />
           } @else {
+          <div class="logo-fallback">
+            <app-icon name="shopping-bag" [size]="24" class="logo-icon"></app-icon>
             <span class="logo-text">{{ store_name }}</span>
+          </div>
           }
         </a>
 
         <!-- Navigation -->
-        <nav class="main-nav" [class.open]="show_mobile_menu">
-          <a
-            routerLink="/"
-            routerLinkActive="active"
-            [routerLinkActiveOptions]="{ exact: true }"
-            >Inicio</a
-          >
+        <nav class="main-nav desktop-only">
+          <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
           <a routerLink="/products" routerLinkActive="active">Productos</a>
           <a routerLink="/new" routerLinkActive="active">Novedades</a>
           <a routerLink="/sale" routerLinkActive="active">Ofertas</a>
@@ -31,61 +29,153 @@
 
       <!-- Actions -->
       <div class="header-actions">
-        <!-- Wishlist -->
-        <button class="action-btn" (click)="goToWishlist()" title="Favoritos">
-          <i class="pi pi-heart"></i>
-        </button>
-
-        <!-- Cart -->
-        <button class="action-btn cart-btn" (click)="goToCart()">
-          <i class="pi pi-shopping-cart"></i>
-          @if (cart_badge$ | async; as badge) {
-            @if (badge.show) {
-              <span class="cart-badge">{{ badge.count }}</span>
-            }
-          }
-        </button>
-
-        <!-- User Menu -->
-        <div class="user-menu-container">
-          <button class="user-btn" (click)="toggleUserMenu()">
-            <i class="pi pi-user"></i>
-            @if (is_authenticated$ | async) {
-              <span class="user-name">{{ user_name$ | async }}</span>
-            }
-            <i class="pi pi-chevron-down"></i>
+        <!-- Icons visible only if authenticated (Desktop Only) -->
+        <div class="desktop-actions">
+          @if (is_authenticated$ | async) {
+          <!-- Wishlist -->
+          <button class="action-btn" (click)="goToWishlist()" title="Favoritos">
+            <app-icon name="heart" [size]="20"></app-icon>
           </button>
-          @if (show_user_menu) {
-            <div class="user-dropdown">
-              @if (is_authenticated$ | async) {
-                <a (click)="goToAccount()">
-                  <i class="pi pi-user"></i> Ver Perfil
-                </a>
-                <a (click)="goToWishlist()">
-                  <i class="pi pi-heart"></i> Favoritos
-                </a>
-                <a (click)="goToOrders()">
-                  <i class="pi pi-list"></i> Ordenes
-                </a>
-                <hr />
-                <a (click)="logout()" class="logout-link">
-                  <i class="pi pi-sign-out"></i> Cerrar Sesión
-                </a>
-              } @else {
-                <a (click)="login()">
-                  <i class="pi pi-sign-in"></i> Iniciar Sesión
-                </a>
-                <a (click)="register()">
-                  <i class="pi pi-user-plus"></i> Registrarse
-                </a>
+
+          <!-- User Profile Icon -->
+          <button class="action-btn" (click)="goToAccount()" title="Mi Perfil">
+            <app-icon name="user-circle" [size]="20"></app-icon>
+          </button>
+          }
+        </div>
+
+        <!-- Cart Dropdown Container -->
+        <div class="cart-container" (mouseenter)="onCartEnter()" (mouseleave)="onCartLeave()">
+          <button class="action-btn cart-btn" [class.shake-animation]="is_animating" (click)="goToCart()"
+            title="Carrito">
+            <app-icon name="shopping-cart" [size]="20"></app-icon>
+            @if (cart_badge$ | async; as badge) {
+            @if (badge.show) {
+            <span class="cart-badge">{{ badge.count }}</span>
+            }
+            }
+          </button>
+
+          <!-- Added to Cart Tooltip -->
+          @if (show_added_tooltip && !show_cart_dropdown) {
+          <div class="cart-tooltip">
+            <div class="tooltip-arrow"></div>
+            <div class="tooltip-content">
+              <app-icon name="check-circle" [size]="16" class="text-success"></app-icon>
+              <span>Se agregó nuevo producto al carrito</span>
+            </div>
+          </div>
+          }
+
+          <!-- Dropdown -->
+          @if (show_cart_dropdown) {
+          <div class="cart-dropdown">
+            <div class="cart-header">
+              <div class="header-title" style="display: flex; align-items: center; gap: 0.5rem;">
+                <app-icon name="shopping-cart" [size]="20" class="text-primary"></app-icon>
+                <h3>Mi Carrito</h3>
+              </div>
+              @if (cart$ | async; as cart) {
+              <span>{{ cart.item_count }} items</span>
               }
             </div>
+
+            <div class="cart-items">
+              @if (cart$ | async; as cart) {
+              @if (cart.items.length > 0) {
+              @for (item of cart.items; track item.id) {
+              <div class="cart-item">
+                <div class="item-image">
+                  @if (item.product.image_url) {
+                  <img [src]="item.product.image_url" [alt]="item.product.name">
+                  } @else {
+                  <div class="placeholder-img">
+                    <app-icon name="image" [size]="16"></app-icon>
+                  </div>
+                  }
+                </div>
+                <div class="item-details">
+                  <p class="item-name">{{ item.product.name }}</p>
+                  <p class="item-price">{{ item.unit_price | currency }}</p>
+
+                  <div class="item-controls">
+                    <app-quantity-control [value]="item.quantity" [min]="1" [size]="'sm'"
+                      (valueChange)="updateCartQuantity(item, $event)"></app-quantity-control>
+                    <button class="remove-btn" (click)="$event.stopPropagation(); removeCartItem(item)">
+                      <app-icon name="trash-2" [size]="14"></app-icon>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              }
+              } @else {
+              <div class="empty-cart">
+                <app-icon name="shopping-cart" [size]="48" class="text-gray-300"></app-icon>
+                <p>Tu carrito está vacío</p>
+              </div>
+              }
+              }
+            </div>
+
+            @if (cart$ | async; as cart) {
+            @if (cart.items.length > 0) {
+            <div class="cart-footer">
+              <div class="cart-total">
+                <span>Total:</span>
+                <span class="total-amount">{{ cart.subtotal | currency }}</span>
+              </div>
+              <div class="cart-actions">
+                <button class="btn-clear" (click)="clearCart()">Vaciar</button>
+                <button class="btn-checkout" (click)="goToCart()">Ver Carrito</button>
+              </div>
+            </div>
+            }
+            }
+          </div>
+          }
+        </div>
+
+        <!-- User Menu (Guest or Authenticated Dropdown) - DESKTOP ONLY -->
+        <div class="user-menu-container desktop-only">
+          <button class="user-btn" (click)="toggleUserMenu()">
+            @if (is_authenticated$ | async) {
+            <span class="user-name">{{ user_name$ | async }}</span>
+            <app-icon name="chevron-down" [size]="12" class="chevron-icon"></app-icon>
+            } @else {
+            <app-icon name="user" [size]="20"></app-icon>
+            }
+          </button>
+          @if (show_user_menu) {
+          <div class="user-dropdown">
+            @if (is_authenticated$ | async) {
+            <a (click)="goToAccount()">
+              <app-icon name="user" [size]="16"></app-icon> Ver Perfil
+            </a>
+            <a (click)="goToWishlist()">
+              <app-icon name="heart" [size]="16"></app-icon> Favoritos
+            </a>
+            <a (click)="goToOrders()">
+              <app-icon name="list" [size]="16"></app-icon> Ordenes
+            </a>
+            <hr />
+            <a (click)="logout()" class="logout-link">
+              <app-icon name="logout" [size]="16"></app-icon> Cerrar Sesión
+            </a>
+            } @else {
+            <a (click)="login()">
+              <app-icon name="log-in" [size]="16"></app-icon> Iniciar Sesión
+            </a>
+            <a (click)="register()">
+              <app-icon name="user-plus" [size]="16"></app-icon> Registrarse
+            </a>
+            }
+          </div>
           }
         </div>
 
         <!-- Mobile Menu Toggle -->
         <button class="mobile-menu-btn" (click)="toggleMobileMenu()">
-          <i class="pi pi-bars"></i>
+          <app-icon name="menu" [size]="24"></app-icon>
         </button>
       </div>
     </div>
@@ -132,10 +222,73 @@
 
 <!-- Overlay for mobile menu -->
 @if (show_mobile_menu) {
-  <div class="mobile-overlay" (click)="toggleMobileMenu()"></div>
+<div class="mobile-overlay" (click)="toggleMobileMenu()"></div>
 }
 
-<!-- Overlay for user menu -->
-@if (show_user_menu) {
-  <div class="menu-overlay" (click)="toggleUserMenu()"></div>
-}
+<!-- Mobile Sidebar (Root Level) -->
+<aside class="mobile-sidebar" [class.open]="show_mobile_menu">
+  <!-- Mobile User Header -->
+  <div class="mobile-nav-header">
+    @if (is_authenticated$ | async) {
+    <div class="user-info">
+      <div class="avatar-circle">
+        <app-icon name="user" [size]="20"></app-icon>
+      </div>
+      <div class="user-details">
+        <span class="greeting">Hola,</span>
+        <span class="name">{{ user_name$ | async }}</span>
+      </div>
+    </div>
+    } @else {
+    <div class="guest-info">
+      <span class="welcome-text">Bienvenido</span>
+      <p class="sub-text">Inicia sesión para ver tus beneficios</p>
+    </div>
+    }
+    <button class="close-menu-btn" (click)="toggleMobileMenu()">
+      <app-icon name="x" [size]="24"></app-icon>
+    </button>
+  </div>
+
+  <!-- Scroll Content -->
+  <div class="nav-scroll-content">
+    <div class="nav-section">
+      <h5 class="nav-subtitle">Menú Principal</h5>
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+        (click)="toggleMobileMenu()">Inicio</a>
+      <a routerLink="/products" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
+      <a routerLink="/new" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
+      <a routerLink="/sale" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
+    </div>
+
+    <hr class="nav-divider">
+
+    <div class="nav-section user-section">
+      <h5 class="nav-subtitle">Mi Cuenta</h5>
+      @if (is_authenticated$ | async) {
+      <a (click)="goToAccount(); toggleMobileMenu()">
+        <app-icon name="user" [size]="18"></app-icon> Mi Perfil
+      </a>
+      <a (click)="goToWishlist(); toggleMobileMenu()">
+        <app-icon name="heart" [size]="18"></app-icon> Favoritos
+      </a>
+      <a (click)="goToOrders(); toggleMobileMenu()">
+        <app-icon name="list" [size]="18"></app-icon> Mis Ordenes
+      </a>
+      <a (click)="logout(); toggleMobileMenu()" class="logout-link">
+        <app-icon name="logout" [size]="18"></app-icon> Cerrar Sesión
+      </a>
+      } @else {
+      <a (click)="login(); toggleMobileMenu()">
+        <app-icon name="log-in" [size]="18"></app-icon> Iniciar Sesión
+      </a>
+      <a (click)="register(); toggleMobileMenu()">
+        <app-icon name="user-plus" [size]="18"></app-icon> Registrarse
+      </a>
+      }
+    </div>
+  </div>
+</aside>
+
+<app-auth-modal [isOpen]="is_auth_modal_open" [initialMode]="auth_modal_mode" [storeLogo]="store_logo"
+  [storeName]="store_name" (closed)="is_auth_modal_open = false"></app-auth-modal>

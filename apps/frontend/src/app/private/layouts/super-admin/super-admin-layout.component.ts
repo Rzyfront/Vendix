@@ -45,7 +45,7 @@ import { Observable } from 'rxjs';
 
         <!-- Page Content (Scrollable) -->
         <main
-          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 py-2 transition-all duration-300 ease-in-out"
+          class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
           style="background-color: var(--background);"
         >
           <div class="w-full">
@@ -124,6 +124,11 @@ export class SuperAdminLayoutComponent {
       label: 'Monedas',
       icon: 'dollar-sign',
       route: '/super-admin/currencies',
+    },
+    {
+      label: 'Envíos del Sistema',
+      icon: 'truck',
+      route: '/super-admin/settings/shipping',
     },
     {
       label: 'Auditoría',

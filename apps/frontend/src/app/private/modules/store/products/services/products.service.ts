@@ -338,6 +338,17 @@ export class ProductsService {
       );
   }
 
+  uploadBulkProductsJson(products: any[]): Observable<any> {
+    return this.http
+      .post<ApiResponse<any>>(`${this.apiUrl}/store/products/bulk/upload`, {
+        products,
+      })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
   // Utilidades
   private buildParams(query: ProductQueryDto): HttpParams {
     let params = new HttpParams();

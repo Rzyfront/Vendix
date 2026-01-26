@@ -6,7 +6,7 @@ import {
   ModalComponent,
   ButtonComponent,
   InputComponent,
-  SelectorComponent
+  SelectorComponent,
 } from '../../../../../../shared/components';
 
 import { InventoryService } from '../../services/inventory.service';
@@ -25,7 +25,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent
+    SelectorComponent,
   ],
   template: `
     <app-modal
@@ -35,8 +35,12 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
       (close)="onClose()"
     >
-      <form (ngSubmit)="onSubmit()" #warehouseForm="ngForm">
-        <div class="space-y-4">
+      <form
+        (ngSubmit)="onSubmit()"
+        #warehouseForm="ngForm"
+        class="h-full flex flex-col"
+      >
+        <div class="space-y-4 flex-1">
           <!-- Name -->
           <app-input
             label="Nombre *"
@@ -67,10 +71,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
 
         <!-- Footer Actions -->
         <div slot="footer" class="flex justify-end gap-3 mt-4">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()"
-          >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
@@ -85,11 +86,13 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
       </form>
     </app-modal>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
-  `],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class PopWarehouseQuickCreateComponent {
   @Input() isOpen = false;
@@ -112,7 +115,7 @@ export class PopWarehouseQuickCreateComponent {
     type: 'warehouse',
   };
 
-  constructor(private inventoryService: InventoryService) { }
+  constructor(private inventoryService: InventoryService) {}
 
   // ============================================================
   // Form Actions
@@ -146,7 +149,7 @@ export class PopWarehouseQuickCreateComponent {
       error: (error) => {
         console.error('Error creating warehouse:', error);
         this.isLoading = false;
-      }
+      },
     });
   }
 

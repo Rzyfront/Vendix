@@ -48,8 +48,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'lg'"
-      (closed)="onModalClosed()"
       [showCloseButton]="false"
     >
       <!-- Modal Header -->
@@ -312,6 +313,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
 export class PosCustomerModalComponent implements OnInit, OnDestroy {
   @Input() isOpen = false;
   @Input() customer: PosCustomer | null = null;
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() customerSelected = new EventEmitter<PosCustomer>();
   @Output() customerCreated = new EventEmitter<PosCustomer>();
@@ -477,6 +479,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy {
   onCancel(): void {
     this.customerForm.reset();
     this.onModalClosed();
+    this.isOpenChange.emit(false);
   }
 
   onSave(): void {

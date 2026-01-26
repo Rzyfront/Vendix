@@ -1,22 +1,29 @@
-import { Component, EventEmitter, Output, inject } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Output,
+  inject,
+  OnDestroy,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { Subject, debounceTime, switchMap, takeUntil } from 'rxjs';
-import { Product } from '../../services/catalog.service';
+import { EcommerceProduct } from '../../services/catalog.service';
 import { CatalogService } from '../../services/catalog.service';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-search-autocomplete',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, IconComponent],
   templateUrl: './search-autocomplete.component.html',
   styleUrls: ['./search-autocomplete.component.scss'],
 })
-export class SearchAutocompleteComponent {
+export class SearchAutocompleteComponent implements OnDestroy {
   @Output() search = new EventEmitter<string>();
 
   search_query = '';
-  search_results: Product[] = [];
+  search_results: EcommerceProduct[] = [];
   is_loading = false;
   show_dropdown = false;
   selected_index = -1;
@@ -30,29 +37,13 @@ export class SearchAutocompleteComponent {
   constructor() {
     this.search_subject
       .pipe(
-        debounceTime(300),
-        switchMap((query) => {
-          if (query.length < 2) {
-            this.show_dropdown = false;
-            this.search_results = [];
-            return [];
-          }
-          this.is_loading = true;
-          return this.catalog_service.getProducts({ search: query, limit: 5 });
-        }),
+        debounceTime(400), // Adjusted to 400ms (0.4s) as requested
         takeUntil(this.destroy$),
       )
-      .subscribe({
-        next: (response) => {
-          this.search_results = response.data;
-          this.show_dropdown = this.search_results.length > 0;
-          this.is_loading = false;
-          this.selected_index = -1;
-        },
-        error: () => {
-          this.search_results = [];
-          this.is_loading = false;
-        },
+      .subscribe((query) => {
+        if (query.trim().length >= 2) {
+          this.onSubmit();
+        }
       });
   }
 
@@ -62,52 +53,18 @@ export class SearchAutocompleteComponent {
     this.search_subject.next(this.search_query);
   }
 
-  onProductSelect(product: Product): void {
-    this.router.navigate(['/productos', product.slug]);
-    this.closeDropdown();
-  }
-
   onSubmit(): void {
     if (this.search_query.trim()) {
       this.router.navigate(['/productos'], {
         queryParams: { search: this.search_query },
       });
-      this.closeDropdown();
     }
   }
 
   onKeyDown(event: KeyboardEvent): void {
-    if (!this.show_dropdown || this.search_results.length === 0) {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        this.onSubmit();
-      }
-      return;
-    }
-
-    switch (event.key) {
-      case 'ArrowDown':
-        event.preventDefault();
-        this.selected_index = Math.min(
-          this.selected_index + 1,
-          this.search_results.length - 1,
-        );
-        break;
-      case 'ArrowUp':
-        event.preventDefault();
-        this.selected_index = Math.max(this.selected_index - 1, -1);
-        break;
-      case 'Enter':
-        event.preventDefault();
-        if (this.selected_index >= 0) {
-          this.onProductSelect(this.search_results[this.selected_index]);
-        } else {
-          this.onSubmit();
-        }
-        break;
-      case 'Escape':
-        this.closeDropdown();
-        break;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      this.onSubmit();
     }
   }
 

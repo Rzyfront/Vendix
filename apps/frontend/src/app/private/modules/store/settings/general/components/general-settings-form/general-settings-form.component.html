@@ -1,0 +1,27 @@
+<div class="general-settings-form">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Store Information -->
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Información Básica</h4>
+
+      <app-input [formControl]="nameControl" type="text" label="Nombre de la Tienda" placeholder="Mi Tienda"
+        (inputChange)="onFieldChange()"></app-input>
+
+      <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
+    </div>
+
+    <!-- Preferences -->
+    <div class="space-y-4">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Preferencias y Localización</h4>
+
+      <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
+
+      <app-selector [formControl]="timezoneControl" label="Zona Horaria" [options]="commonTimezones"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
+
+
+    </div>
+  </div>
+</div>

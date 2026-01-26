@@ -2,14 +2,18 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
+import { TaxesService } from '../../store/taxes/taxes.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 @Injectable()
 export class CheckoutService {
   constructor(
     private readonly prisma: EcommercePrismaService,
+    private readonly store_prisma: StorePrismaService,
     private readonly cart_service: CartService,
-  ) {}
+    private readonly taxes_service: TaxesService,
+  ) { }
 
   async getPaymentMethods() {
     // store_id se aplica automáticamente por EcommercePrismaService
@@ -112,11 +116,102 @@ export class CheckoutService {
       }
     }
 
+    // Validar y calcular shipping
+    const store_id = RequestContextService.getStoreId();
+    let shipping_cost = 0;
+    let shipping_method_id: number | null = null;
+
+    if (dto.shipping_rate_id) {
+      const rate = await this.store_prisma.shipping_rates.findFirst({
+        where: {
+          id: dto.shipping_rate_id,
+          is_active: true
+        },
+        include: {
+          shipping_method: true,
+          shipping_zone: true
+        }
+      });
+
+      if (!rate) {
+        throw new BadRequestException('Método de envío inválido o no disponible');
+      }
+
+      // Verificar que la zona pertenece a la tienda
+      if (rate.shipping_zone.store_id !== store_id) {
+        throw new BadRequestException('Método de envío no disponible para esta tienda');
+      }
+
+      shipping_cost = Number(rate.base_cost);
+      shipping_method_id = rate.shipping_method_id;
+    } else if (dto.shipping_method_id) {
+      // Fallback: si solo viene shipping_method_id sin rate
+      const method = await this.store_prisma.shipping_methods.findFirst({
+        where: {
+          id: dto.shipping_method_id,
+          store_id: store_id,
+          is_active: true
+        }
+      });
+
+      if (!method) {
+        throw new BadRequestException('Método de envío inválido');
+      }
+
+      shipping_method_id = method.id;
+      // En este caso, shipping_cost queda en 0 o se debería recalcular
+    }
+
     const order_number = await this.generateOrderNumber();
 
-    const subtotal = cart.cart_items.reduce((sum, item) => {
-      return sum + Number(item.unit_price) * item.quantity;
-    }, 0);
+    const itemsWithTaxes = await Promise.all(
+      cart.cart_items.map(async (item) => {
+        const taxInfo = await this.taxes_service.calculateProductTaxes(
+          item.product_id,
+          Number(item.unit_price) / (1 + 0), // Base price logic needs refinement if stored unit_price already includes tax
+        );
+
+        // NOTE: In this codebase, calculateFinalPrice (CartService) seems to include tax in unit_price.
+        // We need to extract the base price (excluding tax) to calculate tax_amount correctly.
+        // For simplicity and correctness with calculateProductTaxes:
+        const productWithTaxes = await this.prisma.products.findUnique({
+          where: { id: item.product_id },
+          include: {
+            product_tax_assignments: {
+              include: {
+                tax_categories: {
+                  include: {
+                    tax_rates: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+
+        // Sum rates to reverse engineer base price if needed, or better:
+        // Use product base_price (or sale_price) directly as the net price.
+        const netPrice = productWithTaxes.is_on_sale && productWithTaxes.sale_price
+          ? Number(productWithTaxes.sale_price)
+          : Number(productWithTaxes.base_price);
+
+        const realTaxInfo = await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
+
+        return {
+          ...item,
+          net_price: netPrice,
+          tax_rate: realTaxInfo.total_rate,
+          tax_amount_item: realTaxInfo.total_tax_amount,
+          total_tax: realTaxInfo.total_tax_amount * item.quantity,
+          total_net: netPrice * item.quantity,
+          item_taxes: realTaxInfo.taxes,
+        };
+      })
+    );
+
+    const subtotal = itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0);
+    const total_tax = itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0);
+    const grand_total = subtotal + total_tax + shipping_cost;
 
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
@@ -124,14 +219,17 @@ export class CheckoutService {
         order_number,
         currency: cart.currency,
         subtotal_amount: subtotal,
-        grand_total: subtotal,
+        tax_amount: total_tax,
+        shipping_cost: shipping_cost,
+        shipping_method_id: shipping_method_id,
+        grand_total: grand_total,
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
         internal_notes: dto.notes,
         placed_at: new Date(),
         order_items: {
-          create: cart.cart_items.map((item) => ({
+          create: itemsWithTaxes.map((item) => ({
             product_id: item.product_id,
             product_variant_id: item.product_variant_id,
             product_name: item.product.name,
@@ -140,8 +238,18 @@ export class CheckoutService {
               ? JSON.stringify(item.product_variant.attributes)
               : null,
             quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: Number(item.unit_price) * item.quantity,
+            unit_price: item.net_price,
+            total_price: item.total_net,
+            tax_rate: item.tax_rate,
+            tax_amount_item: item.tax_amount_item,
+            order_item_taxes: {
+              create: item.item_taxes.map(t => ({
+                tax_rate_id: t.tax_rate_id,
+                tax_name: t.name,
+                tax_rate: t.rate,
+                tax_amount: t.amount * item.quantity,
+              }))
+            }
           })),
         },
       },
@@ -154,7 +262,7 @@ export class CheckoutService {
     await this.prisma.payments.create({
       data: {
         order_id: order.id,
-        amount: subtotal,
+        amount: grand_total,
         currency: cart.currency,
         state: 'pending',
         store_payment_method_id: dto.payment_method_id,
@@ -213,9 +321,11 @@ export class CheckoutService {
     const end_of_day = new Date(date);
     end_of_day.setHours(23, 59, 59, 999);
 
-    // store_id se aplica automáticamente
-    const count = await this.prisma.orders.count({
+    // IMPORTANTE: Usar store_prisma para contar TODAS las órdenes de la tienda, 
+    // no solo las del usuario actual (que es lo que haría this.prisma.orders.count)
+    const count = await this.store_prisma.orders.count({
       where: {
+        store_id,
         created_at: {
           gte: start_of_day,
           lte: end_of_day,

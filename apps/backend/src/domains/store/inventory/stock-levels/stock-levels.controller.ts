@@ -2,12 +2,14 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { StockLevelsService } from './stock-levels.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
 import { ResponseService } from '@common/responses/response.service';
+import { InventoryBatchesService } from '../batches/inventory-batches.service';
 
 @Controller('store/inventory/stock-levels')
 export class StockLevelsController {
   constructor(
     private readonly stockLevelsService: StockLevelsService,
     private readonly responseService: ResponseService,
+    private readonly batchesService: InventoryBatchesService,
   ) {}
 
   @Get()
@@ -53,6 +55,29 @@ export class StockLevelsController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener los niveles de stock del producto',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('product/:productId/batches')
+  async findBatchesByProduct(
+    @Param('productId') productId: string,
+    @Query('location_id') locationId?: string,
+  ) {
+    try {
+      const result = await this.batchesService.getBatches({
+        productId: +productId,
+        locationId: locationId ? +locationId : undefined,
+      });
+      return this.responseService.success(
+        result.batches || [],
+        'Lotes del producto obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener los lotes del producto',
         error.response?.message || error.message,
         error.status || 400,
       );

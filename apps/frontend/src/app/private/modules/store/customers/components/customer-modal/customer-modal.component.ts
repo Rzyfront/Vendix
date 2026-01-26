@@ -23,9 +23,11 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
   template: `
     <app-modal
       [isOpen]="isOpen"
+      (isOpenChange)="isOpenChange.emit($event)"
+      (cancel)="onCancel()"
       [size]="'md'"
-      (closed)="onClose()"
       [title]="customer ? 'Editar cliente' : 'Nuevo cliente'"
+      subtitle="Administra la información del cliente"
     >
       <div class="p-6">
         <form [formGroup]="form" class="space-y-4">
@@ -90,7 +92,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 
       <!-- Footer -->
       <div class="flex justify-end gap-3 p-6 border-t border-gray-100 bg-gray-50">
-        <app-button variant="ghost" (clicked)="onClose()">Cancel</app-button>
+        <app-button variant="ghost" (clicked)="onCancel()">Cancel</app-button>
         <app-button
           variant="primary"
           [disabled]="form.invalid || loading"
@@ -107,6 +109,7 @@ export class CustomerModalComponent implements OnChanges {
   @Input() isOpen = false;
   @Input() customer: Customer | null = null;
   @Input() loading = false;
+  @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() closed = new EventEmitter<void>();
   @Output() save = new EventEmitter<CreateCustomerRequest>();
 
@@ -146,6 +149,11 @@ export class CustomerModalComponent implements OnChanges {
 
   onClose() {
     this.closed.emit();
+  }
+
+  onCancel() {
+    this.closed.emit();
+    this.isOpenChange.emit(false);
   }
 
   onSubmit() {

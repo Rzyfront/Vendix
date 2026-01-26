@@ -4,20 +4,24 @@ import { Observable } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
-export interface Product {
+export interface EcommerceProduct {
   id: number;
   name: string;
   slug: string;
   description: string | null;
   base_price: number;
+  sale_price?: number;
+  is_on_sale?: boolean;
   sku: string | null;
   stock_quantity: number | null;
+  final_price: number;
   image_url: string | null;
+  weight?: number | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
 }
 
-export interface ProductDetail extends Product {
+export interface ProductDetail extends EcommerceProduct {
   images: { id: number; image_url: string; is_main: boolean }[];
   variants: {
     id: number;
@@ -54,11 +58,12 @@ export interface Brand {
 
 export interface CatalogQuery {
   search?: string;
+  ids?: string;
   category_id?: number;
   brand_id?: number;
   min_price?: number;
   max_price?: number;
-  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest';
+  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
   page?: number;
   limit?: number;
   created_after?: string;
@@ -85,7 +90,7 @@ export class CatalogService {
   constructor(
     private http: HttpClient,
     private domain_service: TenantFacade,
-  ) {}
+  ) { }
 
   private getHeaders(): HttpHeaders {
     const domainConfig = this.domain_service.getCurrentDomainConfig();
@@ -97,10 +102,11 @@ export class CatalogService {
 
   getProducts(
     query: CatalogQuery = {},
-  ): Observable<PaginatedResponse<Product>> {
+  ): Observable<PaginatedResponse<EcommerceProduct>> {
     let params = new HttpParams();
 
     if (query.search) params = params.set('search', query.search);
+    if (query.ids) params = params.set('ids', query.ids);
     if (query.category_id)
       params = params.set('category_id', query.category_id.toString());
     if (query.brand_id)
@@ -117,7 +123,7 @@ export class CatalogService {
     if (query.has_discount !== undefined)
       params = params.set('has_discount', query.has_discount.toString());
 
-    return this.http.get<PaginatedResponse<Product>>(this.api_url, {
+    return this.http.get<PaginatedResponse<EcommerceProduct>>(this.api_url, {
       headers: this.getHeaders(),
       params,
     });

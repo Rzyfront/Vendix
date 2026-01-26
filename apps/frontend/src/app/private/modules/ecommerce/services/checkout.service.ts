@@ -25,6 +25,8 @@ export interface CheckoutRequest {
         postal_code?: string;
         phone_number?: string;
     };
+    shipping_method_id?: number;
+    shipping_rate_id?: number;
     payment_method_id: number;
     notes?: string;
 }

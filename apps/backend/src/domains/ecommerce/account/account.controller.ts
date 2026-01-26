@@ -3,6 +3,7 @@ import {
     Get,
     Put,
     Post,
+    Patch,
     Delete,
     Body,
     Param,
@@ -10,7 +11,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { AccountService } from './account.service';
-import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto } from './dto/account.dto';
+import { UpdateProfileDto, ChangePasswordDto, CreateAddressDto, UpdateAddressDto } from './dto/account.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @Controller('ecommerce/account')
@@ -79,6 +80,26 @@ export class AccountController {
     async deleteAddress(@Param('id') address_id: string) {
         // user_id se resuelve automáticamente desde el JWT
         const data = await this.account_service.deleteAddress(
+            parseInt(address_id, 10),
+        );
+        return { success: true, data };
+    }
+
+    @Put('addresses/:id')
+    async updateAddress(
+        @Param('id') address_id: string,
+        @Body() dto: UpdateAddressDto,
+    ) {
+        const data = await this.account_service.updateAddress(
+            parseInt(address_id, 10),
+            dto,
+        );
+        return { success: true, data };
+    }
+
+    @Patch('addresses/:id/set-primary')
+    async setAddressPrimary(@Param('id') address_id: string) {
+        const data = await this.account_service.setAddressPrimary(
             parseInt(address_id, 10),
         );
         return { success: true, data };

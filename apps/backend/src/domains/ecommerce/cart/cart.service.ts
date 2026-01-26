@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
+import { S3Service } from '@common/services/s3.service';
 
 @Injectable()
 export class CartService {
-    constructor(private readonly prisma: EcommercePrismaService) { }
+    constructor(
+        private readonly prisma: EcommercePrismaService,
+        private readonly s3Service: S3Service,
+    ) { }
 
     async getCart() {
         // store_id y user_id se aplican automáticamente por EcommercePrismaService
@@ -50,7 +54,7 @@ export class CartService {
             });
         }
 
-        return this.mapCartToResponse(cart);
+        return await this.mapCartToResponse(cart);
     }
 
     async addItem(dto: AddToCartDto) {
@@ -69,7 +73,6 @@ export class CartService {
         }
 
         let available_stock = product.stock_quantity || 0;
-        let unit_price = product.base_price;
 
         if (dto.product_variant_id) {
             const variant = await this.prisma.product_variants.findUnique({
@@ -79,14 +82,29 @@ export class CartService {
                 throw new BadRequestException('Invalid product variant');
             }
             available_stock = variant.stock_quantity || 0;
-            if (variant.price_override) {
-                unit_price = variant.price_override;
-            }
         }
 
         if (dto.quantity > available_stock) {
             throw new BadRequestException(`Only ${available_stock} units available`);
         }
+
+        // Fetch product with taxes for price calculation
+        const productWithTaxes = await this.prisma.products.findUnique({
+            where: { id: dto.product_id },
+            include: {
+                product_tax_assignments: {
+                    include: {
+                        tax_categories: {
+                            include: {
+                                tax_rates: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const unit_price = this.calculateFinalPrice(productWithTaxes);
 
         // Buscar o crear el cart del usuario (store_id y user_id se aplican automáticamente)
         let cart = await this.prisma.carts.findFirst({});
@@ -244,35 +262,68 @@ export class CartService {
         });
     }
 
-    private mapCartToResponse(cart: any) {
-        const items = cart.cart_items.map((item: any) => ({
-            id: item.id,
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: Number(item.unit_price) * item.quantity,
-            product: {
-                name: item.product.name,
-                slug: item.product.slug,
-                sku: item.product.sku,
-                image_url: item.product.product_images?.[0]?.image_url || null,
-            },
-            variant: item.product_variant
-                ? {
-                    name: item.product_variant.name,
-                    sku: item.product_variant.sku,
-                    attributes: item.product_variant.attributes,
-                }
-                : null,
-        }));
+    private async mapCartToResponse(cart: any) {
+        const items = await Promise.all(
+            cart.cart_items.map(async (item: any) => {
+                const raw_image_url = item.product.product_images?.[0]?.image_url || null;
+                const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+
+                return {
+                    id: item.id,
+                    product_id: item.product_id,
+                    product_variant_id: item.product_variant_id,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    total_price: Number(item.unit_price) * item.quantity,
+                    product: {
+                        name: item.product.name,
+                        slug: item.product.slug,
+                        sku: item.product.sku,
+                        image_url: signed_image_url || null,
+                        weight: Number(item.product.weight || 0),
+                    },
+                    variant: item.product_variant
+                        ? {
+                            name: item.product_variant.name,
+                            sku: item.product_variant.sku,
+                            attributes: item.product_variant.attributes,
+                        }
+                        : null,
+                    final_price: item.unit_price, // The stored unit_price is now the final price
+                };
+            }),
+        );
 
         return {
             id: cart.id,
             currency: cart.currency,
-            subtotal: cart.subtotal,
+            subtotal: Number(cart.subtotal),
             item_count: items.reduce((sum: number, i: any) => sum + i.quantity, 0),
             items,
         };
+    }
+
+    /**
+     * Calculates the final price of a product including taxes and active offers.
+     */
+    private calculateFinalPrice(product: any): number {
+        const basePrice = product.is_on_sale && product.sale_price
+            ? Number(product.sale_price)
+            : Number(product.base_price);
+
+        let totalTaxRate = 0;
+
+        if (product.product_tax_assignments) {
+            for (const assignment of product.product_tax_assignments) {
+                if (assignment.tax_categories?.tax_rates) {
+                    for (const tax of assignment.tax_categories.tax_rates) {
+                        totalTaxRate += Number(tax.rate);
+                    }
+                }
+            }
+        }
+
+        const finalPrice = basePrice * (1 + totalTaxRate);
+        return Math.round(finalPrice * 100) / 100;
     }
 }

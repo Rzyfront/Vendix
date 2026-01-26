@@ -50,7 +50,7 @@
             >
               <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
             </app-button>
-            
+
             <app-button
               variant="primary"
               size="sm"
@@ -95,12 +95,4 @@
       ></app-orders-list>
     </div>
   </div>
-
-  <!-- Order Details Modal -->
-  <app-order-details
-    [orderId]="selectedOrderId"
-    [isVisible]="showOrderDetails"
-    (close)="closeOrderDetails()"
-    (orderUpdated)="onOrderUpdated($event)"
-  ></app-order-details>
 </div>

@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { S3Service } from '@common/services/s3.service';
 
 /**
  * 🌐 Public Domains Service
@@ -11,7 +12,10 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 export class PublicDomainsService {
   private readonly logger = new Logger(PublicDomainsService.name);
 
-  constructor(private readonly globalPrisma: GlobalPrismaService) {}
+  constructor(
+    private readonly globalPrisma: GlobalPrismaService,
+    private readonly s3Service: S3Service,
+  ) { }
 
   /**
    * Resolve domain configuration by hostname
@@ -47,12 +51,31 @@ export class PublicDomainsService {
       throw new NotFoundException(`Domain ${hostname} not found`);
     }
 
+    const config = domain.config as any;
+
+    // Si es un dominio de ecommerce, firmar las URLs de imágenes
+    if (domain.domain_type === 'ecommerce') {
+      await this.signEcommerceImages(config);
+    }
+
+    // 5. Inyectar nombre de la tienda en el título si es necesario
+    if (domain.store?.name && config.inicio) {
+      // Si el título está vacío o es el default genérico, le ponemos el nombre de la tienda
+      if (
+        !config.inicio.titulo ||
+        config.inicio.titulo === 'Bienvenido a nuestra tienda' ||
+        config.inicio.titulo === 'Bienvenido a Vendix Shop'
+      ) {
+        config.inicio.titulo = `Bienvenido a ${domain.store.name}`;
+      }
+    }
+
     return {
       id: domain.id,
       hostname: domain.hostname,
       organization_id: domain.organization_id!,
       store_id: domain.store_id ?? undefined,
-      config: domain.config,
+      config,
       created_at: domain.created_at?.toISOString() || new Date().toISOString(),
       updated_at: domain.updated_at?.toISOString() || new Date().toISOString(),
       store_name: domain.store?.name,
@@ -65,6 +88,49 @@ export class PublicDomainsService {
       is_primary: domain.is_primary,
       ownership: domain.ownership,
     };
+  }
+
+  /**
+   * Firma recursivamente las URLs de imágenes en la configuración de ecommerce
+   */
+  private async signEcommerceImages(config: any) {
+    if (!config) return;
+
+    // 1. Firmar Slider
+    if (config.slider?.photos && Array.isArray(config.slider.photos)) {
+      for (const photo of config.slider.photos) {
+        if (photo.url && !photo.url.startsWith('http')) {
+          photo.url = await this.s3Service.signUrl(photo.url);
+        }
+      }
+    }
+
+    // 2. Firmar Logo en Inicio
+    if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
+      config.inicio.logo_url = await this.s3Service.signUrl(
+        config.inicio.logo_url,
+      );
+    }
+
+    // 3. Firmar Logo en Branding (Source of Truth para el tema)
+    if (
+      config.branding?.logo_url &&
+      !config.branding.logo_url.startsWith('http')
+    ) {
+      config.branding.logo_url = await this.s3Service.signUrl(
+        config.branding.logo_url,
+      );
+    }
+
+    // 4. Firmar Favicon en Branding
+    if (
+      config.branding?.favicon_url &&
+      !config.branding.favicon_url.startsWith('http')
+    ) {
+      config.branding.favicon_url = await this.s3Service.signUrl(
+        config.branding.favicon_url,
+      );
+    }
   }
 
   /**

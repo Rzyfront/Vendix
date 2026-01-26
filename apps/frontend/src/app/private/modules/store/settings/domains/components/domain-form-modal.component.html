@@ -1,0 +1,87 @@
+<app-modal
+  [isOpen]="isOpen"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  [size]="'md'"
+  [title]="isEditing ? 'Editar Dominio' : 'Nuevo Dominio'"
+  [subtitle]="
+    isEditing
+      ? 'Actualiza la configuración del dominio'
+      : 'Configura un nuevo dominio para tu tienda'
+  "
+>
+  <div class="p-2 md:p-4">
+    <form [formGroup]="form" class="space-y-4">
+      <app-input
+        label="Hostname"
+        formControlName="hostname"
+        [placeholder]="'mi-tienda.' + vendixDomain"
+        [required]="true"
+        [helperText]="
+          isEditing
+            ? 'El hostname no se puede cambiar después de creado'
+            : 'Ingresa el nombre de dominio o subdominio'
+        "
+      ></app-input>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-selector
+          label="Tipo de Dominio"
+          formControlName="domain_type"
+          [options]="domainTypeOptions"
+          [required]="true"
+        ></app-selector>
+
+        <app-selector
+          label="Propiedad"
+          formControlName="ownership"
+          [options]="ownershipOptions"
+          [required]="true"
+        ></app-selector>
+      </div>
+
+      <div
+        class="flex items-center gap-3 p-3 bg-blue-50/50 rounded-lg border border-blue-100"
+      >
+        <app-icon name="star" [size]="16" class="text-blue-500"></app-icon>
+        <div class="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="is_primary"
+            formControlName="is_primary"
+            class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
+          />
+          <label
+            for="is_primary"
+            class="text-sm text-blue-900 cursor-pointer select-none font-medium"
+          >
+            Establecer como dominio principal
+          </label>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div slot="footer">
+    <div
+      class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-border"
+    >
+      <app-button
+        variant="outline"
+        (clicked)="onCancel()"
+        [disabled]="isSaving"
+      >
+        Cancelar
+      </app-button>
+
+      <app-button
+        variant="primary"
+        (clicked)="onSubmit()"
+        [loading]="isSaving"
+        [disabled]="form.invalid"
+      >
+        {{ isEditing ? "Actualizar Dominio" : "Crear Dominio" }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>
