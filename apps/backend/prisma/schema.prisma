@@ -58,11 +58,12 @@ model users {
   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
   document_acceptances      document_acceptances[]
+  orders                    orders[]
 
   // Campos de tracking de términos
-  terms_accepted_version  String?                     @db.VarChar(20)
-  terms_accepted_at       DateTime?                   @db.Timestamp(6)
-  requires_terms_update   Boolean                    @default(false)
+  terms_accepted_version String?   @db.VarChar(20)
+  terms_accepted_at      DateTime? @db.Timestamp(6)
+  requires_terms_update  Boolean   @default(false)
 
   @@index([email_verified])
   @@index([state])
@@ -497,34 +498,35 @@ model order_items {
 }
 
 model orders {
-  id                                              Int                      @id @default(autoincrement())
+  id                                              Int               @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int?
-  order_number                                    String                   @db.VarChar(50)
+  order_number                                    String            @db.VarChar(50)
+  shipping_method_id                              Int?
   shipping_address_id                             Int?
   billing_address_id                              Int?
   shipping_address_snapshot                       Json?
   billing_address_snapshot                        Json?
-  currency                                        String?          @db.VarChar(10)
-  subtotal_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  discount_amount                                 Decimal          @default(0.00) @db.Decimal(12, 2)
-  tax_amount                                      Decimal          @default(0.00) @db.Decimal(12, 2)
-  shipping_cost                                   Decimal          @default(0.00) @db.Decimal(12, 2)
-  grand_total                                     Decimal          @default(0.00) @db.Decimal(12, 2)
-  state                                           order_state_enum @default(created)
+  currency                                        String?           @db.VarChar(10)
+  subtotal_amount                                 Decimal           @default(0.00) @db.Decimal(12, 2)
+  discount_amount                                 Decimal           @default(0.00) @db.Decimal(12, 2)
+  tax_amount                                      Decimal           @default(0.00) @db.Decimal(12, 2)
+  shipping_cost                                   Decimal           @default(0.00) @db.Decimal(12, 2)
+  grand_total                                     Decimal           @default(0.00) @db.Decimal(12, 2)
+  state                                           order_state_enum  @default(created)
   internal_notes                                  String?
-  created_at                                      DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at                                      DateTime?                @default(now()) @db.Timestamp(6)
-  placed_at                                       DateTime?                @db.Timestamp(6)
-  completed_at                                    DateTime?                @db.Timestamp(6)
+  created_at                                      DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at                                      DateTime?         @default(now()) @db.Timestamp(6)
+  placed_at                                       DateTime?         @db.Timestamp(6)
+  completed_at                                    DateTime?         @db.Timestamp(6)
   order_items                                     order_items[]
-  addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  users                                           users?           @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_billing_address_idToaddresses  addresses?        @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_shipping_address_idToaddresses addresses?        @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                          stores            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  users                                           users?            @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
-  shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
+  shipping_method                                 shipping_methods? @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -961,29 +963,29 @@ model supplier_products {
 }
 
 model expenses {
-  id                    Int                    @id @default(autoincrement())
-  store_id              Int
-  organization_id       Int
-  category_id           Int?
-  amount                Decimal                @db.Decimal(12, 2)
-  currency              String?                @db.VarChar(10)
-  description           String?                @db.VarChar(500)
-  expense_date          DateTime               @db.Timestamp(6)
-  state                 expenses_state_enum    @default(pending)
-  receipt_url           String?                @db.Text
-  notes                 String?                @db.Text
-  created_by_user_id    Int?
-  approved_by_user_id   Int?
-  approved_at           DateTime?              @db.Timestamp(6)
-  created_at             DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at             DateTime?              @default(now()) @db.Timestamp(6)
-  
-  stores                 stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  organizations          organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  expense_categories    expense_categories?    @relation(fields: [category_id], references: [id])
-  created_by_user        users?                 @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
-  approved_by_user      users?                 @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
-  
+  id                  Int                 @id @default(autoincrement())
+  store_id            Int
+  organization_id     Int
+  category_id         Int?
+  amount              Decimal             @db.Decimal(12, 2)
+  currency            String?             @db.VarChar(10)
+  description         String?             @db.VarChar(500)
+  expense_date        DateTime            @db.Timestamp(6)
+  state               expenses_state_enum @default(pending)
+  receipt_url         String?             @db.Text
+  notes               String?             @db.Text
+  created_by_user_id  Int?
+  approved_by_user_id Int?
+  approved_at         DateTime?           @db.Timestamp(6)
+  created_at          DateTime?           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?           @default(now()) @db.Timestamp(6)
+
+  stores             stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organizations      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expense_categories expense_categories? @relation(fields: [category_id], references: [id])
+  created_by_user    users?              @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
+  approved_by_user   users?              @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
+
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
   @@index([state])
@@ -991,18 +993,18 @@ model expenses {
 }
 
 model expense_categories {
-  id               Int         @id @default(autoincrement())
-  organization_id  Int
-  name             String      @db.VarChar(100)
-  description      String?     @db.VarChar(255)
-  color            String?     @db.VarChar(7) // Hex color code
-  is_active        Boolean     @default(true)
-  created_at       DateTime?   @default(now()) @db.Timestamp(6)
-  updated_at       DateTime?   @default(now()) @db.Timestamp(6)
-  
-  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  expenses         expenses[]
-  
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  name            String    @db.VarChar(100)
+  description     String?   @db.VarChar(255)
+  color           String?   @db.VarChar(7) // Hex color code
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  organizations organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expenses      expenses[]
+
   @@unique([organization_id, name])
 }
 
@@ -1298,15 +1300,15 @@ model wishlist_items {
 // ===== DEFAULT TEMPLATES =====
 
 model default_templates {
-  id                Int                    @id @default(autoincrement())
-  template_name     String                 @unique @db.VarChar(255)
+  id                 Int                       @id @default(autoincrement())
+  template_name      String                    @unique @db.VarChar(255)
   configuration_type template_config_type_enum
-  template_data     Json
-  description       String?                @db.Text
-  is_active         Boolean                @default(true)
-  is_system         Boolean                @default(false)
-  created_at        DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at        DateTime?              @default(now()) @db.Timestamp(6)
+  template_data      Json
+  description        String?                   @db.Text
+  is_active          Boolean                   @default(true)
+  is_system          Boolean                   @default(false)
+  created_at         DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                 @default(now()) @db.Timestamp(6)
 
   @@index([configuration_type])
   @@index([is_active])
@@ -1635,4 +1637,146 @@ enum template_config_type_enum {
   notifications
   user_panel_ui
   user_settings
+}
+
+enum shipping_method_type_enum {
+  custom
+  pickup
+  own_fleet
+  carrier
+  third_party_provider
+}
+
+enum shipping_rate_type_enum {
+  flat
+  weight_based
+  price_based
+  carrier_calculated
+  free
+}
+
+enum legal_document_type_enum {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  REFUND_POLICY
+  SHIPPING_POLICY
+  RETURN_POLICY
+  COOKIES_POLICY
+  MERCHANT_AGREEMENT
+}
+
+model shipping_zones {
+  id             Int              @id @default(autoincrement())
+  store_id       Int
+  name           String           @db.VarChar(100)
+  display_name   String?          @db.VarChar(100)
+  countries      String[]
+  regions        String[]
+  cities         String[]
+  zip_codes      String[]
+  is_active      Boolean          @default(true)
+  created_at     DateTime?        @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamp(6)
+  stores         stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates shipping_rates[]
+
+  @@index([store_id])
+}
+
+model shipping_methods {
+  id             Int                       @id @default(autoincrement())
+  store_id       Int
+  name           String                    @db.VarChar(100)
+  code           String?                   @db.VarChar(50)
+  description    String?
+  logo_url       String?
+  type           shipping_method_type_enum @default(custom)
+  provider_name  String?                   @db.VarChar(50)
+  tracking_url   String?
+  min_days       Int?
+  max_days       Int?
+  is_active      Boolean                   @default(true)
+  display_order  Int                       @default(0)
+  created_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
+  stores         stores                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_rates shipping_rates[]
+  orders         orders[]
+
+  @@index([store_id])
+}
+
+model shipping_rates {
+  id                      Int                     @id @default(autoincrement())
+  shipping_zone_id        Int
+  shipping_method_id      Int
+  name                    String?                 @db.VarChar(100)
+  type                    shipping_rate_type_enum @default(flat)
+  base_cost               Decimal                 @default(0.00) @db.Decimal(12, 2)
+  per_unit_cost           Decimal?                @default(0.00) @db.Decimal(12, 2)
+  min_val                 Decimal?                @db.Decimal(12, 2)
+  max_val                 Decimal?                @db.Decimal(12, 2)
+  free_shipping_threshold Decimal?                @db.Decimal(12, 2)
+  is_active               Boolean                 @default(true)
+  created_at              DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?               @default(now()) @db.Timestamp(6)
+  shipping_zones          shipping_zones          @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
+  shipping_methods        shipping_methods        @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+
+  @@index([shipping_zone_id])
+  @@index([shipping_method_id])
+}
+
+model legal_documents {
+  id                   Int                      @id @default(autoincrement())
+  document_type        legal_document_type_enum
+  title                String                   @db.VarChar(255)
+  version              String                   @unique @db.VarChar(20)
+  content              String
+  description          String?
+  effective_date       DateTime                 @db.Timestamp(6)
+  expiry_date          DateTime?                @db.Timestamp(6)
+  is_active            Boolean                  @default(true)
+  is_system            Boolean                  @default(false)
+  document_url         String?
+  organization_id      Int?
+  store_id             Int?
+  created_by_user_id   Int?
+  created_at           DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                @default(now()) @db.Timestamp(6)
+  document_acceptances document_acceptances[]
+
+  @@index([document_type, is_active])
+  @@index([effective_date])
+  @@index([organization_id])
+  @@index([store_id])
+  @@index([document_type, organization_id, is_active])
+  @@index([document_type, store_id, is_active])
+}
+
+model document_acceptances {
+  id                  Int             @id @default(autoincrement())
+  user_id             Int
+  document_id         Int
+  acceptance_version  String          @db.VarChar(20)
+  accepted_at         DateTime        @default(now()) @db.Timestamp(6)
+  accepted_by_user_id Int?
+  ip_address          String?         @db.VarChar(45)
+  user_agent          String?
+  metadata            Json?
+  legal_documents     legal_documents @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  users               users           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, document_id, acceptance_version])
+  @@index([user_id])
+  @@index([document_id, accepted_at])
+  @@index([accepted_at])
+}
+
+enum expenses_state_enum {
+  pending
+  approved
+  rejected
+  paid
+  cancelled
 }
