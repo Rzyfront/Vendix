@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { toTitleCase } from '../../common/utils/format.util';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { EmailService } from '../../email/email.service';
 import { EmailBrandingService } from '../../email/services/email-branding.service';
@@ -923,14 +924,16 @@ export class AuthService {
             storeName = storeWithBranding.name;
             organizationName = storeWithBranding.organizations?.name;
             organizationSlug = storeWithBranding.organizations?.slug;
-            branding = await this.emailBrandingService.getStoreBranding(store_id);
+            branding =
+              await this.emailBrandingService.getStoreBranding(store_id);
           }
         } else {
           // Si no hay store_id, usar branding de la organización
-          const orgWithBranding = await this.prismaService.organizations.findUnique({
-            where: { id: adminUser.organization_id },
-            select: { name: true, slug: true },
-          });
+          const orgWithBranding =
+            await this.prismaService.organizations.findUnique({
+              where: { id: adminUser.organization_id },
+              select: { name: true, slug: true },
+            });
           if (orgWithBranding) {
             organizationName = orgWithBranding.name;
             organizationSlug = orgWithBranding.slug;
@@ -1344,7 +1347,8 @@ export class AuthService {
       target_organization_id = storeUser.store.organizations.id;
       target_store_id = storeUser.store.id;
       active_store = storeUser.store; // Guardar la tienda activa
-      active_store_settings = storeUser.store.store_settings?.settings || null;
+      active_store_settings =
+        (storeUser.store as any).store_settings?.settings || null;
       login_context = `store:${effective_store_slug}`;
     }
 

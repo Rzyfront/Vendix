@@ -15,7 +15,10 @@ import {
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
-import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
+import {
+  DomainGeneratorHelper,
+  DomainContext,
+} from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
@@ -26,10 +29,9 @@ export class StoresService {
     private prisma: OrganizationPrismaService,
     private domainGeneratorHelper: DomainGeneratorHelper,
     private brandingGeneratorHelper: BrandingGeneratorHelper,
-  ) { }
+  ) {}
 
   // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
-
 
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
@@ -233,7 +235,7 @@ export class StoresService {
         store_type: true,
         timezone: true,
         organization_id: true,
-      }
+      },
     });
 
     if (!store) {
@@ -250,9 +252,11 @@ export class StoresService {
 
     // Mapear colores del dominio a la estructura de AppSettings
     const primaryColor = branding.primary_color || '#7ED7A5';
-    const secondaryColor = branding.secondary_color || branding.surface_color || '#2F6F4E';
+    const secondaryColor =
+      branding.secondary_color || branding.surface_color || '#2F6F4E';
     const accentColor = branding.accent_color || '#FFFFFF';
-    const theme = branding.theme === 'light' ? 'default' : branding.theme || 'default';
+    const theme =
+      branding.theme === 'light' ? 'default' : branding.theme || 'default';
 
     if (!storeSettings || !storeSettings.settings) {
       return {
@@ -262,7 +266,8 @@ export class StoresService {
           name: store?.name,
           logo_url: store?.logo_url,
           store_type: store?.store_type as any,
-          timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
+          timezone:
+            store?.timezone || getDefaultStoreSettings().general.timezone,
         },
         app: {
           name: branding.name || store?.name || 'Vendix',
@@ -270,9 +275,9 @@ export class StoresService {
           secondary_color: secondaryColor,
           accent_color: accentColor,
           theme: theme,
-          logo_url: (branding.logo_url || store?.logo_url),
+          logo_url: branding.logo_url || store?.logo_url,
           favicon_url: branding.favicon_url,
-        }
+        },
       };
     }
 
@@ -293,9 +298,9 @@ export class StoresService {
         secondary_color: secondaryColor,
         accent_color: accentColor,
         theme: theme,
-        logo_url: (branding.logo_url || store?.logo_url),
+        logo_url: branding.logo_url || store?.logo_url,
         favicon_url: branding.favicon_url,
-      }
+      },
     };
   }
 
@@ -303,11 +308,13 @@ export class StoresService {
     await this.findOne(storeId);
 
     // Delete existing settings
-    await this.prisma.store_settings.delete({
-      where: { store_id: storeId },
-    }).catch(() => {
-      // Ignore if settings don't exist
-    });
+    await this.prisma.store_settings
+      .delete({
+        where: { store_id: storeId },
+      })
+      .catch(() => {
+        // Ignore if settings don't exist
+      });
 
     // Return default settings with store data and branding
     return this.getStoreSettings(storeId);
@@ -327,14 +334,14 @@ export class StoresService {
         store_id: storeId,
         is_primary: true,
       },
-      select: { config: true }
+      select: { config: true },
     });
 
     // If no primary domain, try to find any domain associated with the store
     if (!domain) {
       const anyDomain = await this.prisma.domain_settings.findFirst({
         where: { store_id: storeId },
-        select: { config: true }
+        select: { config: true },
       });
       return anyDomain?.config || {};
     }
@@ -598,7 +605,9 @@ export class StoresService {
     const existingDomains = await this.prisma.domain_settings.findMany({
       select: { hostname: true, config: true },
     });
-    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+    const existingHostnames: Set<string> = new Set(
+      existingDomains.map((d) => d.hostname as string),
+    );
 
     // Generate unique hostname for store
     const hostname = this.domainGeneratorHelper.generateUnique(
@@ -608,7 +617,12 @@ export class StoresService {
     );
 
     // Get branding config from organization domain if exists
-    const orgDomain = existingDomains.find(d => d.config && typeof d.config === 'object' && 'branding' in (d.config as any));
+    const orgDomain = existingDomains.find(
+      (d) =>
+        d.config &&
+        typeof d.config === 'object' &&
+        'branding' in (d.config as any),
+    );
     const orgBranding = (orgDomain?.config as any)?.branding || null;
 
     // Generate standardized branding
@@ -653,7 +667,9 @@ export class StoresService {
     const existingDomains = await this.prisma.domain_settings.findMany({
       select: { hostname: true },
     });
-    const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
+    const existingHostnames: Set<string> = new Set(
+      existingDomains.map((d) => d.hostname as string),
+    );
 
     // Generate unique hostname for e-commerce
     const hostname = this.domainGeneratorHelper.generateUnique(
@@ -665,7 +681,7 @@ export class StoresService {
     // Get store to get the name for branding
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
-      select: { name: true, organization_id: true }
+      select: { name: true, organization_id: true },
     });
 
     // Get branding from org domain to maintain consistency
@@ -676,8 +692,8 @@ export class StoresService {
       where: {
         organization_id: store?.organization_id,
         ownership: 'vendix_subdomain',
-        domain_type: 'organization'
-      }
+        domain_type: 'organization',
+      },
     });
 
     const orgBranding = (orgDomain?.config as any)?.branding || null;

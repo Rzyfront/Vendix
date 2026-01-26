@@ -87,10 +87,7 @@ export class LegalDocumentsService {
         is_system: true,
         organization_id: null,
         store_id: null,
-        OR: [
-          { expiry_date: null },
-          { expiry_date: { gte: new Date() } },
-        ],
+        OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
       },
       orderBy: {
         effective_date: 'desc',
@@ -100,10 +97,7 @@ export class LegalDocumentsService {
     return document;
   }
 
-  async createSystemDocument(
-    userId: number,
-    dto: CreateSystemDocumentDto,
-  ) {
+  async createSystemDocument(userId: number, dto: CreateSystemDocumentDto) {
     // Verificar si ya existe una versión con ese número
     const existing = await this.globalPrisma.legal_documents.findFirst({
       where: { version: dto.version },
@@ -273,7 +267,10 @@ export class LegalDocumentsService {
   // ACCEPTANCES REPORTING
   // ==========================================
 
-  async getDocumentAcceptances(documentId: number, filters?: AcceptanceFilters) {
+  async getDocumentAcceptances(
+    documentId: number,
+    filters?: AcceptanceFilters,
+  ) {
     const where: any = { document_id: documentId };
 
     if (filters?.startDate || filters?.endDate) {
@@ -293,7 +290,7 @@ export class LegalDocumentsService {
     const acceptances = await this.globalPrisma.document_acceptances.findMany({
       where,
       include: {
-        user: {
+        users: {
           select: {
             id: true,
             email: true,
@@ -302,7 +299,7 @@ export class LegalDocumentsService {
             organization_id: true,
           },
         },
-        document: {
+        legal_documents: {
           select: {
             document_type: true,
             title: true,
@@ -318,7 +315,7 @@ export class LegalDocumentsService {
     // Filtrar por organización si se proporciona
     if (filters?.organizationId) {
       return acceptances.filter(
-        (a) => a.user.organization_id === filters.organizationId,
+        (a: any) => a.users.organization_id === filters.organizationId,
       );
     }
 

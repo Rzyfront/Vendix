@@ -120,7 +120,7 @@ export class AppConfigService {
         .navigate([], {
           queryParams: { env: newEnv, refresh: Date.now() },
         })
-        .catch((error) => {
+        .catch((error: any) => {
           console.error(
             '[AppConfigService] Error notifying environment change:',
             error,

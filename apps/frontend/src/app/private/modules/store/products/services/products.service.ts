@@ -340,9 +340,9 @@ export class ProductsService {
 
   uploadBulkProductsJson(products: any[]): Observable<any> {
     return this.http
-      .post<ApiResponse<any>>(`${this.apiUrl}/store/products/bulk/upload`, {
-        products,
-      })
+      .post<
+        ApiResponse<any>
+      >(`${this.apiUrl}/store/products/bulk/upload/json`, { products })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

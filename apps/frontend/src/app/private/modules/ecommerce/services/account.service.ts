@@ -137,6 +137,14 @@ export class AccountService {
         );
     }
 
+    updateAddress(address_id: number, address: Partial<Address>): Observable<{ success: boolean; data: Address }> {
+        return this.http.put<{ success: boolean; data: Address }>(
+            `${this.api_url}/addresses/${address_id}`,
+            address,
+            { headers: this.getHeaders() },
+        );
+    }
+
     deleteAddress(address_id: number): Observable<{ success: boolean; message: string }> {
         return this.http.delete<{ success: boolean; message: string }>(
             `${this.api_url}/addresses/${address_id}`,

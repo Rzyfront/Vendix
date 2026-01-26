@@ -24,7 +24,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
+import {
+  S3PathHelper,
+  S3OrgContext,
+  S3StoreContext,
+} from '@common/helpers/s3-path.helper';
 
 @Injectable()
 export class ProductsService {
@@ -37,7 +41,7 @@ export class ProductsService {
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
-  ) { }
+  ) {}
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -103,7 +107,7 @@ export class ProductsService {
         if (!brand) {
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-            `Please check available brands in the system.`,
+              `Please check available brands in the system.`,
           );
         }
       } else {
@@ -170,11 +174,11 @@ export class ProductsService {
                 ...(current_context?.is_super_admin
                   ? {}
                   : {
-                    OR: [
-                      { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
-                      { store_id: null }, // Categorías globales
-                    ],
-                  }),
+                      OR: [
+                        { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
+                        { store_id: null }, // Categorías globales
+                      ],
+                    }),
               },
             });
 
@@ -392,7 +396,6 @@ export class ProductsService {
 
       return result;
     } catch (error) {
-
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           throw new ConflictException('El producto ya existe');
@@ -438,12 +441,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
-          { sku: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -564,7 +567,8 @@ export class ProductsService {
             stock_quantity: product.stock_quantity,
             image_url: signed_image_url || null,
             brand: product.brands,
-            categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+            categories:
+              product.product_categories?.map((pc: any) => pc.categories) || [],
             product_tax_assignments: product.product_tax_assignments,
             stock_levels: product.stock_levels,
           };
@@ -763,7 +767,8 @@ export class ProductsService {
       cost_price: product.cost_price,
       image_url: await this.signProductImage(product),
       brand: product.brands,
-      categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+      categories:
+        product.product_categories?.map((pc: any) => pc.categories) || [],
       product_tax_assignments: product.product_tax_assignments,
       product_images: product.product_images,
       product_variants: product.product_variants,
@@ -1374,6 +1379,14 @@ export class ProductsService {
     store: S3StoreContext,
   ): Promise<any[]> {
     const processedImages: any[] = [];
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new BadRequestException('Store context required for image upload');
+    }
+
+    const { org, store } = await this.getStoreWithOrgContext(store_id);
     const basePath = this.s3PathHelper.buildProductPath(org, store);
 
     for (const [index, image] of images.entries()) {
@@ -1456,9 +1469,10 @@ export class ProductsService {
    * Calculates the final price of a product including taxes and active offers.
    */
   private calculateFinalPrice(product: any): number {
-    const basePrice = product.is_on_sale && product.sale_price
-      ? Number(product.sale_price)
-      : Number(product.base_price);
+    const basePrice =
+      product.is_on_sale && product.sale_price
+        ? Number(product.sale_price)
+        : Number(product.base_price);
 
     let totalTaxRate = 0;
 

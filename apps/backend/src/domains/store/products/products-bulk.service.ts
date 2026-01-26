@@ -31,7 +31,9 @@ export class ProductsBulkService {
     Nombre: 'name',
     SKU: 'sku',
     'Precio Venta': 'base_price',
+    'Precio Base': 'base_price', // Aliased for compatibility
     'Precio Compra': 'cost_price',
+    Costo: 'cost_price', // Aliased for compatibility
     Margen: 'profit_margin',
     'Cantidad Inicial': 'stock_quantity',
     Descripción: 'description',
@@ -51,7 +53,7 @@ export class ProductsBulkService {
     private readonly accessValidationService: AccessValidationService,
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
-  ) { }
+  ) {}
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -161,7 +163,9 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Buscar si existe por SKU para decidir si Crear o Actualizar
+        let resultProduct;
+
+        // Check for existing product by SKU
         const existingProduct = await this.prisma.products.findFirst({
           where: {
             store_id: storeId,
@@ -170,44 +174,8 @@ export class ProductsBulkService {
           },
         });
 
-        let resultProduct;
-
         // Wrap operations in a transaction for data integrity
         await this.prisma.$transaction(async (tx) => {
-          // Note: using 'this.prisma' inside transaction usually requires passing 'tx'
-          // but our services might not be transaction-aware by default.
-          // For now, we will use 'tx' for direct calls and manage service calls carefully.
-          // Since we can't easily pass 'tx' to this.productsService.create/update without refactoring them,
-          // we will do a best-effort approach or basic operations here if possible?
-          // ACTUALLY: deeply refactoring productsService to accept TX is out of scope for "fixing bulk upload" safely.
-          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost", 
-          // we should AT LEAST ensure that if variants/stock fail, we don't leave a partial product.
-          // Given the constraints, we will rely on the fact that if this block throws, the transaction rolls back.
-          // BUT - inner service calls using `this.prisma` (the global one) WON'T be part of `tx`.
-          // To fix this properly without breaking changes to ProductsService:
-          // We will catch errors and if manual rollback is needed we might need to delete.
-          // BETTER: For this specific task, we will try to do it sequentially and if creation fails, it fails.
-          // If variants fail, we should delete the product?
-          // Since the user explicitly asked "Adjust for complete load that no data is lost", 
-          // truly atomic acts require 'tx'.
-
-          // Let's implement a localized transaction approach:
-          // We will move the logic *into* the transaction callback, but we need the services to support it.
-          // If they don't, we can't use $transaction effectively for cross-service calls.
-
-          // ALTERNATIVE: Use a try-catch block that manually cleans up if a subsequent step fails.
-          // This is "poor man's transaction" but safer without refactoring the whole app.
-
-          // Wait, the user said "Adjust that no data is lost when saving to db".
-          // Let's look at `productsService`. It likely uses `prisma.products`.
-
-          // Let's stick to the current flow but add robust error handling and manual cleanup if possible.
-          // OR: Since `productsService.create`/`update` are distinct, let's keep them.
-
-          // However, for `processProductVariants` which loop, if one fails, we have a partial product.
-
-          // Let's change the loop to be more robust.
-
           if (existingProduct) {
             // Actualizar producto existente
             const updateProductDto = this.mapToUpdateProductDto(productData);
@@ -227,35 +195,25 @@ export class ProductsBulkService {
               productData,
               storeId,
             );
-            // We'll wrap creation + sub-steps in a try/catch to delete if subsequent steps fail
-            let createdId = null;
-            try {
-              resultProduct = await this.productsService.create(createProductDto);
-              createdId = (resultProduct as any).id;
 
-              // Variantes
-              if (productData.variants && productData.variants.length > 0) {
-                await this.processProductVariants(
-                  createdId as unknown as number,
-                  productData.variants,
-                );
-              }
+            resultProduct = await this.productsService.create(createProductDto);
+            const createdId = (resultProduct as any).id;
 
-              results.push({
-                product: resultProduct,
-                status: 'success',
-                message: 'Product created successfully',
-              });
-            } catch (createErr) {
-              // Compensation logic: if we created the product but failed later (e.g. variants), delete it
-              if (createdId) {
-                await this.prisma.products.delete({ where: { id: createdId } }).catch(e => console.error("Cleanup failed", e));
-              }
-              throw createErr; // Re-throw to be caught by outer loop
+            // Variantes
+            if (productData.variants && productData.variants.length > 0) {
+              await this.processProductVariants(
+                createdId as unknown as number,
+                productData.variants,
+              );
             }
-          }
-        }); // End fake transaction scope (just scoping variables mainly)
 
+            results.push({
+              product: resultProduct,
+              status: 'success',
+              message: 'Product created successfully',
+            });
+          }
+        });
 
         successful++;
       } catch (error) {
@@ -378,13 +336,6 @@ export class ProductsBulkService {
     name: string,
     storeId: number,
   ): Promise<number> {
-    // Intentar buscar por nombre (case insensitive si es posible, aquí simulo con slug o búsqueda directa)
-    // Prisma no soporta insensitive nativo en findFirst en todas las versiones sin preview features, pero intentaremos.
-    // O buscamos por nombre exacto primero.
-    // Mejor estrategia: Normalizar nombre para buscar.
-
-    const slug = generateSlug(name); // Slugify el nombre para usar como referencia si es necesario, pero buscamos por nombre
-
     const existing = await this.prisma.brands.findFirst({
       where: {
         name: { equals: name, mode: 'insensitive' },
@@ -469,11 +420,6 @@ export class ProductsBulkService {
       );
     }
 
-    // Validar uno a uno (lógica simplificada para pre-validación,
-    // la validación real de negocio ocurre al intentar crear en uploadProducts o aquí mismo)
-    // Para no duplicar lógica de findOrCreate, aquí solo validamos estructura básica
-    // Y chequeamos si el SKU ya existe en DB.
-
     for (const [index, product] of products.entries()) {
       if (!product.name || !product.sku || product.base_price === undefined) {
         errors.push(
@@ -481,8 +427,6 @@ export class ProductsBulkService {
         );
         continue;
       }
-
-      // Ya no bloqueamos si el SKU existe, porque ahora actualizamos
       validProducts.push(product);
     }
 
@@ -494,7 +438,6 @@ export class ProductsBulkService {
   }
 
   async getBulkUploadTemplate(): Promise<BulkUploadTemplateDto> {
-    // Deprecated in favor of Excel download, but kept for compatibility
     return {
       headers: [],
       sample_data: [],
@@ -511,8 +454,6 @@ export class ProductsBulkService {
     if (product.base_price < 0)
       throw new BadRequestException('Precio base debe ser positivo');
 
-    // IDs de marca y categoría ya deberían ser numéricos aquí tras el pre-procesamiento
-    // Si llegaron como números directos, validamos existencia.
     if (product.brand_id && typeof product.brand_id === 'number') {
       const exists = await this.prisma.brands.findUnique({
         where: { id: product.brand_id },
@@ -581,7 +522,7 @@ export class ProductsBulkService {
   ): Promise<void> {
     const defaultLocation =
       await this.locationsService.getDefaultLocation(storeId);
-    if (!defaultLocation) return; // O lanzar error
+    if (!defaultLocation) return;
 
     await this.stockLevelManager.updateStock({
       product_id: productId,
@@ -597,7 +538,6 @@ export class ProductsBulkService {
     stockByLocation: any[],
     storeId: number,
   ): Promise<void> {
-    // Implementación similar a la original
     const defaultLocation =
       await this.locationsService.getDefaultLocation(storeId);
 

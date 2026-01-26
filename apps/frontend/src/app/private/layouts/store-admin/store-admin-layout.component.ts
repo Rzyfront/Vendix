@@ -401,6 +401,18 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     }
   }
 
+  formatStoreType(storeType: string | null | undefined): string {
+    if (!storeType) return 'N/A';
+    const typeMap: { [key: string]: string } = {
+      'retail': 'Retail',
+      'restaurant': 'Restaurante',
+      'warehouse': 'Almacén',
+      'ecommerce': 'E-commerce',
+      'wholesale': 'Mayorista',
+    };
+    return typeMap[storeType] || storeType;
+  }
+
   onOnboardingCompleted(event: any): void {
     console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion

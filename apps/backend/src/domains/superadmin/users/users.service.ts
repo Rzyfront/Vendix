@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { toTitleCase } from '@common/utils/format.util';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   CreateUserDto,
@@ -19,6 +20,7 @@ import { toTitleCase } from '@common/utils/format.util';
 @Injectable()
 export class UsersService {
   constructor(
+    // Prisma service
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
   ) {}

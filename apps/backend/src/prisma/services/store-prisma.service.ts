@@ -330,6 +330,22 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.purchase_orders;
   }
 
+  get expenses() {
+    return this.scoped_client.expenses;
+  }
+
+  get shipping_zones() {
+    return this.scoped_client.shipping_zones;
+  }
+
+  get shipping_methods() {
+    return this.scoped_client.shipping_methods;
+  }
+
+  get shipping_rates() {
+    return this.scoped_client.shipping_rates;
+  }
+
   // Global models (no scoping applied)
   get organizations() {
     return this.baseClient.organizations;
@@ -428,22 +444,6 @@ export class StorePrismaService extends BasePrismaService {
 
   get domain_settings() {
     return this.scoped_client.domain_settings;
-  }
-
-  get shipping_zones() {
-    return this.scoped_client.shipping_zones;
-  }
-
-  get shipping_methods() {
-    return this.scoped_client.shipping_methods;
-  }
-
-  get shipping_rates() {
-    return this.scoped_client.shipping_rates;
-  }
-
-  get expenses() {
-    return this.scoped_client.expenses;
   }
 
   // Global tables (no store scoping)

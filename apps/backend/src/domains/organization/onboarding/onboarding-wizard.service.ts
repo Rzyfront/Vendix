@@ -32,7 +32,7 @@ export class OnboardingWizardService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
-  ) { }
+  ) {}
 
   /**
    * Get wizard status for a user
