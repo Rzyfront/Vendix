@@ -32,7 +32,7 @@ export class OnboardingWizardService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
-  ) {}
+  ) { }
 
   /**
    * Get wizard status for a user
@@ -581,6 +581,7 @@ export class OnboardingWizardService {
         name: user.organizations?.name || 'Organization',
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
+        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
       });
 
@@ -636,6 +637,7 @@ export class OnboardingWizardService {
         name: store.name,
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
+        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
       });
 
@@ -731,6 +733,7 @@ export class OnboardingWizardService {
         name: user.organizations?.name || 'Organization',
         primaryColor: setupAppConfigDto.primary_color,
         secondaryColor: setupAppConfigDto.secondary_color,
+        accentColor: setupAppConfigDto.accent_color,
         theme: 'light',
       });
 

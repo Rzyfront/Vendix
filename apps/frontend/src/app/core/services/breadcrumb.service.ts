@@ -594,10 +594,10 @@ export class BreadcrumbService {
       icon: 'globe-2',
     },
 
-    // Store Admin Routes
-    { path: '/store', title: 'Tienda', icon: 'store' },
+    // STORE_ADMIN Routes
+    { path: '/admin', title: 'Tienda', icon: 'store' },
     {
-      path: '/store/dashboard',
+      path: '/admin/dashboard',
       title: 'Panel Principal',
       parent: 'Tienda',
       icon: 'home',
@@ -605,91 +605,135 @@ export class BreadcrumbService {
 
     // Products
     {
-      path: '/store/products',
+      path: '/admin/products',
       title: 'Productos',
       parent: 'Tienda',
       icon: 'package',
     },
     {
-      path: '/store/products/all',
-      title: 'Todos los Productos',
-      parent: 'Products',
-      icon: 'package',
+      path: '/admin/products/create',
+      title: 'Crear Producto',
+      parent: 'Productos',
+      icon: 'plus-circle',
     },
     {
-      path: '/store/products/categories',
-      title: 'Categorías',
-      parent: 'Products',
-      icon: 'tag',
+      path: '/admin/products/edit/:id',
+      title: 'Editar Producto',
+      parent: 'Productos',
+      icon: 'edit',
     },
     {
-      path: '/store/products/inventory',
+      path: '/admin/products/:id',
+      title: 'Detalles del Producto',
+      parent: 'Productos',
+      icon: 'eye',
+    },
+
+    // Inventory
+    {
+      path: '/admin/inventory',
       title: 'Inventario',
-      parent: 'Products',
-      icon: 'archive',
+      parent: 'Tienda',
+      icon: 'warehouse',
+    },
+    {
+      path: '/admin/inventory/pop',
+      title: 'Punto de Compra',
+      parent: 'Inventario',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/inventory/pop/:id',
+      title: 'Detalles de Orden de Compra',
+      parent: 'Inventario',
+      icon: 'eye',
+    },
+    {
+      path: '/admin/inventory/adjustments',
+      title: 'Ajustes de Stock',
+      parent: 'Inventario',
+      icon: 'refresh-cw',
+    },
+    {
+      path: '/admin/inventory/locations',
+      title: 'Ubicaciones',
+      parent: 'Inventario',
+      icon: 'map-pin',
+    },
+    {
+      path: '/admin/inventory/suppliers',
+      title: 'Proveedores',
+      parent: 'Inventario',
+      icon: 'truck',
     },
 
     // Orders
     {
-      path: '/store/orders',
-      title: 'Pedidos',
+      path: '/admin/orders',
+      title: 'Órdenes',
       parent: 'Tienda',
-      icon: 'clipboard-list',
+      icon: 'cart',
     },
     {
-      path: '/store/orders/list',
-      title: 'Lista de Pedidos',
-      parent: 'Orders',
-      icon: 'list',
+      path: '/admin/orders/sales',
+      title: 'Ordenes de Venta',
+      parent: 'Órdenes',
+      icon: 'shopping-bag',
     },
     {
-      path: '/store/orders/:id',
+      path: '/admin/orders/purchase-orders',
+      title: 'Ordenes de Compra',
+      parent: 'Órdenes',
+      icon: 'clipboard',
+    },
+    {
+      path: '/admin/orders/:id',
       title: 'Detalles del Pedido',
-      parent: 'Orders',
+      parent: 'Órdenes',
       icon: 'eye',
     },
 
     // Customers
     {
-      path: '/store/customers',
+      path: '/admin/customers',
       title: 'Clientes',
       parent: 'Tienda',
       icon: 'users',
     },
     {
-      path: '/store/customers/all',
+      path: '/admin/customers/all',
       title: 'Todos los Clientes',
-      parent: 'Customers',
+      parent: 'Clientes',
       icon: 'users',
     },
     {
-      path: '/store/customers/:id',
+      path: '/admin/customers/:id',
       title: 'Detalles del Cliente',
-      parent: 'Customers',
+      parent: 'Clientes',
       icon: 'user',
     },
     {
-      path: '/store/customers/reviews',
-      title: 'Reseñas de Clientes',
-      parent: 'Customers',
+      path: '/admin/customers/reviews',
+      title: 'Reseñas',
+      parent: 'Clientes',
       icon: 'star',
     },
 
     // Marketing
     {
-      path: '/store/marketing',
-      title: 'Mercadeo',
+      path: '/admin/marketing',
+      title: 'Marketing',
       parent: 'Tienda',
-      icon: 'bullhorn',
+      icon: 'megaphone',
     },
     {
-      path: '/store/marketing/promotions',
+      path: '/admin/marketing/promotions',
       title: 'Promociones',
       parent: 'Marketing',
       icon: 'gift',
     },
     {
-      path: '/store/marketing/coupons',
+      path: '/admin/marketing/coupons',
       title: 'Cupones',
       parent: 'Marketing',
       icon: 'ticket',
@@ -697,80 +741,96 @@ export class BreadcrumbService {
 
     // Analytics
     {
-      path: '/store/analytics',
-      title: 'Análisis',
+      path: '/admin/analytics',
+      title: 'Analíticas',
       parent: 'Tienda',
       icon: 'chart-line',
     },
     {
-      path: '/store/analytics/sales',
-      title: 'Análisis de Ventas',
-      parent: 'Analytics',
+      path: '/admin/analytics/sales',
+      title: 'Ventas',
+      parent: 'Analíticas',
       icon: 'dollar-sign',
     },
     {
-      path: '/store/analytics/traffic',
-      title: 'Análisis de Tráfico',
-      parent: 'Analytics',
+      path: '/admin/analytics/traffic',
+      title: 'Tráfico',
+      parent: 'Analíticas',
       icon: 'globe',
     },
     {
-      path: '/store/analytics/performance',
+      path: '/admin/analytics/performance',
       title: 'Rendimiento',
-      parent: 'Analytics',
+      parent: 'Analíticas',
       icon: 'trending-up',
+    },
+
+    // E-commerce
+    {
+      path: '/admin/ecommerce',
+      title: 'E-commerce',
+      parent: 'Tienda',
+      icon: 'shopping-bag',
+    },
+
+    // POS
+    {
+      path: '/admin/pos',
+      title: 'Punto de Venta',
+      parent: 'Tienda',
+      icon: 'store',
+    },
+
+    // Expenses
+    {
+      path: '/admin/expenses',
+      title: 'Gastos',
+      parent: 'Tienda',
+      icon: 'wallet',
     },
 
     // Settings
     {
-      path: '/store/settings',
+      path: '/admin/settings',
       title: 'Configuración',
       parent: 'Tienda',
-      icon: 'cog',
+      icon: 'settings',
     },
     {
-      path: '/store/settings/general',
-      title: 'Configuración General',
-      parent: 'Settings',
-      icon: 'cog',
+      path: '/admin/settings/general',
+      title: 'General',
+      parent: 'Configuración',
+      icon: 'sliders',
     },
     {
-      path: '/store/settings/appearance',
+      path: '/admin/settings/payments',
+      title: 'Métodos de Pago',
+      parent: 'Configuración',
+      icon: 'credit-card',
+    },
+    {
+      path: '/admin/settings/appearance',
       title: 'Apariencia',
-      parent: 'Settings',
+      parent: 'Configuración',
       icon: 'palette',
     },
     {
-      path: '/store/settings/security',
+      path: '/admin/settings/security',
       title: 'Seguridad',
-      parent: 'Settings',
+      parent: 'Configuración',
       icon: 'shield',
     },
-
-    // POS (Point of Sale)
     {
-      path: '/store/pos',
-      title: 'Punto de Venta',
-      parent: 'Tienda',
-      icon: 'cash-register',
+      path: '/admin/settings/domains',
+      title: 'Dominios',
+      parent: 'Configuración',
+      icon: 'globe-2',
     },
     {
-      path: '/store/pos/register',
-      title: 'Registro POS',
-      parent: 'Point of Sale',
-      icon: 'register',
-    },
-    {
-      path: '/store/pos/cart',
-      title: 'Carrito POS',
-      parent: 'Point of Sale',
-      icon: 'shopping-cart',
-    },
-    {
-      path: '/store/pos/payment',
-      title: 'Pago POS',
-      parent: 'Point of Sale',
-      icon: 'credit-card',
+      path: '/admin/settings/shipping',
+      title: 'Envíos',
+      parent: 'Configuración',
+      icon: 'truck',
     },
   ];
 
@@ -860,22 +920,17 @@ export class BreadcrumbService {
       return '/super-admin';
     }
 
-    // Para Admin/Organization Admin: construir URL base
-    if (route.path.startsWith('/admin/')) {
-      return '/admin';
-    }
-
-    // Para Store Admin: construir URL base
-    if (route.path.startsWith('/store/')) {
-      return '/store';
-    }
-
-    // Para Organization Admin (legacy): construir URL base
+    // Para Organization Admin (ORG_ADMIN): construir URL base
     if (route.path.startsWith('/organization/')) {
       return '/organization';
     }
 
-    // Para Store Admin: construir URL base
+    // Para Store Admin (STORE_ADMIN): construir URL base
+    if (route.path.startsWith('/admin/')) {
+      return '/admin';
+    }
+
+    // Legacy support for old /store/ routes
     if (route.path.startsWith('/store/')) {
       return '/store';
     }

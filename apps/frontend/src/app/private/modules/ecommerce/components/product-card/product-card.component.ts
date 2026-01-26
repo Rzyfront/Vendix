@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { Product } from '../../services/catalog.service';
+import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
@@ -28,7 +28,10 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         }
         <h3 class="product-name">{{ product.name }}</h3>
         <div class="product-price">
-          <span class="price">{{ product.base_price | currency }}</span>
+          <span class="price">{{ product.final_price | currency }}</span>
+          @if (product.is_on_sale) {
+            <span class="original-price">{{ product.base_price | currency }}</span>
+          }
         </div>
         @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
           <span class="low-stock">¡Últimas {{ product.stock_quantity }} unidades!</span>
@@ -143,11 +146,20 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 
     .product-price {
       margin-top: 0.5rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
 
       .price {
         font-size: var(--fs-lg);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
+      }
+
+      .original-price {
+        font-size: var(--fs-xs);
+        color: var(--color-text-muted);
+        text-decoration: line-through;
       }
     }
 
@@ -222,11 +234,11 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   `],
 })
 export class ProductCardComponent {
-  @Input() product!: Product;
+  @Input() product!: EcommerceProduct;
   @Input() in_wishlist = false;
-  @Output() add_to_cart = new EventEmitter<Product>();
-  @Output() toggle_wishlist = new EventEmitter<Product>();
-  @Output() quick_view = new EventEmitter<Product>();
+  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
+  @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
+  @Output() quick_view = new EventEmitter<EcommerceProduct>();
 
   private router = inject(Router);
 

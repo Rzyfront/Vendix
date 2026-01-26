@@ -9,7 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Product } from '../../services/catalog.service';
+import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
@@ -48,10 +48,11 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                   <span class="product-brand" *ngIf="product.brand">{{ product.brand.name }}</span>
                   <h4 class="product-name">{{ product.name }}</h4>
                   <div class="product-price">
-                    @if (product.is_on_sale && product.sale_price) {
-                      <span class="sale-price">{{ product.sale_price | currency }}</span>
-                    } @else {
-                      <span class="current-price">{{ product.base_price | currency }}</span>
+                    <span class="current-price">{{ product.final_price | currency }}</span>
+                    @if (product.is_on_sale) {
+                      <span class="original-price text-xs line-through opacity-50 ml-2" style="text-decoration: line-through;">
+                        {{ product.base_price | currency }}
+                      </span>
                     }
                   </div>
                 </div>
@@ -243,9 +244,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 })
 export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
   @Input() title = 'Productos sugeridos';
-  @Input() products: Product[] = [];
-  @Output() quick_view = new EventEmitter<Product>();
-  @Output() add_to_cart = new EventEmitter<Product>();
+  @Input() products: EcommerceProduct[] = [];
+  @Output() quick_view = new EventEmitter<EcommerceProduct>();
+  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
 
   @ViewChild('viewport') viewport!: ElementRef<HTMLDivElement>;
 
@@ -275,11 +276,11 @@ export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
     // can reset timer here if manual interaction
   }
 
-  onQuickView(product: Product): void {
+  onQuickView(product: EcommerceProduct): void {
     this.quick_view.emit(product);
   }
 
-  onAddToCart(event: Event, product: Product): void {
+  onAddToCart(event: Event, product: EcommerceProduct): void {
     event.stopPropagation();
     event.preventDefault();
     this.add_to_cart.emit(product);

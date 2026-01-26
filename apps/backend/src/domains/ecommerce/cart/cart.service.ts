@@ -73,7 +73,6 @@ export class CartService {
         }
 
         let available_stock = product.stock_quantity || 0;
-        let unit_price = product.base_price;
 
         if (dto.product_variant_id) {
             const variant = await this.prisma.product_variants.findUnique({
@@ -83,14 +82,29 @@ export class CartService {
                 throw new BadRequestException('Invalid product variant');
             }
             available_stock = variant.stock_quantity || 0;
-            if (variant.price_override) {
-                unit_price = variant.price_override;
-            }
         }
 
         if (dto.quantity > available_stock) {
             throw new BadRequestException(`Only ${available_stock} units available`);
         }
+
+        // Fetch product with taxes for price calculation
+        const productWithTaxes = await this.prisma.products.findUnique({
+            where: { id: dto.product_id },
+            include: {
+                product_tax_assignments: {
+                    include: {
+                        tax_categories: {
+                            include: {
+                                tax_rates: true,
+                            },
+                        },
+                    },
+                },
+            },
+        });
+
+        const unit_price = this.calculateFinalPrice(productWithTaxes);
 
         // Buscar o crear el cart del usuario (store_id y user_id se aplican automáticamente)
         let cart = await this.prisma.carts.findFirst({});
@@ -275,6 +289,7 @@ export class CartService {
                             attributes: item.product_variant.attributes,
                         }
                         : null,
+                    final_price: item.unit_price, // The stored unit_price is now the final price
                 };
             }),
         );
@@ -286,5 +301,29 @@ export class CartService {
             item_count: items.reduce((sum: number, i: any) => sum + i.quantity, 0),
             items,
         };
+    }
+
+    /**
+     * Calculates the final price of a product including taxes and active offers.
+     */
+    private calculateFinalPrice(product: any): number {
+        const basePrice = product.is_on_sale && product.sale_price
+            ? Number(product.sale_price)
+            : Number(product.base_price);
+
+        let totalTaxRate = 0;
+
+        if (product.product_tax_assignments) {
+            for (const assignment of product.product_tax_assignments) {
+                if (assignment.tax_categories?.tax_rates) {
+                    for (const tax of assignment.tax_categories.tax_rates) {
+                        totalTaxRate += Number(tax.rate);
+                    }
+                }
+            }
+        }
+
+        const finalPrice = basePrice * (1 + totalTaxRate);
+        return Math.round(finalPrice * 100) / 100;
     }
 }

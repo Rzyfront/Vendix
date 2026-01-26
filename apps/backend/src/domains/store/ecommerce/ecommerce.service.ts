@@ -22,7 +22,7 @@ export class EcommerceService {
     private readonly configStandardizer: DomainConfigStandardizerHelper,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
-  ) {}
+  ) { }
 
   /**
    * Get e-commerce settings from domain_settings
@@ -102,8 +102,15 @@ export class EcommerceService {
     // Siempre retorna la plantilla default
     const templateName = 'ecommerce_default_settings';
 
-    const template = await this.prisma.default_templates.findUnique({
-      where: { template_name: templateName },
+    const template = await this.prisma.default_templates.findFirst({
+      where: {
+        template_name: templateName,
+        is_active: true,
+        is_system: true,
+      },
+      orderBy: {
+        updated_at: 'desc',
+      },
     });
 
     if (!template) {
@@ -219,13 +226,58 @@ export class EcommerceService {
         appType,
       );
 
-      return this.prisma.domain_settings.update({
-        where: { id: existingDomain.id },
-        data: {
-          config: standardizedConfig,
-          updated_at: new Date(),
+      // Sincronizar con el nombre de la tienda y organización si el título de inicio cambió
+      if (mergedRaw.inicio?.titulo) {
+        try {
+          const store_id = RequestContextService.getStoreId();
+          if (store_id) {
+            const store = await this.prisma.stores.findUnique({
+              where: { id: store_id },
+              select: { organization_id: true }
+            });
+
+            // Actualizar nombre de la tienda
+            await this.prisma.stores.update({
+              where: { id: store_id },
+              data: { name: mergedRaw.inicio.titulo }
+            });
+
+            // Actualizar nombre de la organización
+            if (store?.organization_id) {
+              await this.prisma.organizations.update({
+                where: { id: store.organization_id },
+                data: { name: mergedRaw.inicio.titulo }
+              });
+            }
+          }
+        } catch (error) {
+          this.logger.warn(`Failed to sync name from ecommerce: ${error.message}`);
+        }
+      }
+
+      // Actualizar TODOS los dominios de tipo ecommerce para esta tienda
+      const store_id = RequestContextService.getStoreId();
+      const domains = await this.prisma.domain_settings.findMany({
+        where: {
+          store_id: store_id,
+          domain_type: 'ecommerce',
         },
       });
+
+      const updatePromises = domains.map(domain => {
+        // Para otros dominios ecommerce, hacemos un merge similar o usamos la misma config estandarizada?
+        // Generalmente, si son dominios del mismo tipo para la misma tienda, deberían compartir la config de ecommerce
+        return this.prisma.domain_settings.update({
+          where: { id: domain.id },
+          data: {
+            config: standardizedConfig,
+            updated_at: new Date(),
+          },
+        });
+      });
+
+      await Promise.all(updatePromises);
+      return standardizedConfig; // Retornamos la config actualizada
     } else {
       // MODO CREACIÓN: crear nuevo domain
       const store_id = RequestContextService.getStoreId();

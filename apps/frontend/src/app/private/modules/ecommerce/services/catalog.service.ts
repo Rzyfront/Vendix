@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
-export interface Product {
+export interface EcommerceProduct {
   id: number;
   name: string;
   slug: string;
@@ -14,13 +14,14 @@ export interface Product {
   is_on_sale?: boolean;
   sku: string | null;
   stock_quantity: number | null;
+  final_price: number;
   image_url: string | null;
   weight?: number | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
 }
 
-export interface ProductDetail extends Product {
+export interface ProductDetail extends EcommerceProduct {
   images: { id: number; image_url: string; is_main: boolean }[];
   variants: {
     id: number;
@@ -101,7 +102,7 @@ export class CatalogService {
 
   getProducts(
     query: CatalogQuery = {},
-  ): Observable<PaginatedResponse<Product>> {
+  ): Observable<PaginatedResponse<EcommerceProduct>> {
     let params = new HttpParams();
 
     if (query.search) params = params.set('search', query.search);
@@ -122,7 +123,7 @@ export class CatalogService {
     if (query.has_discount !== undefined)
       params = params.set('has_discount', query.has_discount.toString());
 
-    return this.http.get<PaginatedResponse<Product>>(this.api_url, {
+    return this.http.get<PaginatedResponse<EcommerceProduct>>(this.api_url, {
       headers: this.getHeaders(),
       params,
     });

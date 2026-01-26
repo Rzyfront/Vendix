@@ -83,6 +83,9 @@ export class AuthFacade {
   readonly userStoreSlug$ = this.store.select(
     AuthSelectors.selectUserStoreSlug,
   );
+  readonly userStoreType$ = this.store.select(
+    AuthSelectors.selectUserStoreType,
+  );
 
   // Store settings observables
   readonly storeSettings$ = this.store.select(AuthSelectors.selectStoreSettings);

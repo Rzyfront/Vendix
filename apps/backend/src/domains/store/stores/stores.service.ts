@@ -193,6 +193,48 @@ export class StoresService {
       include: { organizations: true, addresses: true, store_settings: true },
     });
 
+    // Sincronizar nombre en dominios y organización si el nombre cambió
+    if (storeData.name) {
+      try {
+        const organization_id = updated.organization_id;
+
+        // Actualizar TODOS los dominios de la tienda
+        const domains = await this.prisma.domain_settings.findMany({
+          where: { store_id: id }
+        });
+
+        for (const domain of domains) {
+          const config = (domain.config as any) || {};
+          const branding = config.branding || {};
+
+          await this.prisma.domain_settings.update({
+            where: { id: domain.id },
+            data: {
+              config: {
+                ...config,
+                branding: {
+                  ...branding,
+                  name: storeData.name
+                }
+              }
+            }
+          });
+        }
+
+        // Si es la tienda principal (o simplemente queremos consistencia), 
+        // actualizar el nombre de la organización también
+        if (organization_id) {
+          await this.prisma.organizations.update({
+            where: { id: organization_id },
+            data: { name: storeData.name }
+          });
+        }
+      } catch (error) {
+        // No fallar el update de la tienda si falla la sincronización
+        console.error('Failed to sync name across entities:', error);
+      }
+    }
+
     return {
       ...updated,
       logo_url: await this.s3Service.signUrl((updated as any).logo_url),

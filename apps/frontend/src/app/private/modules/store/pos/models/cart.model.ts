@@ -6,6 +6,7 @@ export interface CartItem {
   product: Product;
   quantity: number;
   unitPrice: number;
+  finalPrice: number;
   totalPrice: number;
   taxAmount: number;
   addedAt: Date;

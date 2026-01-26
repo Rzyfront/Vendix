@@ -35,9 +35,9 @@ export class DomainsService implements OnModuleInit {
   constructor(
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
-  ) {}
+  ) { }
 
-  async onModuleInit() {}
+  async onModuleInit() { }
 
   // ==================== VALIDATION METHODS ====================
 
@@ -414,6 +414,29 @@ export class DomainsService implements OnModuleInit {
       updated_at: new Date(),
     };
 
+    // Si se está actualizando la configuración, sincronizar con otros dominios del mismo tipo
+    if (updateData.config) {
+      const { organization_id, store_id, domain_type: record_type } = existing_record;
+
+      // Actualizar TODOS los dominios del mismo tipo para esta organización/tienda
+      await this.prisma.domain_settings.updateMany({
+        where: {
+          organization_id,
+          store_id,
+          domain_type: record_type,
+        },
+        data: {
+          config: updateData.config as any,
+          updated_at: new Date(),
+        },
+      });
+
+      this.logger.log(
+        `Configuration synchronized across all ${record_type} domains for ${store_id ? 'store ' + store_id : 'org ' + organization_id
+        }`,
+      );
+    }
+
     const updated = await this.prisma.domain_settings.update({
       where: { hostname },
       data: updates,
@@ -435,7 +458,7 @@ export class DomainsService implements OnModuleInit {
 
     // Check if new hostname is available
     const available = await this.checkHostnameAvailability(newHostname);
-    if (!available) {
+    if (!available.available) {
       throw new ConflictException(`Hostname ${newHostname} is not available`);
     }
 
@@ -443,7 +466,7 @@ export class DomainsService implements OnModuleInit {
       hostname: newHostname,
       organization_id: source.organization_id,
       store_id: source.store_id,
-      config: source.config,
+      config: source.config as any,
       domain_type: source.domain_type,
       ownership: source.ownership,
       is_primary: false, // Duplicates are not primary by default

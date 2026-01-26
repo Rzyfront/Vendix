@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, inject, AfterViewInit, OnDestroy, ElementRef, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductCardComponent } from '../product-card/product-card.component';
-import { Product } from '../../services/catalog.service';
+import { EcommerceProduct } from '../../services/catalog.service';
 import { CatalogService, CatalogQuery } from '../../services/catalog.service';
 import { takeUntil } from 'rxjs/operators';
 import { Subject } from 'rxjs';
@@ -16,16 +16,16 @@ import { Subject } from 'rxjs';
 export class ProductsScrollComponent implements AfterViewInit, OnDestroy {
   @Input() title = 'Productos';
   @Input() query: CatalogQuery = { limit: 12, sort_by: 'newest' };
-  @Input() initial_products: Product[] = [];
+  @Input() initial_products: EcommerceProduct[] = [];
   @Input() show_header = true;
   @Input() show_see_all = true;
   @Input() class = '';
 
-  @Output() add_to_cart = new EventEmitter<Product>();
-  @Output() toggle_wishlist = new EventEmitter<Product>();
-  @Output() quick_view = new EventEmitter<Product>();
+  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
+  @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
+  @Output() quick_view = new EventEmitter<EcommerceProduct>();
 
-  products: Product[] = [];
+  products: EcommerceProduct[] = [];
   is_loading = false;
   has_more = true;
   current_page = 1;
@@ -96,15 +96,15 @@ export class ProductsScrollComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  onAddToCart(product: Product): void {
+  onAddToCart(product: EcommerceProduct): void {
     this.add_to_cart.emit(product);
   }
 
-  onToggleWishlist(product: Product): void {
+  onToggleWishlist(product: EcommerceProduct): void {
     this.toggle_wishlist.emit(product);
   }
 
-  onQuickView(product: Product): void {
+  onQuickView(product: EcommerceProduct): void {
     this.quick_view.emit(product);
   }
 }

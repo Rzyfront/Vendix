@@ -8,7 +8,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { Subject, debounceTime, switchMap, takeUntil } from 'rxjs';
-import { Product } from '../../services/catalog.service';
+import { EcommerceProduct } from '../../services/catalog.service';
 import { CatalogService } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
@@ -23,7 +23,7 @@ export class SearchAutocompleteComponent implements OnDestroy {
   @Output() search = new EventEmitter<string>();
 
   search_query = '';
-  search_results: Product[] = [];
+  search_results: EcommerceProduct[] = [];
   is_loading = false;
   show_dropdown = false;
   selected_index = -1;

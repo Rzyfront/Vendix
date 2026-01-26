@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CatalogService, ProductDetail, Product, CatalogQuery } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -88,11 +88,9 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               </div>
 
               <div class="price-line">
-                @if (p.is_on_sale && p.sale_price) {
-                  <span class="sale-price">{{ p.sale_price | currency }}</span>
-                  <span class="original-price">{{ p.base_price | currency }}</span>
-                } @else {
-                  <span class="current-price">{{ p.base_price | currency }}</span>
+                <span class="current-price">{{ p.final_price | currency }}</span>
+                @if (p.is_on_sale) {
+                  <span class="original-price" style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;">{{ p.base_price | currency }}</span>
                 }
               </div>
 
@@ -374,7 +372,7 @@ export class ProductDetailComponent implements OnInit {
   selectedProductSlug: string | null = null;
 
   // Recommendations
-  recommendedProducts = signal<Product[]>([]);
+  recommendedProducts = signal<EcommerceProduct[]>([]);
 
   // Review Form
   reviewForm = this.fb.group({
@@ -435,8 +433,8 @@ export class ProductDetailComponent implements OnInit {
   setActiveImage(url: string): void { this.activeImageUrl.set(url); }
   selectVariant(variant: any): void { this.selectedVariantId.set(variant.id); }
   toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
-  onAddToCart(product: Product | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
-  onQuickView(product: Product): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
+  onAddToCart(product: EcommerceProduct | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
+  onQuickView(product: EcommerceProduct): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
 
   onSubmitReview(): void {
     if (this.reviewForm.invalid) return;

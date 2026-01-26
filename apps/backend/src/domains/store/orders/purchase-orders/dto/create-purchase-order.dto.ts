@@ -82,6 +82,49 @@ export class PurchaseOrderItemDto {
   @IsString()
   @IsOptional()
   product_description?: string;
+
+  @ApiProperty({ description: 'Product State (for new products)' })
+  @IsString()
+  @IsOptional()
+  state?: string;
+
+  @ApiProperty({ description: 'Product Weight (for new products)' })
+  @IsNumber()
+  @IsOptional()
+  weight?: number;
+
+  @ApiProperty({ description: 'Available for Ecommerce (for new products)' })
+  @IsOptional()
+  available_for_ecommerce?: any;
+
+  @ApiProperty({ description: 'Base Price (for new products)' })
+  @IsNumber()
+  @IsOptional()
+  base_price?: number;
+
+  @ApiProperty({ description: 'Profit Margin (for new products)' })
+  @IsNumber()
+  @IsOptional()
+  profit_margin?: number;
+
+  @ApiProperty({ description: 'Is on sale (for new products)' })
+  @IsOptional()
+  is_on_sale?: any;
+
+  @ApiProperty({ description: 'Sale price (for new products)' })
+  @IsNumber()
+  @IsOptional()
+  sale_price?: number;
+
+  @ApiProperty({ description: 'Brand name (for new products)' })
+  @IsString()
+  @IsOptional()
+  brand_name?: string;
+
+  @ApiProperty({ description: 'Category names comma separated (for new products)' })
+  @IsString()
+  @IsOptional()
+  category_names?: string;
 }
 
 export class CreatePurchaseOrderDto {

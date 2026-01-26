@@ -389,7 +389,10 @@ export class ProductsService {
         },
         { timeout: 30000 },
       );
+
+      return result;
     } catch (error) {
+
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
           throw new ConflictException('El producto ya existe');
@@ -540,11 +543,37 @@ export class ProductsService {
       this.prisma.products.count({ where }),
     ]);
 
-    // Para POS optimizado, retornar productos directamente sin cálculos complejos
+    // Para POS optimizado, retornar productos directamente con imágenes firmadas
     if (pos_optimized) {
+      const productsWithSignedImages = await Promise.all(
+        products.map(async (product) => {
+          const raw_image_url = product.product_images?.[0]?.image_url || null;
+          const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+
+          return {
+            id: product.id,
+            name: product.name,
+            slug: product.slug,
+            description: product.description,
+            base_price: product.base_price,
+            sale_price: product.sale_price,
+            is_on_sale: product.is_on_sale,
+            final_price: this.calculateFinalPrice(product),
+            sku: product.sku,
+            cost_price: product.cost_price,
+            stock_quantity: product.stock_quantity,
+            image_url: signed_image_url || null,
+            brand: product.brands,
+            categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+            product_tax_assignments: product.product_tax_assignments,
+            stock_levels: product.stock_levels,
+          };
+        }),
+      );
+
       return {
-        data: products,
-        pagination: {
+        data: productsWithSignedImages,
+        meta: {
           total,
           page,
           limit,
@@ -567,9 +596,24 @@ export class ProductsService {
             0,
           ) || 0;
 
+        const raw_image_url = product.product_images?.[0]?.image_url || null;
+        const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+
         return {
-          ...product,
-          image_url: await this.signProductImage(product, true),
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          description: product.description,
+          base_price: product.base_price,
+          sale_price: product.sale_price,
+          is_on_sale: product.is_on_sale,
+          final_price: this.calculateFinalPrice(product),
+          sku: product.sku,
+          cost_price: product.cost_price,
+          image_url: signed_image_url || null,
+          brand: product.brands,
+          categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+          product_tax_assignments: product.product_tax_assignments,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
           // Nuevos campos agregados para mayor claridad
@@ -583,6 +627,8 @@ export class ProductsService {
               available: stock.quantity_available,
               reserved: stock.quantity_reserved,
             })) || [],
+          stock_levels: product.stock_levels,
+          stores: product.stores,
         };
       }),
     );
@@ -628,7 +674,11 @@ export class ProductsService {
         },
         product_tax_assignments: {
           include: {
-            tax_categories: true,
+            tax_categories: {
+              include: {
+                tax_rates: true,
+              },
+            },
           },
         },
         product_images: {
@@ -701,8 +751,25 @@ export class ProductsService {
 
     // Retornar producto con información de stock enriquecida
     return {
-      ...product,
+      id: product.id,
+      name: product.name,
+      slug: product.slug,
+      description: product.description,
+      base_price: product.base_price,
+      sale_price: product.sale_price,
+      is_on_sale: product.is_on_sale,
+      final_price: this.calculateFinalPrice(product),
+      sku: product.sku,
+      cost_price: product.cost_price,
       image_url: await this.signProductImage(product),
+      brand: product.brands,
+      categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+      product_tax_assignments: product.product_tax_assignments,
+      product_images: product.product_images,
+      product_variants: product.product_variants,
+      reviews: product.reviews,
+      _count: product._count,
+      inventory_batches: product.inventory_batches,
       // Mantener compatibilidad con el campo existente pero basado en stock_levels
       stock_quantity: totalStockAvailable,
       // Nuevos campos agregados para mayor claridad
@@ -716,6 +783,8 @@ export class ProductsService {
         reserved: stock.quantity_reserved,
         reorder_point: stock.reorder_point,
       })),
+      stock_levels: product.stock_levels,
+      stores: product.stores,
     };
   }
 
@@ -1284,6 +1353,20 @@ export class ProductsService {
     );
   }
 
+  async updateVariant(
+    variantId: number,
+    updateVariantDto: UpdateProductVariantDto,
+  ) {
+    return this.productVariantService.updateVariant(
+      variantId,
+      updateVariantDto,
+    );
+  }
+
+  async removeVariant(variantId: number) {
+    return this.productVariantService.removeVariant(variantId);
+  }
+
   private async handleImageUploads(
     images: ProductImageDto[],
     productSlug: string,
@@ -1367,5 +1450,29 @@ export class ProductsService {
       org: store.organizations,
       store: { id: store.id, slug: store.slug },
     };
+  }
+
+  /**
+   * Calculates the final price of a product including taxes and active offers.
+   */
+  private calculateFinalPrice(product: any): number {
+    const basePrice = product.is_on_sale && product.sale_price
+      ? Number(product.sale_price)
+      : Number(product.base_price);
+
+    let totalTaxRate = 0;
+
+    if (product.product_tax_assignments) {
+      for (const assignment of product.product_tax_assignments) {
+        if (assignment.tax_categories?.tax_rates) {
+          for (const tax of assignment.tax_categories.tax_rates) {
+            totalTaxRate += Number(tax.rate);
+          }
+        }
+      }
+    }
+
+    const finalPrice = basePrice * (1 + totalTaxRate);
+    return Math.round(finalPrice * 100) / 100;
   }
 }

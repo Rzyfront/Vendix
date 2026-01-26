@@ -157,6 +157,15 @@ export class CatalogService {
                 categories: { select: { id: true, name: true, slug: true } },
               },
             },
+            product_tax_assignments: {
+              include: {
+                tax_categories: {
+                  include: {
+                    tax_rates: true,
+                  },
+                },
+              },
+            },
           },
         }),
         this.prisma.products.count({ where: whereBestSelling }),
@@ -184,6 +193,15 @@ export class CatalogService {
             product_categories: {
               include: {
                 categories: { select: { id: true, name: true, slug: true } },
+              },
+            },
+            product_tax_assignments: {
+              include: {
+                tax_categories: {
+                  include: {
+                    tax_rates: true,
+                  },
+                },
               },
             },
           },
@@ -240,6 +258,15 @@ export class CatalogService {
               },
             },
           },
+          product_tax_assignments: {
+            include: {
+              tax_categories: {
+                include: {
+                  tax_rates: true,
+                },
+              },
+            },
+          },
         },
       }),
       this.prisma.products.count({ where }),
@@ -280,6 +307,15 @@ export class CatalogService {
         },
         product_variants: {
           where: { stock_quantity: { gt: 0 } },
+        },
+        product_tax_assignments: {
+          include: {
+            tax_categories: {
+              include: {
+                tax_rates: true,
+              },
+            },
+          },
         },
         reviews: {
           where: { state: 'approved' },
@@ -425,6 +461,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
       image_url: signed_image_url || null,
@@ -458,6 +495,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
       images: signed_images,
@@ -477,5 +515,29 @@ export class CatalogService {
       avg_rating: Math.round(avg_rating * 10) / 10,
       review_count: reviews.length,
     };
+  }
+
+  /**
+   * Calculates the final price of a product including taxes and active offers.
+   */
+  private calculateFinalPrice(product: any): number {
+    const basePrice = product.is_on_sale && product.sale_price
+      ? Number(product.sale_price)
+      : Number(product.base_price);
+
+    let totalTaxRate = 0;
+
+    if (product.product_tax_assignments) {
+      for (const assignment of product.product_tax_assignments) {
+        if (assignment.tax_categories?.tax_rates) {
+          for (const tax of assignment.tax_categories.tax_rates) {
+            totalTaxRate += Number(tax.rate);
+          }
+        }
+      }
+    }
+
+    const finalPrice = basePrice * (1 + totalTaxRate);
+    return Math.round(finalPrice * 100) / 100;
   }
 }

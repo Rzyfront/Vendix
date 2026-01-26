@@ -88,8 +88,15 @@ export class EnvironmentContextService {
 
     // Verificar account_type de la organización
     // Solo permitir switch a ORG_ADMIN si la organización es MULTI_STORE_ORG
+
+    // Robust account_type detection (handles objects and arrays)
+    const userOrg = currentUser.organization || currentUser.organizations;
     const accountType =
-      currentUser.organization?.account_type || 'SINGLE_STORE';
+      currentUser.organization?.account_type ||
+      (Array.isArray(userOrg)
+        ? userOrg[0]?.account_type
+        : userOrg?.account_type) ||
+      'SINGLE_STORE';
     const allowOrgSwitch = accountType === 'MULTI_STORE_ORG';
 
     // Para cambiar a organización, debe:

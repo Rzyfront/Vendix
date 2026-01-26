@@ -139,7 +139,7 @@ export class DefaultPanelUIService {
     VENDIX_LANDING: 'user_settings_landing',
   };
 
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(private readonly prisma: GlobalPrismaService) { }
 
   /**
    * Obtiene la configuración de panel UI para un tipo de aplicación
@@ -174,6 +174,10 @@ export class DefaultPanelUIService {
           template_name: templateName,
           configuration_type: 'user_settings',
           is_active: true,
+          is_system: true,
+        },
+        orderBy: {
+          updated_at: 'desc',
         },
       });
 

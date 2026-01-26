@@ -610,6 +610,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             expenses: true,
             expenses_overview: true,
             expenses_all: true,
+            expenses_create: true,
             expenses_categories: true,
             expenses_reports: true,
             settings: true,
@@ -618,6 +619,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             settings_appearance: true,
             settings_security: true,
             settings_domains: true,
+            settings_shipping: true,
           },
         },
         preferences: {

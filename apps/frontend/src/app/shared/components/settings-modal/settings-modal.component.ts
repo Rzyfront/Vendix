@@ -18,12 +18,13 @@ import { AuthService } from '../../../core/services/auth.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
-import { ToggleComponent } from '../toggle/toggle.component';
 import { IconComponent } from '../icon/icon.component';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { DialogService, ToastService } from '../index';
+import { SettingToggleComponent } from '../setting-toggle/setting-toggle.component';
+import { ThemeService } from '../../../core/services/theme.service';
 
 // Constant: Configuration of modules per app type
 const APP_MODULES = {
@@ -275,268 +276,182 @@ const APP_MODULES = {
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    ToggleComponent,
     IconComponent,
+    SettingToggleComponent,
   ],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
       [title]="'Configuración de Usuario'"
       [subtitle]="'Personaliza tu experiencia en la plataforma'"
-      [size]="'lg'"
+      [size]="'xl'"
       (closed)="onClose()"
       (opened)="onOpen()"
     >
       <form
         [formGroup]="settingsForm"
         (ngSubmit)="onSubmit()"
-        class="space-y-6"
+        class="settings-form"
         *ngIf="!loading; else loadingTemplate"
       >
-        <!-- Section 1: App Type Selection -->
-        <div class="app-type-section">
-          <h4 class="text-lg font-medium text-gray-900 mb-4">
-            Tipo de Aplicación
-          </h4>
-          <div class="app-type-selection" [class.read-only]="!canChangeAppType">
-            <div
-              class="app-type-card"
-              [class.selected]="currentAppType === 'ORG_ADMIN'"
-              [class.read-only]="!canChangeAppType"
-              *ngIf="!isSingleStore"
-              (click)="selectAppType('ORG_ADMIN')"
-            >
-              <app-icon name="building" [size]="32"></app-icon>
-              <div class="card-content">
-                <h3>Administración de Organización</h3>
-                <p>Gestión completa de múltiples tiendas</p>
+        <!-- Top Section: App Type & Upgrade -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <!-- App Type Selection -->
+          <div class="lg:col-span-8">
+            <h4 class="section-header">
+              <app-icon name="app-window" [size]="20"></app-icon>
+              Tipo de Aplicación
+            </h4>
+            <div class="app-type-selection" [class.read-only]="!canChangeAppType">
+              <div
+                class="app-type-card"
+                [class.selected]="currentAppType === 'ORG_ADMIN'"
+                *ngIf="!isSingleStore"
+                (click)="selectAppType('ORG_ADMIN')"
+              >
+                <app-icon name="building" [size]="24"></app-icon>
+                <div class="card-content">
+                  <h3>Organización</h3>
+                  <p>Gestión multi-tienda</p>
+                </div>
+                <div class="status-badge" *ngIf="currentAppType === 'ORG_ADMIN'">
+                  Actual
+                </div>
               </div>
-              <div class="badge" *ngIf="currentAppType === 'ORG_ADMIN'">
-                ✓ Actual
-              </div>
-            </div>
 
-            <div
-              class="app-type-card"
-              [class.selected]="currentAppType === 'STORE_ADMIN'"
-              [class.read-only]="!canChangeAppType"
-              (click)="selectAppType('STORE_ADMIN')"
-            >
-              <app-icon name="store" [size]="32"></app-icon>
-              <div class="card-content">
-                <h3>Administración de Tienda</h3>
-                <p>Gestión de operaciones de una tienda</p>
-              </div>
-              <div class="badge" *ngIf="currentAppType === 'STORE_ADMIN'">
-                ✓ Actual
+              <div
+                class="app-type-card"
+                [class.selected]="currentAppType === 'STORE_ADMIN'"
+                (click)="selectAppType('STORE_ADMIN')"
+              >
+                <app-icon name="store" [size]="24"></app-icon>
+                <div class="card-content">
+                  <h3>Tienda</h3>
+                  <p>Operaciones locales</p>
+                </div>
+                <div class="status-badge" *ngIf="currentAppType === 'STORE_ADMIN'">
+                  Actual
+                </div>
               </div>
             </div>
+            <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1" *ngIf="!canChangeAppType">
+              <app-icon name="lock" [size]="10"></app-icon>
+              Cambio restringido a administradores
+            </p>
           </div>
-          <div class="read-only-badge" *ngIf="!canChangeAppType">
-            <app-icon name="lock" [size]="16"></app-icon>
-            Solo administradores pueden cambiar el tipo de aplicación
+
+          <!-- Preferences (Language & Theme) -->
+          <div class="lg:col-span-4" formGroupName="preferences">
+            <h4 class="section-header">
+              <app-icon name="palette" [size]="20"></app-icon>
+              Preferencias
+            </h4>
+            
+            <div class="flex flex-col gap-4">
+              <!-- Inline Theme Selector -->
+              <div class="theme-grid">
+                <div class="theme-box" 
+                     [class.active]="settingsForm.get('preferences.theme')?.value === 'default'"
+                     (click)="selectTheme('default')">
+                  <div class="theme-preview bg-gray-200"></div>
+                  <span>Default</span>
+                </div>
+                <div class="theme-box" 
+                     [class.active]="settingsForm.get('preferences.theme')?.value === 'aura'"
+                     (click)="selectTheme('aura')">
+                  <div class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"></div>
+                  <span>Aura</span>
+                </div>
+                <div class="theme-box" 
+                     [class.active]="settingsForm.get('preferences.theme')?.value === 'monocromo'"
+                     (click)="selectTheme('monocromo')">
+                  <div class="theme-preview bg-slate-700"></div>
+                  <span>Mono</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Section: Upgrade to Organization -->
-        <div class="upgrade-section" *ngIf="isSingleStore && isOwner">
-          <div
-            class="upgrade-card"
-            style="background-color: var(--color-muted); padding: 1.25rem; border-radius: var(--radius-md); border: 1px solid var(--color-border);"
-          >
-            <div
-              style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1rem;"
-            >
-              <app-icon name="building" [size]="32"></app-icon>
-              <div>
-                <h4
-                  style="font-size: var(--fs-base); font-weight: var(--fw-semibold); margin: 0;"
-                >
-                  Convertir en Organización Multi-Tienda
-                </h4>
-                <p
-                  style="font-size: var(--fs-sm); color: var(--color-text-secondary); margin: 0.25rem 0 0 0;"
-                >
-                  Gestiona múltiples tiendas, usuarios centralizados y reportes
-                  consolidados
-                </p>
-              </div>
-            </div>
+        <hr class="border-gray-100 my-6" />
 
-            <div
-              style="background-color: var(--color-surface); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--color-border);"
-            >
-              <p
-                style="font-weight: var(--fw-medium); font-size: var(--fs-sm); margin-bottom: 0.75rem; color: var(--color-text-primary);"
-              >
-                Esto te permitirá:
-              </p>
-              <ul
-                style="list-style-type: disc; list-style-position: inside; font-size: var(--fs-sm); color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem;"
-              >
-                <li>Administrar múltiples tiendas desde un solo lugar</li>
-                <li>Gestionar usuarios y permisos centralizados</li>
-                <li>Ver reportes consolidados de todas tus tiendas</li>
-              </ul>
-            </div>
+        <!-- Modules Configuration - COMPACT GRID -->
+        <div class="modules-section">
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="section-header !mb-0">
+              <app-icon name="layout" [size]="20"></app-icon>
+              Módulos del Panel: {{ getAppTypeLabel(currentAppType) }}
+            </h4>
+            <span class="text-xs text-gray-400">Personaliza la visibilidad de tus herramientas</span>
           </div>
 
-          <app-button
-            variant="primary"
-            [loading]="upgrading"
-            (clicked)="upgradeToOrganization()"
-            style="margin-top: 1rem; width: 100%;"
-          >
-            Convertir en Organización
-          </app-button>
-        </div>
-
-        <!-- Section 2: Panel UI Configuration -->
-
-        <div class="panel-ui-config">
-          <h4 class="text-lg font-medium text-gray-900 mb-4">
-            Módulos del Panel para {{ getAppTypeLabel(currentAppType) }}
-          </h4>
-
-          <div formGroupName="panel_ui">
-            <div [formGroupName]="currentAppType">
-              <div class="module-toggles-container">
-                <!-- Parent modules with children -->
-                <div
-                  *ngFor="let module of getParentModules(currentAppType)"
-                  class="parent-module"
-                  [class.has-children]="module.isParent"
-                >
-                  <div *ngIf="module.isParent" class="parent-module-wrapper">
-                    <!-- Parent header with expand/collapse -->
-                    <div
-                      class="parent-header"
-                      (click)="toggleModuleExpansion(module.key)"
-                    >
-                      <div class="parent-toggle">
-                        <app-toggle
-                          [formControlName]="module.key"
-                          [label]="module.label"
-                          (changed)="onParentToggle($event, module)"
-                        >
-                        </app-toggle>
-                      </div>
-                      <app-icon
-                        name="chevron-right"
-                        [size]="16"
-                        class="expand-icon"
-                        [class.rotated]="isExpanded(module.key)"
-                      >
-                      </app-icon>
-                    </div>
-                    <span class="module-description">{{
-                      module.description
-                    }}</span>
-
-                    <!-- Children modules (nested) -->
-                    <div
-                      class="child-modules"
-                      [class.expanded]="isExpanded(module.key)"
-                    >
-                      <div
-                        *ngFor="let child of module.children"
-                        class="child-toggle-item"
-                      >
-                        <div class="child-header">
-                          <app-toggle
-                            [formControlName]="child.key"
-                            [label]="child.label"
-                            [disabled]="!isParentModuleEnabled(module.key)"
-                          >
-                          </app-toggle>
-                        </div>
-                        <span class="module-description child-description">{{
-                          child.description
-                        }}</span>
-                      </div>
+          <div formGroupName="panel_ui" class="relative">
+            <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
+              
+              <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
+              <div class="compact-modules-grid">
+                <div *ngFor="let module of getModulesWithChildren(currentAppType)" class="module-group is-parent">
+                  <app-setting-toggle
+                    [formControlName]="module.key"
+                    [label]="module.label"
+                    [description]="module.description"
+                    (changed)="onParentToggle($event, module)"
+                  ></app-setting-toggle>
+                  
+                  <div class="children-grid">
+                    <div *ngFor="let child of module.children" class="child-item">
+                      <app-setting-toggle
+                        [formControlName]="child.key"
+                        [label]="child.label"
+                        [disabled]="!isParentModuleEnabled(module.key)"
+                      ></app-setting-toggle>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <!-- Standalone modules (without children) -->
-                <div
-                  *ngFor="let module of getParentModules(currentAppType)"
-                  class="standalone-module"
-                  [class.standalone]="!module.isParent"
-                >
-                  <div *ngIf="!module.isParent" class="toggle-item">
-                    <div class="toggle-header">
-                      <app-toggle
-                        [formControlName]="module.key"
-                        [label]="module.label"
-                      >
-                      </app-toggle>
-                    </div>
-                    <span class="module-description">{{
-                      module.description
-                    }}</span>
+              <!-- SECTION B: STANDALONE Modules (grouped together) -->
+              <div class="standalone-container mt-2">
+                <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Herramientas Directas</h5>
+                <div class="compact-modules-grid">
+                  <div *ngFor="let module of getStandaloneModules(currentAppType)" class="module-group">
+                    <app-setting-toggle
+                      [formControlName]="module.key"
+                      [label]="module.label"
+                      [description]="module.description"
+                    ></app-setting-toggle>
                   </div>
                 </div>
               </div>
+
             </div>
           </div>
 
-          <div *ngIf="hasModuleError()" class="text-sm text-red-500 mt-2">
-            Debes habilitar al menos un módulo
+          <div *ngIf="hasModuleError()" class="text-xs text-red-500 mt-4 flex items-center gap-1">
+            <app-icon name="alert-circle" [size]="14"></app-icon>
+            Debes habilitar al menos un módulo para poder navegar
           </div>
         </div>
 
-        <!-- Section 3: Preferences -->
-        <div formGroupName="preferences" class="preferences-section">
-          <h4 class="text-lg font-medium text-gray-900 mb-4">Preferencias</h4>
-
-          <!-- Language (disabled) -->
-          <div class="preference-row">
-            <label>Idioma</label>
-            <select
-              formControlName="language"
-              [disabled]="true"
-              class="disabled-select"
-            >
-              <option value="es">Español</option>
-            </select>
-            <small class="text-gray-500"
-              >Español es el único idioma disponible actualmente</small
-            >
-          </div>
-
-          <!-- Theme -->
-          <div class="preference-row">
-            <label>Tema de la aplicación</label>
-            <div class="theme-selector">
-              <div
-                class="theme-option"
-                [class.selected]="
-                  settingsForm.get('preferences.theme')?.value === 'default'
-                "
-                (click)="selectTheme('default')"
-              >
-                <app-icon name="circle" [size]="32"></app-icon>
-                <div class="theme-info">
-                  <span class="theme-name">Default</span>
-                  <span class="theme-description"
-                    >Tema por defecto del sistema</span
-                  >
-                </div>
+        <!-- Upgrade single store if applicable -->
+        <div class="mt-8 pt-6 border-t border-gray-100" *ngIf="isSingleStore && isOwner">
+          <div class="upgrade-banner">
+            <div class="flex items-center gap-4">
+              <div class="p-3 bg-primary/10 rounded-xl text-primary">
+                <app-icon name="zap" [size]="32"></app-icon>
               </div>
-              <div
-                class="theme-option"
-                [class.selected]="
-                  settingsForm.get('preferences.theme')?.value === 'aura'
-                "
-                (click)="selectTheme('aura')"
-              >
-                <app-icon name="sparkles" [size]="32"></app-icon>
-                <div class="theme-info">
-                  <span class="theme-name">Aura</span>
-                  <span class="theme-description">Estilo alternativo</span>
-                </div>
+              <div class="flex-1">
+                <h5 class="font-bold text-gray-900">¿Necesitas más tiendas?</h5>
+                <p class="text-xs text-gray-500">Convierte tu cuenta en una Organización para gestionar múltiples sucursales y reportes consolidados.</p>
               </div>
+              <app-button
+                variant="primary"
+                [loading]="upgrading"
+                (clicked)="upgradeToOrganization()"
+                size="sm"
+              >
+                Ver más
+              </app-button>
             </div>
           </div>
         </div>
@@ -578,6 +493,7 @@ export class SettingsModalComponent implements OnInit {
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
+  private themeService = inject(ThemeService);
 
   settingsForm: FormGroup;
   loading = false;
@@ -588,9 +504,6 @@ export class SettingsModalComponent implements OnInit {
   isSingleStore = false;
   isOwner = false;
   upgrading = false;
-
-  // Nested module state
-  private expandedModules: Set<string> = new Set();
 
   constructor() {
     // Initialize panel_ui controls for ORG_ADMIN
@@ -635,8 +548,17 @@ export class SettingsModalComponent implements OnInit {
     this.loadSettings();
 
     const context = this.globalFacade.getUserContext();
-    this.isSingleStore = context?.organization?.account_type === 'SINGLE_STORE';
+
+    // Robust account_type detection (handles objects and arrays)
+    const userOrg = context?.user?.organizations;
+    const accountType =
+      context?.organization?.account_type ||
+      (Array.isArray(userOrg) ? userOrg[0]?.account_type : userOrg?.account_type);
+
+    this.isSingleStore = accountType === 'SINGLE_STORE';
     this.isOwner = this.authFacade.isOwner();
+
+    console.log('🔍 isSingleStore:', this.isSingleStore, 'AccountType:', accountType);
 
     // Forzar STORE_ADMIN si es SINGLE_STORE
     if (this.isSingleStore && this.currentAppType === 'ORG_ADMIN') {
@@ -662,27 +584,6 @@ export class SettingsModalComponent implements OnInit {
   }
 
   // ===== Nested Module Methods =====
-
-  /**
-   * Toggle expansion of a parent module section
-   * @param moduleKey - The key of the module to expand/collapse
-   */
-  toggleModuleExpansion(moduleKey: string): void {
-    if (this.expandedModules.has(moduleKey)) {
-      this.expandedModules.delete(moduleKey);
-    } else {
-      this.expandedModules.add(moduleKey);
-    }
-  }
-
-  /**
-   * Check if a module is currently expanded
-   * @param moduleKey - The key of the module to check
-   * @returns true if the module is expanded
-   */
-  isExpanded(moduleKey: string): boolean {
-    return this.expandedModules.has(moduleKey);
-  }
 
   /**
    * Check if a parent module is enabled (used to disable children when parent is off)
@@ -752,6 +653,24 @@ export class SettingsModalComponent implements OnInit {
    */
   getParentModules(appType: string): any[] {
     return APP_MODULES[appType as keyof typeof APP_MODULES] || [];
+  }
+
+  /**
+   * Get modules that have children
+   * @param appType - The app type to get modules for
+   * @returns Array of modules with children
+   */
+  getModulesWithChildren(appType: string): any[] {
+    return this.getParentModules(appType).filter(m => m.isParent && m.children && m.children.length > 0);
+  }
+
+  /**
+   * Get standalone modules (no children)
+   * @param appType - The app type to get modules for
+   * @returns Array of modules without children
+   */
+  getStandaloneModules(appType: string): any[] {
+    return this.getParentModules(appType).filter(m => !m.isParent || !m.children || m.children.length === 0);
   }
 
   loadSettings() {
@@ -859,6 +778,8 @@ export class SettingsModalComponent implements OnInit {
     this.settingsForm.patchValue({
       preferences: { theme },
     });
+    // Apply immediate preview
+    this.themeService.applyUserTheme(theme);
   }
 
   hasModuleError(): boolean {

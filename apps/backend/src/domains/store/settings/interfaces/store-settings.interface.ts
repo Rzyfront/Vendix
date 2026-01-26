@@ -4,8 +4,8 @@ export interface AppSettings {
   secondary_color: string;
   accent_color: string;
   theme: 'default' | 'aura' | 'monocromo';
-  logo_url: string | null;
-  favicon_url: string | null;
+  logo_url?: string;
+  favicon_url?: string;
 }
 
 export interface StoreSettings {
@@ -24,6 +24,10 @@ export interface GeneralSettings {
   currency: string;
   language: string;
   tax_included: boolean;
+  // Campos de la tabla stores (sincronizados)
+  name?: string;
+  logo_url?: string;
+  store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
 }
 
 export interface InventorySettings {

@@ -164,7 +164,18 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               <div
                 class="w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
               >
+                <!-- Product Image -->
+                <img
+                  *ngIf="item.product.image_url || item.product.image"
+                  [src]="item.product.image_url || item.product.image"
+                  [alt]="item.product.name"
+                  class="absolute inset-0 w-full h-full object-cover"
+                  (error)="handleImageError($event)"
+                />
+                
+                <!-- Fallback Icon -->
                 <div
+                  *ngIf="!item.product.image_url && !item.product.image"
                   class="absolute inset-0 flex items-center justify-center text-text-secondary"
                 >
                   <app-icon name="image" [size]="14"></app-icon>
@@ -173,7 +184,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 
               <!-- Item Info -->
               <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2 mb-0.5">
+                <div class="flex justify-between items-start gap-2 mb-1">
                   <h4
                     class="text-sm font-semibold text-text-primary truncate leading-tight"
                   >
@@ -187,17 +198,23 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
-                <div
-                  *ngIf="getItemTaxAmount(item) > 0"
-                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit"
-                >
-                  Imp {{ formatCurrency(getItemTaxAmount(item)) }}
-                </div>
-                <div class="flex justify-between items-end">
-                  <span class="text-xs font-medium text-text-secondary">
-                    {{ formatCurrency(item.unitPrice) }}
-                  </span>
-                  <span class="text-sm font-bold text-primary">
+
+                <div class="flex justify-between items-end mt-2">
+                  <div class="flex flex-col gap-0.5">
+                    <div
+                      *ngIf="getItemTaxAmount(item) > 0"
+                      class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit mb-1"
+                    >
+                      Imp {{ formatCurrency(getItemTaxAmount(item)) }}
+                    </div>
+                    <span class="text-[10px] text-text-muted leading-none">
+                      Base: {{ formatCurrency(item.unitPrice) }}
+                    </span>
+                    <span class="text-xs font-bold text-text-primary">
+                      Unit. Final: {{ formatCurrency(item.finalPrice) }}
+                    </span>
+                  </div>
+                  <span class="text-base font-extrabold text-primary">
                     {{ formatCurrency(item.totalPrice) }}
                   </span>
                 </div>
@@ -279,7 +296,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => {},
+        next: () => { },
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',

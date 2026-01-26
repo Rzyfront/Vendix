@@ -59,8 +59,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       secondary_color: '#2F6F4E',
       accent_color: '#FFFFFF',
       theme: 'default',
-      logo_url: null,
-      favicon_url: null,
     },
   };
 }

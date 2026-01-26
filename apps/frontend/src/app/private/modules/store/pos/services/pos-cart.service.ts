@@ -29,7 +29,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-  constructor() {}
+  constructor() { }
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -223,7 +223,9 @@ export class PosCartService {
       updatedItems[existingItemIndex] = {
         ...existingItem,
         quantity: newQuantity,
-        totalPrice: newQuantity * existingItem.unitPrice,
+        taxAmount: this.calculateItemTax(existingItem.product, newQuantity),
+        finalPrice: this.calculateItemFinalPrice(existingItem.product),
+        totalPrice: newQuantity * this.calculateItemFinalPrice(existingItem.product),
         notes: request.notes || existingItem.notes,
       };
     } else {
@@ -237,13 +239,15 @@ export class PosCartService {
             ) || 0;
           return rateSum + assignmentRate;
         }, 0) || 0;
+      const finalUnitPrice = request.product.final_price || this.calculateItemFinalPrice(request.product);
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
         unitPrice: request.product.price,
-        taxAmount: request.product.price * request.quantity * rateSum,
-        totalPrice: request.quantity * request.product.price,
+        taxAmount: this.calculateItemTax(request.product, request.quantity),
+        finalPrice: finalUnitPrice,
+        totalPrice: request.quantity * finalUnitPrice,
         addedAt: new Date(),
         notes: request.notes,
       };
@@ -281,11 +285,13 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
-    const newTotalPrice = request.quantity * item.unitPrice;
+    const finalUnitPrice = item.finalPrice;
+    const newTotalPrice = request.quantity * finalUnitPrice;
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
       taxAmount: this.calculateItemTax(item.product, request.quantity),
+      finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       notes: request.notes || item.notes,
     };
@@ -326,6 +332,7 @@ export class PosCartService {
    */
   private processApplyDiscount(request: ApplyDiscountRequest): CartState {
     const currentState = this.cartState$.value;
+    // Para descuentos, usamos el subtotal BRUTO (con IVA) tal como está en el carrito
     const subtotal = this.calculateSubtotal(currentState.items);
 
     let discountAmount = 0;
@@ -377,13 +384,13 @@ export class PosCartService {
     items: CartItem[],
     discounts: CartDiscount[],
   ): CartSummary {
-    const subtotal = this.calculateSubtotal(items);
+    const subtotal = this.calculateSubtotal(items); // Ahora incluye impuestos (SUM of quantity * finalPrice)
     const discountAmount = discounts.reduce(
       (total, discount) => total + discount.amount,
       0,
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
-    const total = subtotal - discountAmount + taxAmount;
+    const total = subtotal - discountAmount; // subtotal ya tiene el taxAmount sumado en cada item.totalPrice
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -408,7 +415,24 @@ export class PosCartService {
    * Calculate tax for a single item
    */
   private calculateItemTax(product: any, quantity: number): number {
-    const rateSum =
+    const rateSum = this.calculateRateSum(product);
+    return product.price * quantity * rateSum;
+  }
+
+  /**
+   * Calculate final price for a single item (unit)
+   */
+  private calculateItemFinalPrice(product: any): number {
+    if (product.final_price) return product.final_price;
+    const rateSum = this.calculateRateSum(product);
+    return product.price * (1 + rateSum);
+  }
+
+  /**
+   * Helper to calculate sum of tax rates
+   */
+  private calculateRateSum(product: any): number {
+    return (
       product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
         const assignmentRate =
           assignment.tax_categories?.tax_rates?.reduce(
@@ -416,8 +440,8 @@ export class PosCartService {
             0,
           ) || 0;
         return rateSum + assignmentRate;
-      }, 0) || 0;
-    return product.price * quantity * rateSum;
+      }, 0) || 0
+    );
   }
 
   /**

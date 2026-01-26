@@ -16,7 +16,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { CatalogService, ProductDetail } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, EcommerceProduct } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 
 @Component({
@@ -91,11 +91,11 @@ import { CartService } from '../../services/cart.service';
 
             <!-- Price -->
             <div class="product-price">
-              @if (product.is_on_sale && product.sale_price) {
-                <span class="sale-price">{{ product.sale_price | currency }}</span>
-                <span class="original-price">{{ product.base_price | currency }}</span>
-              } @else {
-                <span class="current-price">{{ product.base_price | currency }}</span>
+              <span class="current-price text-2xl font-bold">{{ product.final_price | currency }}</span>
+              @if (product.is_on_sale) {
+                <span class="original-price text-lg text-text-muted line-through ml-3" style="text-decoration: line-through;">
+                  {{ product.base_price | currency }}
+                </span>
               }
             </div>
 

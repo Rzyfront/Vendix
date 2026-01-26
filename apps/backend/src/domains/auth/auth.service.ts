@@ -36,7 +36,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
-  ) {}
+  ) { }
 
   async updateProfile(userId: number, updateProfileDto: any) {
     const {
@@ -1257,10 +1257,13 @@ export class AuthService {
       }
     } else if (effective_store_slug) {
       // Verificar que el usuario tenga acceso a la tienda especificada
-      const storeUser = await this.prismaService.store_users.findFirst({
+      let storeUser = await this.prismaService.store_users.findFirst({
         where: {
           user_id: user.id,
-          store: { slug: effective_store_slug },
+          store: {
+            slug: effective_store_slug,
+            organization_id: user.organization_id, // Asegurar consistencia organizacional
+          },
         },
         include: {
           store: {
@@ -1286,6 +1289,50 @@ export class AuthService {
           },
         },
       });
+
+      // AUTO-RELATION: Si es High Privilege y la tienda existe en su organización, permitir y crear relación
+      if (!storeUser && hasHighPrivilege) {
+        const targetStore = await this.prismaService.stores.findUnique({
+          where: {
+            organization_id_slug: {
+              organization_id: user.organization_id,
+              slug: effective_store_slug,
+            },
+          },
+          include: {
+            store_settings: true,
+            organizations: {
+              include: {
+                domain_settings: {
+                  where: {
+                    is_primary: true,
+                    status: 'active',
+                  },
+                },
+              },
+            },
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        });
+
+        if (targetStore) {
+          // Crear la relación automáticamente para futuros accesos
+          await this.prismaService.store_users.create({
+            data: {
+              store_id: targetStore.id,
+              user_id: user.id,
+            },
+          });
+
+          // Simular el objeto storeUser para continuar con el flujo normal
+          storeUser = { store: targetStore } as any;
+        }
+      }
 
       if (!storeUser) {
         await this.logLoginAttempt(user.id, false);

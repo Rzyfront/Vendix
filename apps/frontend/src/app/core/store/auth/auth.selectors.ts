@@ -212,6 +212,11 @@ export const selectUserStoreSlug = createSelector(
   (store: any) => store?.slug || null,
 );
 
+export const selectUserStoreType = createSelector(
+  selectUserStore,
+  (store: any) => store?.store_type || null,
+);
+
 // Onboarding selectors
 export const selectOnboardingCompleted = createSelector(
   selectAuthState,

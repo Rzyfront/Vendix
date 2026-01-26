@@ -7,7 +7,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store';
 import { StoreUiService } from '../../services/store-ui.service';
-import { CatalogService, Product } from '../../services/catalog.service';
+import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -28,7 +28,7 @@ export class CartComponent implements OnInit, OnDestroy {
   updating_item_id: number | null = null;
 
   // Recommendations
-  recommendedProducts = signal<Product[]>([]);
+  recommendedProducts = signal<EcommerceProduct[]>([]);
   quickViewOpen = false;
   selectedProductSlug: string | null = null;
 
@@ -158,12 +158,12 @@ export class CartComponent implements OnInit, OnDestroy {
     this.router.navigate(['/catalog']);
   }
 
-  onQuickView(product: Product): void {
+  onQuickView(product: EcommerceProduct): void {
     this.selectedProductSlug = product.slug;
     this.quickViewOpen = true;
   }
 
-  onAddToCartFromSlider(product: Product): void {
+  onAddToCartFromSlider(product: EcommerceProduct): void {
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) result.subscribe();
   }

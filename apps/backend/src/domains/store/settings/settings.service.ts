@@ -35,6 +35,19 @@ export class SettingsService {
       throw new ForbiddenException('Store context required');
     }
 
+    // Obtener datos de la tienda desde la tabla stores
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: {
+        id: true,
+        name: true,
+        logo_url: true,
+        store_type: true,
+        timezone: true,
+        organization_id: true,
+      }
+    });
+
     let storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id },
     });
@@ -43,33 +56,54 @@ export class SettingsService {
     const domainConfig = await this.getDomainConfig(store_id);
     const branding = domainConfig?.branding || {};
 
+    // Mapear colores del dominio a la estructura de AppSettings
+    // El dominio tiene: primary_color, secondary_color, accent_color, surface_color, background_color, etc.
+    const primaryColor = branding.primary_color || '#7ED7A5';
+    const secondaryColor = branding.secondary_color || branding.surface_color || '#2F6F4E';
+    const accentColor = branding.accent_color || '#FFFFFF';
+    const theme = branding.theme === 'light' ? 'default' : branding.theme || 'default';
+
     if (!storeSettings || !storeSettings.settings) {
       return {
         ...getDefaultStoreSettings(),
+        general: {
+          ...getDefaultStoreSettings().general,
+          name: store?.name,
+          logo_url: store?.logo_url as string | undefined,
+          store_type: store?.store_type,
+          timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
+        },
         app: {
-          name: branding.name || 'Vendix',
-          primary_color: branding.primary_color || '#7ED7A5',
-          secondary_color: branding.secondary_color || '#2F6F4E',
-          accent_color: branding.accent_color || '#FFFFFF',
-          theme: branding.theme || 'default',
-          logo_url: branding.logo_url || null,
-          favicon_url: branding.favicon_url || null,
+          name: branding.name || store?.name || 'Vendix',
+          primary_color: primaryColor,
+          secondary_color: secondaryColor,
+          accent_color: accentColor,
+          theme: theme,
+          logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
+          favicon_url: branding.favicon_url as string | undefined,
         }
       };
     }
 
-    // Merge existing settings with app config from domain
+    // Merge existing settings with store data and app config from domain
     const settings = storeSettings.settings as StoreSettings;
     return {
       ...settings,
+      general: {
+        ...settings.general,
+        name: store?.name,
+        logo_url: store?.logo_url as string | undefined,
+        store_type: store?.store_type,
+        timezone: store?.timezone || settings.general.timezone,
+      },
       app: {
-        name: branding.name || 'Vendix',
-        primary_color: branding.primary_color || '#7ED7A5',
-        secondary_color: branding.secondary_color || '#2F6F4E',
-        accent_color: branding.accent_color || '#FFFFFF',
-        theme: branding.theme || 'default',
-        logo_url: branding.logo_url || null,
-        favicon_url: branding.favicon_url || null,
+        name: branding.name || store?.name || 'Vendix',
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        accent_color: accentColor,
+        theme: theme,
+        logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
+        favicon_url: branding.favicon_url as string | undefined,
       }
     };
   }
@@ -89,6 +123,35 @@ export class SettingsService {
 
     // Handle app section separately (domain_settings)
     if (dto.app) {
+      // Sincronizar logo_url simultáneamente en stores table
+      if (dto.app.logo_url !== undefined) {
+        await this.prisma.stores.update({
+          where: { id: store_id },
+          data: { logo_url: dto.app.logo_url },
+        });
+      }
+
+      // Sincronizar nombre simultáneamente en stores y organizations
+      if (dto.app.name !== undefined) {
+        await this.prisma.stores.update({
+          where: { id: store_id },
+          data: { name: dto.app.name },
+        });
+
+        // Sincronizar con organizations table
+        const store = await this.prisma.stores.findUnique({
+          where: { id: store_id },
+          select: { organization_id: true }
+        });
+
+        if (store?.organization_id) {
+          await this.organizationPrisma.organizations.update({
+            where: { id: store.organization_id },
+            data: { name: dto.app.name }
+          });
+        }
+      }
+
       await this.updateDomainBranding(store_id, dto.app);
       delete (dto as any).app; // Remove from dto to not save in store_settings
     }
@@ -125,10 +188,29 @@ export class SettingsService {
       // Actualizar tabla stores si hay campos para actualizar
       if (Object.keys(storeUpdateData).length > 0) {
         try {
+          // Obtener la tienda para saber si es la principal y su organización
+          const store = await this.prisma.stores.findUnique({
+            where: { id: store_id },
+            select: { organization_id: true, main_store_users: { take: 1 } }
+          });
+
           await this.prisma.stores.update({
             where: { id: store_id },
             data: storeUpdateData,
           });
+
+          // Si el nombre cambió y es una organización, también actualizar el nombre de la organización
+          // si esta tienda es la principal (slug o lógica similar, pero aquí usamos main_store_users para inferir)
+          if (name && store?.organization_id) {
+            // Sincronizar con todos los dominios de la tienda
+            await this.updateDomainBranding(store_id, { name } as any);
+
+            // Opcional: Si queremos sincronizar con la organización
+            // await this.organizationPrisma.organizations.update({
+            //   where: { id: store.organization_id },
+            //   data: { name },
+            // });
+          }
 
           // Trigger favicon generation asynchronously if logo_url was updated
           if (logo_url !== undefined && logo_url !== null) {
@@ -137,8 +219,6 @@ export class SettingsService {
           }
         } catch (error) {
           console.error('Error updating stores table:', error);
-          // No fallar la operación completa si falla la actualización de stores
-          // Los settings se guardan igualmente en store_settings
         }
       }
     }
@@ -175,6 +255,8 @@ export class SettingsService {
     const templates = await this.prisma.default_templates.findMany({
       where: {
         configuration_type: 'store_settings',
+        is_active: true,
+        is_system: true,
       },
       select: {
         template_name: true,
@@ -182,7 +264,7 @@ export class SettingsService {
         description: true,
       },
       orderBy: {
-        template_name: 'asc',
+        updated_at: 'desc',
       },
     });
 
@@ -201,6 +283,7 @@ export class SettingsService {
       where: {
         template_name,
         configuration_type: 'store_settings',
+        is_active: true,
       },
     });
 
@@ -350,54 +433,74 @@ export class SettingsService {
   }
 
   /**
-   * Updates the branding configuration in domain_settings.
+   * Updates the branding configuration in domain_settings for ALL domains of the store.
    *
    * @param storeId - Store ID
    * @param appSettings - App settings containing branding configuration
    */
   private async updateDomainBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
-    // Try to find primary domain first
-    let domain = await this.organizationPrisma.domain_settings.findFirst({
+    // Buscar TODOS los dominios asociados a esta tienda
+    const domains = await this.organizationPrisma.domain_settings.findMany({
       where: {
         store_id: storeId,
-        is_primary: true,
       }
     });
 
-    // If no primary domain, try to find any domain associated with the store
-    if (!domain) {
-      domain = await this.organizationPrisma.domain_settings.findFirst({
-        where: { store_id: storeId }
-      });
-    }
-
-    if (!domain) {
-      this.logger.warn(`No domain found for store ${storeId}, skipping branding update`);
+    if (domains.length === 0) {
+      this.logger.warn(`No domains found for store ${storeId}, skipping branding update`);
       return;
     }
 
-    // Merge with existing config to preserve other settings
-    const existingConfig = (domain.config as any) || {};
-    const updatedConfig = {
-      ...existingConfig,
-      branding: {
-        ...existingConfig.branding,
-        name: appSettings.name,
-        primary_color: appSettings.primary_color,
-        secondary_color: appSettings.secondary_color,
-        accent_color: appSettings.accent_color,
-        theme: appSettings.theme,
-        logo_url: appSettings.logo_url,
-        favicon_url: appSettings.favicon_url,
-      }
-    };
+    // Actualizar cada dominio individualmente para preservar sus configuraciones únicas
+    const updatePromises = domains.map(async (domain) => {
+      const existingConfig = (domain.config as any) || {};
+      const existingBranding = existingConfig.branding || {};
 
-    await this.organizationPrisma.domain_settings.update({
-      where: { id: domain.id },
-      data: { config: updatedConfig }
+      const updatedConfig = {
+        ...existingConfig,
+        branding: {
+          ...existingBranding,
+          // Solo actualizar los campos que vienen en appSettings y no son undefined
+          ...(appSettings.name !== undefined && { name: appSettings.name }),
+          ...(appSettings.primary_color !== undefined && { primary_color: appSettings.primary_color }),
+          ...(appSettings.secondary_color !== undefined && { secondary_color: appSettings.secondary_color }),
+          ...(appSettings.accent_color !== undefined && { accent_color: appSettings.accent_color }),
+          ...(appSettings.theme !== undefined && { theme: appSettings.theme }),
+          ...(appSettings.logo_url !== undefined && { logo_url: appSettings.logo_url }),
+          ...(appSettings.favicon_url !== undefined && { favicon_url: appSettings.favicon_url }),
+        }
+      };
+
+      return this.organizationPrisma.domain_settings.update({
+        where: { id: domain.id },
+        data: { config: updatedConfig }
+      });
     });
 
-    this.logger.log(`Branding updated for domain ${domain.hostname} (store ${storeId})`);
+    await Promise.all(updatePromises);
+
+    this.logger.log(`Branding updated for ${domains.length} domains of store ${storeId}`);
+
+    // Si el nombre de la tienda cambió, también podemos intentar sincronizar con el nombre de la organización
+    // si esta es la tienda principal de la organización.
+    if (appSettings.name) {
+      try {
+        const store = await this.prisma.stores.findUnique({
+          where: { id: storeId },
+          select: { organization_id: true }
+        });
+
+        if (store?.organization_id) {
+          await this.organizationPrisma.organizations.update({
+            where: { id: store.organization_id },
+            data: { name: appSettings.name }
+          });
+          this.logger.log(`Organization ${store.organization_id} name updated to ${appSettings.name}`);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to sync organization name: ${error.message}`);
+      }
+    }
   }
 
   private async validatePartialSettings(dto: UpdateSettingsDto): Promise<void> {

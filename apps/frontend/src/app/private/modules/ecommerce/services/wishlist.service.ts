@@ -15,6 +15,7 @@ export interface WishlistItem {
         name: string;
         slug: string;
         base_price: number;
+        final_price: number;
         sku: string | null;
         stock_quantity: number | null;
         image_url: string | null;
@@ -79,6 +80,7 @@ export class WishlistService {
                     name: 'Cargando...',
                     slug: '',
                     base_price: 0,
+                    final_price: 0,
                     sku: null,
                     stock_quantity: null,
                     image_url: null,

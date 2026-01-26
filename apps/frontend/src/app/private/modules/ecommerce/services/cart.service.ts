@@ -3,7 +3,7 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, Observable, Subject } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
-import { CatalogService } from './catalog.service';
+import { CatalogService, EcommerceProduct } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
@@ -19,6 +19,7 @@ export interface CartItem {
         slug: string;
         sku: string;
         image_url: string | null;
+        final_price: number;
         weight?: number;
     };
     variant: {
@@ -107,7 +108,7 @@ export class CartService {
                     .getProducts({ ids: productIds.join(','), limit: 100 })
                     .subscribe({
                         next: (response) => {
-                            const products = response.data;
+                            const products: EcommerceProduct[] = response.data;
                             const cartItems: CartItem[] = items
                                 .map((localItem) => {
                                     const product = products.find(
@@ -115,10 +116,7 @@ export class CartService {
                                     );
                                     if (!product) return null;
 
-                                    const price =
-                                        product.is_on_sale && product.sale_price
-                                            ? Number(product.sale_price)
-                                            : Number(product.base_price);
+                                    const price = Number(product.final_price || product.base_price);
 
                                     return {
                                         id: localItem.product_id,

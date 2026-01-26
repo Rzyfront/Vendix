@@ -47,6 +47,11 @@ export class AppConfigService {
   async setupConfig(): Promise<AppConfig> {
     // 1. Detectar la configuración base del dominio.
     let domainConfig = await this.detectDomain();
+    console.log('[AppConfigService] Domain detected:', {
+      hostname: domainConfig.hostname,
+      environment: domainConfig.environment,
+      domainType: domainConfig.domainType,
+    });
 
     // 2. Revisar si hay un entorno de usuario guardado (de un login previo).
     const cachedUserEnv = this.getCachedUserEnvironment();
@@ -79,6 +84,11 @@ export class AppConfigService {
 
     // 4. Construir la configuración final con el entorno definitivo.
     const appConfig = this.buildAppConfig(domainConfig);
+    console.log('[AppConfigService] Final App Config build:', {
+      environment: appConfig.environment,
+      store: domainConfig.store_id,
+      org: domainConfig.organization_id,
+    });
     this.cacheAppConfig(appConfig);
     return appConfig;
   }
@@ -204,7 +214,7 @@ export class AppConfigService {
     return {
       hostname,
       domainType: domainInfo.domain_type as DomainType,
-      environment: domainInfo.config.app as AppEnvironment,
+      environment: this.normalizeEnvironment(domainInfo.config.app),
       organization_slug: domainInfo.organization_slug,
       store_slug: domainInfo.store_slug,
       organization_id: domainInfo.organization_id,
@@ -212,6 +222,12 @@ export class AppConfigService {
       customConfig: domainInfo.config,
       isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
     };
+  }
+
+  private normalizeEnvironment(env: string): AppEnvironment {
+    if (!env) return AppEnvironment.VENDIX_LANDING;
+    const normalized = env.toUpperCase() as AppEnvironment;
+    return normalized;
   }
 
   private getCachedUserEnvironment(): AppEnvironment | null {
@@ -248,12 +264,12 @@ export class AppConfigService {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_user_environment', env);
-    } catch (e) {}
+    } catch (e) { }
   }
   private cacheAppConfig(config: AppConfig): void {
     try {
       if (typeof localStorage !== 'undefined')
         localStorage.setItem('vendix_app_config', JSON.stringify(config));
-    } catch (e) {}
+    } catch (e) { }
   }
 }

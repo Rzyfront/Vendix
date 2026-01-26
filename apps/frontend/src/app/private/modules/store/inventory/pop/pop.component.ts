@@ -145,7 +145,7 @@ export class PopComponent implements OnInit, OnDestroy {
     private router: Router,
     private toastService: ToastService,
     private dialogService: DialogService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     // Check for editing existing order
@@ -234,23 +234,43 @@ export class PopComponent implements OnInit, OnDestroy {
       }
 
       // Optional fields
-      // Cost: cost, costo, price, precio
+      // Cost: cost, costo, price, precio, unit_cost, cost_price, precio compra
       const costRaw =
         normalizedRow['cost'] ||
         normalizedRow['costo'] ||
         normalizedRow['price'] ||
         normalizedRow['precio'] ||
+        normalizedRow['unit_cost'] ||
+        normalizedRow['cost_price'] ||
+        normalizedRow['precio compra'] ||
+        normalizedRow['precio_compra'] ||
         0;
       const unit_cost = Number(costRaw) || 0;
 
-      // Quantity: quantity, qty, cantidad, cant
+      // Quantity: quantity, qty, cantidad, cant, cantidad inicial
       const qtyRaw =
         normalizedRow['quantity'] ||
         normalizedRow['qty'] ||
         normalizedRow['cantidad'] ||
         normalizedRow['cant'] ||
+        normalizedRow['cantidad inicial'] ||
+        normalizedRow['cantidad_inicial'] ||
         1;
       const quantity = Number(qtyRaw) || 1;
+
+      // New metadata fields
+      const description = (normalizedRow['description'] || normalizedRow['descripción'] || normalizedRow['detalle'] || '').trim();
+      const state = (normalizedRow['state'] || normalizedRow['estado'] || normalizedRow['status'] || 'active').trim();
+      const weight = Number(normalizedRow['weight'] || normalizedRow['peso']) || 0;
+      const available_for_ecommerce = normalizedRow['available_for_ecommerce'] || normalizedRow['disponible ecommerce'] || normalizedRow['ecommerce'] || true;
+      const base_price = Number(normalizedRow['base_price'] || normalizedRow['precio venta'] || normalizedRow['precio_venta']) || 0;
+      const profit_margin = Number(normalizedRow['profit_margin'] || normalizedRow['margen'] || normalizedRow['margin']) || 0;
+
+      // Final metadata mapping for new requirement
+      const brand = (normalizedRow['marca'] || normalizedRow['brand'] || '').trim();
+      const categories = (normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').trim();
+      const isOnSale = normalizedRow['en oferta'] || normalizedRow['en_oferta'] || normalizedRow['is_on_sale'] || false;
+      const salePrice = Number(normalizedRow['precio oferta'] || normalizedRow['precio_oferta'] || normalizedRow['sale_price']) || 0;
 
       // Construct dummy product
       const dummyProduct = {
@@ -258,7 +278,7 @@ export class PopComponent implements OnInit, OnDestroy {
         name: String(name),
         code: String(sku),
         cost: unit_cost,
-        price: 0,
+        price: base_price,
         stock: 0,
         is_active: true,
       };
@@ -272,7 +292,16 @@ export class PopComponent implements OnInit, OnDestroy {
           prebulk_data: {
             name: String(name),
             code: String(sku),
-            description: 'Importado Masivo',
+            description: String(description),
+            state: String(state),
+            weight: weight,
+            available_for_ecommerce: available_for_ecommerce,
+            base_price: base_price,
+            profit_margin: profit_margin,
+            brand_id: String(brand),
+            category_ids: String(categories),
+            is_on_sale: isOnSale,
+            sale_price: salePrice,
           },
         })
         .subscribe();
@@ -388,7 +417,8 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error saving draft:', error);
-        this.toastService.error('Error al guardar el borrador');
+        const errorMsg = error.error?.message || error.message || 'Error al guardar el borrador';
+        this.toastService.error(errorMsg);
       },
     });
   }
@@ -418,7 +448,8 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error submitting order:', error);
-        this.toastService.error('Error al enviar la orden');
+        const errorMsg = error.error?.message || error.message || 'Error al enviar la orden';
+        this.toastService.error(errorMsg);
       },
     });
   }
@@ -474,7 +505,8 @@ export class PopComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Error creating order:', error);
-        this.toastService.error('Error al crear la orden');
+        const errorMsg = error.error?.message || error.message || 'Error al crear la orden';
+        this.toastService.error(errorMsg);
       },
     });
   }

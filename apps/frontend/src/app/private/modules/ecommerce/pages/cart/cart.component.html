@@ -39,7 +39,8 @@
                 </div>
 
                 <div class="item-price">
-                    {{ item.unit_price | currency }}
+                    <span class="price">{{ item.unit_price | currency }}</span>
+                    <span class="tax-note">Imp. incl.</span>
                 </div>
 
                 <div class="item-quantity">

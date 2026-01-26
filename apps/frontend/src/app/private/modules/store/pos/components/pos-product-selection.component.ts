@@ -160,8 +160,8 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
             >
               <!-- Product Image -->
               <img
-                *ngIf="product.image || product.image_url"
-                [src]="product.image || product.image_url"
+                *ngIf="product.image_url || product.image"
+                [src]="product.image_url || product.image"
                 [alt]="product.name"
                 class="w-full h-full object-cover"
                 (error)="onImageError($event)"
@@ -223,16 +223,7 @@ import { ProductQueryDto, Brand } from '../../products/interfaces';
                 <!-- Price -->
                 <div class="flex flex-col">
                   <span class="text-text-primary font-bold text-lg">
-                    {{ product.price }}
-                  </span>
-                  <span
-                    *ngIf="
-                      product.compare_at_price &&
-                      product.compare_at_price > product.price
-                    "
-                    class="text-text-muted text-xs line-through"
-                  >
-                    {{ product.compare_at_price }}
+                    {{ product.final_price | currency }}
                   </span>
                 </div>
 
@@ -356,7 +347,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     private dialogService: DialogService,
     private router: Router,
     private store: Store,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.checkAuthState();
@@ -373,7 +364,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private initializeCategories(): void {
-    this.categories = [{ id: 'all', name: 'Todos', icon: 'grid' }];
+    this.categories = [{ id: '', name: 'Todos', icon: 'grid' }];
     this.selectedCategory = this.categories[0];
     this.loadCategories();
   }
@@ -381,7 +372,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   private initializeBrands(): void {
     this.brands = [
       {
-        id: 0,
+        id: '',
         name: 'Todas',
         slug: 'all',
         store_id: 0,
@@ -420,7 +411,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         next: (brands) => {
           const backendBrands = brands.map((brand) => ({
             ...brand,
-            id: brand.id,
+            id: brand.id.toString(),
           }));
           this.brands = [this.brands[0], ...backendBrands];
         },
@@ -456,15 +447,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       filters.query = this.searchQuery;
     }
 
-    if (this.selectedCategory && this.selectedCategory.id !== 'all') {
+    if (this.selectedCategory && this.selectedCategory.id !== '') {
       filters.category = this.selectedCategory.id;
     }
 
-    if (
-      this.selectedBrand &&
-      this.selectedBrand.id !== 0 &&
-      this.selectedBrand.id !== 'all'
-    ) {
+    if (this.selectedBrand && this.selectedBrand.id !== '') {
       filters.brand = this.selectedBrand.id.toString();
     }
 
@@ -525,9 +512,15 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
     if (filters.brand_id) {
       this.selectedBrand =
-        this.brands.find((b) => b.id === filters.brand_id) || this.brands[0];
+        this.brands.find((b) => b.id.toString() === filters.brand_id!.toString()) ||
+        this.brands[0];
     } else {
       this.selectedBrand = this.brands[0];
+    }
+
+    // Update search query if it was changed in filters (for future extensibility)
+    if (filters.search !== undefined && filters.search !== this.searchQuery) {
+      this.searchQuery = filters.search;
     }
 
     this.filterProducts();

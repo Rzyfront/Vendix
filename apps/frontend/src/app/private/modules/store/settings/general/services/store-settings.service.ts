@@ -68,8 +68,14 @@ export class StoreSettingsService {
       );
   }
 
-  saveSettings(settings: Partial<StoreSettings>): void {
-    this.save_settings$$.next(settings);
+  saveSettings(settings: Partial<StoreSettings>): Observable<ApiResponse<StoreSettings>> {
+    return this.save_settings$$.pipe(
+      debounceTime(2500),
+      distinctUntilChanged(
+        (prev, curr) => JSON.stringify(prev) === JSON.stringify(curr),
+      ),
+      switchMap((s) => this.update_settings_api(s)),
+    );
   }
 
   saveSettingsNow(

@@ -87,6 +87,7 @@ export class StorePrismaService extends BasePrismaService {
       'purchase_orders', // Relational
       'shipping_rates', // Relational
       'expense_categories', // Org scoped
+      'product_tax_assignments', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -175,6 +176,7 @@ export class StorePrismaService extends BasePrismaService {
       inventory_movements: { products: { store_id: context.store_id } },
       inventory_transactions: { products: { store_id: context.store_id } },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
+      product_tax_assignments: { products: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -302,6 +304,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get return_orders() {
     return this.scoped_client.return_orders;
+  }
+
+  get product_tax_assignments() {
+    return this.scoped_client.product_tax_assignments;
   }
 
   get inventory_adjustments() {

@@ -38,8 +38,10 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
   settings: StoreSettings = {} as StoreSettings;
   isLoading = true;
   isSaving = false;
+  isAutoSaving = false;
   hasUnsavedChanges = false;
   lastSaved: Date | null = null;
+  saveError: string | null = null;
 
   showTemplates = false;
   templates: any[] = [];
@@ -82,8 +84,23 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     };
     this.hasUnsavedChanges = true;
     this.lastSaved = null;
-    this.settings_service.saveSettings({ [section]: new_settings });
-    this.toast_service.info('Guardando cambios...');
+    this.saveError = null;
+
+    // Suscribirse para recibir feedback del auto-guardado
+    this.settings_service.saveSettings({ [section]: new_settings }).subscribe({
+      next: (response) => {
+        this.hasUnsavedChanges = false;
+        this.lastSaved = new Date();
+        this.isAutoSaving = false;
+        this.toast_service.success('Cambios guardados automáticamente');
+      },
+      error: (error) => {
+        this.hasUnsavedChanges = true;
+        this.saveError = error.message || 'Error al guardar cambios';
+        this.isAutoSaving = false;
+        this.toast_service.error('Error al guardar cambios');
+      }
+    });
   }
 
   saveAllSettings() {

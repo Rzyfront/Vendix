@@ -15,6 +15,7 @@ import { NavigationService } from '../../services/navigation.service';
 import { AppConfigService } from '../../services/app-config.service';
 import { ConfigFacade } from '../config';
 import { AuthFacade } from './auth.facade';
+import { ThemeService } from '../../services/theme.service';
 import * as AuthActions from './auth.actions';
 import * as ConfigActions from '../config/config.actions';
 
@@ -28,6 +29,7 @@ export class AuthEffects {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private appConfigService = inject(AppConfigService);
+  private themeService = inject(ThemeService);
   private onboardingWizardService = inject(OnboardingWizardService);
   private store = inject(Store);
 
@@ -530,13 +532,43 @@ export class AuthEffects {
     { dispatch: false },
   );
 
-  // Update Store Settings
   updateStoreSettingsSuccess$ = createEffect(
     () =>
       this.actions$.pipe(
         ofType(AuthActions.updateStoreSettingsSuccess),
         tap(() => {
           this.toast.success('Configuración de tienda actualizada correctamente');
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  // 🔥 Apply Theme Preset
+  applyThemeEffect$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(
+          AuthActions.loginSuccess,
+          AuthActions.loginCustomerSuccess,
+          AuthActions.restoreAuthState,
+          AuthActions.updateUserSettingsSuccess,
+        ),
+        tap((action: any) => {
+          let theme = 'default';
+
+          if (action.user_settings) {
+            // Check for config.preferences.theme (as per prompt/new structure)
+            if (action.user_settings.config?.preferences?.theme) {
+              theme = action.user_settings.config.preferences.theme;
+            }
+            // Fallback/Legacy: preferences directly on user_settings?
+            else if (action.user_settings.preferences?.theme) {
+              theme = action.user_settings.preferences.theme;
+            }
+          }
+
+          console.log('🎨 Applying user theme:', theme);
+          this.themeService.applyUserTheme(theme);
         }),
       ),
     { dispatch: false },

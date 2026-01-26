@@ -72,6 +72,7 @@ export interface Product {
   description?: string;
   sku: string;
   price: number;
+  final_price: number;
   image_url?: string;
 }
 

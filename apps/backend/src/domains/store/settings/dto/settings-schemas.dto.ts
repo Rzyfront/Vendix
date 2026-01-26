@@ -48,7 +48,7 @@ export class GeneralSettingsDto {
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })
   @IsOptional()
   @IsString()
-  logo_url?: string | null;
+  logo_url?: string;
 
   @ApiProperty({
     enum: ['physical', 'online', 'hybrid', 'popup', 'kiosko'],
@@ -117,7 +117,7 @@ export class ShippingSettingsDto {
   @ApiProperty({ example: null, required: false })
   @IsOptional()
   @IsString()
-  default_shipping_method?: string | null;
+  default_shipping_method?: string;
 
   @ApiProperty({ type: ShippingTypesConfigDto })
   @ValidateNested()
@@ -151,22 +151,22 @@ export class NotificationsSettingsDto {
   @ApiProperty({ example: 'alerts@store.com', required: false })
   @IsOptional()
   @IsString()
-  low_stock_alerts_email?: string | null;
+  low_stock_alerts_email?: string;
 
   @ApiProperty({ example: 'orders@store.com', required: false })
   @IsOptional()
   @IsString()
-  new_order_alerts_email?: string | null;
+  new_order_alerts_email?: string;
 
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
-  low_stock_alerts_phone?: string | null;
+  low_stock_alerts_phone?: string;
 
   @ApiProperty({ example: '+573001234567', required: false })
   @IsOptional()
   @IsString()
-  new_order_alerts_phone?: string | null;
+  new_order_alerts_phone?: string;
 }
 
 export class PosSettingsDto {
@@ -280,10 +280,10 @@ export class AppSettingsDto {
   @ApiProperty({ example: 'https://example.com/logo.png', required: false })
   @IsOptional()
   @IsUrl({}, { message: 'logo_url must be a valid URL' })
-  logo_url?: string | null;
+  logo_url?: string;
 
   @ApiProperty({ example: 'https://example.com/favicon.ico', required: false })
   @IsOptional()
   @IsUrl({}, { message: 'favicon_url must be a valid URL' })
-  favicon_url?: string | null;
+  favicon_url?: string;
 }
