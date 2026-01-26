@@ -36,6 +36,8 @@ import {
       title="Editar Tienda"
       subtitle="Actualiza la información de la tienda seleccionada"
     >
+      @if (store) {
+        <ng-container>
       <form [formGroup]="editForm" class="space-y-6">
         <!-- Store Information -->
         <div>
@@ -241,6 +243,8 @@ import {
           Actualizar Tienda
         </app-button>
       </div>
+        </ng-container>
+      } 
     </app-modal>
   `,
 })
@@ -340,6 +344,7 @@ export class StoreEditModalComponent {
   }
 
   onCancel(): void {
+    this.isOpenChange.emit(false);
     this.cancel.emit();
   }
 
