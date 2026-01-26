@@ -94,6 +94,15 @@ jobs:
           JWT_SECRET=\$(aws secretsmanager get-secret-value --secret-id vendix/production/jwt --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin)['JWT_SECRET'])")
           EMAIL_PASSWORD=\$(aws secretsmanager get-secret-value --secret-id vendix/production/email --query SecretString --output text | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('EMAIL_PASSWORD', ''))")
 
+          # Fetch app configuration secrets
+          APP_SECRETS=\$(aws secretsmanager get-secret-value --secret-id vendix/production/app --query SecretString --output text)
+          BASE_DOMAIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; print(json.load(sys.stdin).get('BASE_DOMAIN', 'vendix.com'))")
+          FRONTEND_URL=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; print(json.load(sys.stdin).get('FRONTEND_URL', 'https://vendix.com'))")
+          PORT=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; print(json.load(sys.stdin).get('PORT', '3000'))")
+          NODE_ENV=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; print(json.load(sys.stdin).get('NODE_ENV', 'production'))")
+          CORS_ORIGIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('CORS_ORIGIN', ''))")
+          ADDITIONAL_CORS_ORIGINS=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('ADDITIONAL_CORS_ORIGINS', ''))")
+
           echo "🛑 Stopping current container..."
           sudo docker stop vendix-backend || true
           sudo docker rm vendix-backend || true
@@ -104,6 +113,12 @@ jobs:
             --restart unless-stopped \\
             -p 3000:3000 \\
             --env-file /opt/vendix/.env \\
+            -e BASE_DOMAIN="\$BASE_DOMAIN" \\
+            -e FRONTEND_URL="\$FRONTEND_URL" \\
+            -e PORT="\$PORT" \\
+            -e NODE_ENV="\$NODE_ENV" \\
+            -e CORS_ORIGIN="\$CORS_ORIGIN" \\
+            -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
           echo "🧹 Cleaning up old images..."
