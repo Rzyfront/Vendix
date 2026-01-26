@@ -50,7 +50,7 @@ export class AuthGuard implements CanActivate {
         }
 
         // 4. Check role-based permissions
-        if (!this.hasRolePermission(path)) {
+        if (!this.hasRolePermission(state.url)) {
           this.toastService.error(
             'No tienes permisos para acceder a esta página',
           );
@@ -66,6 +66,13 @@ export class AuthGuard implements CanActivate {
         return of(this.router.createUrlTree(['/']));
       }),
     );
+  }
+
+  /**
+   * Check if the user was recently logged out via localStorage flag
+   */
+  private wasRecentlyLoggedOut(): boolean {
+    return localStorage.getItem('logged_out') === 'true';
   }
 
   /**
@@ -90,6 +97,14 @@ export class AuthGuard implements CanActivate {
     ];
 
     return publicPrefixes.some((prefix) => path.startsWith(prefix));
+  }
+
+  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
+    // Siempre redirigir al login contextual unificado
+    const loginPath = '/auth/login';
+    return of(
+      this.router.createUrlTree([loginPath], { queryParams: { returnUrl } }),
+    );
   }
 
   /**
@@ -156,25 +171,5 @@ export class AuthGuard implements CanActivate {
 
     // Default fallback
     return this.router.createUrlTree(['/']);
-  }
-
-  /**
-   * Check if the user was recently logged out to prevent stale state navigation
-   */
-  private wasRecentlyLoggedOut(): boolean {
-    if (typeof localStorage === 'undefined') return false;
-
-    const loggedOutRecently = localStorage.getItem(
-      'vendix_logged_out_recently',
-    );
-    if (loggedOutRecently) {
-      const logoutTime = parseInt(loggedOutRecently, 10);
-      const currentTime = Date.now();
-      // Consider "recently logged out" within 5 minutes
-      if (currentTime - logoutTime < 5 * 60 * 1000) {
-        return true;
-      }
-    }
-    return false;
   }
 }

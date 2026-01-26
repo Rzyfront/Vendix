@@ -259,6 +259,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
   cartState$: Observable<CartState>;
   isEmpty$: Observable<boolean>;
   summary$: Observable<any>;
+  loading$: Observable<boolean>;
 
   @Output() saveDraft = new EventEmitter<void>();
   @Output() checkout = new EventEmitter<void>();
@@ -271,6 +272,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
     this.summary$ = this.cartService.summary;
+    this.loading$ = this.cartService.loading;
   }
 
   ngOnInit(): void {

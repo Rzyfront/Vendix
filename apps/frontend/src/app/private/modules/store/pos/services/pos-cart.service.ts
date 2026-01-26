@@ -29,7 +29,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-  constructor() { }
+  constructor() {}
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -225,29 +225,21 @@ export class PosCartService {
         quantity: newQuantity,
         taxAmount: this.calculateItemTax(existingItem.product, newQuantity),
         finalPrice: this.calculateItemFinalPrice(existingItem.product),
-        totalPrice: newQuantity * this.calculateItemFinalPrice(existingItem.product),
+        totalPrice:
+          newQuantity * this.calculateItemFinalPrice(existingItem.product),
         notes: request.notes || existingItem.notes,
       };
     } else {
       // Add new item
-      const rateSum =
-        request.product.tax_assignments?.reduce((rateSum, assignment) => {
-          const assignmentRate =
-            assignment.tax_categories?.tax_rates?.reduce(
-              (sum, tr) => sum + parseFloat(tr.rate || '0'),
-              0,
-            ) || 0;
-          return rateSum + assignmentRate;
-        }, 0) || 0;
-      const finalUnitPrice = request.product.final_price || this.calculateItemFinalPrice(request.product);
+      const finalPrice = this.calculateItemFinalPrice(request.product);
       const newItem: CartItem = {
         id: this.generateItemId(),
         product: request.product,
         quantity: request.quantity,
         unitPrice: request.product.price,
+        finalPrice: finalPrice,
         taxAmount: this.calculateItemTax(request.product, request.quantity),
-        finalPrice: finalUnitPrice,
-        totalPrice: request.quantity * finalUnitPrice,
+        totalPrice: request.quantity * finalPrice,
         addedAt: new Date(),
         notes: request.notes,
       };
@@ -285,13 +277,13 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
-    const finalUnitPrice = item.finalPrice;
-    const newTotalPrice = request.quantity * finalUnitPrice;
+    const finalPrice = this.calculateItemFinalPrice(item.product);
+    const newTotalPrice = request.quantity * finalPrice;
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
+      finalPrice: finalPrice,
       taxAmount: this.calculateItemTax(item.product, request.quantity),
-      finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       notes: request.notes || item.notes,
     };
