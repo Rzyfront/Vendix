@@ -49,6 +49,10 @@ export class LogsComponent implements OnInit, OnDestroy {
   isLoading = false;
   private destroy$ = new Subject<void>();
 
+  // Track active subscriptions to prevent duplicates
+  private statsSubscription: any = null;
+  private logsSubscription: any = null;
+
   // Modal State
   selectedLog: AuditLog | null = null;
   showDetailModal = false;
@@ -127,11 +131,27 @@ export class LogsComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    // Cancel active subscriptions before destroying
+    if (this.logsSubscription) {
+      this.logsSubscription.unsubscribe();
+      this.logsSubscription = null;
+    }
+    if (this.statsSubscription) {
+      this.statsSubscription.unsubscribe();
+      this.statsSubscription = null;
+    }
+
     this.destroy$.next();
     this.destroy$.complete();
   }
 
   loadLogs(): void {
+    // Cancel previous subscription if exists
+    if (this.logsSubscription) {
+      this.logsSubscription.unsubscribe();
+      this.logsSubscription = null;
+    }
+
     this.isLoading = true;
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
@@ -141,7 +161,7 @@ export class LogsComponent implements OnInit, OnDestroy {
       action: filters.action || undefined,
     };
 
-    this.auditService.getAuditLogs(query)
+    this.logsSubscription = this.auditService.getAuditLogs(query)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: PaginatedAuditResponse) => {
@@ -163,19 +183,40 @@ export class LogsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    this.auditService.getAuditStats()
+    // Cancel previous subscription if exists to prevent duplicates
+    if (this.statsSubscription) {
+      this.statsSubscription.unsubscribe();
+      this.statsSubscription = null;
+    }
+
+    this.statsSubscription = this.auditService.getAuditStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats) => {
           this.stats = stats;
           this.updateStatsItems();
         },
-        error: (err) => console.error(err)
+        error: (err) => {
+          console.error('Error loading audit stats:', err);
+          this.statsSubscription = null;
+        }
       });
   }
 
   updateStatsItems(): void {
     if (!this.stats) return;
+
+    const combined = this.stats.logs_by_action_and_resource || {};
+
+    // Para "Usuarios", solo contar cambios reales (CREATE, UPDATE, DELETE), no vistas (VIEW, SEARCH)
+    const userChanges = (combined['CREATE_users'] || 0) +
+                        (combined['UPDATE_users'] || 0) +
+                        (combined['DELETE_users'] || 0);
+
+    // Para "Cambios Config", solo contar cambios reales en settings
+    const settingsChanges = (combined['CREATE_settings'] || 0) +
+                            (combined['UPDATE_settings'] || 0) +
+                            (combined['DELETE_settings'] || 0);
 
     this.statsItems = [
       {
@@ -195,16 +236,16 @@ export class LogsComponent implements OnInit, OnDestroy {
         iconColor: 'text-green-600'
       },
       {
-        title: 'Cambios Config',
-        value: this.stats.logs_by_resource['organization_settings'] || 0,
-        smallText: 'Ajustes',
+        title: 'Configuración',
+        value: settingsChanges,
+        smallText: 'Modificaciones',
         iconName: 'settings',
         iconBgColor: 'bg-orange-100',
         iconColor: 'text-orange-600'
       },
       {
         title: 'Usuarios',
-        value: this.stats.logs_by_resource['users'] || 0,
+        value: userChanges,
         smallText: 'Cambios en usuarios',
         iconName: 'users',
         iconBgColor: 'bg-indigo-100',
