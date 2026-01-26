@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { toTitleCase } from '@common/utils/format.util';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import {
   CreateUserDto,
@@ -28,12 +29,13 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
 @Injectable()
 export class UsersService {
   constructor(
+    // Prisma service
     private prisma: OrganizationPrismaService,
     private emailService: EmailService,
     private auditService: AuditService,
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     const {

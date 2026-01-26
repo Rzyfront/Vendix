@@ -5,6 +5,7 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
+import { toTitleCase } from '@common/utils/format.util';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   CreateUserDto,
@@ -18,9 +19,10 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
 @Injectable()
 export class UsersService {
   constructor(
+    // Prisma service
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     // Check if email already exists
@@ -64,7 +66,8 @@ export class UsersService {
     });
 
     // Create user_settings with default ORG_ADMIN configuration
-    const adminConfig = await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+    const adminConfig =
+      await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,

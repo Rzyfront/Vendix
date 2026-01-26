@@ -574,7 +574,8 @@ interface LocationStockOption {
           </div>
 
           <!-- Description -->
-          <app-textarea
+          <div>
+            <app-textarea
             label="Descripcion"
             formControlName="description"
             [rows]="3"
@@ -584,6 +585,7 @@ interface LocationStockOption {
 
         </div>
       </form>
+      }
 
       <!-- Footer -->
       <div

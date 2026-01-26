@@ -27,6 +27,7 @@ export interface Address {
     postal_code: string | null;
     phone_number: string | null;
     is_primary: boolean;
+    type: string;
 }
 
 export interface Order {
@@ -129,6 +130,14 @@ export class AccountService {
     createAddress(address: Omit<Address, 'id'>): Observable<{ success: boolean; data: Address }> {
         return this.http.post<{ success: boolean; data: Address }>(
             `${this.api_url}/addresses`,
+            address,
+            { headers: this.getHeaders() },
+        );
+    }
+
+    updateAddress(address_id: number, address: Partial<Address>): Observable<{ success: boolean; data: Address }> {
+        return this.http.put<{ success: boolean; data: Address }>(
+            `${this.api_url}/addresses/${address_id}`,
             address,
             { headers: this.getHeaders() },
         );

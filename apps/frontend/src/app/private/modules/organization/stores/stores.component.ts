@@ -67,7 +67,7 @@ interface StatItem {
     StoreCreateModalComponent,
     StoreEditModalComponent,
     StoreDeleteConfirmationComponent,
-    StoreSettingsModalComponent,
+    StoreConfigurationModalComponent,
     InputsearchComponent,
     IconComponent,
     TableComponent,
@@ -218,14 +218,13 @@ interface StatItem {
       ></app-store-edit-modal>
 
       <!-- Settings Store Modal -->
-      <app-store-settings-modal
+      <app-store-configuration-modal
         [isOpen]="isSettingsModalOpen"
-        [isSubmitting]="isUpdatingSettings"
-        [settings]="selectedStoreForSettings?.settings || null"
+        [storeId]="selectedStoreForSettings?.id || null"
+        [storeName]="selectedStoreForSettings?.name || ''"
         (openChange)="onSettingsModalChange($event)"
-        (submit)="updateStoreSettings($event)"
-        (cancel)="onSettingsModalCancel()"
-      ></app-store-settings-modal>
+        (settingsSaved)="updateStoreSettings($event)"
+      ></app-store-configuration-modal>
 
       <!-- Delete Store Confirmation Modal -->
       <app-store-delete-confirmation
@@ -646,6 +645,10 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isEditModalOpen = false;
   }
 
+  onSettingsModalCancel(): void {
+    this.isSettingsModalOpen = false;
+  }
+
   updateStore(storeData: any): void {
     if (!this.selectedStore) return;
 
@@ -736,6 +739,14 @@ export class StoresComponent implements OnInit, OnDestroy {
     if (!isOpen) {
       this.selectedStoreForDelete = null;
     }
+  }
+
+  onSettingsModalChange(isOpen: boolean | Event): void {
+    this.isSettingsModalOpen = isOpen as boolean;
+  }
+
+  updateStoreSettings(event: SettingsSavedEvent): void {
+    this.onSettingsSaved(event);
   }
 
   onDeleteModalCancel(): void {

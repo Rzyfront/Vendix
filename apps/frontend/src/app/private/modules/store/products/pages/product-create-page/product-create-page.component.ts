@@ -810,4 +810,8 @@ export class ProductCreatePageComponent implements OnInit {
     if (!status) return 'Unknown';
     return status.charAt(0).toUpperCase() + status.slice(1);
   }
+
+  goToPurchase(): void {
+    this.router.navigate(['/admin/orders/purchase-orders']);
+  }
 }

@@ -15,6 +15,9 @@ export interface Product {
   image_url: string | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
+  is_on_sale: boolean;
+  sale_price?: number;
+  final_price: number;
 }
 
 export interface ProductDetail extends Product {
@@ -36,6 +39,9 @@ export interface ProductDetail extends Product {
   }[];
   avg_rating: number;
   review_count: number;
+  is_on_sale: boolean;
+  sale_price?: number;
+  final_price: number;
 }
 
 export interface Category {

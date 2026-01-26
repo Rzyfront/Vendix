@@ -31,7 +31,9 @@ export class ProductsBulkService {
     Nombre: 'name',
     SKU: 'sku',
     'Precio Venta': 'base_price',
+    'Precio Base': 'base_price', // Aliased for compatibility
     'Precio Compra': 'cost_price',
+    Costo: 'cost_price', // Aliased for compatibility
     Margen: 'profit_margin',
     'Cantidad Inicial': 'stock_quantity',
     Descripción: 'description',
@@ -44,22 +46,6 @@ export class ProductsBulkService {
     Peso: 'weight',
   };
 
-  // Mapa de encabezados en Español a claves del DTO
-  private readonly HEADER_MAP = {
-    Nombre: 'name',
-    SKU: 'sku',
-    'Precio Base': 'base_price',
-    Costo: 'cost_price',
-    'Cantidad Inicial': 'stock_quantity',
-    Descripción: 'description',
-    Categorías: 'category_ids', // Special handling
-    Marca: 'brand_id', // Special handling
-    'En Oferta': 'is_on_sale',
-    'Precio Oferta': 'sale_price',
-    'Disponible Ecommerce': 'available_for_ecommerce', // Not directly in DTO but used in logic? mapped to something?
-    Peso: 'weight',
-  };
-
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
@@ -68,67 +54,6 @@ export class ProductsBulkService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly locationsService: LocationsService,
   ) {}
-
-  /**
-   * Genera la plantilla de carga masiva en formato Excel (.xlsx)
-   */
-  async generateExcelTemplate(type: 'quick' | 'complete'): Promise<Buffer> {
-    let headers: string[] = [];
-    let exampleData: any[] = [];
-
-    if (type === 'quick') {
-      headers = ['Nombre', 'SKU', 'Precio Base', 'Costo', 'Cantidad Inicial'];
-      exampleData = [
-        {
-          Nombre: 'Camiseta Básica Blanca',
-          SKU: 'CAM-BAS-BLA-001',
-          'Precio Base': 15000,
-          Costo: 8000,
-          'Cantidad Inicial': 50,
-        },
-      ];
-    } else {
-      headers = [
-        'Nombre',
-        'SKU',
-        'Precio Base',
-        'Costo',
-        'Cantidad Inicial',
-        'Descripción',
-        'Marca',
-        'Categorías',
-        'Peso',
-        'En Oferta',
-        'Precio Oferta',
-      ];
-      exampleData = [
-        {
-          Nombre: 'Zapatillas Running Pro',
-          SKU: 'ZAP-RUN-PRO-42',
-          'Precio Base': 85000,
-          Costo: 45000,
-          'Cantidad Inicial': 20,
-          Descripción: 'Zapatillas ideales para correr largas distancias.',
-          Marca: 'Nike',
-          Categorías: 'Deportes, Calzado, Running',
-          Peso: 0.8,
-          'En Oferta': 'No',
-          'Precio Oferta': 0,
-        },
-      ];
-    }
-
-    const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
-
-    // Ajustar ancho de columnas
-    const colWidths = headers.map((h) => ({ wch: Math.max(h.length + 5, 20) }));
-    ws['!cols'] = colWidths;
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Productos');
-
-    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-  }
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -238,50 +163,12 @@ export class ProductsBulkService {
         // Validar datos
         await this.validateProductData(productData, storeId);
 
-        // Mapear y crear
-        const createProductDto = this.mapToCreateProductDto(
-          productData,
-          storeId,
-        );
-        const createdProduct =
-          await this.productsService.create(createProductDto);
-
-        // Variantes
-        if (productData.variants && productData.variants.length > 0) {
-          await this.processProductVariants(
-            (createdProduct as any).id,
-            productData.variants,
-          );
-        }
-
-        // Stock por ubicación
-        if (productData.stock_quantity && productData.stock_quantity > 0) {
-          // Si viene cantidad inicial en el root, asignarlo a la ubicación por defecto
-          await this.processInitialStock(
-            (createdProduct as any).id,
-            productData.stock_quantity,
-            storeId,
-          );
-        }
-
-        if (
-          productData.stock_by_location &&
-          productData.stock_by_location.length > 0
-        ) {
-          await this.processStockByLocation(
-            (createdProduct as any).id,
-            productData.stock_by_location,
-            storeId,
-          );
-        }
-
-        results.push({
-          product: createdProduct,
-          status: 'success',
-          message: 'Product created successfully',
-        });
-
         let resultProduct;
+
+        // Check for existing product by SKU
+        const existingProduct = await this.prisma.products.findFirst({
+          where: { store_id: storeId, sku: productData.sku },
+        });
 
         // Wrap operations in a transaction for data integrity
         await this.prisma.$transaction(async (tx) => {
@@ -291,7 +178,7 @@ export class ProductsBulkService {
           // Since we can't easily pass 'tx' to this.productsService.create/update without refactoring them,
           // we will do a best-effort approach or basic operations here if possible?
           // ACTUALLY: deeply refactoring productsService to accept TX is out of scope for "fixing bulk upload" safely.
-          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost", 
+          // However, to ensure integrity as requested "Adjust pass the full load that no data is lost",
           // we should AT LEAST ensure that if variants/stock fail, we don't leave a partial product.
           // Given the constraints, we will rely on the fact that if this block throws, the transaction rolls back.
           // BUT - inner service calls using `this.prisma` (the global one) WON'T be part of `tx`.
@@ -299,7 +186,7 @@ export class ProductsBulkService {
           // We will catch errors and if manual rollback is needed we might need to delete.
           // BETTER: For this specific task, we will try to do it sequentially and if creation fails, it fails.
           // If variants fail, we should delete the product?
-          // Since the user explicitly asked "Adjust for complete load that no data is lost", 
+          // Since the user explicitly asked "Adjust for complete load that no data is lost",
           // truly atomic acts require 'tx'.
 
           // Let's implement a localized transaction approach:
@@ -341,7 +228,8 @@ export class ProductsBulkService {
             // We'll wrap creation + sub-steps in a try/catch to delete if subsequent steps fail
             let createdId = null;
             try {
-              resultProduct = await this.productsService.create(createProductDto);
+              resultProduct =
+                await this.productsService.create(createProductDto);
               createdId = (resultProduct as any).id;
 
               // Variantes
@@ -360,13 +248,14 @@ export class ProductsBulkService {
             } catch (createErr) {
               // Compensation logic: if we created the product but failed later (e.g. variants), delete it
               if (createdId) {
-                await this.prisma.products.delete({ where: { id: createdId } }).catch(e => console.error("Cleanup failed", e));
+                await this.prisma.products
+                  .delete({ where: { id: createdId } })
+                  .catch((e) => console.error('Cleanup failed', e));
               }
               throw createErr; // Re-throw to be caught by outer loop
             }
           }
         }); // End fake transaction scope (just scoping variables mainly)
-
 
         successful++;
       } catch (error) {
@@ -602,6 +491,23 @@ export class ProductsBulkService {
       profit_margin: product.profit_margin,
       weight: product.weight,
       is_on_sale: product['is_on_sale'], // Acceso dinámico por si acaso
+      sale_price: product['sale_price'],
+    };
+  }
+
+  private mapToUpdateProductDto(product: BulkProductItemDto): any {
+    return {
+      name: product.name,
+      base_price: product.base_price,
+      sku: product.sku,
+      description: product.description,
+      brand_id: product.brand_id,
+      category_ids: product.category_ids,
+      stock_quantity: product.stock_quantity,
+      cost_price: product.cost_price,
+      profit_margin: product.profit_margin,
+      weight: product.weight,
+      is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
     };
   }

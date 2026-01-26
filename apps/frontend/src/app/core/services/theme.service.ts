@@ -103,9 +103,10 @@ export class ThemeService {
     }
 
     // Re-aplicar el tema del usuario (default, aura, etc.) sobre el nuevo branding cargado.
-    // Esto es crucial para solucionar condiciones de carrera donde applyBranding sobreescribe 
-    // las modificaciones de applyUserTheme (como transparency en Aura).
-    await this.applyUserTheme(this.activeUserTheme);
+    // Esto es crucial para solucionar condiciones de carrera donde applyBranding sobreescribe
+    // las modificaciones de applyTheme (como transparency en Aura).
+    // Note: Theme is now fully managed by branding, user theme selection is handled elsewhere
+    // await this.applyTheme(this.activeUserTheme);
   }
 
   /**

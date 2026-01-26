@@ -42,6 +42,7 @@ export interface AppConfig {
 export class AppConfigService {
   private http = inject(HttpClient);
   private themeService = inject(ThemeService);
+  private router = inject(Router);
 
   async setupConfig(): Promise<AppConfig> {
     // 1. Detectar la configuración base del dominio.
@@ -119,7 +120,7 @@ export class AppConfigService {
         .navigate([], {
           queryParams: { env: newEnv, refresh: Date.now() },
         })
-        .catch((error) => {
+        .catch((error: any) => {
           console.error(
             '[AppConfigService] Error notifying environment change:',
             error,

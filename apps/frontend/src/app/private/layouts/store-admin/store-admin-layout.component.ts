@@ -116,6 +116,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
   organizationSlug$: Observable<string | null>;
   storeDomainHostname$: Observable<string | null>;
   storeDomainHostname: string | null = null;
+  storeType$: Observable<string | null>;
 
   // Onboarding
   showOnboardingModal = false; // Will be set in ngOnInit based on actual status
@@ -294,6 +295,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.storeSlug$ = this.authFacade.userStoreSlug$;
     this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
     this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
+    this.storeType$ = this.authFacade.userStoreType$;
   }
 
   ngOnInit(): void {
@@ -381,6 +383,18 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       // Desktop: toggle collapsed state
       this.sidebarCollapsed = !this.sidebarCollapsed;
     }
+  }
+
+  formatStoreType(storeType: string | null | undefined): string {
+    if (!storeType) return 'N/A';
+    const typeMap: { [key: string]: string } = {
+      'retail': 'Retail',
+      'restaurant': 'Restaurante',
+      'warehouse': 'Almacén',
+      'ecommerce': 'E-commerce',
+      'wholesale': 'Mayorista',
+    };
+    return typeMap[storeType] || storeType;
   }
 
   onOnboardingCompleted(event: any): void {

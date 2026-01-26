@@ -9,7 +9,7 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { EcommerceProduct } from '../../services/catalog.service';
+import { Product } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
@@ -244,9 +244,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 })
 export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
   @Input() title = 'Productos sugeridos';
-  @Input() products: EcommerceProduct[] = [];
-  @Output() quick_view = new EventEmitter<EcommerceProduct>();
-  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
+  @Input() products: Product[] = [];
+  @Output() quick_view = new EventEmitter<Product>();
+  @Output() add_to_cart = new EventEmitter<Product>();
 
   @ViewChild('viewport') viewport!: ElementRef<HTMLDivElement>;
 
@@ -276,11 +276,11 @@ export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
     // can reset timer here if manual interaction
   }
 
-  onQuickView(product: EcommerceProduct): void {
+  onQuickView(product: Product): void {
     this.quick_view.emit(product);
   }
 
-  onAddToCart(event: Event, product: EcommerceProduct): void {
+  onAddToCart(event: Event, product: Product): void {
     event.stopPropagation();
     event.preventDefault();
     this.add_to_cart.emit(product);
