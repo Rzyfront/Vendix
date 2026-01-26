@@ -27,7 +27,7 @@ import {
   StoreDeleteConfirmationComponent,
 } from './components/index';
 
-import { StoreSettingsModalComponent } from './components/store-settings-modal/store-settings-modal.component';
+import { StoreConfigurationModalComponent, SettingsSavedEvent } from './components/store-configuration-modal/store-configuration-modal.component';
 
 import { EnvironmentSwitchService } from '../../../../core/services/environment-switch.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
@@ -67,7 +67,7 @@ interface StatItem {
     StoreCreateModalComponent,
     StoreEditModalComponent,
     StoreDeleteConfirmationComponent,
-    StoreSettingsModalComponent,
+    StoreConfigurationModalComponent,
     InputsearchComponent,
     IconComponent,
     TableComponent,
@@ -202,38 +202,33 @@ interface StatItem {
 
       <!-- Create Store Modal -->
       <app-store-create-modal
-        [isOpen]="isCreateModalOpen"
+        [(isOpen)]="isCreateModalOpen"
         [isSubmitting]="isCreatingStore"
-        (openChange)="onCreateModalChange($event)"
         (submit)="createStore($event)"
         (cancel)="onCreateModalCancel()"
       ></app-store-create-modal>
 
       <!-- Edit Store Modal -->
       <app-store-edit-modal
-        [isOpen]="isEditModalOpen"
+        [(isOpen)]="isEditModalOpen"
         [isSubmitting]="isUpdatingStore"
         [store]="selectedStore"
-        (openChange)="onEditModalChange($event)"
         (submit)="updateStore($event)"
         (cancel)="onEditModalCancel()"
       ></app-store-edit-modal>
 
       <!-- Settings Store Modal -->
-      <app-store-settings-modal
-        [isOpen]="isSettingsModalOpen"
-        [isSubmitting]="isUpdatingSettings"
-        [settings]="selectedStoreForSettings?.settings || null"
-        (openChange)="onSettingsModalChange($event)"
-        (submit)="updateStoreSettings($event)"
-        (cancel)="onSettingsModalCancel()"
-      ></app-store-settings-modal>
+      <app-store-configuration-modal
+        [(isOpen)]="isSettingsModalOpen"
+        [storeId]="selectedStoreForSettings?.id || null"
+        [storeName]="selectedStoreForSettings?.name || ''"
+        (settingsSaved)="onSettingsSaved($event)"
+      ></app-store-configuration-modal>
 
       <!-- Delete Store Confirmation Modal -->
       <app-store-delete-confirmation
-        [isOpen]="isDeleteModalOpen"
+        [(isOpen)]="isDeleteModalOpen"
         [store]="selectedStoreForDelete"
-        (openChange)="onDeleteModalChange($event)"
         (confirm)="confirmDeleteStore()"
         (cancel)="onDeleteModalCancel()"
       ></app-store-delete-confirmation>
@@ -362,7 +357,6 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   // Settings Modal state
   isSettingsModalOpen = false;
-  isUpdatingSettings = false;
   selectedStoreForSettings?: StoreListItem;
 
   // Delete Confirmation Modal state
@@ -426,16 +420,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     });
   }
 
-  onCreateModalChange(isOpen: boolean | Event): void {
-    this.isCreateModalOpen = isOpen as boolean;
-    if (!isOpen) {
-      this.createStoreForm.reset();
-    }
-  }
-
   onCreateModalCancel(): void {
     this.isCreateModalOpen = false;
-    this.createStoreForm.reset();
   }
 
   createStore(storeData?: any | Event): void {
@@ -471,15 +457,12 @@ export class StoresComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          console.log('Create store response:', response);
           if (response.success && response.data) {
             this.isCreateModalOpen = false;
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda creada exitosamente');
-            console.log('Store created successfully:', response.data);
           } else {
-            console.warn('Invalid create store response:', response);
             this.toastService.error('Respuesta inválida al crear la tienda');
           }
           this.isCreatingStore = false;
@@ -512,7 +495,6 @@ export class StoresComponent implements OnInit, OnDestroy {
 
     this.storesService.getStores(query).subscribe({
       next: (response) => {
-        console.log('Stores response:', response);
         if (response.success && response.data) {
           this.stores = response.data.map((store: any) => ({
             id: store.id,
@@ -535,9 +517,7 @@ export class StoresComponent implements OnInit, OnDestroy {
             addresses: store.addresses || [],
             _count: store._count || { products: 0, orders: 0, store_users: 0 },
           }));
-          console.log('Processed stores:', this.stores);
         } else {
-          console.warn('Invalid response structure:', response);
           this.stores = [];
         }
         this.isLoading = false;
@@ -651,7 +631,6 @@ export class StoresComponent implements OnInit, OnDestroy {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    console.log('Sort event:', sortEvent);
     this.loadStores();
   }
 
@@ -660,16 +639,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isEditModalOpen = true;
   }
 
-  onEditModalChange(isOpen: boolean | Event): void {
-    this.isEditModalOpen = isOpen as boolean;
-    if (!isOpen) {
-      this.selectedStore = undefined;
-    }
-  }
-
   onEditModalCancel(): void {
     this.isEditModalOpen = false;
-    this.selectedStore = undefined;
   }
 
   updateStore(storeData: any): void {
@@ -696,16 +667,13 @@ export class StoresComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          console.log('Update store response:', response);
           if (response.success && response.data) {
             this.isEditModalOpen = false;
             this.selectedStore = undefined;
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda actualizada exitosamente');
-            console.log('Store updated successfully:', response.data);
           } else {
-            console.warn('Invalid update store response:', response);
             this.toastService.error(
               'Respuesta inválida al actualizar la tienda',
             );
@@ -722,7 +690,6 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   // Store actions
   viewStore(store: StoreListItem): void {
-    console.log('View store:', store);
     this.switchToStoreEnvironment(store);
   }
 
@@ -761,16 +728,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isDeleteModalOpen = true;
   }
 
-  onDeleteModalChange(isOpen: boolean | Event): void {
-    this.isDeleteModalOpen = isOpen as boolean;
-    if (!isOpen) {
-      this.selectedStoreForDelete = null;
-    }
-  }
-
   onDeleteModalCancel(): void {
     this.isDeleteModalOpen = false;
-    this.selectedStoreForDelete = null;
   }
 
   confirmDeleteStore(): void {
@@ -807,48 +766,19 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isSettingsModalOpen = true;
   }
 
-  onSettingsModalChange(isOpen: boolean | Event): void {
-    this.isSettingsModalOpen = isOpen as boolean;
-    if (!isOpen) {
-      this.selectedStoreForSettings = undefined;
+  onSettingsSaved(event?: SettingsSavedEvent): void {
+    // Settings were saved successfully in the modal
+    // Update only the current store in the list instead of reloading all stores
+    if (this.selectedStoreForSettings && event?.storeName) {
+      const storeIndex = this.stores.findIndex(s => s.id === this.selectedStoreForSettings!.id);
+      if (storeIndex !== -1) {
+        // Update the store name in the list
+        this.stores[storeIndex].name = event.storeName;
+        // Update the selected store reference
+        this.selectedStoreForSettings.name = event.storeName;
+      }
     }
-  }
-
-  onSettingsModalCancel(): void {
-    this.isSettingsModalOpen = false;
-    this.selectedStoreForSettings = undefined;
-  }
-
-  updateStoreSettings(settingsData: any): void {
-    if (!this.selectedStoreForSettings) return;
-
-    this.isUpdatingSettings = true;
-
-    this.storesService
-      .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe({
-        next: (response) => {
-          console.log('Update store settings response:', response);
-          if (response.success && response.data) {
-            this.isSettingsModalOpen = false;
-            this.selectedStoreForSettings = undefined;
-            this.toastService.success('Configuración actualizada exitosamente');
-            console.log('Store settings updated successfully:', response.data);
-          } else {
-            console.warn('Invalid update store settings response:', response);
-            this.toastService.error(
-              'Respuesta inválida al actualizar la configuración',
-            );
-          }
-          this.isUpdatingSettings = false;
-        },
-        error: (error) => {
-          console.error('Error updating store settings:', error);
-          this.toastService.error('Error al actualizar la configuración');
-          this.isUpdatingSettings = false;
-        },
-      });
+    // Don't reload all stores - the modal handles reloading its own settings
   }
 
   // Helper methods for table display

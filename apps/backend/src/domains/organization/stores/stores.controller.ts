@@ -167,6 +167,26 @@ export class StoresController {
     }
   }
 
+  @Get(':id/settings')
+  @Permissions('organization:stores:read')
+  async getSettings(@Param('id', ParseIntPipe) storeId: number) {
+    try {
+      const settings = await this.storesService.getStoreSettings(storeId);
+      return this.responseService.success(
+        settings,
+        'Configuración de tienda obtenida exitosamente',
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound('Tienda no encontrada', 'Store');
+      }
+      return this.responseService.error(
+        'Error al obtener la configuración de la tienda',
+        error.message,
+      );
+    }
+  }
+
   @Patch(':id/settings')
   @Permissions('organization:stores:update')
   async updateSettings(
@@ -188,6 +208,26 @@ export class StoresController {
       }
       return this.responseService.error(
         'Error al actualizar la configuración de la tienda',
+        error.message,
+      );
+    }
+  }
+
+  @Post(':id/settings/reset')
+  @Permissions('organization:stores:update')
+  async resetSettings(@Param('id', ParseIntPipe) storeId: number) {
+    try {
+      const settings = await this.storesService.resetStoreSettings(storeId);
+      return this.responseService.updated(
+        settings,
+        'Configuración restablecida a valores por defecto',
+      );
+    } catch (error) {
+      if (error.message.includes('Store not found')) {
+        return this.responseService.notFound('Tienda no encontrada', 'Store');
+      }
+      return this.responseService.error(
+        'Error al restablecer la configuración',
         error.message,
       );
     }
