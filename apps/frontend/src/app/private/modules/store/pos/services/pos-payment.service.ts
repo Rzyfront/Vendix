@@ -272,8 +272,11 @@ export class PosPaymentService {
       update_inventory: true,
     };
 
-    // Only include customer fields if it's not an anonymous sale
-    if (!isAnonymousSale && cartState.customer) {
+    // For anonymous sales, use "Consumidor Final" as customer name
+    // For regular sales, include customer fields
+    if (isAnonymousSale) {
+      sale_data.customer_name = 'Consumidor Final';
+    } else if (cartState.customer) {
       sale_data.customer_id = cartState.customer.id;
       sale_data.customer_name = `${cartState.customer.first_name} ${cartState.customer.last_name}`;
       sale_data.customer_email = cartState.customer.email;

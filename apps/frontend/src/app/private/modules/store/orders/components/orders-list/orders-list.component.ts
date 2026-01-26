@@ -191,7 +191,8 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                   const customerMap = new Map(customers.map(c => [c.id, c]));
                   this.orders = normalizedOrders.map((order: any) => ({
                     ...order,
-                    customer_name: order.customer_id ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() || 'N/A' : 'N/A'
+                    // Show "Consumidor Final" for anonymous sales (no customer_id), otherwise show customer name
+                    customer_name: order.customer_id ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() || 'N/A' : 'Consumidor Final'
                   }));
 
                   this.loading = false;
@@ -203,7 +204,10 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                 },
                 error: (error) => {
                   console.error('Error loading customers:', error);
-                  this.orders = normalizedOrders.map((order: any) => ({ ...order, customer_name: 'N/A' }));
+                  this.orders = normalizedOrders.map((order: any) => ({
+                    ...order,
+                    customer_name: order.customer_id ? 'N/A' : 'Consumidor Final'
+                  }));
                   this.loading = false;
                   this.ordersLoaded.emit({
                     orders: this.orders,
@@ -213,7 +217,11 @@ export class OrdersListComponent implements OnInit, OnDestroy, OnChanges {
                 }
               });
           } else {
-            this.orders = normalizedOrders.map((order: any) => ({ ...order, customer_name: 'N/A' }));
+            // No customer IDs to fetch, show "Consumidor Final" for orders without customer
+            this.orders = normalizedOrders.map((order: any) => ({
+              ...order,
+              customer_name: order.customer_id ? 'N/A' : 'Consumidor Final'
+            }));
             this.loading = false;
             this.ordersLoaded.emit({
               orders: this.orders,
