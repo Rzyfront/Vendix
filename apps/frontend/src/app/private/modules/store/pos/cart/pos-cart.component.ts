@@ -23,7 +23,12 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, QuantityControlComponent],
+  imports: [
+    CommonModule,
+    ButtonComponent,
+    IconComponent,
+    QuantityControlComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -56,7 +61,9 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
-              <span class="font-medium">{{ formatCurrency((summary$ | async)?.taxAmount || 0) }}</span>
+              <span class="font-medium">{{
+                formatCurrency((summary$ | async)?.taxAmount || 0)
+              }}</span>
             </div>
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
@@ -69,12 +76,16 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
           </div>
 
           <!-- Checkout Actions -->
-          <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div
+            class="flex flex-col sm:flex-row items-center justify-between gap-4"
+          >
             <app-button
               variant="outline"
               size="md"
               (clicked)="saveCart()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              [disabled]="
+                ((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)
+              "
               class="!h-10 text-sm font-medium px-3"
             >
               <app-icon name="save" [size]="16" slot="icon"></app-icon>
@@ -84,7 +95,9 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
               variant="primary"
               size="md"
               (clicked)="proceedToPayment()"
-              [disabled]="((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)"
+              [disabled]="
+                ((loading$ | async) ?? false) || ((isEmpty$ | async) ?? false)
+              "
               class="!h-10 text-sm font-bold px-6"
             >
               <app-icon name="credit-card" [size]="18" slot="icon"></app-icon>
@@ -163,7 +176,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                   class="absolute inset-0 w-full h-full object-cover"
                   (error)="handleImageError($event)"
                 />
-                
+
                 <!-- Fallback Icon -->
                 <div
                   *ngIf="!item.product.image_url && !item.product.image"
@@ -189,7 +202,10 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
                     <app-icon name="trash-2" [size]="14"></app-icon>
                   </button>
                 </div>
-                <div *ngIf="getItemTaxAmount(item) > 0" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit">
+                <div
+                  *ngIf="getItemTaxAmount(item) > 0"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800 w-fit"
+                >
                   Imp {{ formatCurrency(getItemTaxAmount(item)) }}
                 </div>
                 <div class="flex justify-between items-end">
@@ -281,7 +297,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => { },
+        next: () => {},
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -351,24 +367,17 @@ export class PosCartComponent implements OnInit, OnDestroy {
       currency: 'ARS',
     }).format(amount);
   }
-  
-  getItemTaxRate(item: CartItem): number {
-    const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
-      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
-      return rateSum + assignmentRate;
-    }, 0) || 0;
-    return rate;
-  }
-
-  getItemTaxAmount(item: CartItem): number {
-    return item.taxAmount;
-  }
 
   getItemTaxRate(item: CartItem): number {
-    const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
-      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;
-      return rateSum + assignmentRate;
-    }, 0) || 0;
+    const rate =
+      item.product.tax_assignments?.reduce((rateSum, assignment) => {
+        const assignmentRate =
+          assignment.tax_categories?.tax_rates?.reduce(
+            (sum, tr) => sum + parseFloat(tr.rate || '0'),
+            0,
+          ) || 0;
+        return rateSum + assignmentRate;
+      }, 0) || 0;
     return rate;
   }
 
