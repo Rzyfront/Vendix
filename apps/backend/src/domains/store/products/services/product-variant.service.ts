@@ -22,7 +22,7 @@ export class ProductVariantService {
     private readonly prisma: StorePrismaService,
     private readonly inventoryLocationsService: LocationsService,
     private readonly stockLevelManager: StockLevelManager,
-  ) {}
+  ) { }
 
   async findUniqueVariantBySlug(storeId: number, slug: string) {
     const variant = await this.prisma.product_variants.findFirst({
@@ -233,99 +233,99 @@ export class ProductVariantService {
           user_id,
         );
       });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ConflictException('Conflicto de datos únicos');
-        }
+    });
+  } catch(error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === 'P2002') {
+        throw new ConflictException('Conflicto de datos únicos');
       }
-      throw error;
     }
+    throw error;
   }
+}
 
   private async executeUpdateVariant(
-    prisma: Prisma.TransactionClient,
-    variantId: number,
-    updateVariantDto: UpdateProductVariantDto,
-    existingVariant: any,
-    user_id?: number,
-  ) {
-    const { stock_quantity, attributes, ...variantData } = updateVariantDto;
+  prisma: Prisma.TransactionClient,
+  variantId: number,
+  updateVariantDto: UpdateProductVariantDto,
+  existingVariant: any,
+  user_id ?: number,
+) {
+  const { stock_quantity, attributes, ...variantData } = updateVariantDto;
 
-    // Actualizar variante
-    const variant = await prisma.product_variants.update({
-      where: { id: variantId },
-      data: {
-        ...variantData,
-        price_override: variantData.price_override || updateVariantDto.price,
-        attributes: attributes !== undefined ? attributes : undefined,
-        updated_at: new Date(),
-      } as any,
-    });
+  // Actualizar variante
+  const variant = await prisma.product_variants.update({
+    where: { id: variantId },
+    data: {
+      ...variantData,
+      price_override: variantData.price_override || updateVariantDto.price,
+      attributes: attributes !== undefined ? attributes : undefined,
+      updated_at: new Date(),
+    } as any,
+  });
 
-    // Si cambió el stock, actualizar stock levels
-    if (stock_quantity !== undefined) {
-      const stockDifference = stock_quantity - existingVariant.stock_quantity;
+  // Si cambió el stock, actualizar stock levels
+  if (stock_quantity !== undefined) {
+    const stockDifference = stock_quantity - existingVariant.stock_quantity;
 
-      if (stockDifference !== 0) {
-        const defaultLocation =
-          await this.inventoryLocationsService.getDefaultLocation(
-            existingVariant.products.store_id,
-          );
-
-        await this.stockLevelManager.updateStock(
-          {
-            product_id: existingVariant.product_id,
-            variant_id: variantId,
-            location_id: defaultLocation.id,
-            quantity_change: stockDifference,
-            movement_type: 'adjustment',
-            reason: 'Stock quantity updated from variant edit',
-            user_id: user_id!, // Non-null assertion safe because we checked above
-            create_movement: true,
-            validate_availability: false,
-          },
-          prisma,
+    if (stockDifference !== 0) {
+      const defaultLocation =
+        await this.inventoryLocationsService.getDefaultLocation(
+          existingVariant.products.store_id,
         );
-      }
-    }
 
-    return variant;
-  }
-
-  async removeVariant(variantId: number) {
-    const existingVariant = await this.prisma.product_variants.findUnique({
-      where: { id: variantId },
-    });
-
-    if (!existingVariant) {
-      throw new NotFoundException('Variante no encontrada');
-    }
-
-    return await this.prisma.$transaction(async (prisma) => {
-      // Verificar que no haya stock en ninguna ubicación
-      const stockLevels = await prisma.stock_levels.findMany({
-        where: {
+      await this.stockLevelManager.updateStock(
+        {
           product_id: existingVariant.product_id,
-          product_variant_id: variantId,
+          variant_id: variantId,
+          location_id: defaultLocation.id,
+          quantity_change: stockDifference,
+          movement_type: 'adjustment',
+          reason: 'Stock quantity updated from variant edit',
+          user_id: user_id!, // Non-null assertion safe because we checked above
+          create_movement: true,
+          validate_availability: false,
         },
-      });
-
-      const hasStock = stockLevels.some(
-        (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
+        prisma,
       );
-
-      if (hasStock) {
-        throw new BadRequestException(
-          'Cannot delete variant with existing stock',
-        );
-      }
-
-      // Eliminación lógica: archivar variante (si tuviera estado)
-      // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
-      return await prisma.product_variants.delete({
-        where: { id: variantId },
-      });
-    });
+    }
   }
+
+  return variant;
+}
+  async removeVariant(variantId: number) {
+  const existingVariant = await this.prisma.product_variants.findUnique({
+    where: { id: variantId },
+  });
+
+  if (!existingVariant) {
+    throw new NotFoundException('Variante no encontrada');
+  }
+
+  return await this.prisma.$transaction(async (prisma) => {
+    // Verificar que no haya stock en ninguna ubicación
+    const stockLevels = await prisma.stock_levels.findMany({
+      where: {
+        product_id: existingVariant.product_id,
+        product_variant_id: variantId,
+      },
+    });
+
+    const hasStock = stockLevels.some(
+      (sl) => sl.quantity_on_hand > 0 || sl.quantity_reserved > 0,
+    );
+
+    if (hasStock) {
+      throw new BadRequestException(
+        'Cannot delete variant with existing stock',
+      );
+    }
+
+    // Eliminación lógica: archivar variante (si tuviera estado)
+    // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
+    return await prisma.product_variants.delete({
+      where: { id: variantId },
+    });
+  });
+}
 }

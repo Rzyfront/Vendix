@@ -330,7 +330,7 @@ export class PosCartComponent implements OnInit, OnDestroy {
       currency: 'ARS',
     }).format(amount);
   }
-  
+
   getItemTaxRate(item: CartItem): number {
     const rate = item.product.tax_assignments?.reduce((rateSum, assignment) => {
       const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum, tr) => sum + parseFloat(tr.rate || '0'), 0) || 0;

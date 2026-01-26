@@ -341,6 +341,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
     if (!this.orderData) return;
 
     this.printing = true;
+    // Basic browser print for now, ideally this would use a thermal printer service
+    window.print();
 
     // Create TicketData from orderData
     const ticketData: any = {

@@ -35,7 +35,7 @@ export class ProductsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   async create(createProductDto: CreateProductDto) {
     try {
@@ -56,6 +56,12 @@ export class ProductsService {
         throw new ForbiddenException(
           'User context required for stock operations',
         );
+      }
+
+      // Verify user context for audit
+      const user_id = context?.user_id;
+      if (!user_id) {
+        throw new ForbiddenException('User context required for stock operations');
       }
 
       // Generar slug si no se proporciona
@@ -101,11 +107,12 @@ export class ProductsService {
         if (!brand) {
           throw new BadRequestException(
             `Brand with ID ${createProductDto.brand_id} not found or inactive. ` +
-              `Please check available brands in the system.`,
+            `Please check available brands in the system.`,
           );
         }
       } else {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
+
       }
 
       const {
@@ -168,11 +175,11 @@ export class ProductsService {
                 ...(current_context?.is_super_admin
                   ? {}
                   : {
-                      OR: [
-                        { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
-                        { store_id: null }, // Categorías globales
-                      ],
-                    }),
+                    OR: [
+                      { store_id: store_id }, // Categorías específicas - El interceptor garantiza que este store_id es del usuario
+                      { store_id: null }, // Categorías globales
+                    ],
+                  }),
               },
             });
 
@@ -432,12 +439,12 @@ export class ProductsService {
       }),
       ...(search &&
         !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { description: { contains: search, mode: 'insensitive' } },
+          { sku: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
       ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -793,6 +800,7 @@ export class ProductsService {
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
 
+<<<<<<< HEAD
       if (
         !user_id &&
         (updateProductDto.stock_quantity !== undefined ||
@@ -802,6 +810,10 @@ export class ProductsService {
         throw new ForbiddenException(
           'User context required for stock operations',
         );
+=======
+      if (!user_id && (updateProductDto.stock_quantity !== undefined || (updateProductDto.stock_by_location && updateProductDto.stock_by_location.length > 0))) {
+        throw new ForbiddenException('User context required for stock operations');
+>>>>>>> 4bd1fdd (V 0.0.2)
       }
 
       const {
@@ -989,7 +1001,11 @@ export class ProductsService {
                   location_id: defaultLocation.id,
                   quantity_change: stockDifference,
                   movement_type: 'adjustment',
+<<<<<<< HEAD
                   reason: 'Stock quantity updated from product edit (legacy)',
+=======
+                  reason: `Stock adjusted from product edit${stockLocation.notes ? ': ' + stockLocation.notes : ''}`,
+>>>>>>> 4bd1fdd (V 0.0.2)
                   user_id: user_id!, // Non-null assertion safe because we checked above
                   create_movement: true,
                   validate_availability: false,
@@ -999,10 +1015,37 @@ export class ProductsService {
             }
           }
 
+<<<<<<< HEAD
           return product;
         },
         { timeout: 30000 },
       );
+=======
+          if (stockDifference !== 0) {
+            const defaultLocation =
+              await this.inventoryLocationsService.getDefaultLocation(
+                product.store_id,
+              );
+
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: id,
+                location_id: defaultLocation.id,
+                quantity_change: stockDifference,
+                movement_type: 'adjustment',
+                reason: 'Stock quantity updated from product edit (legacy)',
+                user_id: user_id!, // Non-null assertion safe because we checked above
+                create_movement: true,
+                validate_availability: false,
+              },
+              prisma,
+            );
+          }
+        }
+
+        return product;
+      });
+>>>>>>> 4bd1fdd (V 0.0.2)
 
       return await this.findOne(result.id);
     } catch (error) {
@@ -1133,6 +1176,10 @@ export class ProductsService {
   }
 
   // Gestión de variantes
+<<<<<<< HEAD
+=======
+
+>>>>>>> 4bd1fdd (V 0.0.2)
 
   // Gestión de imágenes
   async addImage(productId: number, imageDto: ProductImageDto) {
@@ -1272,6 +1319,7 @@ export class ProductsService {
     productId: number,
     createVariantDto: CreateProductVariantDto,
   ) {
+<<<<<<< HEAD
     return this.productVariantService.createVariant(
       productId,
       createVariantDto,
@@ -1330,5 +1378,8 @@ export class ProductsService {
         }
       }
     }
+=======
+    return this.productVariantService.createVariant(productId, createVariantDto);
+>>>>>>> 4bd1fdd (V 0.0.2)
   }
 }

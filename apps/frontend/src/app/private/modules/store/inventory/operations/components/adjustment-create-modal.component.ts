@@ -128,6 +128,7 @@ import { CreateAdjustmentDto, AdjustmentType, InventoryLocation } from '../../in
             placeholder="Describir el motivo del ajuste..."
             [control]="form.get('description')"
           ></app-textarea>
+
         </div>
       </form>
 
