@@ -16,8 +16,10 @@ import {
   TableComponent,
   TableColumn,
   TableAction,
-  ModalComponent,
   IconComponent,
+  StatsComponent,
+  InputsearchComponent,
+  ConfirmationModalComponent,
 } from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreDomainsService } from './store-domains.service';
@@ -28,6 +30,7 @@ import {
   StoreDomainQueryDto,
 } from './domain.interface';
 import { environment } from '../../../../../../environments/environment';
+import { DomainFormModalComponent } from './components/domain-form-modal.component';
 
 @Component({
   selector: 'app-store-domains',
@@ -37,74 +40,141 @@ import { environment } from '../../../../../../environments/environment';
     FormsModule,
     ButtonComponent,
     TableComponent,
-    ModalComponent,
     IconComponent,
+    StatsComponent,
+    InputsearchComponent,
+    DomainFormModalComponent,
+    ConfirmationModalComponent,
   ],
   template: `
-    <div class="p-6">
-      <!-- Header -->
-      <div class="flex justify-between items-center mb-6">
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">Dominios</h1>
-          <p class="text-sm text-gray-500 mt-1">
-            Administra los dominios de tu tienda
-          </p>
+    <div class="w-full">
+      <!-- 4 Stats Cards Grid -->
+      <div
+        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8"
+      >
+        <app-stats
+          title="Total"
+          [value]="stats.total"
+          iconName="globe"
+        ></app-stats>
+        <app-stats
+          title="Activos"
+          [value]="stats.active"
+          iconName="check-circle"
+          iconBgColor="bg-green-50"
+          iconColor="text-green-600"
+        ></app-stats>
+        <app-stats
+          title="Pendientes"
+          [value]="stats.pending"
+          iconName="clock"
+          iconBgColor="bg-yellow-50"
+          iconColor="text-yellow-600"
+        ></app-stats>
+        <app-stats
+          title="Principal"
+          [value]="stats.primary"
+          iconName="star"
+          iconBgColor="bg-blue-50"
+          iconColor="text-blue-600"
+        ></app-stats>
+      </div>
+
+      <!-- List Component Container -->
+      <div
+        class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
+      >
+        <!-- Header -->
+        <div class="p-2 md:px-6 md:py-4 border-b border-border">
+          <div
+            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+          >
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-semibold text-text-primary">
+                Dominios ({{ domains.length }})
+              </h2>
+              <p class="text-sm text-text-muted mt-0.5">
+                Administra los dominios y subdominios de tu tienda
+              </p>
+            </div>
+
+            <div
+              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            >
+              <!-- Search -->
+              <app-inputsearch
+                class="w-full sm:w-64"
+                placeholder="Buscar dominios..."
+                (search)="onSearch($event)"
+              ></app-inputsearch>
+
+              <!-- Actions -->
+              <div class="flex gap-2">
+                <app-button variant="outline" (clicked)="loadDomains()">
+                  <app-icon name="refresh" [size]="16"></app-icon>
+                </app-button>
+                <app-button variant="primary" (clicked)="openCreateModal()">
+                  <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
+                  Nuevo
+                </app-button>
+              </div>
+            </div>
+          </div>
         </div>
-        <app-button variant="primary" size="md" (clicked)="openCreateModal()">
-          <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
-          Nuevo Dominio
-        </app-button>
-      </div>
 
-      <!-- Loading State -->
-      <div *ngIf="is_loading" class="flex justify-center items-center py-12">
-        <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"
-        ></div>
-      </div>
+        <!-- Table -->
+        <div class="p-2 md:p-4">
+          <!-- Loading State -->
+          <div
+            *ngIf="is_loading"
+            class="flex justify-center items-center py-12"
+          >
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
 
-      <!-- Empty State -->
-      <div
-        *ngIf="!is_loading && domains.length === 0"
-        class="text-center py-12 bg-white rounded-lg border border-gray-200"
-      >
-        <app-icon
-          name="globe"
-          [size]="48"
-          class="mx-auto text-gray-400 mb-4"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">Sin dominios</h3>
-        <p class="text-gray-500 mb-6">
-          Aún no tienes dominios configurados para tu tienda.
-        </p>
-        <app-button variant="primary" (clicked)="openCreateModal()">
-          <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
-          Crear primer dominio
-        </app-button>
-      </div>
+          <!-- Empty State -->
+          <div
+            *ngIf="!is_loading && domains.length === 0"
+            class="text-center py-12"
+          >
+            <app-icon
+              name="globe"
+              [size]="48"
+              class="mx-auto text-text-muted mb-4 opacity-20"
+            ></app-icon>
+            <h3 class="text-lg font-medium text-text-primary mb-2">
+              Sin dominios
+            </h3>
+            <p class="text-text-muted mb-6">
+              Aún no tienes dominios configurados para tu tienda.
+            </p>
+            <app-button variant="primary" (clicked)="openCreateModal()">
+              <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
+              Crear primer dominio
+            </app-button>
+          </div>
 
-      <!-- Domains Table -->
-      <div
-        *ngIf="!is_loading && domains.length > 0"
-        class="bg-white rounded-lg border border-gray-200"
-      >
-        <app-table
-          [columns]="table_columns"
-          [data]="domains"
-          [actions]="table_actions"
-          [loading]="is_loading"
-        >
-        </app-table>
+          <app-table
+            *ngIf="!is_loading && domains.length > 0"
+            [columns]="table_columns"
+            [data]="domains"
+            [actions]="table_actions"
+            [loading]="is_loading"
+          >
+          </app-table>
+        </div>
       </div>
 
       <!-- Templates -->
       <ng-template #hostnameTemplate let-item>
         <div class="flex items-center space-x-2">
-          <span class="text-gray-900">{{ item.hostname }}</span>
+          <span class="text-text-primary font-medium">{{ item.hostname }}</span>
           <a
             [href]="'https://' + item.hostname"
             target="_blank"
-            class="text-gray-400 hover:text-blue-500 transition-colors"
+            class="text-text-muted hover:text-primary transition-colors"
             title="Abrir en nueva pestaña"
           >
             <app-icon name="external-link" [size]="14"></app-icon>
@@ -112,112 +182,28 @@ import { environment } from '../../../../../../environments/environment';
         </div>
       </ng-template>
 
-      <!-- Create/Edit Modal -->
-      <app-modal
-        [isOpen]="is_modal_open"
-        [title]="is_editing ? 'Editar Dominio' : 'Nuevo Dominio'"
-        size="md"
-        (closed)="closeModal()"
-      >
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">
-              Hostname <span class="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              [(ngModel)]="form_data.hostname"
-              [disabled]="is_editing"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="{{ 'mi-tienda.' + environment.vendixDomain }}"
-            />
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">
-              Tipo de Dominio
-            </label>
-            <select
-              [(ngModel)]="form_data.domain_type"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="store">Tienda</option>
-              <option value="ecommerce">E-commerce</option>
-              <option value="organization">Organización</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">
-              Propiedad
-            </label>
-            <select
-              [(ngModel)]="form_data.ownership"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="vendix_subdomain">Subdominio Vendix</option>
-              <option value="custom_domain">Dominio Personalizado</option>
-              <option value="custom_subdomain">Subdominio Personalizado</option>
-            </select>
-          </div>
-
-          <div class="flex items-center">
-            <input
-              type="checkbox"
-              id="is_primary"
-              [(ngModel)]="form_data.is_primary"
-              class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-            />
-            <label for="is_primary" class="ml-2 block text-sm text-gray-900">
-              Establecer como dominio principal
-            </label>
-          </div>
-        </div>
-
-        <!-- Modal Footer -->
-        <div modal-footer class="flex justify-end space-x-3 mt-6 pt-4 border-t">
-          <app-button variant="outline" (clicked)="closeModal()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            [loading]="is_saving"
-            (clicked)="saveModal()"
-          >
-            {{ is_editing ? 'Actualizar' : 'Crear' }}
-          </app-button>
-        </div>
-      </app-modal>
+      <!-- New Form Modal -->
+      <app-domain-form-modal
+        [(isOpen)]="is_modal_open"
+        [domain]="editing_domain"
+        [isSaving]="is_saving"
+        (save)="onSaveDomain($event)"
+      ></app-domain-form-modal>
 
       <!-- Delete Confirmation Modal -->
-      <app-modal
-        [isOpen]="is_delete_modal_open"
+      <app-confirmation-modal
+        [(isOpen)]="is_delete_modal_open"
         title="Eliminar Dominio"
-        size="sm"
-        (closed)="closeDeleteModal()"
-      >
-        <p class="text-gray-600">
-          ¿Estás seguro de que deseas eliminar el dominio
-          <strong>{{ domain_to_delete?.hostname }}</strong
-          >?
-        </p>
-        <p class="text-red-500 text-sm mt-2">
-          Esta acción no se puede deshacer.
-        </p>
-
-        <div modal-footer class="flex justify-end space-x-3 mt-6 pt-4 border-t">
-          <app-button variant="outline" (clicked)="closeDeleteModal()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="danger"
-            [loading]="is_deleting"
-            (clicked)="confirmDelete()"
-          >
-            Eliminar
-          </app-button>
-        </div>
-      </app-modal>
+        [message]="
+          '¿Estás seguro de que deseas eliminar el dominio ' +
+          domain_to_delete?.hostname +
+          '?'
+        "
+        confirmText="Eliminar"
+        confirmVariant="danger"
+        (confirm)="confirmDelete()"
+        (cancel)="closeDeleteModal()"
+      ></app-confirmation-modal>
     </div>
   `,
   styles: [
@@ -248,12 +234,11 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   domain_to_delete: StoreDomain | null = null;
   editing_domain: StoreDomain | null = null;
 
-  form_data: CreateStoreDomainDto = {
-    hostname: '',
-    domain_type: 'store',
-    ownership: 'vendix_subdomain',
-    is_primary: false,
-    config: {},
+  stats = {
+    total: 0,
+    active: 0,
+    pending: 0,
+    primary: 'Ninguno',
   };
 
   table_columns: TableColumn[] = [
@@ -316,7 +301,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
   constructor(
     private domains_service: StoreDomainsService,
     private toast_service: ToastService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     this.loadDomains();
@@ -343,14 +328,15 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  loadDomains(): void {
+  loadDomains(query?: StoreDomainQueryDto): void {
     this.domains_service
-      .getDomains({ page: 1, limit: 50 })
+      .getDomains(query || { page: 1, limit: 50 })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
           if (response.success) {
             this.domains = response.data;
+            this.calculateStats();
           }
         },
         error: (error) => {
@@ -359,29 +345,33 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       });
   }
 
-  openCreateModal(): void {
-    this.is_editing = false;
-    this.editing_domain = null;
-    this.form_data = {
-      hostname: '',
-      domain_type: 'store',
-      ownership: 'vendix_subdomain',
-      is_primary: false,
-      config: {},
+  calculateStats(): void {
+    const total = this.domains.length;
+    const active = this.domains.filter((d) => d.status === 'active').length;
+    const pending = this.domains.filter(
+      (d) => d.status === 'pending_dns' || d.status === 'pending_ssl',
+    ).length;
+    const primaryDomain = this.domains.find((d) => d.is_primary);
+
+    this.stats = {
+      total,
+      active,
+      pending,
+      primary: primaryDomain ? primaryDomain.hostname : 'Ninguno',
     };
+  }
+
+  onSearch(term: string): void {
+    this.loadDomains({ search: term });
+  }
+
+  openCreateModal(): void {
+    this.editing_domain = null;
     this.is_modal_open = true;
   }
 
   openEditModal(domain: StoreDomain): void {
-    this.is_editing = true;
     this.editing_domain = domain;
-    this.form_data = {
-      hostname: domain.hostname,
-      domain_type: domain.domain_type,
-      ownership: domain.ownership,
-      is_primary: domain.is_primary,
-      config: domain.config || {},
-    };
     this.is_modal_open = true;
   }
 
@@ -390,24 +380,12 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.editing_domain = null;
   }
 
-  saveModal(): void {
-    if (!this.form_data.hostname) {
-      this.toast_service.warning('El hostname es requerido');
-      return;
-    }
-
+  onSaveDomain(dto: CreateStoreDomainDto): void {
     this.is_saving = true;
 
-    if (this.is_editing && this.editing_domain) {
-      const update_dto: UpdateStoreDomainDto = {
-        domain_type: this.form_data.domain_type,
-        ownership: this.form_data.ownership,
-        is_primary: this.form_data.is_primary,
-        config: this.form_data.config,
-      };
-
+    if (this.editing_domain) {
       this.domains_service
-        .updateDomain(this.editing_domain.id, update_dto)
+        .updateDomain(this.editing_domain.id, dto as UpdateStoreDomainDto)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
@@ -416,14 +394,14 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
             this.loadDomains();
             this.is_saving = false;
           },
-          error: (error) => {
+          error: () => {
             this.toast_service.error('Error al actualizar el dominio');
             this.is_saving = false;
           },
         });
     } else {
       this.domains_service
-        .createDomain(this.form_data)
+        .createDomain(dto)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
@@ -432,7 +410,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
             this.loadDomains();
             this.is_saving = false;
           },
-          error: (error) => {
+          error: () => {
             this.toast_service.error('Error al crear el dominio');
             this.is_saving = false;
           },

@@ -384,56 +384,29 @@
             </div>
           </div>
 
-          <!-- SECCIÓN 5: CARRITO -->
+          <!-- SECCIÓN 5: CARRITO Y CHECKOUT -->
           <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
             <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
                 <app-icon name="shopping-cart" size="18" class="text-primary-600"></app-icon>
               </div>
-              Configuración del Carrito
+              Configuración del Carrito y Checkout
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- Inputs primero -->
+              <!-- Inputs del Carrito -->
               <app-input label="Expiración (horas)" type="number" [formControl]="cartExpirationHoursControl"
                 placeholder="24"></app-input>
 
               <app-input label="Cantidad máxima por item" type="number" [formControl]="maxQuantityPerItemControl"
                 placeholder="10"></app-input>
 
-              <!-- Toggles después -->
-              <app-setting-toggle [formControl]="allowGuestCheckoutControl" label="Checkout de invitados"
-                description="Comprar sin registro"></app-setting-toggle>
+              <!-- Toggles del Checkout -->
+              <app-setting-toggle [formControl]="whatsappCheckoutControl" label="Whatsapp Checkout"
+                description="Permitir terminar compra en whatsapp"></app-setting-toggle>
 
-              <app-setting-toggle [formControl]="saveForLaterControl" label="Guardar para después"
-                description="Guardar items del carrito"></app-setting-toggle>
-            </div>
-          </div>
-
-          <!-- SECCIÓN 6: CHECKOUT -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="credit-card" size="18" class="text-primary-600"></app-icon>
-              </div>
-              Configuración del Checkout
-            </h2>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-setting-toggle [formControl]="requireRegistrationControl" label="Requerir registro"
                 description="Obligar a crear cuenta"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="guestEmailRequiredControl" label="Email de invitado requerido"
-                description="Pedir email en checkout"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="createAccountAfterOrderControl" label="Crear cuenta después del pedido"
-                description="Opción post-compra"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="termsRequiredControl" label="Términos requeridos"
-                description="Aceptar términos"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="guestNewsletterOptInControl" label="Opt-in newsletter"
-                description="Suscripción al newsletter"></app-setting-toggle>
             </div>
           </div>
         </div>

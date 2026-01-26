@@ -266,6 +266,7 @@ export class CartService {
                         slug: item.product.slug,
                         sku: item.product.sku,
                         image_url: signed_image_url || null,
+                        weight: Number(item.product.weight || 0),
                     },
                     variant: item.product_variant
                         ? {
@@ -281,7 +282,7 @@ export class CartService {
         return {
             id: cart.id,
             currency: cart.currency,
-            subtotal: cart.subtotal,
+            subtotal: Number(cart.subtotal),
             item_count: items.reduce((sum: number, i: any) => sum + i.quantity, 0),
             items,
         };

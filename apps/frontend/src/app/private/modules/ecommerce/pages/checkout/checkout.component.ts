@@ -216,6 +216,93 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.selected_payment_method_id = method_id;
   }
 
+  // Shipping
+  shipping_options: any[] = [];
+  selected_shipping_method_id: number | null = null;
+  selected_shipping_option_id: number | null = null;
+  shipping_cost = 0;
+
+  // ... (existing methods)
+
+  // Modified logic: call this when address is finalized (e.g. Next from Address step)
+  loadShippingOptions(): void {
+    if (this.use_new_address && this.address_form.valid) {
+      // Convert form to address object
+      const address = this.mapFormToCalcAddress(this.address_form.value);
+      this.fetchShipping(address);
+    } else if (this.selected_address_id) {
+      const address = this.addresses.find(a => a.id === this.selected_address_id);
+      if (address) {
+        this.fetchShipping(this.mapAddressToCalc(address));
+      }
+    }
+  }
+
+  private mapFormToCalcAddress(formValue: any): any {
+    const address = { ...formValue };
+
+    // For Colombia, convert department and city IDs to names
+    if (address.country_code === 'CO') {
+      // Convert department ID to name
+      if (address.state_province) {
+        const depId = Number(address.state_province);
+        const department = this.departments.find(d => d.id === depId);
+        if (department) {
+          address.state_province = department.name;
+        }
+      }
+
+      // Convert city ID to name
+      if (address.city) {
+        const cityId = Number(address.city);
+        const city = this.cities.find(c => c.id === cityId);
+        if (city) {
+          address.city = city.name;
+        }
+      }
+    }
+    return address;
+  }
+
+  fetchShipping(address: any) {
+    this.is_loading = true;
+    this.cart_service.getShippingEstimates(address).subscribe({
+      next: (options) => {
+        this.shipping_options = options;
+        if (options.length > 0) {
+          // Default select first or cheapest?
+          // Select first
+          this.selectShippingMethod(options[0], options[0].cost);
+        } else {
+          this.selected_shipping_method_id = null;
+          this.selected_shipping_option_id = null;
+          this.shipping_cost = 0;
+        }
+        this.is_loading = false;
+      },
+      error: () => {
+        this.is_loading = false;
+        // Handle error
+      }
+    });
+  }
+
+  selectShippingMethod(option: any, cost: number) {
+    this.selected_shipping_option_id = option.id;
+    this.selected_shipping_method_id = option.method_id;
+    this.shipping_cost = cost;
+  }
+
+  mapAddressToCalc(addr: Address) {
+    return {
+      country_code: addr.country_code,
+      state_province: addr.state_province,
+      city: addr.city,
+      postal_code: addr.postal_code || undefined
+    };
+  }
+
+  // Override nextStep to load shipping if moving from Step 1
   nextStep(): void {
     if (this.step === 1) {
       if (this.use_new_address && !this.address_form.valid) {
@@ -226,10 +313,20 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.error_message = 'Por favor selecciona una dirección';
         return;
       }
+
+      // Load shipping before moving? Or move to step 2 (Payment/Shipping)
+      // If we move to step 2, we load shipping there.
+      this.loadShippingOptions();
     }
 
     if (this.step === 2 && !this.selected_payment_method_id) {
       this.error_message = 'Por favor selecciona un método de pago';
+      return;
+    }
+
+    // Check shipping selection
+    if (this.step === 2 && this.shipping_options.length > 0 && !this.selected_shipping_method_id) {
+      this.error_message = 'Por favor selecciona un método de envío';
       return;
     }
 
@@ -253,6 +350,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id,
       notes: this.notes || undefined,
+      shipping_method_id: this.selected_shipping_method_id || undefined,
+      shipping_rate_id: this.selected_shipping_option_id || undefined
     };
 
     if (this.use_new_address) {
@@ -299,6 +398,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       },
     });
   }
+
+  // ... (previous helper methods)
+
 
   goToCart(): void {
     this.router.navigate(['/cart']);

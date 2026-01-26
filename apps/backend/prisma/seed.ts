@@ -3,6 +3,7 @@ import { seedDefaultTemplates } from './seeds/default-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
 import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
+import { seedLegalDocuments } from './seeds/legal-documents.seed';
 import { seedUsers } from './seeds/users.seed';
 import { seedProductsAndCategories } from './seeds/products-categories.seed';
 import { seedDomains } from './seeds/domains.seed';
@@ -19,12 +20,13 @@ import { seedTestOrders } from './seeds/test-orders.seed';
  * 2. permissionsAndRoles - No dependencies
  * 3. systemPaymentMethods - No dependencies
  * 4. organizationsAndStores - No dependencies
- * 5. users - Depends on: organizationsAndStores, permissionsAndRoles
- * 6. productsAndCategories - Depends on: organizationsAndStores
- * 7. domains - Depends on: organizationsAndStores
- * 8. addresses - Depends on: organizationsAndStores, users
- * 9. inventoryLocations - Depends on: organizationsAndStores
- * 10. testOrders - Depends on: organizationsAndStores, users, productsAndCategories
+ * 5. legalDocuments - No dependencies (system documents)
+ * 6. users - Depends on: organizationsAndStores, permissionsAndRoles
+ * 7. productsAndCategories - Depends on: organizationsAndStores
+ * 8. domains - Depends on: organizationsAndStores
+ * 9. addresses - Depends on: organizationsAndStores, users
+ * 10. inventoryLocations - Depends on: organizationsAndStores
+ * 11. testOrders - Depends on: organizationsAndStores, users, productsAndCategories
  *
  * Cada módulo debe:
  * - Exportar una función async que acepta PrismaClient opcional
@@ -51,6 +53,11 @@ const seedModules = [
     name: 'Organizations & Stores',
     fn: seedOrganizationsAndStores,
     description: 'Organizations and store instances',
+  },
+  {
+    name: 'Legal Documents',
+    fn: seedLegalDocuments,
+    description: 'System legal documents and terms',
   },
   {
     name: 'Users',
@@ -169,6 +176,7 @@ export * from './seeds/default-templates.seed';
 export * from './seeds/permissions-roles.seed';
 export * from './seeds/system-payment-methods.seed';
 export * from './seeds/organizations-stores.seed';
+export * from './seeds/legal-documents.seed';
 export * from './seeds/users.seed';
 export * from './seeds/products-categories.seed';
 export * from './seeds/domains.seed';

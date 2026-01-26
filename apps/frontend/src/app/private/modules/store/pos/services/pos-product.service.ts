@@ -64,8 +64,11 @@ export interface Brand {
 
 export interface SearchFilters {
   query?: string;
+  search?: string; // Add search as alias for query
   category?: string;
   brand?: string;
+  category_id?: string | number; // Add category_id for compatibility
+  brand_id?: string | number; // Add brand_id for compatibility
   minPrice?: number;
   maxPrice?: number;
   inStock?: boolean;
@@ -130,16 +133,21 @@ export class PosProductService {
       state: 'active',
     };
 
-    if (filters.query) {
-      query.search = filters.query;
+    if (filters.query || filters.search) {
+      query.search = filters.query || filters.search;
     }
 
-    if (filters.category && filters.category !== 'all') {
-      query.category_id = filters.category;
+    if (
+      (filters.category && filters.category !== 'all') ||
+      filters.category_id
+    ) {
+      query.category_id =
+        filters.category !== 'all' ? filters.category : filters.category_id;
     }
 
-    if (filters.brand && filters.brand !== 'all') {
-      query.brand_id = filters.brand;
+    if ((filters.brand && filters.brand !== 'all') || filters.brand_id) {
+      query.brand_id =
+        filters.brand !== 'all' ? filters.brand : filters.brand_id;
     }
 
     if (filters.inStock) {
@@ -191,6 +199,13 @@ export class PosProductService {
           currentPage = response.meta?.page || response.page || page;
           limit = response.meta?.limit || response.limit || pageSize;
           totalPages = Math.ceil(total / limit);
+        } else if (Array.isArray(response)) {
+          // Alternative format: [...]
+          products = response;
+          total = products.length;
+          currentPage = page;
+          limit = pageSize;
+          totalPages = Math.ceil(total / limit);
         }
 
         const transformedProducts = this.transformProducts(products);
@@ -204,23 +219,21 @@ export class PosProductService {
         };
       }),
       catchError((error: any) => {
-        // Mensajes de error más descriptivos
-        let errorMessage = 'An error occurred';
+        console.error('PosProductService Error:', error);
+        let errorMessage = 'Error al cargar productos';
 
         if (error.error?.message) {
           errorMessage = error.error.message;
         } else if (error.status === 400) {
-          errorMessage = 'Invalid data provided';
+          errorMessage = 'Datos inválidos proporcionados';
         } else if (error.status === 401) {
-          errorMessage = 'Unauthorized access';
+          errorMessage = 'Acceso no autorizado';
         } else if (error.status === 403) {
-          errorMessage = 'Insufficient permissions';
+          errorMessage = 'Permisos insuficientes';
         } else if (error.status === 404) {
-          errorMessage = 'Product not found';
-        } else if (error.status === 409) {
-          errorMessage = 'Product with this SKU or slug already exists';
+          errorMessage = 'Producto no encontrado';
         } else if (error.status >= 500) {
-          errorMessage = 'Server error. Please try again later';
+          errorMessage = 'Error del servidor. Por favor intenta más tarde';
         }
 
         return throwError(() => errorMessage);
@@ -386,6 +399,43 @@ export class PosProductService {
     return this.http.get<Brand[]>(`${environment.apiUrl}/store/brands`).pipe(
       catchError((error: any) => {
         return of([]);
+      }),
+    );
+  }
+
+  // Simplified method similar to ProductsService.getProducts()
+  getProducts(query: any = {}): Observable<SearchResult> {
+    const default_query = {
+      page: 1,
+      limit: 50,
+      state: 'active',
+      ...query,
+    };
+
+    const params = this.buildParams(default_query);
+
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        const products = response.data || [];
+        const total = response.meta?.total || response.total || products.length;
+        const page = response.meta?.page || response.page || default_query.page;
+        const limit =
+          response.meta?.limit || response.limit || default_query.limit;
+        const totalPages = Math.ceil(total / limit);
+
+        const transformedProducts = this.transformProducts(products);
+
+        return {
+          products: transformedProducts,
+          total,
+          page,
+          pageSize: limit,
+          totalPages,
+        };
+      }),
+      catchError((error: any) => {
+        console.error('PosProductService.getProducts Error:', error);
+        return throwError(() => 'Error al cargar productos');
       }),
     );
   }

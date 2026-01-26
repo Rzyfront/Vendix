@@ -3,13 +3,15 @@ import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prism
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
 import { CheckoutDto } from './dto/checkout.dto';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 @Injectable()
 export class CheckoutService {
   constructor(
     private readonly prisma: EcommercePrismaService,
+    private readonly store_prisma: StorePrismaService,
     private readonly cart_service: CartService,
-  ) {}
+  ) { }
 
   async getPaymentMethods() {
     // store_id se aplica automáticamente por EcommercePrismaService
@@ -112,11 +114,59 @@ export class CheckoutService {
       }
     }
 
+    // Validar y calcular shipping
+    const store_id = RequestContextService.getStoreId();
+    let shipping_cost = 0;
+    let shipping_method_id: number | null = null;
+
+    if (dto.shipping_rate_id) {
+      const rate = await this.store_prisma.shipping_rates.findFirst({
+        where: {
+          id: dto.shipping_rate_id,
+          is_active: true
+        },
+        include: {
+          shipping_method: true,
+          shipping_zone: true
+        }
+      });
+
+      if (!rate) {
+        throw new BadRequestException('Método de envío inválido o no disponible');
+      }
+
+      // Verificar que la zona pertenece a la tienda
+      if (rate.shipping_zone.store_id !== store_id) {
+        throw new BadRequestException('Método de envío no disponible para esta tienda');
+      }
+
+      shipping_cost = Number(rate.base_cost);
+      shipping_method_id = rate.shipping_method_id;
+    } else if (dto.shipping_method_id) {
+      // Fallback: si solo viene shipping_method_id sin rate
+      const method = await this.store_prisma.shipping_methods.findFirst({
+        where: {
+          id: dto.shipping_method_id,
+          store_id: store_id,
+          is_active: true
+        }
+      });
+
+      if (!method) {
+        throw new BadRequestException('Método de envío inválido');
+      }
+
+      shipping_method_id = method.id;
+      // En este caso, shipping_cost queda en 0 o se debería recalcular
+    }
+
     const order_number = await this.generateOrderNumber();
 
     const subtotal = cart.cart_items.reduce((sum, item) => {
       return sum + Number(item.unit_price) * item.quantity;
     }, 0);
+
+    const grand_total = subtotal + shipping_cost;
 
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
@@ -124,7 +174,9 @@ export class CheckoutService {
         order_number,
         currency: cart.currency,
         subtotal_amount: subtotal,
-        grand_total: subtotal,
+        shipping_cost: shipping_cost,
+        shipping_method_id: shipping_method_id,
+        grand_total: grand_total,
         shipping_address_id,
         shipping_address_snapshot,
         state: 'pending_payment',
@@ -154,7 +206,7 @@ export class CheckoutService {
     await this.prisma.payments.create({
       data: {
         order_id: order.id,
-        amount: subtotal,
+        amount: grand_total,
         currency: cart.currency,
         state: 'pending',
         store_payment_method_id: dto.payment_method_id,
@@ -213,9 +265,11 @@ export class CheckoutService {
     const end_of_day = new Date(date);
     end_of_day.setHours(23, 59, 59, 999);
 
-    // store_id se aplica automáticamente
-    const count = await this.prisma.orders.count({
+    // IMPORTANTE: Usar store_prisma para contar TODAS las órdenes de la tienda, 
+    // no solo las del usuario actual (que es lo que haría this.prisma.orders.count)
+    const count = await this.store_prisma.orders.count({
       where: {
+        store_id,
         created_at: {
           gte: start_of_day,
           lte: end_of_day,

@@ -8,10 +8,15 @@ import {
     Param,
     ParseIntPipe,
     UseGuards,
+    Query,
 } from '@nestjs/common';
 import { ShippingService } from './shipping.service';
+import { ShippingCalculatorService } from './shipping-calculator.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { CurrentStore } from '../../../common/decorators/current-store.decorator';
+import { Public } from '../../../common/decorators/public.decorator';
+import { RequestContextService } from '../../../common/context/request-context.service';
+import { CalculateShippingDto } from './dto/shipping_calc.dto';
 import {
     CreateShippingMethodDto,
     UpdateShippingMethodDto,
@@ -24,7 +29,10 @@ import {
 @Controller('shipping')
 @UseGuards(JwtAuthGuard)
 export class ShippingController {
-    constructor(private readonly shippingService: ShippingService) { }
+    constructor(
+        private readonly shippingService: ShippingService,
+        private readonly calculatorService: ShippingCalculatorService
+    ) { }
 
     // --- METHODS ---
     @Get('methods')
@@ -120,5 +128,17 @@ export class ShippingController {
         @Param('id', ParseIntPipe) id: number
     ) {
         return this.shippingService.deleteRate(storeId, id);
+    }
+
+    // --- CALCULATOR ---
+    @Public()
+    @Post('calculate')
+    async calculateAndGetRates(
+        @Body() dto: CalculateShippingDto,
+        @Query('store_id', ParseIntPipe) storeId: number
+    ) {
+        // Manually set store context for public endpoint
+        RequestContextService.setDomainContext(storeId);
+        return this.calculatorService.calculateRates(storeId, dto.items, dto.address);
     }
 }

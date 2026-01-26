@@ -130,19 +130,14 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
       // Carrito
       cart: this.fb.group({
-        allow_guest_checkout: [true],
         cart_expiration_hours: [24],
         max_quantity_per_item: [10],
-        save_for_later: [false],
       }),
 
       // Checkout
       checkout: this.fb.group({
+        whatsapp_checkout: [false],
         require_registration: [false],
-        guest_email_required: [true],
-        create_account_after_order: [true],
-        terms_required: [false],
-        guest_newsletter_opt_in: [false],
       }),
     });
   }
@@ -180,15 +175,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   // Cart
   get cartExpirationHoursControl() { return this.cartGroup.get('cart_expiration_hours') as any; }
   get maxQuantityPerItemControl() { return this.cartGroup.get('max_quantity_per_item') as any; }
-  get allowGuestCheckoutControl() { return this.cartGroup.get('allow_guest_checkout') as any; }
-  get saveForLaterControl() { return this.cartGroup.get('save_for_later') as any; }
 
   // Checkout
+  get whatsappCheckoutControl() { return this.checkoutGroup.get('whatsapp_checkout') as any; }
   get requireRegistrationControl() { return this.checkoutGroup.get('require_registration') as any; }
-  get guestEmailRequiredControl() { return this.checkoutGroup.get('guest_email_required') as any; }
-  get createAccountAfterOrderControl() { return this.checkoutGroup.get('create_account_after_order') as any; }
-  get termsRequiredControl() { return this.checkoutGroup.get('terms_required') as any; }
-  get guestNewsletterOptInControl() { return this.checkoutGroup.get('guest_newsletter_opt_in') as any; }
 
   /**
    * Load settings and determine mode (setup vs edit)

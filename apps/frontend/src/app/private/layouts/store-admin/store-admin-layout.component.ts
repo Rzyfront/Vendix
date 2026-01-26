@@ -214,6 +214,11 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       ],
     },
     {
+      label: 'Gastos',
+      icon: 'wallet',
+      route: '/admin/expenses',
+    },
+    {
       label: 'Configuración',
       icon: 'settings',
       children: [
@@ -281,11 +286,9 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
       });
 
     // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((items) => {
-        this.filteredMenuItems = items;
-      });
+    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
+      this.filteredMenuItems = items;
+    });
 
     // Subscribe to domain hostname for sidebar vlink
     this.storeDomainHostname$

@@ -35,10 +35,9 @@ export class DomainsService implements OnModuleInit {
   constructor(
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
-  ) { }
+  ) {}
 
-  async onModuleInit() {
-  }
+  async onModuleInit() {}
 
   // ==================== VALIDATION METHODS ====================
 
@@ -262,8 +261,10 @@ export class DomainsService implements OnModuleInit {
 
     // Handle primary domain logic
     const is_primary = data.is_primary || false;
-    if (is_primary) {
-      await this.clearExistingPrimary(
+    const status = is_primary ? ('active' as any) : ('pending_dns' as any);
+
+    if (is_primary || status === 'active') {
+      await this.ensureSingleActiveType(
         data.organization_id,
         data.store_id,
         inferred_type,
@@ -281,7 +282,7 @@ export class DomainsService implements OnModuleInit {
         store_id: data.store_id,
         config: data.config as any,
         domain_type: inferred_type as any,
-        status: 'pending_dns' as any,
+        status,
         ssl_status: 'pending' as any,
         is_primary,
         ownership: inferred_ownership as any,
@@ -291,6 +292,28 @@ export class DomainsService implements OnModuleInit {
     });
 
     return domainSetting;
+  }
+
+  private async ensureSingleActiveType(
+    organizationId: number | undefined,
+    storeId: number | undefined,
+    domainType: string,
+    excludeId?: number,
+  ) {
+    await this.prisma.domain_settings.updateMany({
+      where: {
+        organization_id: organizationId || null,
+        store_id: storeId || null,
+        domain_type: domainType as any,
+        status: 'active',
+        id: excludeId ? { not: excludeId } : undefined,
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
+    });
   }
 
   async getAllDomainSettings(filters: any) {
@@ -370,13 +393,20 @@ export class DomainsService implements OnModuleInit {
   ) {
     const existing_record = await this.getDomainSettingByHostname(hostname);
 
-    // Handle primary domain changes
-    if (updateData.is_primary && !existing_record.is_primary) {
-      await this.clearExistingPrimary(
+    const domain_type = updateData.domain_type || existing_record.domain_type;
+
+    // Handle activation logic
+    if (updateData.status === 'active' || updateData.is_primary === true) {
+      await this.ensureSingleActiveType(
         existing_record.organization_id,
         existing_record.store_id,
-        existing_record.domain_type,
+        domain_type,
+        existing_record.id,
       );
+
+      if (updateData.is_primary === true) {
+        updateData.status = 'active';
+      }
     }
 
     const updates: any = {

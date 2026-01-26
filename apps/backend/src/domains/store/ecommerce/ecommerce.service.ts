@@ -22,7 +22,7 @@ export class EcommerceService {
     private readonly configStandardizer: DomainConfigStandardizerHelper,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
-  ) { }
+  ) {}
 
   /**
    * Get e-commerce settings from domain_settings
@@ -200,12 +200,16 @@ export class EcommerceService {
 
       // ===== NUEVO: Generación de Favicon =====
       // Detectar si el logo cambió y generar favicon
-      if (mergedRaw.inicio?.logo_url && mergedRaw.inicio.logo_url !== existingConfig.inicio?.logo_url) {
+      if (
+        mergedRaw.inicio?.logo_url &&
+        mergedRaw.inicio.logo_url !== existingConfig.inicio?.logo_url
+      ) {
         const newLogoUrl = mergedRaw.inicio.logo_url;
 
         // Generar favicon asíncronamente (fire-and-forget)
-        this.generateFaviconForEcommerce(newLogoUrl)
-          .catch(error => this.logger.warn(`Favicon generation failed: ${error.message}`));
+        this.generateFaviconForEcommerce(newLogoUrl).catch((error) =>
+          this.logger.warn(`Favicon generation failed: ${error.message}`),
+        );
       }
       // ========================================
 
@@ -284,20 +288,41 @@ export class EcommerceService {
         appType,
       );
 
+      // Ensure only one active ecommerce domain
+      await this.prisma.domain_settings.updateMany({
+        where: {
+          store_id: store_id,
+          domain_type: 'ecommerce',
+          status: 'active',
+        },
+        data: {
+          status: 'disabled',
+          is_primary: false,
+          updated_at: new Date(),
+        },
+      });
+
       const newDomain = await this.prisma.domain_settings.create({
         data: {
           hostname,
+          store_id: store_id,
           domain_type: 'ecommerce',
           is_primary: false,
           ownership: 'vendix_subdomain',
+          status: 'active',
           config: standardizedConfig,
         },
       });
 
       // ===== NUEVO: Generación de Favicon en Setup =====
       if (standardizedConfig.inicio?.logo_url) {
-        this.generateFaviconForEcommerce(standardizedConfig.inicio.logo_url)
-          .catch(error => this.logger.warn(`Favicon generation failed during setup: ${error.message}`));
+        this.generateFaviconForEcommerce(
+          standardizedConfig.inicio.logo_url,
+        ).catch((error) =>
+          this.logger.warn(
+            `Favicon generation failed during setup: ${error.message}`,
+          ),
+        );
       }
 
       return newDomain;
@@ -434,7 +459,9 @@ export class EcommerceService {
       // 2. Descargar logo desde S3
       let logoBuffer: Buffer;
       if (logoUrl.startsWith('http')) {
-        this.logger.warn('External logo URL detected, skipping favicon generation');
+        this.logger.warn(
+          'External logo URL detected, skipping favicon generation',
+        );
         return;
       }
 
@@ -468,8 +495,8 @@ export class EcommerceService {
       const domain = await this.prisma.domain_settings.findFirst({
         where: {
           domain_type: 'ecommerce',
-          store_id: store_id
-        }
+          store_id: store_id,
+        },
       });
 
       if (domain) {
@@ -478,19 +505,21 @@ export class EcommerceService {
           ...existingConfig,
           branding: {
             ...existingConfig.branding,
-            favicon_url: result.faviconKey // Standardized to favicon_url
-          }
+            favicon_url: result.faviconKey, // Standardized to favicon_url
+          },
         };
 
         await this.prisma.domain_settings.update({
           where: { id: domain.id },
-          data: { config: updatedConfig }
+          data: { config: updatedConfig },
         });
 
         this.logger.log(`Favicon updated for domain ${domain.hostname}`);
       }
     } catch (error) {
-      this.logger.error(`Error in generateFaviconForEcommerce: ${error.message}`);
+      this.logger.error(
+        `Error in generateFaviconForEcommerce: ${error.message}`,
+      );
       // No re-lanzamos el error para no afectar el flujo principal si esto falla
     }
   }

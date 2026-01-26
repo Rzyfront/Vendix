@@ -218,6 +218,13 @@ const APP_MODULES = {
       ],
     },
 
+    // Gastos
+    {
+      key: 'expenses',
+      label: 'Gastos',
+      description: 'Sección de gastos',
+    },
+
     // Configuración (padre con hijos)
     {
       key: 'settings',

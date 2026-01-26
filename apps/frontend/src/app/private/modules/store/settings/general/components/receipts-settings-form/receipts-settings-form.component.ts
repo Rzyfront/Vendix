@@ -36,6 +36,12 @@ export class ReceiptsSettingsForm implements OnInit, OnChanges {
     receipt_footer: new FormControl('¡Gracias por su compra!'),
   });
 
+  // Getters for form controls
+  get printReceiptControl() { return this.form.get('print_receipt') as FormControl; }
+  get emailReceiptControl() { return this.form.get('email_receipt') as FormControl; }
+  get receiptHeaderControl() { return this.form.get('receipt_header') as FormControl; }
+  get receiptFooterControl() { return this.form.get('receipt_footer') as FormControl; }
+
   ngOnInit() {
     this.patchForm();
   }

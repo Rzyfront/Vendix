@@ -1,8 +1,10 @@
 <div class="app-settings-form">
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-    <!-- Visual Branding -->
+  <div class="space-y-6">
+    <!-- Color Scheme Section - Full Width Horizontal -->
     <div class="space-y-4">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Esquema de Colores</h4>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+        Esquema de Colores
+      </h4>
 
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <!-- Primary Color -->
@@ -13,7 +15,8 @@
               (change)="onColorPickerChange('primary_color', $event)"
               class="w-8 h-8 rounded-lg cursor-pointer border-0 p-0 bg-transparent" />
             <input type="text" [formControl]="primaryColorControl"
-              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0" placeholder="#000000">
+              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0"
+              placeholder="#000000" />
           </div>
         </div>
 
@@ -25,7 +28,8 @@
               (change)="onColorPickerChange('secondary_color', $event)"
               class="w-8 h-8 rounded-lg cursor-pointer border-0 p-0 bg-transparent" />
             <input type="text" [formControl]="secondaryColorControl"
-              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0" placeholder="#000000">
+              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0"
+              placeholder="#000000" />
           </div>
         </div>
 
@@ -37,34 +41,18 @@
               (change)="onColorPickerChange('accent_color', $event)"
               class="w-8 h-8 rounded-lg cursor-pointer border-0 p-0 bg-transparent" />
             <input type="text" [formControl]="accentColorControl"
-              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0" placeholder="#000000">
+              class="w-full bg-transparent border-0 p-0 text-xs font-mono uppercase focus:ring-0"
+              placeholder="#000000" />
           </div>
-        </div>
-      </div>
-
-      <!-- Theme Selection -->
-      <div class="mt-4">
-        <label class="block text-[10px] font-bold text-gray-400 uppercase mb-2">Tema del Sistema</label>
-        <div class="flex flex-wrap gap-2">
-          @for (option of themeOptions; track option.value) {
-          <button type="button" (click)="themeControl.setValue(option.value); onFieldChange()"
-            [class.bg-blue-500]="themeControl.value === option.value"
-            [class.text-white]="themeControl.value === option.value"
-            [class.bg-gray-50]="themeControl.value !== option.value"
-            [class.text-gray-600]="themeControl.value !== option.value"
-            class="px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent transition-all hover:border-blue-200">
-            {{ option.label }}
-          </button>
-          }
         </div>
       </div>
     </div>
 
-    <!-- Assets Section -->
+    <!-- Brand Assets Section - 50/50 Horizontal Layout -->
     <div class="space-y-4">
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Recursos de Marca</h4>
 
-      <div class="grid grid-cols-1 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- Logo URL -->
         <div class="flex items-center gap-4 p-3 bg-gray-50 border border-gray-100 rounded-2xl">
           <div
@@ -98,5 +86,6 @@
         </div>
       </div>
     </div>
+
   </div>
 </div>

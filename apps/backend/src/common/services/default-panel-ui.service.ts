@@ -49,6 +49,7 @@ export class DefaultPanelUIService {
       billing: true,
       ecommerce: true,
       orders: true,
+      expenses: true,
     },
 
     /**
@@ -90,6 +91,14 @@ export class DefaultPanelUIService {
       analytics_traffic: true,
       analytics_performance: true,
 
+      // Gastos
+      expenses: true,
+      expenses_overview: true,
+      expenses_all: true,
+      expenses_create: true,
+      expenses_categories: true,
+      expenses_reports: true,
+
       // Configuración
       settings: true,
       settings_general: true,
@@ -130,7 +139,7 @@ export class DefaultPanelUIService {
     VENDIX_LANDING: 'user_settings_landing',
   };
 
-  constructor(private readonly prisma: GlobalPrismaService) { }
+  constructor(private readonly prisma: GlobalPrismaService) {}
 
   /**
    * Obtiene la configuración de panel UI para un tipo de aplicación

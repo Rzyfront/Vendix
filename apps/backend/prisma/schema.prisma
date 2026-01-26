@@ -34,6 +34,8 @@ model users {
   email_verification_tokens email_verification_tokens[]
   inventory_adjustments1    inventory_adjustments[]     @relation("inventory_adjustments_approved_by")
   inventory_adjustments     inventory_adjustments[]     @relation("inventory_adjustments_created_by")
+  expenses1                 expenses[]                  @relation("expenses_approved_by")
+  expenses                  expenses[]                  @relation("expenses_created_by")
   inventory_movements       inventory_movements[]
   inventory_transactions    inventory_transactions[]
   password_reset_tokens     password_reset_tokens[]
@@ -56,10 +58,17 @@ model users {
   orders                    orders[]
   main_store                stores?                     @relation("main_store", fields: [main_store_id], references: [id], onUpdate: NoAction)
   organizations             organizations               @relation(fields: [organization_id], references: [id], onUpdate: NoAction)
+  document_acceptances      document_acceptances[]
+
+  // Campos de tracking de términos
+  terms_accepted_version  String?                     @db.VarChar(20)
+  terms_accepted_at       DateTime?                   @db.Timestamp(6)
+  requires_terms_update   Boolean                    @default(false)
 
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
+  @@index([requires_terms_update])
 }
 
 model user_settings {
@@ -257,6 +266,8 @@ model organizations {
   suppliers                     suppliers[]
   users                         users[]
   roles                         roles[]
+  expenses                      expenses[]
+  expense_categories            expense_categories[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -332,6 +343,7 @@ model stores {
   main_store_users      users[]                 @relation("main_store")
   shipping_zones        shipping_zones[]
   shipping_methods      shipping_methods[]
+  expenses              expenses[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -359,7 +371,7 @@ model domain_settings {
   last_error         String?               @db.VarChar(255)
   last_verified_at   DateTime?             @db.Timestamp(6)
   ssl_status         ssl_status_enum       @default(none)
-  status             domain_status_enum    @default(active)
+  status             domain_status_enum    @default(pending_dns)
   verification_token String?               @unique @db.VarChar(100)
   ownership          domain_ownership_enum @default(vendix_subdomain)
   organization       organizations?        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
@@ -960,6 +972,52 @@ model supplier_products {
   @@unique([supplier_id, product_id])
 }
 
+model expenses {
+  id                    Int                    @id @default(autoincrement())
+  store_id              Int
+  organization_id       Int
+  category_id           Int?
+  amount                Decimal                @db.Decimal(12, 2)
+  currency              String?                @db.VarChar(10)
+  description           String?                @db.VarChar(500)
+  expense_date          DateTime               @db.Timestamp(6)
+  state                 expenses_state_enum    @default(pending)
+  receipt_url           String?                @db.Text
+  notes                 String?                @db.Text
+  created_by_user_id    Int?
+  approved_by_user_id   Int?
+  approved_at           DateTime?              @db.Timestamp(6)
+  created_at             DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at             DateTime?              @default(now()) @db.Timestamp(6)
+  
+  stores                 stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organizations          organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expense_categories    expense_categories?    @relation(fields: [category_id], references: [id])
+  created_by_user        users?                 @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
+  approved_by_user      users?                 @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
+  
+  @@index([store_id, expense_date])
+  @@index([organization_id, expense_date])
+  @@index([state])
+  @@index([category_id])
+}
+
+model expense_categories {
+  id               Int         @id @default(autoincrement())
+  organization_id  Int
+  name             String      @db.VarChar(100)
+  description      String?     @db.VarChar(255)
+  color            String?     @db.VarChar(7) // Hex color code
+  is_active        Boolean     @default(true)
+  created_at       DateTime?   @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?   @default(now()) @db.Timestamp(6)
+  
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expenses         expenses[]
+  
+  @@unique([organization_id, name])
+}
+
 model inventory_adjustments {
   id                                                     Int                  @id @default(autoincrement())
   organization_id                                        Int
@@ -1188,7 +1246,7 @@ model return_order_items {
 
 model shipping_zones {
   id             Int              @id @default(autoincrement())
-  store_id       Int
+  store_id       Int?
   name           String           @db.VarChar(100)
   display_name   String?          @db.VarChar(100)
   countries      String[] // Array of ISO country codes
@@ -1196,17 +1254,19 @@ model shipping_zones {
   cities         String[] // Specific cities if needed
   zip_codes      String[] // Zip code patterns
   is_active      Boolean          @default(true)
+  is_system      Boolean          @default(false)
   created_at     DateTime?        @default(now()) @db.Timestamp(6)
   updated_at     DateTime?        @default(now()) @db.Timestamp(6)
-  store          stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store          stores?          @relation(fields: [store_id], references: [id], onDelete: Cascade)
   shipping_rates shipping_rates[]
 
   @@index([store_id])
+  @@index([is_system])
 }
 
 model shipping_methods {
   id             Int                       @id @default(autoincrement())
-  store_id       Int
+  store_id       Int?
   name           String                    @db.VarChar(100)
   code           String?                   @db.VarChar(50)
   description    String?
@@ -1217,14 +1277,16 @@ model shipping_methods {
   min_days       Int?
   max_days       Int?
   is_active      Boolean                   @default(true)
+  is_system      Boolean                   @default(false)
   display_order  Int                       @default(0)
   created_at     DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at     DateTime?                 @default(now()) @db.Timestamp(6)
-  store          stores                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store          stores?                   @relation(fields: [store_id], references: [id], onDelete: Cascade)
   shipping_rates shipping_rates[]
   orders         orders[]
 
   @@index([store_id])
+  @@index([is_system])
 }
 
 model shipping_rates {
@@ -1669,4 +1731,80 @@ enum shipping_rate_type_enum {
   price_based
   carrier_calculated
   free
+}
+
+enum expenses_state_enum {
+  pending
+  approved
+  rejected
+  paid
+  cancelled
+}
+
+// ===== LEGAL DOCUMENTS DOMAIN =====
+
+model legal_documents {
+  id                   Int                        @id @default(autoincrement())
+  document_type        legal_document_type_enum
+  title                String                     @db.VarChar(255)
+  version              String                     @unique @db.VarChar(20)
+  content              String                     @db.Text
+  description          String?                    @db.Text
+  effective_date       DateTime                   @db.Timestamp(6)
+  expiry_date          DateTime?                  @db.Timestamp(6)
+  is_active            Boolean                    @default(true)
+  is_system            Boolean                    @default(false)
+  document_url         String?                    @db.Text
+
+  // Scope del documento
+  organization_id      Int?
+  store_id             Int?
+
+  // Auditoría de cambios
+  created_by_user_id   Int?
+  created_at           DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                  @default(now()) @db.Timestamp(6)
+
+  // Relaciones
+  document_acceptances document_acceptances[]
+
+  @@index([document_type, is_active])
+  @@index([effective_date])
+  @@index([organization_id])
+  @@index([store_id])
+  @@index([document_type, organization_id, is_active])
+  @@index([document_type, store_id, is_active])
+}
+
+model document_acceptances {
+  id                   Int                        @id @default(autoincrement())
+  user_id              Int
+  document_id          Int
+  acceptance_version   String                     @db.VarChar(20)
+  accepted_at          DateTime                   @default(now()) @db.Timestamp(6)
+
+  // Datos legales de la aceptación
+  accepted_by_user_id  Int?
+  ip_address           String?                    @db.VarChar(45)
+  user_agent           String?
+  metadata             Json?
+
+  // Relaciones
+  document             legal_documents           @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  user                 users                     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, document_id, acceptance_version])
+  @@index([user_id])
+  @@index([document_id, accepted_at])
+  @@index([accepted_at])
+}
+
+enum legal_document_type_enum {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  REFUND_POLICY
+  SHIPPING_POLICY
+  RETURN_POLICY
+  COOKIES_POLICY
+  MERCHANT_AGREEMENT
 }

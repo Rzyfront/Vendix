@@ -1,54 +1,68 @@
 <div class="notifications-settings-form">
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+  <div class="space-y-8">
     <!-- Channels -->
     <div class="space-y-4">
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Canales de Comunicación</h4>
 
-      <app-setting-toggle [formControl]="emailEnabledControl" label="Notificaciones por Email"
-        description="Alertas vía correo electrónico" (changed)="onFieldChange()"></app-setting-toggle>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <app-setting-toggle [formControl]="emailEnabledControl" label="Notificaciones por Email"
+          description="Alertas vía correo electrónico" (changed)="onFieldChange()"></app-setting-toggle>
 
-      <app-setting-toggle [formControl]="smsEnabledControl" label="Notificaciones por SMS"
-        description="Alertas vía mensaje de texto" (changed)="onFieldChange()"></app-setting-toggle>
+        <app-setting-toggle [formControl]="smsEnabledControl" label="Notificaciones por SMS"
+          description="Alertas vía mensaje de texto" (changed)="onFieldChange()"></app-setting-toggle>
+      </div>
     </div>
 
     <!-- Alert Subscriptions -->
     <div class="space-y-4">
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Alertas de Eventos</h4>
 
-      <!-- Stock Alerts -->
-      <div class="space-y-3">
-        <app-setting-toggle [formControl]="lowStockAlertsControl" label="Stock Bajo"
-          description="Notificar cuando el producto se agote" (changed)="onFieldChange()"></app-setting-toggle>
-        @if (lowStockAlertsControl.value) {
-        <div class="grid grid-cols-1 gap-3 animate-fadeIn px-1">
-          @if (emailEnabledControl.value) {
-          <app-input [formControl]="lowStockAlertsEmailControl" type="email" label="Email de Alerta"
-            placeholder="alerts@store.com" (inputChange)="onFieldChange()" size="sm"></app-input>
-          }
-          @if (smsEnabledControl.value) {
-          <app-input [formControl]="lowStockAlertsPhoneControl" type="tel" label="Teléfono de Alerta"
-            placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
-          }
-        </div>
-        }
-      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <!-- Stock Alerts -->
+        <div class="space-y-3">
+          <app-setting-toggle [formControl]="lowStockAlertsControl" label="Stock Bajo"
+            description="Notificar cuando el producto se agote" (changed)="onFieldChange()"></app-setting-toggle>
 
-      <!-- Order Alerts -->
-      <div class="space-y-3">
-        <app-setting-toggle [formControl]="newOrderAlertsControl" label="Nuevos Pedidos"
-          description="Notificar al recibir una nueva venta" (changed)="onFieldChange()"></app-setting-toggle>
-        @if (newOrderAlertsControl.value) {
-        <div class="grid grid-cols-1 gap-3 animate-fadeIn px-1">
-          @if (emailEnabledControl.value) {
-          <app-input [formControl]="newOrderAlertsEmailControl" type="email" label="Email de Notificación"
-            placeholder="orders@store.com" (inputChange)="onFieldChange()" size="sm"></app-input>
-          }
-          @if (smsEnabledControl.value) {
-          <app-input [formControl]="newOrderAlertsPhoneControl" type="tel" label="Teléfono de Notificación"
-            placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
+          @if (lowStockAlertsControl.value) {
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 animate-slideDown pl-2 border-l-2 border-orange-100 ml-2">
+            @if (emailEnabledControl.value) {
+            <div class="col-span-2 sm:col-span-1">
+              <app-input [formControl]="lowStockAlertsEmailControl" type="email" label="Email de Alerta"
+                placeholder="alerts@store.com" (inputChange)="onFieldChange()" size="sm"></app-input>
+            </div>
+            }
+            @if (smsEnabledControl.value) {
+            <div class="col-span-2 sm:col-span-1">
+              <app-input [formControl]="lowStockAlertsPhoneControl" type="tel" label="Teléfono de Alerta"
+                placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
+            </div>
+            }
+          </div>
           }
         </div>
-        }
+
+        <!-- Order Alerts -->
+        <div class="space-y-3">
+          <app-setting-toggle [formControl]="newOrderAlertsControl" label="Nuevos Pedidos"
+            description="Notificar al recibir una nueva venta" (changed)="onFieldChange()"></app-setting-toggle>
+
+          @if (newOrderAlertsControl.value) {
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 animate-slideDown pl-2 border-l-2 border-blue-100 ml-2">
+            @if (emailEnabledControl.value) {
+            <div class="col-span-2 sm:col-span-1">
+              <app-input [formControl]="newOrderAlertsEmailControl" type="email" label="Email de Notificación"
+                placeholder="orders@store.com" (inputChange)="onFieldChange()" size="sm"></app-input>
+            </div>
+            }
+            @if (smsEnabledControl.value) {
+            <div class="col-span-2 sm:col-span-1">
+              <app-input [formControl]="newOrderAlertsPhoneControl" type="tel" label="Teléfono de Notificación"
+                placeholder="+57..." (inputChange)="onFieldChange()" size="sm"></app-input>
+            </div>
+            }
+          </div>
+          }
+        </div>
       </div>
     </div>
   </div>

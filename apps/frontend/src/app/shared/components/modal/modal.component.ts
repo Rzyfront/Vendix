@@ -5,6 +5,8 @@ import {
   EventEmitter,
   OnInit,
   OnDestroy,
+  ViewChild,
+  ElementRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -20,24 +22,24 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
     <div
       *ngIf="isOpen"
       class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+      (click)="onWrapperClick($event)"
     >
       <!-- Backdrop overlay con blur y oscuridad mejorada -->
       <div
         class="absolute inset-0 backdrop-blur-md bg-black/40 transition-all duration-300 ease-out"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
-        (click)="onBackdropClick()"
       ></div>
 
       <!-- Modal container con animación mejorada -->
       <div
+        #modalContainer
         class="relative transform transition-all duration-300 ease-out"
         [class]="modalClasses"
         [class.scale-100]="isOpen"
         [class.scale-95]="!isOpen"
         [class.opacity-100]="isOpen"
         [class.opacity-0]="!isOpen"
-        (click)="$event.stopPropagation()"
       >
         <!-- Modal content con diseño mejorado -->
         <div
@@ -117,6 +119,8 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
 export class ModalComponent implements OnInit, OnDestroy {
   private _isOpen = false;
   private _isInternalChange = false;
+
+  @ViewChild('modalContainer') modalContainer!: ElementRef;
 
   @Input()
   set isOpen(value: boolean) {
@@ -225,9 +229,15 @@ export class ModalComponent implements OnInit, OnDestroy {
     this.cancel.emit();
   }
 
-  onBackdropClick(): void {
-    if (this.closeOnBackdrop) {
-      this.close();
+  onWrapperClick(event: MouseEvent): void {
+    if (!this.closeOnBackdrop) return;
+
+    // Check if the click target is the modal container or one of its descendants
+    if (this.modalContainer && this.modalContainer.nativeElement.contains(event.target)) {
+      return; // Click inside modal, ignore
     }
+
+    // Click outside modal (wrapper or backdrop overlay)
+    this.close();
   }
 }

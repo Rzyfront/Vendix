@@ -66,19 +66,11 @@
 
                 @if (use_new_address) {
                 <form [formGroup]="address_form" class="address-form">
-                    <app-input
-                        label="Dirección"
-                        formControlName="address_line1"
-                        placeholder="Calle y número"
-                        [error]="getFieldError('address_line1')"
-                        [required]="true"
-                    ></app-input>
+                    <app-input label="Dirección" formControlName="address_line1" placeholder="Calle y número"
+                        [error]="getFieldError('address_line1')" [required]="true"></app-input>
 
-                    <app-input
-                        label="Apartamento, oficina, etc. (opcional)"
-                        formControlName="address_line2"
-                        placeholder="Apto, piso, oficina"
-                    ></app-input>
+                    <app-input label="Apartamento, oficina, etc. (opcional)" formControlName="address_line2"
+                        placeholder="Apto, piso, oficina"></app-input>
 
                     <div class="form-row">
                         <div class="form-group">
@@ -86,29 +78,30 @@
                             <select formControlName="country_code" class="checkout-select">
                                 <option value="">Selecciona un país</option>
                                 @for (country of countries; track country.code) {
-                                    <option [value]="country.code">{{ country.name }}</option>
+                                <option [value]="country.code">{{ country.name }}</option>
                                 }
                             </select>
                             @if (getFieldError('country_code')) {
-                                <p class="error-text">{{ getFieldError('country_code') }}</p>
+                            <p class="error-text">{{ getFieldError('country_code') }}</p>
                             }
                         </div>
                         <div class="form-group">
                             <label>Departamento/Estado</label>
                             @if (loading_departments) {
-                                <select class="checkout-select" disabled>
-                                    <option>Cargando...</option>
-                                </select>
+                            <select class="checkout-select" disabled>
+                                <option>Cargando...</option>
+                            </select>
                             } @else {
-                                <select formControlName="state_province" class="checkout-select" [disabled]="departments.length === 0">
-                                    <option value="">Selecciona un departamento</option>
-                                    @for (dep of departments; track dep.id) {
-                                        <option [value]="dep.id">{{ dep.name }}</option>
-                                    }
-                                </select>
+                            <select formControlName="state_province" class="checkout-select"
+                                [disabled]="departments.length === 0">
+                                <option value="">Selecciona un departamento</option>
+                                @for (dep of departments; track dep.id) {
+                                <option [value]="dep.id">{{ dep.name }}</option>
+                                }
+                            </select>
                             }
                             @if (getFieldError('state_province')) {
-                                <p class="error-text">{{ getFieldError('state_province') }}</p>
+                            <p class="error-text">{{ getFieldError('state_province') }}</p>
                             }
                         </div>
                     </div>
@@ -117,38 +110,30 @@
                         <div class="form-group">
                             <label>Ciudad</label>
                             @if (loading_cities) {
-                                <select class="checkout-select" disabled>
-                                    <option>Cargando...</option>
-                                </select>
+                            <select class="checkout-select" disabled>
+                                <option>Cargando...</option>
+                            </select>
                             } @else {
-                                <select formControlName="city" class="checkout-select" [disabled]="cities.length === 0">
-                                    <option value="">Selecciona una ciudad</option>
-                                    @for (city of cities; track city.id) {
-                                        <option [value]="city.id">{{ city.name }}</option>
-                                    }
-                                </select>
+                            <select formControlName="city" class="checkout-select" [disabled]="cities.length === 0">
+                                <option value="">Selecciona una ciudad</option>
+                                @for (city of cities; track city.id) {
+                                <option [value]="city.id">{{ city.name }}</option>
+                                }
+                            </select>
                             }
                             @if (getFieldError('city')) {
-                                <p class="error-text">{{ getFieldError('city') }}</p>
+                            <p class="error-text">{{ getFieldError('city') }}</p>
                             }
                         </div>
                         <div class="form-group">
-                            <app-input
-                                label="Código Postal"
-                                formControlName="postal_code"
-                                placeholder="Código postal"
-                            ></app-input>
+                            <app-input label="Código Postal" formControlName="postal_code"
+                                placeholder="Código postal"></app-input>
                         </div>
                     </div>
 
-                    <app-input
-                        label="Teléfono"
-                        formControlName="phone_number"
-                        type="tel"
-                        placeholder="Teléfono de contacto"
-                        [error]="getFieldError('phone_number')"
-                        [required]="true"
-                    ></app-input>
+                    <app-input label="Teléfono" formControlName="phone_number" type="tel"
+                        placeholder="Teléfono de contacto" [error]="getFieldError('phone_number')"
+                        [required]="true"></app-input>
                 </form>
                 }
             </div>
@@ -157,6 +142,32 @@
             <!-- Step 2: Payment -->
             @if (step === 2) {
             <div class="checkout-section">
+                <h2>Opciones de Envío</h2>
+                @if (shipping_options.length > 0) {
+                <div class="payment-list" style="margin-bottom: 2rem;">
+                    @for (option of shipping_options; track option.id) {
+                    <div class="payment-card" [class.selected]="selected_shipping_option_id === option.id"
+                        (click)="selectShippingMethod(option, option.cost)">
+                        <div class="payment-radio">
+                            <span class="radio" [class.checked]="selected_shipping_option_id === option.id"></span>
+                        </div>
+                        <div class="payment-info" style="flex: 1;">
+                            <span class="payment-name">{{ option.method_name }}</span>
+                            <span class="payment-type">{{ option.description }}</span>
+                        </div>
+                        <div class="payment-price" style="font-weight: bold;">
+                            {{ option.cost === 0 ? 'Gratis' : (option.cost | currency) }}
+                        </div>
+                    </div>
+                    }
+                </div>
+                } @else {
+                <div class="error-message" style="margin-bottom: 2rem;">
+                    <i class="pi pi-exclamation-triangle"></i>
+                    No hay opciones de envío disponibles para esta ubicación. Por favor revisa tu dirección.
+                </div>
+                }
+
                 <h2>Método de Pago</h2>
 
                 <div class="payment-list">
@@ -292,14 +303,14 @@
                 </div>
                 <div class="summary-row">
                     <span>Envío</span>
-                    <span>Por calcular</span>
+                    <span>{{ shipping_cost === 0 ? 'Gratis' : (shipping_cost | currency) }}</span>
                 </div>
 
                 <hr>
 
                 <div class="summary-row total">
                     <span>Total</span>
-                    <span>{{ cart.subtotal | currency }}</span>
+                    <span>{{ (cart.subtotal + shipping_cost) | currency }}</span>
                 </div>
                 }
             </div>

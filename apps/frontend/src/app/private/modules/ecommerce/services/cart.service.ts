@@ -19,6 +19,7 @@ export interface CartItem {
         slug: string;
         sku: string;
         image_url: string | null;
+        weight?: number;
     };
     variant: {
         name: string;
@@ -364,8 +365,52 @@ export class CartService {
     clearAllCart(): Observable<any> | void {
         if (this.is_authenticated) {
             return this.clearCart();
-        } else {
-            this.clearLocalCart();
         }
+        this.clearLocalCart();
+    }
+
+    // ========== SHIPPING ==========
+    getShippingEstimates(address: {
+        country_code: string;
+        state_province?: string;
+        city?: string;
+        postal_code?: string;
+    }): Observable<any[]> {
+        const cart = this.cart_subject.value;
+        if (!cart || cart.items.length === 0) {
+            return new Observable(observer => {
+                observer.next([]);
+                observer.complete();
+            });
+        }
+
+        const items = cart.items.map((item: CartItem) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            weight: (item.product.weight || 0) * item.quantity,
+            price: item.total_price
+        }));
+
+        const payload = {
+            address: address,
+            items: items
+        };
+
+        const domainConfig = this.domain_service.getCurrentDomainConfig();
+        const storeId = domainConfig?.store_id;
+
+        let params: any = {};
+        if (storeId !== undefined && storeId !== null) {
+            params.store_id = storeId.toString();
+        }
+
+        // Use standard http call. 
+        // Note: The controller is @Public().
+        // If we have an interceptor that adds token, it's fine.
+        // We pass store_id as query param as implemented in controller.
+        return this.http.post<any[]>(`${environment.apiUrl}/shipping/calculate`, payload, {
+            headers: this.getHeaders(), // Keeps store-id in header too, just in case
+            params: params
+        });
     }
 }

@@ -18,6 +18,7 @@ import { SettingsModule } from './settings/settings.module';
 import { CustomersModule } from './customers/customers.module';
 import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
+import { ExpensesModule } from './expenses/expenses.module';
 
 @Module({
   imports: [
@@ -38,8 +39,9 @@ import { ShippingModule } from './shipping/shipping.module';
     CustomersModule,
     StoreDomainsModule,
     ShippingModule,
+    ExpensesModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule { }
+export class StoreDomainModule {}

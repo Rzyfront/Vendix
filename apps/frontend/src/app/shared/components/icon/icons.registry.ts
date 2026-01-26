@@ -109,6 +109,7 @@ import {
   TrendingDown,
   Phone,
   Printer,
+  Wallet,
 } from 'lucide-angular';
 
 /**
@@ -260,6 +261,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'circle-x': CircleX,
   phone: Phone,
   printer: Printer,
+  wallet: Wallet,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

@@ -15,6 +15,7 @@ export interface Product {
   sku: string | null;
   stock_quantity: number | null;
   image_url: string | null;
+  weight?: number | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
 }

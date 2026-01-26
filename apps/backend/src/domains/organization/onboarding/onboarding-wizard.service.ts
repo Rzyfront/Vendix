@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
@@ -27,6 +28,7 @@ interface WizardValidation {
 export class OnboardingWizardService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
@@ -369,6 +371,20 @@ export class OnboardingWizardService {
       existingHostnames,
     );
 
+    // Ensure only one active domain of this type
+    await this.prismaService.domain_settings.updateMany({
+      where: {
+        store_id: storeId,
+        domain_type: 'store',
+        status: 'active',
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
+    });
+
     // Create domain settings for the store
     await this.prismaService.domain_settings.create({
       data: {
@@ -568,6 +584,20 @@ export class OnboardingWizardService {
         theme: 'light',
       });
 
+      // Ensure only one active domain of this type
+      await this.prismaService.domain_settings.updateMany({
+        where: {
+          organization_id: user.organization_id,
+          domain_type: 'organization',
+          status: 'active',
+        },
+        data: {
+          status: 'disabled',
+          is_primary: false,
+          updated_at: new Date(),
+        },
+      });
+
       await this.prismaService.domain_settings.create({
         data: {
           hostname: autoSubdomain,
@@ -637,6 +667,20 @@ export class OnboardingWizardService {
           DomainContext.STORE,
           existingHostnames,
         );
+
+        // Ensure only one active domain of this type
+        await this.prismaService.domain_settings.updateMany({
+          where: {
+            store_id: store.id,
+            domain_type: 'store',
+            status: 'active',
+          },
+          data: {
+            status: 'disabled',
+            is_primary: false,
+            updated_at: new Date(),
+          },
+        });
 
         // Create new store domain with branding config
         storeDomainRecord = await this.prismaService.domain_settings.create({
@@ -771,6 +815,38 @@ export class OnboardingWizardService {
    * Complete wizard and activate all entities
    */
   async completeWizard(userId: number) {
+    // ✅ NUEVO: Verificar términos OBLIGATORIOS antes de completar
+    const termsCheck = await this.globalPrisma.legal_documents.findMany({
+      where: {
+        is_system: true,
+        document_type: {
+          in: ['TERMS_OF_SERVICE', 'PRIVACY_POLICY'],
+        },
+        is_active: true,
+        organization_id: null,
+        store_id: null,
+      },
+    });
+
+    // Verificar aceptaciones para cada documento requerido
+    for (const document of termsCheck) {
+      const acceptance = await this.globalPrisma.document_acceptances.findFirst(
+        {
+          where: {
+            user_id: userId,
+            document_id: document.id,
+            acceptance_version: document.version,
+          },
+        },
+      );
+
+      if (!acceptance) {
+        throw new BadRequestException(
+          `Debe aceptar los ${document.title} (versión ${document.version}) antes de completar la configuración`,
+        );
+      }
+    }
+
     // Validate completion
     const validation = await this.validateWizardCompletion(userId);
     if (!validation.isValid) {
@@ -1087,6 +1163,20 @@ export class OnboardingWizardService {
       DomainContext.ECOMMERCE,
       existingHostnames,
     );
+
+    // Ensure only one active domain of this type
+    await this.prismaService.domain_settings.updateMany({
+      where: {
+        store_id: storeId,
+        domain_type: 'ecommerce',
+        status: 'active',
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
+    });
 
     // Create domain settings for e-commerce
     await this.prismaService.domain_settings.create({

@@ -1,5 +1,8 @@
 import { Routes } from '@angular/router';
+import { provideState } from '@ngrx/store';
+import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
+
 
 export const storeAdminRoutes: Routes = [
   {
@@ -311,6 +314,14 @@ export const storeAdminRoutes: Routes = [
               ).then((m) => m.ShippingModule),
           },
         ],
+      },
+      // Expenses Routes
+      {
+        path: 'expenses',
+        loadChildren: () =>
+          import('../../private/modules/store/expenses/expenses.routes').then(
+            (m) => m.expensesRoutes
+          ),
       },
     ],
   },

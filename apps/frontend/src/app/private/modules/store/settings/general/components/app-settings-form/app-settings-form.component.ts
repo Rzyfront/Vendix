@@ -21,7 +21,12 @@ import { LucideAngularModule } from 'lucide-angular';
 @Component({
   selector: 'app-app-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, LucideAngularModule],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    IconComponent,
+    LucideAngularModule,
+  ],
   templateUrl: './app-settings-form.component.html',
   styleUrls: ['./app-settings-form.component.scss'],
 })
@@ -47,16 +52,9 @@ export class AppSettingsForm implements OnInit, OnChanges {
       Validators.required,
       Validators.pattern(/^#[0-9A-Fa-f]{6}$/),
     ]),
-    theme: new FormControl<'default' | 'aura' | 'monocromo'>('default', [Validators.required]),
     logo_url: new FormControl(null),
     favicon_url: new FormControl(null),
   });
-
-  themeOptions = [
-    { value: 'default', label: 'Default' },
-    { value: 'aura', label: 'Aura' },
-    { value: 'monocromo', label: 'Monocromo' },
-  ];
 
   // Typed getters para FormControls
   get nameControl(): FormControl<string> {
@@ -73,10 +71,6 @@ export class AppSettingsForm implements OnInit, OnChanges {
 
   get accentColorControl(): FormControl<string> {
     return this.form.get('accent_color') as FormControl<string>;
-  }
-
-  get themeControl(): FormControl<string> {
-    return this.form.get('theme') as FormControl<string>;
   }
 
   get logoUrlControl(): FormControl<string | null> {

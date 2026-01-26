@@ -3,6 +3,14 @@ import { IsInt, IsOptional, IsString, IsObject } from 'class-validator';
 export class CheckoutDto {
     @IsOptional()
     @IsInt()
+    shipping_method_id?: number;
+
+    @IsOptional()
+    @IsInt()
+    shipping_rate_id?: number;
+
+    @IsOptional()
+    @IsInt()
     shipping_address_id?: number;
 
     @IsOptional()
