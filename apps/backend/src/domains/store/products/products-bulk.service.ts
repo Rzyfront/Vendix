@@ -46,22 +46,6 @@ export class ProductsBulkService {
     Peso: 'weight',
   };
 
-  // Mapa de encabezados en Español a claves del DTO
-  private readonly HEADER_MAP = {
-    Nombre: 'name',
-    SKU: 'sku',
-    'Precio Base': 'base_price',
-    Costo: 'cost_price',
-    'Cantidad Inicial': 'stock_quantity',
-    Descripción: 'description',
-    Categorías: 'category_ids', // Special handling
-    Marca: 'brand_id', // Special handling
-    'En Oferta': 'is_on_sale',
-    'Precio Oferta': 'sale_price',
-    'Disponible Ecommerce': 'available_for_ecommerce', // Not directly in DTO but used in logic? mapped to something?
-    Peso: 'weight',
-  };
-
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
