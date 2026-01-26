@@ -144,8 +144,8 @@ export class PosTicketService {
       const displayTaxId = ticketData.customer.name ? (ticketData.customer.taxId || '') : '000';
       html += `
         <div style="margin-bottom: 15px;">
-          <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${ticketData.customer.name}</p>
-          ${ticketData.customer.taxId ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Cédula:</strong> ${ticketData.customer.taxId}</p>` : ''}
+          <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${displayName}</p>
+          ${displayTaxId ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Cédula:</strong> ${displayTaxId}</p>` : ''}
         </div>
         <hr style="border: 1px dashed #000; margin: 10px 0;">
       `;

@@ -228,9 +228,8 @@ interface StatItem {
 
       <!-- Delete Store Confirmation Modal -->
       <app-store-delete-confirmation
-        [isOpen]="isDeleteModalOpen"
+        [(isOpen)]="isDeleteModalOpen"
         [store]="selectedStoreForDelete"
-        (openChange)="onDeleteModalChange($event)"
         (confirm)="confirmDeleteStore()"
         (cancel)="onDeleteModalCancel()"
       ></app-store-delete-confirmation>
@@ -751,7 +750,6 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   onDeleteModalCancel(): void {
     this.isDeleteModalOpen = false;
-    this.selectedStoreForDelete = null;
   }
 
   confirmDeleteStore(): void {
