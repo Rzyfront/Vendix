@@ -42,9 +42,9 @@ async function bootstrap() {
     // CloudFront distributions (infrastructure)
     'https://d10fsx06e3z6rc.cloudfront.net',
     'https://d1y0m1duatgngc.cloudfront.net',
-    // Allow any subdomain for multi-tenant
+    // Allow ANY subdomain level for multi-tenant (e.g., store.tenant.vendix.online)
     new RegExp(
-      `^https://([a-zA-Z0-9-]+\\.)?${baseDomain.replace('.', '\\.')}$`,
+      `^https://([a-zA-Z0-9-]+\\.)*${baseDomain.replace('.', '\\.')}$`,
     ),
     // Allow any CloudFront distribution
     /^https:\/\/[a-z0-9]+\.cloudfront\.net$/,
