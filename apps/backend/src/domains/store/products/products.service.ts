@@ -588,6 +588,9 @@ export class ProductsService {
     // Calcular stock totals dinámicamente para cada producto
     const productsWithStock = await Promise.all(
       products.map(async (product) => {
+        const raw_image_url = product.product_images?.[0]?.image_url || null;
+        const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+
         const totalStockAvailable =
           product.stock_levels?.reduce(
             (sum, stock) => sum + stock.quantity_available,

@@ -1742,6 +1742,7 @@ model shipping_zones {
   updated_at       DateTime?          @default(now()) @db.Timestamp(6)
   store            stores             @relation(fields: [store_id], references: [id], onDelete: Cascade)
   shipping_methods shipping_methods[]
+  shipping_rates   shipping_rates[]
 
   @@index([store_id])
 }
@@ -1769,17 +1770,22 @@ model shipping_methods {
 }
 
 model shipping_rates {
-  id                 Int                      @id @default(autoincrement())
-  shipping_method_id Int
-  name               String                   @db.VarChar(100)
-  rate_type          shipping_rate_type_enum  @default(flat)
-  price              Decimal                  @db.Decimal(12, 2)
-  condition_min      Decimal?                 @db.Decimal(12, 2)
-  condition_max      Decimal?                 @db.Decimal(12, 2)
-  is_active          Boolean                  @default(true)
-  created_at         DateTime?                @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?                @default(now()) @db.Timestamp(6)
-  shipping_method    shipping_methods         @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+  id                      Int                      @id @default(autoincrement())
+  shipping_method_id      Int
+  shipping_zone_id        Int
+  name                    String                   @db.VarChar(100)
+  type                    shipping_rate_type_enum  @default(flat)
+  base_cost               Decimal                  @db.Decimal(12, 2)
+  per_unit_cost           Decimal?                 @db.Decimal(12, 2)
+  min_val                 Decimal?                 @db.Decimal(12, 2)
+  max_val                 Decimal?                 @db.Decimal(12, 2)
+  free_shipping_threshold Decimal?                 @db.Decimal(12, 2)
+  is_active               Boolean                  @default(true)
+  created_at              DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime?                @default(now()) @db.Timestamp(6)
+  shipping_method         shipping_methods         @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+  shipping_zone           shipping_zones           @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
 
   @@index([shipping_method_id])
+  @@index([shipping_zone_id])
 }
