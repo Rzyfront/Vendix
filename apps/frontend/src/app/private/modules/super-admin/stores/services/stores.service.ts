@@ -1,6 +1,6 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { BehaviorSubject, Observable, finalize } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 
 import {
@@ -39,8 +39,27 @@ export interface PaginatedResponse<T> {
 })
 export class StoresService {
   private readonly apiUrl = environment.apiUrl;
+  private readonly http = inject(HttpClient);
 
-  constructor(private http: HttpClient) {}
+  // States
+  private isLoading$$ = new BehaviorSubject<boolean>(false);
+  private isCreatingStore$$ = new BehaviorSubject<boolean>(false);
+  private isUpdatingStore$$ = new BehaviorSubject<boolean>(false);
+  private isDeletingStore$$ = new BehaviorSubject<boolean>(false);
+
+  // Observables
+  get isLoading$() {
+    return this.isLoading$$.asObservable();
+  }
+  get isCreatingStore$() {
+    return this.isCreatingStore$$.asObservable();
+  }
+  get isUpdatingStore$() {
+    return this.isUpdatingStore$$.asObservable();
+  }
+  get isDeletingStore$() {
+    return this.isDeletingStore$$.asObservable();
+  }
 
   /**
    * Get all stores with pagination and filtering
@@ -48,6 +67,7 @@ export class StoresService {
   getStores(
     query?: StoreQueryDto,
   ): Observable<PaginatedResponse<StoreListItem[]>> {
+    this.isLoading$$.next(true);
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
@@ -60,14 +80,10 @@ export class StoresService {
       params = params.set('organization_id', query.organization_id.toString());
 
     const url = `${this.apiUrl}/superadmin/stores`;
-    console.log(
-      'Fetching stores from:',
-      url,
-      'with params:',
-      params.toString(),
-    );
 
-    return this.http.get<PaginatedResponse<StoreListItem[]>>(url, { params });
+    return this.http
+      .get<PaginatedResponse<StoreListItem[]>>(url, { params })
+      .pipe(finalize(() => this.isLoading$$.next(false)));
   }
 
   /**
@@ -92,10 +108,10 @@ export class StoresService {
    * Create a new store
    */
   createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
-    return this.http.post<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores`,
-      data,
-    );
+    this.isCreatingStore$$.next(true);
+    return this.http
+      .post<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores`, data)
+      .pipe(finalize(() => this.isCreatingStore$$.next(false)));
   }
 
   /**
@@ -105,19 +121,20 @@ export class StoresService {
     id: number,
     data: UpdateStoreDto,
   ): Observable<ApiResponse<Store>> {
-    return this.http.patch<ApiResponse<Store>>(
-      `${this.apiUrl}/superadmin/stores/${id}`,
-      data,
-    );
+    this.isUpdatingStore$$.next(true);
+    return this.http
+      .patch<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores/${id}`, data)
+      .pipe(finalize(() => this.isUpdatingStore$$.next(false)));
   }
 
   /**
    * Delete a store
    */
   deleteStore(id: number): Observable<ApiResponse<void>> {
-    return this.http.delete<ApiResponse<void>>(
-      `${this.apiUrl}/superadmin/stores/${id}`,
-    );
+    this.isDeletingStore$$.next(true);
+    return this.http
+      .delete<ApiResponse<void>>(`${this.apiUrl}/superadmin/stores/${id}`)
+      .pipe(finalize(() => this.isDeletingStore$$.next(false)));
   }
 
   /**
@@ -218,10 +235,13 @@ export class StoresService {
     storeId: number,
     settingsData: StoreSettingsUpdateDto,
   ): Observable<ApiResponse<Store['settings']>> {
-    return this.http.patch<ApiResponse<Store['settings']>>(
-      `${this.apiUrl}/superadmin/stores/${storeId}/settings`,
-      settingsData,
-    );
+    this.isUpdatingStore$$.next(true);
+    return this.http
+      .patch<ApiResponse<Store['settings']>>(
+        `${this.apiUrl}/superadmin/stores/${storeId}/settings`,
+        settingsData,
+      )
+      .pipe(finalize(() => this.isUpdatingStore$$.next(false)));
   }
 
   /**

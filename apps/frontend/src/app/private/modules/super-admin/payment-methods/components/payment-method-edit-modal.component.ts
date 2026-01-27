@@ -1,12 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
-  OnChanges,
   inject,
+  input,
+  output,
+  effect,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -25,6 +24,7 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
+  SelectorComponent,
 } from '../../../../../shared/components/index';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -37,109 +37,82 @@ import { Subject, takeUntil } from 'rxjs';
     InputComponent,
     ButtonComponent,
     ModalComponent,
+    SelectorComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Método de Pago"
-      [subtitle]="paymentMethod ? 'Modificando ' + paymentMethod.display_name : ''"
-      (closed)="onModalClose()"
+      [subtitle]="paymentMethod() ? 'Modificando ' + paymentMethod()?.display_name : ''"
     >
-      <form [formGroup]="paymentMethodForm" (ngSubmit)="onSubmit()">
+      <form [formGroup]="paymentMethodForm" (ngSubmit)="onSubmit()" class="space-y-6">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- ID (Readonly - solo referencia) -->
           <div class="space-y-2">
-            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
-              ID
+            <label class="block text-sm font-medium text-text-primary">
+              ID del Método
             </label>
-            <input
-              type="text"
-              [value]="paymentMethod?.id"
-              readonly
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)]/50 text-[var(--color-text-secondary)] cursor-not-allowed"
-            />
+            <div class="px-3 py-2 border border-border rounded-md bg-surface/50 text-text-secondary font-mono text-xs overflow-hidden text-ellipsis">
+              {{ paymentMethod()?.id }}
+            </div>
           </div>
 
-          <!-- Name (Identificador) -->
           <app-input
             formControlName="name"
             label="Nombre (Identificador)"
             placeholder="Ej: stripe_card"
             [required]="true"
             [control]="paymentMethodForm.get('name')"
-            [disabled]="isSubmitting"
           ></app-input>
 
-          <!-- Display Name -->
           <app-input
             formControlName="display_name"
             label="Nombre a Mostrar"
             placeholder="Ej: Tarjeta de Crédito"
             [required]="true"
             [control]="paymentMethodForm.get('display_name')"
-            [disabled]="isSubmitting"
           ></app-input>
 
-          <!-- Provider -->
           <app-input
             formControlName="provider"
             label="Proveedor"
             placeholder="Ej: stripe, paypal, manual"
             [required]="true"
             [control]="paymentMethodForm.get('provider')"
-            [disabled]="isSubmitting"
           ></app-input>
 
-          <!-- Logo URL -->
           <app-input
             formControlName="logo_url"
             label="URL del Logo (Opcional)"
             type="url"
             placeholder="https://example.com/logo.png"
             [control]="paymentMethodForm.get('logo_url')"
-            [disabled]="isSubmitting"
           ></app-input>
 
-          <!-- Type Select -->
-          <div class="space-y-2">
-            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
-              Tipo de Método
-            </label>
-            <select
-              formControlName="type"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isSubmitting"
-            >
-              <option value="">Seleccionar tipo...</option>
-              <option [value]="PaymentMethodType.CASH">Efectivo</option>
-              <option [value]="PaymentMethodType.CARD">Tarjeta</option>
-              <option [value]="PaymentMethodType.PAYPAL">PayPal</option>
-              <option [value]="PaymentMethodType.BANK_TRANSFER">Transferencia Bancaria</option>
-              <option [value]="PaymentMethodType.VOUCHER">Voucher</option>
-            </select>
-            <div
-              *ngIf="paymentMethodForm.get('type')?.invalid && paymentMethodForm.get('type')?.touched"
-              class="text-red-600 text-xs mt-1"
-            >
-              Campo requerido
-            </div>
-          </div>
+          <!-- Type Selection -->
+          <app-selector
+            label="Tipo de Método"
+            [options]="typeOptions"
+            [formControl]="$any(paymentMethodForm.get('type'))"
+            placeholder="Seleccionar tipo..."
+            [required]="true"
+            [errorText]="paymentMethodForm.get('type')?.touched && paymentMethodForm.get('type')?.invalid ? 'Campo requerido' : ''"
+          ></app-selector>
 
           <!-- Requires Config Checkbox -->
-          <div class="flex items-center">
+          <div class="flex items-center pt-8">
             <input
               type="checkbox"
               id="requires_config_edit"
               formControlName="requires_config"
-              class="h-4 w-4 text-[var(--color-primary)] focus:ring-[var(--color-primary)] border-[var(--color-border)] rounded"
-              [disabled]="isSubmitting"
+              class="h-4 w-4 text-primary focus:ring-primary border-border rounded cursor-pointer"
             />
             <label
               for="requires_config_edit"
-              class="ml-2 block text-sm text-[var(--color-text-primary)]"
+              class="ml-2 block text-sm text-text-primary cursor-pointer"
             >
               Requiere configuración
             </label>
@@ -147,42 +120,30 @@ import { Subject, takeUntil } from 'rxjs';
 
           <!-- Description (full width) -->
           <div class="md:col-span-2">
-            <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
+            <label class="block text-sm font-medium text-text-primary mb-2">
               Descripción
             </label>
             <textarea
               formControlName="description"
               rows="3"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)] resize-none"
+              class="w-full px-3 py-2 border border-border rounded-md bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary resize-none transition-all"
               placeholder="Descripción del método de pago..."
-              [disabled]="isSubmitting"
             ></textarea>
           </div>
 
           <!-- Processing Fee Section -->
-          <div class="md:col-span-2 space-y-4">
-            <h4 class="text-sm font-medium text-[var(--color-text-primary)]">
+          <div class="md:col-span-2 space-y-4 pt-2 border-t border-border mt-2">
+            <h4 class="text-sm font-semibold text-text-primary uppercase tracking-wider">
               Configuración de Comisiones
             </h4>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- Processing Fee Type -->
-              <div class="space-y-2">
-                <label class="block text-sm font-medium text-[var(--color-text-primary)]">
-                  Tipo de Comisión
-                </label>
-                <select
-                  formControlName="processing_fee_type"
-                  class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-                  [disabled]="isSubmitting"
-                >
-                  <option value="">Sin comisión</option>
-                  <option [value]="ProcessingFeeType.FIXED">Fijo</option>
-                  <option [value]="ProcessingFeeType.PERCENTAGE">Porcentaje</option>
-                  <option [value]="ProcessingFeeType.MIXED">Mixto</option>
-                </select>
-              </div>
+              <app-selector
+                label="Tipo de Comisión"
+                [options]="feeTypeOptions"
+                [formControl]="$any(paymentMethodForm.get('processing_fee_type'))"
+                placeholder="Sin comisión"
+              ></app-selector>
 
-              <!-- Processing Fee Value -->
               <app-input
                 formControlName="processing_fee_value"
                 label="Valor de Comisión"
@@ -191,14 +152,13 @@ import { Subject, takeUntil } from 'rxjs';
                 step="0.01"
                 min="0"
                 [control]="paymentMethodForm.get('processing_fee_value')"
-                [disabled]="isSubmitting"
               ></app-input>
             </div>
           </div>
 
           <!-- Amount Limits Section -->
-          <div class="md:col-span-2 space-y-4">
-            <h4 class="text-sm font-medium text-[var(--color-text-primary)]">
+          <div class="md:col-span-2 space-y-4 pt-2 border-t border-border mt-2">
+            <h4 class="text-sm font-semibold text-text-primary uppercase tracking-wider">
               Límites de Monto
             </h4>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -210,7 +170,6 @@ import { Subject, takeUntil } from 'rxjs';
                 step="0.01"
                 min="0"
                 [control]="paymentMethodForm.get('min_amount')"
-                [disabled]="isSubmitting"
               ></app-input>
 
               <app-input
@@ -221,72 +180,31 @@ import { Subject, takeUntil } from 'rxjs';
                 step="0.01"
                 min="0"
                 [control]="paymentMethodForm.get('max_amount')"
-                [disabled]="isSubmitting"
               ></app-input>
             </div>
           </div>
 
-          <!-- Status Selection Section -->
-          <div class="md:col-span-2">
-            <div class="bg-gray-50 rounded-lg p-4">
-              <h3 class="text-sm font-medium text-gray-700 mb-2">
-                Estado del Método de Pago
-              </h3>
-              <div class="flex items-center gap-2 mb-3">
-                <span
-                  class="px-3 py-1 rounded-full text-sm font-medium"
-                  [class.bg-green-100]="selectedStatus === 'active'"
-                  [class.text-green-800]="selectedStatus === 'active'"
-                  [class.bg-red-100]="selectedStatus === 'inactive'"
-                  [class.text-red-800]="selectedStatus === 'inactive'"
-                  [class.bg-gray-100]="selectedStatus === 'archived'"
-                  [class.text-gray-800]="selectedStatus === 'archived'"
-                >
-                  {{ getStatusLabel(selectedStatus) }}
-                </span>
+          <!-- Status Section -->
+          <div class="md:col-span-2 pt-2 border-t border-border mt-2">
+            <div class="flex items-center justify-between">
+              <div>
+                <h4 class="text-sm font-semibold text-text-primary">Estado del Método</h4>
+                <p class="text-xs text-text-secondary">Define si el método está visible y operativo</p>
               </div>
-              <div class="flex flex-wrap gap-2">
+              <div class="flex items-center gap-4">
                 <button
                   type="button"
-                  (click)="selectStatus('active')"
-                  [disabled]="isSubmitting"
-                  [class.bg-blue-600]="selectedStatus === 'active'"
-                  [class.text-white]="selectedStatus === 'active'"
-                  [class.border-blue-600]="selectedStatus === 'active'"
-                  [class.bg-white]="selectedStatus !== 'active'"
-                  [class.text-gray-700]="selectedStatus !== 'active'"
-                  [class.border-gray-300]="selectedStatus !== 'active'"
-                  class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  (click)="toggleStatus(true)"
+                  [class]="'px-4 py-2 rounded-lg text-sm font-medium transition-all ' + (paymentMethodForm.get('is_active')?.value ? 'bg-green-100 text-green-700 border border-green-200' : 'bg-surface text-text-secondary border border-border')"
                 >
-                  Active
+                  Activo
                 </button>
                 <button
                   type="button"
-                  (click)="selectStatus('inactive')"
-                  [disabled]="isSubmitting"
-                  [class.bg-blue-600]="selectedStatus === 'inactive'"
-                  [class.text-white]="selectedStatus === 'inactive'"
-                  [class.border-blue-600]="selectedStatus === 'inactive'"
-                  [class.bg-white]="selectedStatus !== 'inactive'"
-                  [class.text-gray-700]="selectedStatus !== 'inactive'"
-                  [class.border-gray-300]="selectedStatus !== 'inactive'"
-                  class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  (click)="toggleStatus(false)"
+                  [class]="'px-4 py-2 rounded-lg text-sm font-medium transition-all ' + (!paymentMethodForm.get('is_active')?.value ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-surface text-text-secondary border border-border')"
                 >
-                  Inactive
-                </button>
-                <button
-                  type="button"
-                  (click)="selectStatus('archived')"
-                  [disabled]="isSubmitting"
-                  [class.bg-blue-600]="selectedStatus === 'archived'"
-                  [class.text-white]="selectedStatus === 'archived'"
-                  [class.border-blue-600]="selectedStatus === 'archived'"
-                  [class.bg-white]="selectedStatus !== 'archived'"
-                  [class.text-gray-700]="selectedStatus !== 'archived'"
-                  [class.border-gray-300]="selectedStatus !== 'archived'"
-                  class="px-3 py-2 text-sm border rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Archived
+                  Inactivo
                 </button>
               </div>
             </div>
@@ -298,15 +216,14 @@ import { Subject, takeUntil } from 'rxjs';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="paymentMethodForm.invalid || isSubmitting"
-          [loading]="isSubmitting"
+          [disabled]="paymentMethodForm.invalid || isSubmitting()"
+          [loading]="isSubmitting()"
         >
           Actualizar Método
         </app-button>
@@ -321,22 +238,33 @@ import { Subject, takeUntil } from 'rxjs';
     `,
   ],
 })
-export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnChanges {
-  @Input() paymentMethod: PaymentMethod | null = null;
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onPaymentMethodUpdated = new EventEmitter<UpdatePaymentMethodDto>();
+export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
+  private readonly fb = inject(FormBuilder);
 
-  ProcessingFeeType = ProcessingFeeType;
-  PaymentMethodType = PaymentMethodType;
+  paymentMethod = input<PaymentMethod | null>(null);
+  isOpen = input<boolean>(false);
+  isSubmitting = input<boolean>(false);
+  isOpenChange = output<boolean>();
+  onPaymentMethodUpdated = output<UpdatePaymentMethodDto>();
 
   paymentMethodForm: FormGroup;
-  isSubmitting: boolean = false;
-  selectedStatus: 'active' | 'inactive' | 'archived' = 'active';
-
   private destroy$ = new Subject<void>();
 
-  constructor(private fb: FormBuilder) {
+  typeOptions = [
+    { value: PaymentMethodType.CASH, label: 'Efectivo' },
+    { value: PaymentMethodType.CARD, label: 'Tarjeta' },
+    { value: PaymentMethodType.PAYPAL, label: 'PayPal' },
+    { value: PaymentMethodType.BANK_TRANSFER, label: 'Transferencia Bancaria' },
+    { value: PaymentMethodType.VOUCHER, label: 'Voucher' },
+  ];
+
+  feeTypeOptions = [
+    { value: ProcessingFeeType.FIXED, label: 'Valor Fijo' },
+    { value: ProcessingFeeType.PERCENTAGE, label: 'Porcentaje' },
+    { value: ProcessingFeeType.MIXED, label: 'Mixto' },
+  ];
+
+  constructor() {
     this.paymentMethodForm = this.fb.group({
       name: ['', [Validators.required]],
       display_name: ['', [Validators.required]],
@@ -351,6 +279,32 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
       max_amount: [null],
       is_active: [true],
     });
+
+    effect(() => {
+      const pm = this.paymentMethod();
+      if (pm && this.isOpen()) {
+        this.paymentMethodForm.patchValue({
+          name: pm.name,
+          display_name: pm.display_name,
+          description: pm.description || '',
+          type: pm.type,
+          provider: pm.provider,
+          logo_url: pm.logo_url || '',
+          requires_config: pm.requires_config,
+          processing_fee_type: pm.processing_fee_type || '',
+          processing_fee_value: pm.processing_fee_value,
+          min_amount: pm.min_amount,
+          max_amount: pm.max_amount,
+          is_active: pm.is_active,
+        });
+      }
+    });
+
+    effect(() => {
+      if (!this.isOpen()) {
+        this.resetForm();
+      }
+    });
   }
 
   ngOnInit(): void { }
@@ -360,64 +314,19 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
     this.destroy$.complete();
   }
 
-  onModalOpen(): void {
-    // Reset submission state when modal opens
-    this.isSubmitting = false;
-  }
-
-  onModalClose(): void {
-    // Reset form and submission state when modal closes
-    this.isSubmitting = false;
-    this.resetForm();
-  }
-
-  ngOnChanges(): void {
-    if (this.paymentMethod) {
-      this.paymentMethodForm.patchValue({
-        name: this.paymentMethod.name,
-        display_name: this.paymentMethod.display_name,
-        description: this.paymentMethod.description || '',
-        type: this.paymentMethod.type,
-        provider: this.paymentMethod.provider,
-        logo_url: this.paymentMethod.logo_url || '',
-        requires_config: this.paymentMethod.requires_config,
-        processing_fee_type: this.paymentMethod.processing_fee_type || '',
-        processing_fee_value: this.paymentMethod.processing_fee_value,
-        min_amount: this.paymentMethod.min_amount,
-        max_amount: this.paymentMethod.max_amount,
-        is_active: this.paymentMethod.is_active,
-      });
-
-      // Set the selected status based on is_active
-      this.selectedStatus = this.paymentMethod.is_active ? 'active' : 'inactive';
-    }
-  }
-
-  selectStatus(status: 'active' | 'inactive' | 'archived'): void {
-    this.selectedStatus = status;
-    this.paymentMethodForm.patchValue({
-      is_active: status === 'active',
-    });
-  }
-
-  getStatusLabel(status: 'active' | 'inactive' | 'archived' | string): string {
-    const labels: Record<string, string> = {
-      active: 'Active',
-      inactive: 'Inactive',
-      archived: 'Archived',
-    };
-    return labels[status] || status;
+  toggleStatus(active: boolean): void {
+    this.paymentMethodForm.patchValue({ is_active: active });
   }
 
   onSubmit(): void {
-    if (this.paymentMethodForm.invalid || this.isSubmitting || !this.paymentMethod) {
+    if (this.paymentMethodForm.invalid || !this.paymentMethod()) {
+      this.paymentMethodForm.markAllAsTouched();
       return;
     }
 
-    this.isSubmitting = true;
     const formData: UpdatePaymentMethodDto = this.paymentMethodForm.value;
 
-    // Remove empty fee fields if no fee type is selected
+    // Clean data
     if (!formData.processing_fee_type) {
       delete formData.processing_fee_type;
       delete formData.processing_fee_value;
@@ -428,7 +337,6 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
 
   onCancel(): void {
     this.isOpenChange.emit(false);
-    this.resetForm();
   }
 
   private resetForm(): void {
@@ -446,7 +354,5 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
       max_amount: null,
       is_active: true,
     });
-    this.selectedStatus = 'active';
-    this.isSubmitting = false;
   }
 }

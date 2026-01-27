@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -9,7 +9,6 @@ import {
   PaginatedUsersResponse,
 } from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
-import { GlobalUsersService } from './services/global-users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
@@ -55,19 +54,29 @@ import {
   styleUrls: ['./users.component.css'],
 })
 export class UsersComponent implements OnInit, OnDestroy {
+  // Services
+  private usersService = inject(UsersService);
+  private fb = inject(FormBuilder);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+
+  // State
   users: User[] = [];
   userStats: UserStats | null = null;
   isLoading = false;
   currentUser: User | null = null;
   showCreateModal = false;
   showEditModal = false;
-  userToDelete: User | null = null;
-  showDeleteModal = false;
-  searchSubject = new Subject<string>();
+
+  private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
 
   // Form for filters
-  filterForm: FormGroup;
+  filterForm: FormGroup = this.fb.group({
+    search: [''],
+    state: [''],
+    organization_id: [''],
+  });
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -86,23 +95,6 @@ export class UsersComponent implements OnInit, OnDestroy {
         size: 'sm',
       },
       transform: (value: UserState) => this.getStateDisplay(value).text,
-
-    },
-    {
-      key: 'organizations.name',
-      label: 'Organización',
-      sortable: false,
-      defaultValue: 'N/A',
-      priority: 2,
-
-    },
-    {
-      key: 'last_login',
-      label: 'Último Acceso',
-      sortable: true,
-      priority: 3,
-      transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
-
     },
     {
       key: 'created_at',
@@ -110,7 +102,6 @@ export class UsersComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 3,
       transform: (value: string) => this.formatDate(value),
-
     },
   ];
 
@@ -139,32 +130,21 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   // Filter states
   userStates = [
-    { value: '', label: 'Todos los estados' },
+    { value: '', label: 'Cualquier estado' },
     { value: UserState.ACTIVE, label: 'Activo' },
     { value: UserState.INACTIVE, label: 'Inactivo' },
     {
       value: UserState.PENDING_VERIFICATION,
-      label: 'Pendiente de Verificación',
+      label: 'Pendiente',
     },
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
 
-  constructor(
-    private usersService: UsersService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
-    this.filterForm = this.fb.group({
-      search: [''],
-      state: [''],
-      organization_id: [''],
-    });
-
+  constructor() {
     // Setup search debounce
     this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(400), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe((searchTerm: string) => {
         this.filterForm.patchValue(
           { search: searchTerm },
@@ -186,19 +166,6 @@ export class UsersComponent implements OnInit, OnDestroy {
         this.pagination.page = 1;
         this.loadUsers();
       });
-
-    // Subscribe to service loading states
-    this.usersService.isCreatingUser
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((isCreating) => {
-        // Optional: Handle global loading state
-      });
-
-    this.usersService.isUpdatingUser
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((isUpdating) => {
-        // Optional: Handle global loading state
-      });
   }
 
   ngOnDestroy(): void {
@@ -219,11 +186,10 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     this.usersService
       .getUsers(query)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: PaginatedUsersResponse) => {
           this.users = response.data || [];
-
-          // Validar que response.pagination exista y tenga las propiedades esperadas
           if (response.pagination) {
             this.pagination = {
               page: response.pagination.page || 1,
@@ -231,58 +197,30 @@ export class UsersComponent implements OnInit, OnDestroy {
               total: response.pagination.total || 0,
               totalPages: response.pagination.total_pages || 0,
             };
-          } else {
-            // Si no hay paginación, mantener valores por defecto
-            console.warn(
-              'La respuesta no contiene información de paginación:',
-              response,
-            );
-            this.pagination = {
-              page: 1,
-              limit: 10,
-              total: this.users.length,
-              totalPages: 1,
-            };
           }
         },
         error: (error) => {
           console.error('Error loading users:', error);
-          this.users = []; // Limpiar usuarios en caso de error
-          // Resetear paginación a valores seguros
-          this.pagination = {
-            page: 1,
-            limit: 10,
-            total: 0,
-            totalPages: 0,
-          };
-          // Handle error - show toast or notification
+          this.users = [];
+          this.toastService.error('Error al cargar usuarios');
         },
       })
       .add(() => {
-        this.isLoading = false; // Asegurar que el estado de carga se resetee
+        this.isLoading = false;
       });
   }
 
   loadUserStats(): void {
-    this.usersService.getUsersStats().subscribe({
-      next: (stats: UserStats) => {
-        this.userStats = stats;
-      },
-      error: (error) => {
-        console.error('Error loading user stats:', error);
-        // Establecer valores por defecto para evitar errores de renderizado
-        this.userStats = {
-          total_usuarios: 0,
-          activos: 0,
-          pendientes: 0,
-          con_2fa: 0,
-          inactivos: 0,
-          suspendidos: 0,
-          email_verificado: 0,
-          archivados: 0,
-        };
-      },
-    });
+    this.usersService.getUsersStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (stats: UserStats) => {
+          this.userStats = stats;
+        },
+        error: (error) => {
+          console.error('Error loading user stats:', error);
+        },
+      });
   }
 
   onSearchChange(searchTerm: string): void {
@@ -295,13 +233,13 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
-    // TODO: Implement sorting logic
-    console.log('Sort changed:', column, direction);
+    // Implementation can be added here if service supports sorting
     this.loadUsers();
   }
 
   refreshUsers(): void {
     this.loadUsers();
+    this.loadUserStats();
   }
 
   createUser(): void {
@@ -310,8 +248,8 @@ export class UsersComponent implements OnInit, OnDestroy {
 
   onUserCreated(): void {
     this.showCreateModal = false;
-    this.loadUsers();
-    this.loadUserStats();
+    this.refreshUsers();
+    this.toastService.success('Usuario creado correctamente');
   }
 
   editUser(user: User): void {
@@ -322,8 +260,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   onUserUpdated(): void {
     this.showEditModal = false;
     this.currentUser = null;
-    this.loadUsers();
-    this.loadUserStats();
+    this.refreshUsers();
   }
 
   confirmDelete(user: User): void {
@@ -337,19 +274,15 @@ export class UsersComponent implements OnInit, OnDestroy {
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.deleteUser();
+          this.deleteUser(user.id);
         }
       });
   }
 
-  deleteUser(): void {
-    if (!this.userToDelete) return;
-
-    this.usersService.deleteUser(this.userToDelete.id).subscribe({
+  deleteUser(userId: number): void {
+    this.usersService.deleteUser(userId).subscribe({
       next: () => {
-        this.userToDelete = null;
-        this.loadUsers();
-        this.loadUserStats();
+        this.refreshUsers();
         this.toastService.success('Usuario eliminado exitosamente');
       },
       error: (error) => {
@@ -369,35 +302,24 @@ export class UsersComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
         confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
+        confirmVariant: action === 'archive' ? 'danger' : 'primary',
       })
       .then((confirmed) => {
         if (confirmed) {
-          if (action === 'archive') {
-            this.usersService.archiveUser(user.id).subscribe({
-              next: () => {
-                this.loadUsers();
-                this.loadUserStats();
-                this.toastService.success('Usuario archivado exitosamente');
-              },
-              error: (error) => {
-                console.error('Error archiving user:', error);
-                this.toastService.error('Error al archivar el usuario');
-              },
-            });
-          } else {
-            this.usersService.reactivateUser(user.id).subscribe({
-              next: () => {
-                this.loadUsers();
-                this.loadUserStats();
-                this.toastService.success('Usuario reactivado exitosamente');
-              },
-              error: (error) => {
-                console.error('Error reactivating user:', error);
-                this.toastService.error('Error al reactivar el usuario');
-              },
-            });
-          }
+          const obs = action === 'archive'
+            ? this.usersService.archiveUser(user.id)
+            : this.usersService.reactivateUser(user.id);
+
+          obs.subscribe({
+            next: () => {
+              this.refreshUsers();
+              this.toastService.success(`Usuario ${action === 'archive' ? 'archivado' : 'reactivado'} exitosamente`);
+            },
+            error: (error) => {
+              console.error(`Error ${action} user:`, error);
+              this.toastService.error(`Error al ${actionText} el usuario`);
+            },
+          });
         }
       });
   }
@@ -419,7 +341,8 @@ export class UsersComponent implements OnInit, OnDestroy {
     }
   }
 
-  formatDate(dateString: string): string {
+  formatDate(dateString: string | null | undefined): string {
+    if (!dateString) return 'Nunca';
     const date = new Date(dateString);
     return date.toLocaleDateString('es-ES', {
       day: '2-digit',
@@ -430,37 +353,19 @@ export class UsersComponent implements OnInit, OnDestroy {
     });
   }
 
-  getRelativeTime(dateString: string): string {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInMs = now.getTime() - date.getTime();
-    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
-
-    if (diffInHours < 1) {
-      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
-      return `Hace ${diffInMinutes} minuto${diffInMinutes !== 1 ? 's' : ''}`;
-    } else if (diffInHours < 24) {
-      return `Hace ${diffInHours} hora${diffInHours !== 1 ? 's' : ''}`;
-    } else if (diffInHours < 48) {
-      return 'Ayer';
-    } else {
-      return this.formatDate(dateString);
-    }
-  }
-
   getEmptyStateTitle(): string {
     const filters = this.filterForm.value;
     if (filters.search || filters.state || filters.organization_id) {
-      return 'No users match your filters';
+      return 'Sin coincidencias';
     }
-    return 'No users found';
+    return 'No hay usuarios';
   }
 
   getEmptyStateDescription(): string {
     const filters = this.filterForm.value;
     if (filters.search || filters.state || filters.organization_id) {
-      return 'Try adjusting your search terms or filters';
+      return 'Intenta ajustar los filtros de búsqueda';
     }
-    return 'Get started by creating your first user.';
+    return 'Comienza creando el primer usuario del sistema.';
   }
 }

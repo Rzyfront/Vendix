@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, inject, input, output, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -28,14 +28,14 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Tienda"
       subtitle="Actualizar la información de la tienda"
     >
-      <form [formGroup]="storeForm" class="space-y-6" *ngIf="store">
+      <form [formGroup]="storeForm" class="space-y-6" *ngIf="store()">
         <!-- Basic Information -->
         <div class="space-y-4">
           <h3
@@ -95,8 +95,8 @@ import {
               <div
                 class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary"
               >
-                {{ store.organizations?.name || 'N/A' }} (ID:
-                {{ store.organization_id }})
+                {{ store()?.organizations?.name || 'N/A' }} (ID:
+                {{ store()?.organization_id }})
               </div>
             </div>
           </div>
@@ -267,8 +267,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="!store || storeForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="!store() || storeForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             Update Store
           </app-button>
@@ -277,22 +277,20 @@ import {
     </app-modal>
   `,
 })
-export class StoreEditModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() store?: StoreListItem;
+export class StoreEditModalComponent {
+  private readonly fb = inject(FormBuilder);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<UpdateStoreDto>();
-  @Output() cancel = new EventEmitter<void>();
+  isOpen = input<boolean>(false);
+  isSubmitting = input<boolean>(false);
+  store = input<StoreListItem | undefined>();
 
-  storeForm!: FormGroup;
+  isOpenChange = output<boolean>();
+  submit = output<UpdateStoreDto>();
+  cancel = output<void>();
 
-  constructor(private fb: FormBuilder) {
-    this.initializeForm();
-  }
+  storeForm: FormGroup;
 
-  private initializeForm(): void {
+  constructor() {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: [
@@ -320,54 +318,49 @@ export class StoreEditModalComponent implements OnChanges {
       color_primary: [''],
       color_secondary: [''],
     });
+
+    effect(() => {
+      const storeVal = this.store();
+      if (storeVal) {
+        this.populateForm(storeVal);
+      }
+    });
+
+    effect(() => {
+      if (!this.isOpen()) {
+        this.resetForm();
+      }
+    });
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['store'] && changes['store'].currentValue) {
-      this.populateForm();
-    }
-  }
-
-  private populateForm(): void {
-    if (!this.store) return;
-
-    // Get primary address if available
+  private populateForm(store: StoreListItem): void {
     const primaryAddress =
-      this.store.addresses?.find((addr) => addr.is_primary) ||
-      this.store.addresses?.[0];
+      store.addresses?.find((addr) => addr.is_primary) || store.addresses?.[0];
 
     this.storeForm.patchValue({
-      name: this.store.name,
-      slug: this.store.slug,
-      store_code: this.store.store_code || '',
+      name: store.name,
+      slug: store.slug,
+      store_code: store.store_code || '',
       description: '',
-      email: '', // Email is not in the new structure
+      email: '',
       phone: primaryAddress?.phone_number || '',
       website: '',
       address: primaryAddress?.address_line1 || '',
       city: primaryAddress?.city || '',
       country: primaryAddress?.country_code || '',
-      store_type: this.store.store_type || StoreType.PHYSICAL,
-      is_active:
-        this.store.is_active !== undefined ? this.store.is_active : true,
+      store_type: store.store_type || StoreType.PHYSICAL,
+      is_active: store.is_active !== undefined ? store.is_active : true,
       domain: '',
-      timezone: this.store.timezone || '',
+      timezone: store.timezone || '',
       currency_code: '',
-      manager_user_id: this.store.manager_user_id || null,
+      manager_user_id: store.manager_user_id || null,
       color_primary: '',
       color_secondary: '',
     });
   }
 
-  onModalChange(isOpen: boolean): void {
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onSubmit(): void {
-    if (!this.store || this.storeForm.invalid) {
-      // Mark all fields as touched to trigger validation messages
+    if (!this.store() || this.storeForm.invalid) {
       Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });

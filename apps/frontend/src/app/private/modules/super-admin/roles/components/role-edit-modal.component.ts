@@ -1,9 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnChanges,
+  inject,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -16,6 +17,7 @@ import {
 import { Role, UpdateRoleDto } from '../interfaces/role.interface';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 
 @Component({
   selector: 'app-role-edit-modal',
@@ -26,13 +28,14 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     ReactiveFormsModule,
     ModalComponent,
     IconComponent,
+    ButtonComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
-      title="Edit Role"
-      subtitle="Modify the role details and permissions"
+      title="Editar Rol"
+      subtitle="Modificar detalles del rol"
       size="md"
       [showCloseButton]="true"
       (closed)="onCancel()"
@@ -40,31 +43,30 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       <form [formGroup]="roleForm" (ngSubmit)="onSubmit()">
         <div class="space-y-6">
           <!-- System Role Warning -->
-          <div *ngIf="role?.is_system_role" class="warning-banner">
+          <div *ngIf="role()?.is_system_role" class="warning-banner">
             <app-icon name="warning" size="20" class="warning-icon"></app-icon>
             <div class="warning-content">
-              <h4 class="warning-title">System Role</h4>
+              <h4 class="warning-title">Rol de Sistema</h4>
               <p class="warning-message">
-                This is a system role and cannot be modified. Only description
-                can be updated.
+                Este es un rol de sistema y no modificado completamente. Solo la descripción puede ser actualizada.
               </p>
             </div>
           </div>
 
           <!-- Role Name -->
           <div class="form-group">
-            <label for="name" class="form-label"> Role Name * </label>
+            <label for="name" class="form-label"> Nombre del Rol * </label>
             <input
               id="name"
               type="text"
               formControlName="name"
               class="form-input"
-              placeholder="e.g., store_manager"
+              placeholder="ej., store_manager"
               [class.form-input-error]="
                 roleForm.get('name')?.invalid && roleForm.get('name')?.touched
               "
-              [readonly]="role?.is_system_role"
-              [class.form-input-disabled]="role?.is_system_role"
+              [readonly]="role()?.is_system_role"
+              [class.form-input-disabled]="role()?.is_system_role"
             />
             <div
               *ngIf="
@@ -73,23 +75,23 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
               class="form-error"
             >
               <span *ngIf="roleForm.get('name')?.errors?.['required']"
-                >Role name is required</span
+                >El nombre es requerido</span
               >
               <span *ngIf="roleForm.get('name')?.errors?.['minlength']"
-                >Role name must be at least 2 characters</span
+                >El nombre debe tener al menos 2 caracteres</span
               >
             </div>
           </div>
 
           <!-- Description -->
           <div class="form-group">
-            <label for="description" class="form-label"> Description * </label>
+            <label for="description" class="form-label"> Descripción * </label>
             <textarea
               id="description"
               formControlName="description"
               rows="3"
               class="form-input"
-              placeholder="Describe the role and its responsibilities"
+              placeholder="Describe el rol y sus responsabilidades"
               [class.form-input-error]="
                 roleForm.get('description')?.invalid &&
                 roleForm.get('description')?.touched
@@ -103,274 +105,109 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
               class="form-error"
             >
               <span *ngIf="roleForm.get('description')?.errors?.['required']"
-                >Description is required</span
+                >La descripción es requerida</span
               >
               <span *ngIf="roleForm.get('description')?.errors?.['minlength']"
-                >Description must be at least 10 characters</span
+                >La descripción debe tener al menos 10 caracteres</span
               >
             </div>
           </div>
 
           <!-- Role Info -->
           <div class="info-card">
-            <h4 class="info-title">Role Information</h4>
+            <h4 class="info-title">Información del Rol</h4>
             <div class="info-grid">
               <div class="info-item">
-                <span class="info-label">Role ID:</span>
-                <span class="info-value">{{ role?.id }}</span>
+                <span class="info-label">ID de Rol:</span>
+                <span class="info-value">{{ role()?.id }}</span>
               </div>
               <div class="info-item">
-                <span class="info-label">System Role:</span>
+                <span class="info-label">Rol de Sistema:</span>
                 <span
                   class="info-value"
-                  [class.info-value-danger]="role?.is_system_role"
-                  [class.info-value-success]="!role?.is_system_role"
+                  [class.info-value-danger]="role()?.is_system_role"
+                  [class.info-value-success]="!role()?.is_system_role"
                 >
-                  {{ role?.is_system_role ? 'Yes' : 'No' }}
+                  {{ role()?.is_system_role ? 'Si' : 'No' }}
                 </span>
               </div>
               <div class="info-item">
-                <span class="info-label">Created:</span>
+                <span class="info-label">Creado:</span>
                 <span class="info-value">{{
-                  formatDate(role?.created_at)
+                  formatDate(role()?.created_at)
                 }}</span>
               </div>
               <div class="info-item">
-                <span class="info-label">Last Updated:</span>
+                <span class="info-label">Actualizado:</span>
                 <span class="info-value">{{
-                  formatDate(role?.updated_at)
+                  formatDate(role()?.updated_at)
                 }}</span>
               </div>
             </div>
           </div>
         </div>
-      </form>
 
-      <div slot="footer" class="modal-footer">
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="onCancel()"
-          [disabled]="isSubmitting"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          class="btn btn-primary"
-          [disabled]="isSubmitting || roleForm.invalid"
-          (click)="onSubmit()"
-        >
-          <app-icon
-            *ngIf="isSubmitting"
-            name="refresh"
-            class="animate-spin"
-            size="16"
-          ></app-icon>
-          <span *ngIf="!isSubmitting">Update Role</span>
-          <span *ngIf="isSubmitting">Updating...</span>
-        </button>
-      </div>
+        <div class="modal-footer mt-6">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isSubmitting()"
+          >
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
+            [disabled]="isSubmitting() || roleForm.invalid"
+            [loading]="isSubmitting()"
+          >
+            <span *ngIf="!isSubmitting()">Actualizar Rol</span>
+            <span *ngIf="isSubmitting()">Actualizando...</span>
+          </app-button>
+        </div>
+      </form>
     </app-modal>
   `,
-  styles: [
-    `
-      .form-group {
-        @apply mb-6;
-      }
-
-      .form-label {
-        @apply block text-sm font-medium text-text-primary mb-2;
-      }
-
-      .form-input {
-        @apply w-full px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:border-primary transition-colors;
-        background-color: var(--color-surface);
-        color: var(--color-text-primary);
-        focus-ring-color: rgba(var(--color-primary), 0.5);
-      }
-
-      .form-input:focus {
-        background-color: var(--color-surface);
-      }
-
-      .form-input-error {
-        border-color: var(--color-destructive);
-        box-shadow: 0 0 0 1px var(--color-destructive);
-      }
-
-      .form-input-disabled {
-        background-color: var(--color-background);
-        color: var(--color-text-muted);
-        cursor: not-allowed;
-      }
-
-      .form-error {
-        @apply mt-1 text-sm text-destructive;
-      }
-
-      .warning-banner {
-        @apply flex items-start p-4 mb-6 rounded-md border;
-        background-color: rgba(251, 191, 36, 0.1);
-        border-color: rgba(251, 191, 36, 0.3);
-        color: #92400e;
-      }
-
-      .warning-icon {
-        flex-shrink: 0;
-        margin-right: 12px;
-        color: #f59e0b;
-      }
-
-      .warning-content {
-        flex: 1;
-      }
-
-      .warning-title {
-        @apply text-sm font-medium mb-1;
-        color: #92400e;
-      }
-
-      .warning-message {
-        @apply text-sm;
-        color: #b45309;
-      }
-
-      .info-card {
-        @apply p-4 rounded-md border;
-        background-color: var(--color-background);
-        border-color: var(--color-border);
-      }
-
-      .info-title {
-        @apply text-sm font-medium text-text-primary mb-3;
-      }
-
-      .info-grid {
-        @apply space-y-2;
-      }
-
-      .info-item {
-        @apply flex justify-between text-sm;
-      }
-
-      .info-label {
-        color: var(--color-text-secondary);
-      }
-
-      .info-value {
-        font-family: var(--font-primary);
-        color: var(--color-text-primary);
-      }
-
-      .info-value-danger {
-        color: var(--color-destructive);
-      }
-
-      .info-value-success {
-        color: #059669;
-      }
-
-      .modal-footer {
-        @apply flex justify-end gap-3;
-      }
-
-      .btn {
-        @apply inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
-      }
-
-      .btn-primary {
-        background-color: var(--color-primary);
-        color: var(--color-text-on-primary);
-        border: 1px solid var(--color-primary);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-secondary);
-          border-color: var(--color-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-primary), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      .btn-secondary {
-        background-color: var(--color-surface);
-        color: var(--color-text-primary);
-        border: var(--border-width) solid var(--color-border);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-background);
-          border-color: var(--color-text-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-muted), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      @keyframes spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .animate-spin {
-        animation: spin 1s linear infinite;
-      }
-    `,
-  ],
+  styleUrls: ['./role-edit-modal.component.scss'],
 })
 export class RoleEditModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() role: Role | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<UpdateRoleDto>();
-  @Output() cancel = new EventEmitter<void>();
+  // Signals
+  readonly isOpen = input<boolean>(false);
+  readonly isSubmitting = input<boolean>(false);
+  readonly role = input<Role | null>(null);
+
+  // Outputs
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<UpdateRoleDto>();
+  readonly cancel = output<void>();
 
   roleForm: FormGroup;
+  private fb = inject(FormBuilder);
 
-  constructor(private fb: FormBuilder) {
+  constructor() {
     this.roleForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       description: ['', [Validators.required, Validators.minLength(10)]],
     });
   }
 
-  onOpenChange(isOpen: any): void {
+  onOpenChange(isOpen: boolean): void {
     if (!isOpen) {
       this.onCancel();
     }
     this.isOpenChange.emit(isOpen);
   }
 
-  ngOnChanges(): void {
-    if (this.isOpen && this.role) {
+  ngOnChanges(changes: SimpleChanges): void {
+    const currentRole = this.role();
+    if (changes['isOpen'] && changes['isOpen'].currentValue && currentRole) {
       this.roleForm.patchValue({
-        name: this.role.name,
-        description: this.role.description,
+        name: currentRole.name,
+        description: currentRole.description,
       });
 
       // Disable name field for system roles
-      if (this.role.is_system_role) {
+      if (currentRole.is_system_role) {
         this.roleForm.get('name')?.disable();
       } else {
         this.roleForm.get('name')?.enable();
@@ -379,18 +216,21 @@ export class RoleEditModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    if (this.roleForm.valid && this.role) {
+    const currentRole = this.role();
+    if (this.roleForm.valid && currentRole) {
       const roleData: UpdateRoleDto = {
         name: this.roleForm.get('name')?.value,
         description: this.roleForm.get('description')?.value,
       };
 
       // Only include name if it's not a system role
-      if (this.role.is_system_role) {
+      if (currentRole.is_system_role) {
         delete roleData.name;
       }
 
       this.submit.emit(roleData);
+    } else {
+      this.roleForm.markAllAsTouched();
     }
   }
 

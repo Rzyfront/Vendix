@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -6,11 +6,9 @@ import {
   RoleQueryDto,
   RoleStats,
   PaginatedRolesResponse,
-  PermissionStatus,
 } from './interfaces/role.interface';
 import { RolesService } from './services/roles.service';
 import {
-  RoleStatsComponent,
   RoleCreateModalComponent,
   RoleEditModalComponent,
   RoleEmptyStateComponent,
@@ -23,10 +21,11 @@ import {
   TableColumn,
   TableAction,
   InputsearchComponent,
-  IconComponent,
   ButtonComponent,
   DialogService,
   ToastService,
+  StatsComponent,
+  SelectorComponent,
 } from '../../../../shared/components/index';
 
 import {
@@ -43,15 +42,15 @@ import {
     CommonModule,
     FormsModule,
     ReactiveFormsModule,
-    RoleStatsComponent,
     RoleCreateModalComponent,
     RoleEditModalComponent,
     RoleEmptyStateComponent,
     RolePermissionsModalComponent,
     TableComponent,
     InputsearchComponent,
-    IconComponent,
     ButtonComponent,
+    StatsComponent,
+    SelectorComponent,
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],
@@ -59,26 +58,39 @@ import {
 export class RolesComponent implements OnInit, OnDestroy {
   roles: Role[] = [];
   roleStats: RoleStats = {
-    total_roles: 0,
-    system_roles: 0,
-    custom_roles: 0,
-    total_permissions: 0,
+    totalRoles: 0,
+    systemRoles: 0,
+    customRoles: 0,
+    totalPermissions: 0,
   };
   isLoading = false;
   currentRole: Role | null = null;
+
+  // Modals state
   showCreateModal = false;
   showEditModal = false;
-  roleToDelete: Role | null = null;
-  showDeleteModal = false;
-  searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
+  showPermissionsModal = false;
+
   isCreatingRole = false;
   isUpdatingRole = false;
-  showPermissionsModal = false;
   isUpdatingPermissions = false;
 
-  // Form for filters
+  // Filter states
   filterForm: FormGroup;
+  roleTypes = [
+    { value: '', label: 'Todos los tipos' },
+    { value: 'true', label: 'Roles de Sistema' },
+    { value: 'false', label: 'Roles Personalizados' },
+  ];
+
+  // Services
+  private rolesService = inject(RolesService);
+  private fb = inject(FormBuilder);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+
+  private destroy$ = new Subject<void>();
+  searchSubject = new Subject<string>();
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -148,23 +160,11 @@ export class RolesComponent implements OnInit, OnDestroy {
       icon: 'trash-2',
       action: (role: Role) => this.confirmDelete(role),
       variant: 'danger',
-      disabled: (role: Role) => role.is_system_role,
+      disabled: (role: Role) => role.is_system_role || ((role._count?.user_roles ?? 0) > 0),
     },
   ];
 
-  // Filter states
-  roleTypes = [
-    { value: '', label: 'Todos los tipos' },
-    { value: 'true', label: 'Roles de Sistema' },
-    { value: 'false', label: 'Roles Personalizados' },
-  ];
-
-  constructor(
-    private rolesService: RolesService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
+  constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       is_system_role: [''],
@@ -187,7 +187,7 @@ export class RolesComponent implements OnInit, OnDestroy {
     this.loadRoleStats();
 
     // Subscribe to form changes
-    this.filterForm.valueChanges
+    this.filterForm.get('is_system_role')?.valueChanges
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
         this.loadRoles();
@@ -217,47 +217,40 @@ export class RolesComponent implements OnInit, OnDestroy {
     const filters = this.filterForm.value;
     const query: RoleQueryDto = {
       search: filters.search || undefined,
-      is_system_role: filters.is_system_role
+      is_system_role: filters.is_system_role && filters.is_system_role !== ''
         ? filters.is_system_role === 'true'
         : undefined,
     };
 
     this.rolesService
       .getRoles(query)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: PaginatedRolesResponse) => {
           this.roles = response.data || [];
-
-          // Ignorar información de paginación de la respuesta
         },
         error: (error) => {
           console.error('Error loading roles:', error);
-          this.roles = []; // Limpiar roles en caso de error
-          // Resetear estado de carga
-          // Handle error - show toast or notification
+          this.roles = [];
+          this.toastService.error('Error al cargar roles');
         },
       })
       .add(() => {
-        this.isLoading = false; // Asegurar que el estado de carga se resetee
+        this.isLoading = false;
       });
   }
 
   loadRoleStats(): void {
-    this.rolesService.getRolesStats().subscribe({
-      next: (stats: RoleStats) => {
-        this.roleStats = stats;
-      },
-      error: (error) => {
-        console.error('Error loading role stats:', error);
-        // Establecer valores por defecto para evitar errores de renderizado
-        this.roleStats = {
-          total_roles: 0,
-          system_roles: 0,
-          custom_roles: 0,
-          total_permissions: 0,
-        };
-      },
-    });
+    this.rolesService.getRolesStats()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (stats: RoleStats) => {
+          this.roleStats = stats;
+        },
+        error: (error) => {
+          console.error('Error loading role stats:', error);
+        },
+      });
   }
 
   onSearchChange(searchTerm: string): void {
@@ -268,34 +261,62 @@ export class RolesComponent implements OnInit, OnDestroy {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    // TODO: Implement sorting logic
-    console.log('Sort changed:', event.column, event.direction);
-    this.loadRoles();
+    // Implement sort logic here if backend supports it
+    // For now, re-load
+    console.log('Sort changed:', event);
   }
 
   refreshRoles(): void {
     this.loadRoles();
+    this.loadRoleStats();
   }
 
   createRole(): void {
     this.showCreateModal = true;
   }
 
-  updateRole(roleData: any): void {
-    if (!this.currentRole) return;
+  editRole(role: Role): void {
+    this.currentRole = role;
+    this.showEditModal = true;
+  }
 
-    this.rolesService.updateRole(this.currentRole.id, roleData).subscribe({
+  confirmDelete(role: Role): void {
+    // Double check system role
+    if (role.is_system_role) {
+      this.toastService.warning('No se pueden eliminar roles del sistema.');
+      return;
+    }
+
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Rol',
+        message: `¿Estás seguro de que deseas eliminar el rol "${role.name}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.deleteRole(role.id);
+        }
+      });
+  }
+
+  deleteRole(id: number): void {
+    this.rolesService.deleteRole(id).subscribe({
       next: () => {
-        this.showEditModal = false;
-        this.currentRole = null;
         this.loadRoles();
         this.loadRoleStats();
+        this.toastService.success('Rol eliminado exitosamente');
       },
       error: (error) => {
-        console.error('Error updating role:', error);
+        console.error('Error deleting role:', error);
+        this.toastService.error('Error al eliminar el rol');
       },
     });
   }
+
+  // === Modal Outputs === //
 
   onRoleCreated(roleData: any): void {
     this.rolesService.createRole(roleData).subscribe({
@@ -310,11 +331,6 @@ export class RolesComponent implements OnInit, OnDestroy {
         this.toastService.error('Error al crear el rol');
       },
     });
-  }
-
-  editRole(role: Role): void {
-    this.currentRole = role;
-    this.showEditModal = true;
   }
 
   onRoleUpdated(roleData: any): void {
@@ -335,70 +351,7 @@ export class RolesComponent implements OnInit, OnDestroy {
     });
   }
 
-  confirmDelete(role: Role): void {
-    if (role.is_system_role) {
-      this.toastService.warning('No se pueden eliminar roles del sistema.');
-      return;
-    }
-
-    this.dialogService
-      .confirm({
-        title: 'Eliminar Rol',
-        message: `¿Estás seguro de que deseas eliminar el rol "${role.name}"? Esta acción no se puede deshacer.`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
-      .then((confirmed) => {
-        if (confirmed) {
-          this.deleteRole();
-        }
-      });
-  }
-
-  deleteRole(): void {
-    if (!this.roleToDelete) return;
-
-    this.rolesService.deleteRole(this.roleToDelete.id).subscribe({
-      next: () => {
-        this.roleToDelete = null;
-        this.loadRoles();
-        this.loadRoleStats();
-        this.toastService.success('Rol eliminado exitosamente');
-      },
-      error: (error) => {
-        console.error('Error deleting role:', error);
-        this.toastService.error('Error al eliminar el rol');
-      },
-    });
-  }
-
-  formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  }
-
-  getEmptyStateTitle(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.is_system_role) {
-      return 'No roles match your filters';
-    }
-    return 'No roles found';
-  }
-
-  getEmptyStateDescription(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.is_system_role) {
-      return 'Try adjusting your search terms or filters';
-    }
-    return 'Get started by creating your first role.';
-  }
+  // === Permissions === //
 
   openPermissionsModal(role: Role): void {
     this.currentRole = role;
@@ -410,90 +363,99 @@ export class RolesComponent implements OnInit, OnDestroy {
 
     this.isUpdatingPermissions = true;
 
-    // Get current role permissions to calculate differences
+    // Delegate logic to service or handle here
+    // For simplicity, we can do simpler logic than the original component's massive parallel block if the backend supports bulk assign
+    // The original code calculated diffs. Let's see if we can just assign the new set if the API supports it.
+    // The Service has assignPermissionsToRole and removePermissionsFromRole. It seems we need to calc diffs.
+
+    // NOTE: Keep original logic logic or Refactor? 
+    // I'll keep the diff logic but cleaner.
+
     this.rolesService.getRolePermissions(this.currentRole.id).subscribe({
       next: (currentPermissionIds) => {
         const newPermissionIds = permissionData.permission_ids || [];
 
-        // Calculate permissions to add and remove
-        const toAdd = newPermissionIds.filter(
-          (id: number) => !currentPermissionIds.includes(id),
-        );
-        const toRemove = currentPermissionIds.filter(
-          (id: number) => !newPermissionIds.includes(id),
-        );
+        const toAdd = newPermissionIds.filter((id: number) => !currentPermissionIds.includes(id));
+        const toRemove = currentPermissionIds.filter((id: number) => !newPermissionIds.includes(id));
 
-        // Execute operations in parallel if both are needed
-        const operations = [];
-
-        if (toAdd.length > 0) {
-          operations.push(
-            this.rolesService.assignPermissionsToRole(this.currentRole!.id, {
-              permission_ids: toAdd,
-            }),
-          );
-        }
-
-        if (toRemove.length > 0) {
-          operations.push(
-            this.rolesService.removePermissionsFromRole(this.currentRole!.id, {
-              permission_ids: toRemove,
-            }),
-          );
-        }
-
-        // If no changes needed, just close modal
-        if (operations.length === 0) {
+        if (toAdd.length === 0 && toRemove.length === 0) {
+          this.isUpdatingPermissions = false;
           this.showPermissionsModal = false;
           this.currentRole = null;
-          this.isUpdatingPermissions = false;
           this.toastService.info('No hay cambios en los permisos');
           return;
         }
 
-        // Execute all operations
-        operations.length === 1
-          ? operations[0].subscribe({
-            next: () => this.handlePermissionsUpdateSuccess(),
-            error: (error) => this.handlePermissionsUpdateError(error),
-          })
-          : operations.length === 2
-            ? // Execute both operations in parallel
-            operations.forEach((op) =>
-              op.subscribe({
-                next: () => {
-                  // Wait for both operations to complete
-                  // This is a simplified approach, in production you might want more sophisticated handling
-                },
-                error: (error) => this.handlePermissionsUpdateError(error),
-              }),
-            )
-            : null;
+        const requests = [];
+        if (toAdd.length) requests.push(this.rolesService.assignPermissionsToRole(this.currentRole!.id, { permission_ids: toAdd }));
+        if (toRemove.length) requests.push(this.rolesService.removePermissionsFromRole(this.currentRole!.id, { permission_ids: toRemove }));
 
-        // For simplicity, we'll wait a bit and then complete
-        setTimeout(() => {
-          this.handlePermissionsUpdateSuccess();
-        }, operations.length * 500); // Rough timing estimate
+        // Execute sequentially or parallel. 
+        // Using forkJoin or similar would be better but let's stick to simple promise/subscribe chain or just parallel.
+        // I will use a simple counter for now as RxJS forkJoin needs import
+
+        let completed = 0;
+        let errors = 0;
+
+        const checkDone = () => {
+          completed++;
+          if (completed === requests.length) {
+            this.isUpdatingPermissions = false;
+            this.showPermissionsModal = false;
+            this.currentRole = null;
+            this.loadRoles();
+            this.loadRoleStats(); // Stats might change (total permissions)
+            if (errors === 0) {
+              this.toastService.success('Permisos actualizados exitosamente');
+            } else {
+              this.toastService.warning('Algunos permisos no se pudieron actualizar');
+            }
+          }
+        };
+
+        requests.forEach(req => {
+          req.subscribe({
+            next: () => checkDone(),
+            error: (e) => {
+              console.error(e);
+              errors++;
+              checkDone();
+            }
+          });
+        });
+
       },
-      error: (error) => {
-        console.error('Error getting current permissions:', error);
+      error: (err) => {
         this.isUpdatingPermissions = false;
         this.toastService.error('Error al obtener permisos actuales');
-      },
+      }
     });
   }
 
-  private handlePermissionsUpdateSuccess(): void {
-    this.showPermissionsModal = false;
-    this.currentRole = null;
-    this.isUpdatingPermissions = false;
-    this.loadRoles();
-    this.toastService.success('Permisos actualizados exitosamente');
+  getEmptyStateTitle(): string {
+    const filters = this.filterForm.value;
+    if (filters.search || filters.is_system_role) {
+      return 'No hay roles que coincidan';
+    }
+    return 'No hay roles';
   }
 
-  private handlePermissionsUpdateError(error: any): void {
-    console.error('Error updating permissions:', error);
-    this.isUpdatingPermissions = false;
-    this.toastService.error('Error al actualizar permisos');
+  getEmptyStateDescription(): string {
+    const filters = this.filterForm.value;
+    if (filters.search || filters.is_system_role) {
+      return 'Intenta ajustar los filtros de búsqueda';
+    }
+    return 'Comienza creando tu primer rol.';
+  }
+
+  formatDate(dateString: string): string {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 }

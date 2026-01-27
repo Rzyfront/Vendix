@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AuditLog } from '../interfaces/audit.interface';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
@@ -9,472 +9,145 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   selector: 'app-audit-details-modal',
   standalone: true,
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
-  styles: [
-    `
-      .audit-details-container {
-        display: flex;
-        flex-direction: column;
-        gap: var(--radius-lg);
-        padding: var(--control-padding);
-      }
-
-      .audit-section {
-        background-color: var(--color-background);
-        border: var(--border-width) solid var(--color-border);
-        border-radius: var(--radius-lg);
-        overflow: hidden;
-        box-shadow: var(--shadow-sm);
-        transition: all var(--transition-fast) ease;
-      }
-
-      .audit-section:hover {
-        box-shadow: var(--shadow-md);
-        transform: translateY(-1px);
-      }
-
-      .audit-section-header {
-        display: flex;
-        align-items: center;
-        gap: var(--radius-sm);
-        padding: var(--control-padding);
-        background-color: var(--color-muted);
-        border-bottom: var(--border-width) solid var(--color-border);
-      }
-
-      .audit-section-icon {
-        color: var(--color-primary);
-        flex-shrink: 0;
-      }
-
-      .audit-section-title {
-        font-size: var(--fs-base);
-        font-weight: var(--fw-semibold);
-        color: var(--color-text-primary);
-        margin: 0;
-      }
-
-      .audit-section-content {
-        padding: var(--control-padding);
-      }
-
-      .audit-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: var(--radius-md);
-      }
-
-      .audit-field {
-        display: flex;
-        flex-direction: column;
-        gap: calc(var(--radius-sm) / 2);
-      }
-
-      .audit-field-label {
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--color-text-secondary);
-        margin: 0;
-      }
-
-      .audit-field-value {
-        font-size: var(--fs-sm);
-        color: var(--color-text-primary);
-        font-family: var(--font-primary);
-        line-height: 1.5;
-        word-break: break-word;
-      }
-
-      .audit-field-code {
-        font-family:
-          'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro',
-          monospace;
-        background-color: var(--color-muted);
-        padding: calc(var(--radius-sm) / 2) var(--radius-sm);
-        border-radius: var(--radius-sm);
-        border: var(--border-width) solid var(--color-border);
-        font-size: var(--fs-xs);
-      }
-
-      .audit-field-small {
-        font-size: var(--fs-xs);
-        line-height: 1.4;
-        word-break: break-all;
-      }
-
-      .audit-action-badge {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: calc(var(--radius-sm) / 2) var(--radius-md);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-medium);
-        border-radius: var(--radius-pill);
-        border: var(--border-width) solid;
-        transition: all var(--transition-fast) ease;
-        min-width: 80px;
-        text-align: center;
-      }
-
-      .audit-action-badge:hover {
-        transform: translateY(-1px);
-        box-shadow: var(--shadow-sm);
-      }
-
-      .audit-action-badge.create {
-        background-color: rgba(34, 197, 94, 0.1);
-        color: #15803d;
-        border-color: rgba(34, 197, 94, 0.3);
-      }
-
-      .audit-action-badge.update {
-        background-color: rgba(59, 130, 246, 0.1);
-        color: #1e40af;
-        border-color: rgba(59, 130, 246, 0.3);
-      }
-
-      .audit-action-badge.delete {
-        background-color: rgba(239, 68, 68, 0.1);
-        color: #b91c1c;
-        border-color: rgba(239, 68, 68, 0.3);
-      }
-
-      .audit-action-badge.login {
-        background-color: rgba(16, 185, 129, 0.1);
-        color: #047857;
-        border-color: rgba(16, 185, 129, 0.3);
-      }
-
-      .audit-action-badge.logout {
-        background-color: rgba(107, 114, 128, 0.1);
-        color: #374151;
-        border-color: rgba(107, 114, 128, 0.3);
-      }
-
-      .audit-action-badge.read {
-        background-color: rgba(245, 158, 11, 0.1);
-        color: #b45309;
-        border-color: rgba(245, 158, 11, 0.3);
-      }
-
-      .audit-action-badge.permission_change {
-        background-color: rgba(139, 92, 246, 0.1);
-        color: #6d28d9;
-        border-color: rgba(139, 92, 246, 0.3);
-      }
-
-      .audit-data-change {
-        margin-bottom: var(--radius-md);
-      }
-
-      .audit-data-change:last-child {
-        margin-bottom: 0;
-      }
-
-      .audit-data-title {
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--color-text-secondary);
-        margin: 0 0 var(--radius-sm) 0;
-      }
-
-      .audit-data-content {
-        background-color: var(--color-muted);
-        border: var(--border-width) solid var(--color-border);
-        border-radius: var(--radius-md);
-        padding: var(--control-padding);
-        font-family:
-          'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro',
-          monospace;
-        font-size: var(--fs-xs);
-        line-height: 1.5;
-        color: var(--color-text-primary);
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        margin: 0;
-        max-height: 200px;
-        overflow-y: auto;
-      }
-
-      .audit-data-content::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-
-      .audit-data-content::-webkit-scrollbar-track {
-        background: var(--color-background);
-        border-radius: var(--radius-sm);
-      }
-
-      .audit-data-content::-webkit-scrollbar-thumb {
-        background: var(--color-border);
-        border-radius: var(--radius-sm);
-      }
-
-      .audit-data-content::-webkit-scrollbar-thumb:hover {
-        background: var(--color-text-secondary);
-      }
-
-      .audit-modal-footer {
-        display: flex;
-        justify-content: flex-end;
-        padding: var(--control-padding);
-        background-color: var(--color-background);
-        border-top: var(--border-width) solid var(--color-border);
-      }
-
-      /* Responsive Design */
-      @media (max-width: 768px) {
-        .audit-details-container {
-          padding: calc(var(--control-padding) / 2);
-          gap: var(--radius-md);
-        }
-
-        .audit-grid {
-          grid-template-columns: 1fr;
-          gap: calc(var(--radius-sm) / 2);
-        }
-
-        .audit-section-header {
-          padding: calc(var(--control-padding) / 2);
-        }
-
-        .audit-section-content {
-          padding: calc(var(--control-padding) / 2);
-        }
-
-        .audit-field {
-          gap: calc(var(--radius-sm) / 4);
-        }
-
-        .audit-data-content {
-          max-height: 150px;
-          font-size: 10px;
-        }
-      }
-
-      /* Dark theme adjustments */
-      [data-theme='dark'] .audit-action-badge.create {
-        background-color: rgba(34, 197, 94, 0.15);
-        color: #4ade80;
-        border-color: rgba(34, 197, 94, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.update {
-        background-color: rgba(59, 130, 246, 0.15);
-        color: #60a5fa;
-        border-color: rgba(59, 130, 246, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.delete {
-        background-color: rgba(239, 68, 68, 0.15);
-        color: #f87171;
-        border-color: rgba(239, 68, 68, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.login {
-        background-color: rgba(16, 185, 129, 0.15);
-        color: #34d399;
-        border-color: rgba(16, 185, 129, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.logout {
-        background-color: rgba(107, 114, 128, 0.15);
-        color: #9ca3af;
-        border-color: rgba(107, 114, 128, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.read {
-        background-color: rgba(245, 158, 11, 0.15);
-        color: #fbbf24;
-        border-color: rgba(245, 158, 11, 0.3);
-      }
-
-      [data-theme='dark'] .audit-action-badge.permission_change {
-        background-color: rgba(139, 92, 246, 0.15);
-        color: #a78bfa;
-        border-color: rgba(139, 92, 246, 0.3);
-      }
-    `,
-  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
       title="Detalles del Log de Auditoría"
       subtitle="Visualiza la información completa del registro de auditoría"
     >
-      <div class="audit-details-container" *ngIf="log">
-        <!-- Información General -->
-        <div class="audit-section">
-          <div class="audit-section-header">
-            <app-icon
-              name="info"
-              [size]="18"
-              class="audit-section-icon"
-            ></app-icon>
-            <h4 class="audit-section-title">Información General</h4>
-          </div>
-          <div class="audit-section-content">
-            <div class="audit-grid">
-              <div class="audit-field">
-                <label class="audit-field-label">Usuario</label>
-                <div class="audit-field-value">
-                  {{
-                    log.users
-                      ? log.users.first_name + ' ' + log.users.last_name
-                      : 'N/A'
-                  }}
+      @if (log(); as auditLog) {
+        <div class="flex flex-col gap-6 p-1">
+          <!-- Información General -->
+          <div class="bg-surface border border-border rounded-xl overflow-hidden shadow-sm">
+            <div class="px-4 py-3 bg-muted/30 border-b border-border flex items-center gap-2">
+              <app-icon name="info" [size]="18" class="text-primary"></app-icon>
+              <h4 class="text-sm font-semibold text-text-primary">Información General</h4>
+            </div>
+            <div class="p-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Usuario</span>
+                  <span class="text-sm text-text-primary">{{ auditLog.users ? auditLog.users.first_name + ' ' + auditLog.users.last_name : 'Sistema' }}</span>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">Email</label>
-                <div class="audit-field-value">
-                  {{ log.users?.email || 'N/A' }}
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Email</span>
+                  <span class="text-sm text-text-primary truncate" [title]="auditLog.users?.email">{{ auditLog.users?.email || 'N/A' }}</span>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">Acción</label>
-                <div class="audit-field-value">
-                  <span
-                    class="audit-action-badge"
-                    [ngClass]="getActionBadgeClass(log.action)"
-                  >
-                    {{ getActionDisplay(log.action).text }}
-                  </span>
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Acción</span>
+                  <div>
+                    <span [class]="'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ' + getBadgeClasses(auditLog.action)">
+                      {{ getActionDisplay(auditLog.action) }}
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">Recurso</label>
-                <div class="audit-field-value">
-                  {{ getResourceDisplay(log.resource) }}
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Recurso</span>
+                  <span class="text-sm text-text-primary">{{ getResourceDisplay(auditLog.resource) }}</span>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">ID Recurso</label>
-                <div class="audit-field-value">
-                  {{ log.resource_id || 'N/A' }}
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">ID Recurso</span>
+                  <span class="text-sm font-mono text-text-primary">{{ auditLog.resource_id || 'N/A' }}</span>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">Fecha</label>
-                <div class="audit-field-value">
-                  {{ formatDate(log.created_at) }}
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Fecha</span>
+                  <span class="text-sm text-text-primary">{{ formatDate(auditLog.created_at) }}</span>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Información de Organización y Tienda -->
-        <div class="audit-section">
-          <div class="audit-section-header">
-            <app-icon
-              name="building"
-              [size]="18"
-              class="audit-section-icon"
-            ></app-icon>
-            <h4 class="audit-section-title">Organización y Tienda</h4>
-          </div>
-          <div class="audit-section-content">
-            <div class="audit-grid">
-              <div class="audit-field">
-                <label class="audit-field-label">Organización</label>
-                <div class="audit-field-value">
-                  {{
-                    log.users && log.users.organization_id
-                      ? 'Org ' + log.users.organization_id
-                      : 'N/A'
-                  }}
+          <!-- Información Técnica -->
+          <div class="bg-surface border border-border rounded-xl overflow-hidden shadow-sm">
+            <div class="px-4 py-3 bg-muted/30 border-b border-border flex items-center gap-2">
+              <app-icon name="server" [size]="18" class="text-primary"></app-icon>
+              <h4 class="text-sm font-semibold text-text-primary">Información Técnica</h4>
+            </div>
+            <div class="p-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs font-medium text-text-secondary">Dirección IP</span>
+                  <span class="text-sm font-mono text-text-primary">{{ auditLog.ip_address || 'N/A' }}</span>
                 </div>
-              </div>
-              <div class="audit-field">
-                <label class="audit-field-label">Tienda</label>
-                <div class="audit-field-value">
-                  {{ log.stores?.name || 'N/A' }}
+                <div class="flex flex-col gap-1 truncate">
+                  <span class="text-xs font-medium text-text-secondary">User Agent</span>
+                  <span class="text-xs text-text-secondary italic" [title]="auditLog.user_agent">{{ auditLog.user_agent || 'N/A' }}</span>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <!-- Información Técnica -->
-        <div class="audit-section">
-          <div class="audit-section-header">
-            <app-icon
-              name="server"
-              [size]="18"
-              class="audit-section-icon"
-            ></app-icon>
-            <h4 class="audit-section-title">Información Técnica</h4>
-          </div>
-          <div class="audit-section-content">
-            <div class="audit-grid">
-              <div class="audit-field">
-                <label class="audit-field-label">Dirección IP</label>
-                <div class="audit-field-value audit-field-code">
-                  {{ log.ip_address || 'N/A' }}
-                </div>
+          <!-- Cambios de Datos -->
+          @if (auditLog.old_values || auditLog.new_values) {
+            <div class="bg-surface border border-border rounded-xl overflow-hidden shadow-sm">
+              <div class="px-4 py-3 bg-muted/30 border-b border-border flex items-center gap-2">
+                <app-icon name="git-branch" [size]="18" class="text-primary"></app-icon>
+                <h4 class="text-sm font-semibold text-text-primary">Cambios de Datos</h4>
               </div>
-              <div class="audit-field">
-                <label class="audit-field-label">User Agent</label>
-                <div class="audit-field-value audit-field-small">
-                  {{ log.user_agent || 'N/A' }}
-                </div>
+              <div class="p-4 flex flex-col gap-4">
+                @if (auditLog.old_values) {
+                  <div>
+                    <h5 class="text-xs font-medium text-red-600 mb-2 uppercase tracking-wider">Valores Anteriores</h5>
+                    <pre class="text-[10px] font-mono bg-red-50/50 border border-red-100 p-3 rounded-lg overflow-auto max-h-[150px] text-text-primary">{{ auditLog.old_values | json }}</pre>
+                  </div>
+                }
+                @if (auditLog.new_values) {
+                  <div>
+                    <h5 class="text-xs font-medium text-green-600 mb-2 uppercase tracking-wider">Valores Nuevos</h5>
+                    <pre class="text-[10px] font-mono bg-green-50/50 border border-green-100 p-3 rounded-lg overflow-auto max-h-[150px] text-text-primary">{{ auditLog.new_values | json }}</pre>
+                  </div>
+                }
               </div>
             </div>
-          </div>
+          }
         </div>
-
-        <!-- Cambios de Datos -->
-        <div *ngIf="log.old_values || log.new_values" class="audit-section">
-          <div class="audit-section-header">
-            <app-icon
-              name="git-branch"
-              [size]="18"
-              class="audit-section-icon"
-            ></app-icon>
-            <h4 class="audit-section-title">Cambios de Datos</h4>
-          </div>
-          <div class="audit-section-content">
-            <!-- Valores Anteriores -->
-            <div *ngIf="log.old_values" class="audit-data-change">
-              <h5 class="audit-data-title">Valores Anteriores</h5>
-              <pre class="audit-data-content">{{ log.old_values | json }}</pre>
-            </div>
-
-            <!-- Valores Nuevos -->
-            <div *ngIf="log.new_values" class="audit-data-change">
-              <h5 class="audit-data-title">Valores Nuevos</h5>
-              <pre class="audit-data-content">{{ log.new_values | json }}</pre>
-            </div>
-          </div>
-        </div>
-      </div>
+      }
 
       <!-- Footer -->
-      <div slot="footer" class="audit-modal-footer">
+      <div slot="footer" class="flex justify-end p-4 bg-surface border-t border-border">
         <app-button variant="primary" (clicked)="onCancel()">
           Cerrar
         </app-button>
       </div>
     </app-modal>
   `,
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class AuditDetailsModalComponent {
-  @Input() isOpen = false;
-  @Input() log: AuditLog | null = null;
+  isOpen = input<boolean>(false);
+  log = input<AuditLog | null>(null);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
+  isOpenChange = output<boolean>();
+  cancel = output<void>();
 
   onCancel(): void {
     this.isOpenChange.emit(false);
   }
 
-  getActionDisplay(action: string): { text: string; class: string } {
+  getBadgeClasses(action: string): string {
+    const base = '';
+    switch (action) {
+      case 'CREATE': return 'bg-green-50 text-green-700 border-green-200';
+      case 'UPDATE': return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'DELETE': return 'bg-red-50 text-red-700 border-red-200';
+      case 'LOGIN': return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      case 'LOGOUT': return 'bg-gray-50 text-gray-700 border-gray-200';
+      case 'READ': return 'bg-amber-50 text-amber-700 border-amber-200';
+      case 'PERMISSION_CHANGE': return 'bg-purple-50 text-purple-700 border-purple-200';
+      default: return 'bg-gray-100 text-gray-600 border-gray-200';
+    }
+  }
+
+  getActionDisplay(action: string): string {
     const actionMap: Record<string, string> = {
       CREATE: 'Crear',
       UPDATE: 'Actualizar',
@@ -484,23 +157,7 @@ export class AuditDetailsModalComponent {
       READ: 'Lectura',
       PERMISSION_CHANGE: 'Cambio Permisos',
     };
-    return {
-      text: actionMap[action] || action,
-      class: '',
-    };
-  }
-
-  getActionBadgeClass(action: string): string {
-    const actionClassMap: Record<string, string> = {
-      CREATE: 'create',
-      UPDATE: 'update',
-      DELETE: 'delete',
-      LOGIN: 'login',
-      LOGOUT: 'logout',
-      READ: 'read',
-      PERMISSION_CHANGE: 'permission_change',
-    };
-    return actionClassMap[action] || '';
+    return actionMap[action] || action;
   }
 
   getResourceDisplay(resource: string): string {
@@ -525,7 +182,6 @@ export class AuditDetailsModalComponent {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
     });
   }
 }

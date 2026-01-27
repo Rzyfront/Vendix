@@ -1,156 +1,30 @@
-/* Currencies Component Styles */
+/* Currencies Module Base Styles */
 
-/* Table container */
-.table-container {
-  overflow-x: auto;
+:host {
+  display: block;
 }
 
-/* Status badges */
-.status-badge {
-  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+/* Adjustments for standard layout components */
+.bg-surface {
+  background-color: var(--color-surface);
 }
 
-.status-active {
-  @apply bg-green-100 text-green-800;
+.border-border {
+  border-color: var(--color-border);
 }
 
-.status-inactive {
-  @apply bg-yellow-100 text-yellow-800;
+.rounded-xl {
+  border-radius: 0.75rem;
 }
 
-.status-deprecated {
-  @apply bg-red-100 text-red-800;
+/* Table container custom styles if needed */
+.relative.min-h-\[400px\] {
+  min-height: 400px;
 }
 
-/* Action buttons */
-.action-button {
-  @apply p-1 rounded hover:bg-gray-100 transition-colors duration-200;
-}
-
-.action-button:disabled {
-  @apply opacity-50 cursor-not-allowed;
-}
-
-/* Modal animations */
-.modal-backdrop {
-  animation: fadeIn 0.2s ease-out;
-}
-
-.modal-panel {
-  animation: slideUp 0.3s ease-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(20px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-/* Loading spinner */
-.loading-spinner {
-  @apply inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600;
-}
-
-/* Empty state */
-.empty-state {
-  @apply text-center py-12;
-}
-
-.empty-state-icon {
-  @apply mx-auto h-12 w-12 text-gray-400;
-}
-
-.empty-state-title {
-  @apply mt-2 text-sm font-medium text-gray-900;
-}
-
-.empty-state-description {
-  @apply mt-1 text-sm text-gray-500;
-}
-
-/* Stats cards */
-.stats-grid {
-  @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6;
-}
-
-.stats-card {
-  @apply bg-white rounded-lg shadow p-6 border border-gray-200;
-}
-
-.stats-icon {
-  @apply p-3 rounded-full;
-}
-
-.stats-content {
-  @apply ml-4;
-}
-
-.stats-label {
-  @apply text-sm font-medium text-gray-600;
-}
-
-.stats-value {
-  @apply text-2xl font-semibold text-gray-900;
-}
-
-/* Form validation */
-.form-error {
-  @apply mt-1 text-sm text-red-600;
-}
-
-.form-input-error {
-  @apply border-red-500;
-}
-
-/* Responsive adjustments */
+/* Ensure symmetric spacing */
 @media (max-width: 640px) {
-  .table-container {
-    @apply -mx-4 px-4;
+  .flex-col {
+    width: 100%;
   }
-
-  .stats-grid {
-    @apply grid-cols-1;
-  }
-}
-
-/* Focus states */
-.focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
-}
-
-/* Transitions */
-.transition-custom {
-  @apply transition-colors duration-200 ease-in-out;
-}
-
-/* Hover states */
-.hover-lift {
-  @apply hover:shadow-lg hover:-translate-y-1;
-}
-
-/* Button variants */
-.btn-primary {
-  @apply inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
-}
-
-.btn-secondary {
-  @apply inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500;
-}
-
-.btn-disabled {
-  @apply opacity-50 cursor-not-allowed;
 }

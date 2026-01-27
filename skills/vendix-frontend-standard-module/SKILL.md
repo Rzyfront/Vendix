@@ -21,120 +21,155 @@ metadata:
 
 ### 1. Main Component Structure
 
-The main component should orchestrate the stats and the list component.
+The main component acts as the orchestrator. It holds the data state and manages modals.
+**RULE:** Use a single `div` container with `flex flex-col gap-6`.
 
 ```typescript
 @Component({
   template: `
-    <div class="w-full">
-      <!-- 4 Stats Cards Grid -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6 mb-4 md:mb-6 lg:mb-8">
-        <app-stats title="Total" [value]="stats.total" iconName="package"></app-stats>
-        <app-stats title="Active" [value]="stats.active" iconName="check-circle"></app-stats>
-        <app-stats title="Alerts" [value]="stats.alerts" iconName="alert-triangle"></app-stats>
-        <app-stats title="Value" [value]="stats.value" iconName="dollar-sign"></app-stats>
+    <!-- Standard Module Layout -->
+    <div class="flex flex-col gap-6">
+
+      <!-- Stats Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- stats must use system colors -->
+        <app-stats
+          title="Total Roles"
+          [value]="stats.totalRoles"
+          iconName="shield"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+        <!-- ... other stats ... -->
       </div>
 
-      <!-- List Component -->
-      <app-item-list
-        [items]="items"
-        [isLoading]="isLoading"
-        (search)="onSearch($event)"
-        (filter)="onFilter($event)"
-        (create)="openCreateModal()"
-      ></app-item-list>
+      <!-- Main Content Card -->
+      <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+        <!-- Header (Title & Controls) -->
+        <!-- SEE SECTION 2 BELOW FOR HEADER DETAILS -->
 
-      <!-- Quick Interaction Modals -->
-      <app-item-create-modal [(isOpen)]="isCreateModalOpen"></app-item-create-modal>
+        <!-- Table Content -->
+        <!-- SEE SECTION 3 BELOW FOR TABLE DETAILS -->
+      </div>
     </div>
   `
 })
 ```
 
-### 2. List Component Layout
+### 2. Header Layout (Compact & Symmetric)
 
-The list component must use the standard container and header styling.
+The header MUST follow this exact structure for symmetry and compactness.
 
+**Container Style:** `p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface`
+
+**Left Side (Title & Help):**
 ```html
-<div
-  class="bg-surface rounded-card shadow-card border border-border min-h-[600px]"
->
-  <!-- Header -->
-  <div class="p-2 md:px-6 md:py-4 border-b border-border">
-    <div
-      class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-    >
-      <div class="flex-1 min-w-0">
-        <h2 class="text-lg font-semibold text-text-primary">
-          Title ({{ items.length }})
-        </h2>
-      </div>
-
-      <div
-        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-      >
-        <!-- Search -->
-        <app-inputsearch
-          class="w-full sm:w-64"
-          (ngModelChange)="onSearch($event)"
-        ></app-inputsearch>
-
-        <!-- Filters -->
-        <app-item-filter-dropdown
-          (filterChange)="onFilter($event)"
-        ></app-item-filter-dropdown>
-
-        <!-- Actions -->
-        <div class="flex gap-2">
-          <app-button variant="outline" (clicked)="refresh.emit()"
-            ><app-icon name="refresh"></app-icon
-          ></app-button>
-          <app-button variant="primary" (clicked)="create.emit()"
-            ><app-icon name="plus"></app-icon> New</app-button
-          >
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Table -->
-  <div class="p-2 md:p-4">
-    <app-table
-      [data]="items"
-      [columns]="tableColumns"
-      [actions]="tableActions"
-    ></app-table>
-  </div>
+<div class="flex-1 min-w-0">
+  <h3 class="text-lg font-semibold text-text-primary">
+    Listado de [Entidad]
+  </h3>
+  <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+    [Descripción breve]
+  </p>
 </div>
 ```
 
-### 3. Component Communication
+**Right Side (Controls):**
+- Container: `flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto`
+- **Search**: `w-full sm:w-60`. MUST use `size="sm"` and `fullWidth="true"`.
+- **Selector**: `w-full sm:w-48`. MUST use `size="sm"` and `label=""` (no label).
+- **Actions**: Flex container `flex gap-2 items-center sm:ml-auto`. Buttons MUST be `size="sm"`.
 
-- **Main to List:** Pass data (`items`, `isLoading`) and configurations.
-- **List to Main:** Emit events for `search`, `filter`, `create`, `edit`, `delete`.
-- **Main to Modals:** Control visibility with `isOpen` (two-way binding).
+```html
+<!-- Search -->
+<div class="w-full sm:w-60">
+  <app-inputsearch
+    placeholder="Buscar..."
+    [debounceTime]="300"
+    (searchChange)="onSearch($event)"
+    size="sm"
+    fullWidth="true"
+  ></app-inputsearch>
+</div>
 
-## Code Examples
+<!-- Selector (No Label, No margin-top) -->
+<div class="w-full sm:w-48">
+  <app-selector
+    placeholder="Filtrar..."
+    [options]="options"
+    [formControl]="control"
+    size="sm"
+    variant="outline"
+  ></app-selector>
+</div>
 
-### Table Column Configuration
+<!-- Actions -->
+<div class="flex gap-2 items-center sm:ml-auto">
+  <app-button variant="primary" size="sm" iconName="plus" (clicked)="create()">
+    <span class="hidden sm:inline">Nuevo</span>
+    <span class="sm:hidden">Plus</span>
+  </app-button>
+</div>
+```
 
+### 3. Table Container
+
+The table container MUST have padding to separate it from the card edges.
+
+**Style:** `relative min-h-[400px] p-2 md:p-4`
+
+```html
+<div class="relative min-h-[400px] p-2 md:p-4">
+  <!-- Loading Overlay -->
+  <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+  </div>
+
+  <!-- Table -->
+  <app-table [data]="items" ...>
+    <!-- Empty State internal slot -->
+    <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && items.length === 0">
+       <app-empty-state ...></app-empty-state>
+    </div>
+  </app-table>
+</div>
+```
+
+### 4. Stats Component Usage
+
+**RULE:** Use `iconBgColor` and `iconColor` inputs directly. Do NOT rely on generic `variant` unless absolutely necessary.
+**Data Rule:** Stats data properties usually come as camelCase from the API (e.g., `totalRoles`, `systemRoles`). Match the interface exactly.
+
+```html
+<app-stats
+  title="System Roles"
+  [value]="stats.systemRoles"
+  iconName="lock"
+  iconBgColor="bg-purple-100"
+  iconColor="text-purple-600"
+></app-stats>
+```
+
+### 5. Angular Signals
+
+All new logic MUST use Angular Signals.
+- `input()` instead of `@Input()`
+- `output()` instead of `@Output()`
+- Use `inject()` for dependency injection.
+
+### 6. Code Examples
+
+**Role Stats Interface (camelCase):**
 ```typescript
-tableColumns: TableColumn[] = [
-  { key: 'name', label: 'Name', sortable: true, priority: 1 },
-  {
-    key: 'status',
-    label: 'Status',
-    badge: true,
-    badgeConfig: {
-      type: 'custom',
-      colorMap: { active: '#22c55e', inactive: '#f59e0b' }
-    }
-  },
-  { key: 'created_at', label: 'Date', transform: (val) => formatDate(val) }
-];
+export interface RoleStats {
+  totalRoles: number;
+  systemRoles: number;
+  customRoles: number;
+  totalPermissions: number;
+}
 ```
 
 ## Resources
 
-- **Core Components**: `app-stats`, `app-table`, `app-button`, `app-inputsearch`.
-- **Reference**: `apps/frontend/src/app/private/modules/store/products/`
+- **Reference Module**: `apps/frontend/src/app/private/modules/super-admin/roles/` (Gold Standard)
+- **Theme**: Use `vendix-frontend-theme` variables.

@@ -229,20 +229,22 @@ import {
       </div>
 
       <!-- Actions -->
-      <div
-        class="flex justify-end space-x-3 pt-6 border-t border-gray-200 mt-6"
-      >
-        <app-button variant="outline" (clicked)="onCancel()">
-          Cancelar
-        </app-button>
-        <app-button
-          *ngIf="parsedData && parsedData.length > 0"
-          variant="primary"
-          (clicked)="confirmImport()"
+      <div slot="footer">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
         >
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-          Importar {{ parsedData.length }} Productos
-        </app-button>
+          <app-button variant="outline" (clicked)="onCancel()">
+            Cancelar
+          </app-button>
+          <app-button
+            *ngIf="parsedData && parsedData.length > 0"
+            variant="primary"
+            (clicked)="confirmImport()"
+          >
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            Importar {{ parsedData.length }} Productos
+          </app-button>
+        </div>
       </div>
     </app-modal>
   `,

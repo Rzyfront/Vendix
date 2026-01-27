@@ -1,39 +1,30 @@
-import { Component, Input, EventEmitter, Output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { IconComponent } from '../../../../../shared/components/index';
+import { IconComponent, ButtonComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-audit-empty-state',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, ButtonComponent],
   template: `
-    <div class="flex flex-col items-center justify-center py-16 px-4">
-      <!-- Icon -->
-      <div
-        class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mb-4"
-      >
-        <app-icon name="file-text" class="w-10 h-10 text-gray-400"></app-icon>
+    <div class="flex flex-col items-center justify-center py-12 px-4 text-center animate-in fade-in zoom-in duration-300">
+      <div class="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
+        <app-icon name="file-text" [size]="40" class="text-primary"></app-icon>
       </div>
 
-      <!-- Title -->
-      <h3 class="text-xl font-semibold text-text mb-2">
-        {{ title }}
+      <h3 class="text-xl font-semibold text-text-primary mb-2">
+        {{ title() }}
       </h3>
-
-      <!-- Description -->
-      <p class="text-text-muted text-center max-w-md mb-6">
-        {{ description }}
+      <p class="text-text-secondary max-w-md mb-8">
+        {{ description() }}
       </p>
 
-      <!-- Action Button (optional) -->
-      <button
-        *ngIf="showActionButton"
-        (click)="actionClick.emit()"
-        class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2"
-      >
-        <app-icon name="refresh-cw" [size]="16"></app-icon>
-        {{ actionText }}
-      </button>
+      @if (showActionButton()) {
+        <app-button variant="primary" (clicked)="actionClick.emit()">
+          <app-icon name="refresh-cw" [size]="18" slot="icon"></app-icon>
+          {{ actionText() }}
+        </app-button>
+      }
     </div>
   `,
   styles: [
@@ -45,13 +36,10 @@ import { IconComponent } from '../../../../../shared/components/index';
   ],
 })
 export class AuditEmptyStateComponent {
-  @Input() title: string = 'No audit logs found';
-  @Input() description: string =
-    'Audit logs will appear here when actions are performed in the system.';
-  @Input() showActionButton: boolean = true;
-  @Input() actionText: string = 'Refresh';
+  title = input<string>('No se encontraron registros');
+  description = input<string>('Los logs de auditoría aparecerán aquí cuando se realicen acciones en el sistema.');
+  showActionButton = input<boolean>(true);
+  actionText = input<string>('Actualizar');
 
-  @Output() actionClick = new EventEmitter<void>();
-
-  constructor() {}
+  actionClick = output<void>();
 }

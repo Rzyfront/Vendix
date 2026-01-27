@@ -384,13 +384,18 @@ export class PosCartService {
     items: CartItem[],
     discounts: CartDiscount[],
   ): CartSummary {
-    const subtotal = this.calculateSubtotal(items); // Ahora incluye impuestos (SUM of quantity * finalPrice)
+    const grossTotal = this.calculateSubtotal(items); // Gross Total (with tax)
     const discountAmount = discounts.reduce(
       (total, discount) => total + discount.amount,
       0,
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
-    const total = subtotal - discountAmount; // subtotal ya tiene el taxAmount sumado en cada item.totalPrice
+
+    // Subtotal should be Net Amount (without tax) for display
+    const subtotal = grossTotal - taxAmount;
+
+    // Total is based on Gross Total minus Discounts
+    const total = grossTotal - discountAmount;
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 

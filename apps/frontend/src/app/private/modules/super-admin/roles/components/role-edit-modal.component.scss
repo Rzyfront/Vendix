@@ -1,0 +1,49 @@
+.form-group {
+    @apply mb-6;
+}
+
+.form-label {
+    @apply block text-sm font-medium text-text-primary mb-2;
+}
+
+.form-input {
+    @apply w-full px-3 py-2 border border-border rounded-md shadow-sm transition-colors;
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
+
+    &:focus {
+        @apply outline-none ring-2 border-primary;
+        background-color: var(--color-surface);
+        --tw-ring-color: rgba(var(--color-primary-rgb), 0.5);
+    }
+}
+
+.form-input-error {
+    border-color: var(--color-destructive);
+
+    &:focus {
+        --tw-ring-color: rgba(var(--color-destructive-rgb), 0.5);
+        border-color: var(--color-destructive);
+    }
+}
+
+.form-error {
+    @apply mt-1 text-sm text-destructive;
+}
+
+.form-checkbox {
+    @apply h-4 w-4 text-primary border-border rounded focus:ring-2;
+    --tw-ring-color: rgba(var(--color-primary-rgb), 0.5);
+}
+
+.form-checkbox-label {
+    @apply block text-sm font-medium text-text-primary;
+}
+
+.form-checkbox-description {
+    @apply mt-1 text-sm text-text-secondary;
+}
+
+.modal-footer {
+    @apply flex justify-end gap-3;
+}

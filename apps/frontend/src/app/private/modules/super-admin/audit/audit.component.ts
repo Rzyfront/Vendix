@@ -1,6 +1,6 @@
-import { Component, OnInit, OnDestroy, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject, takeUntil, finalize } from 'rxjs';
 import {
   AuditLog,
   AuditStats,
@@ -24,6 +24,7 @@ import {
   InputsearchComponent,
   IconComponent,
   ButtonComponent,
+  SelectorComponent,
   ToastService,
 } from '../../../../shared/components/index';
 import {
@@ -47,20 +48,31 @@ import {
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
+    SelectorComponent,
   ],
   templateUrl: './audit.component.html',
-  styleUrls: ['./audit.component.css'],
 })
 export class AuditComponent implements OnInit, OnDestroy {
-  auditLogs: AuditLog[] = [];
-  auditStats: AuditStats | null = null;
-  isLoading = false;
-  searchSubject = new Subject<string>();
-  showFiltersDropdown = false;
-  private destroy$ = new Subject<void>();
+  private readonly auditService = inject(AuditService);
+  private readonly fb = inject(FormBuilder);
+  private readonly toastService = inject(ToastService);
 
-  // Form for filters
+  // Signals for state
+  auditLogs = signal<AuditLog[]>([]);
+  auditStats = signal<AuditStats | null>(null);
+  isLoading = signal<boolean>(false);
+  showCreateModal = signal<boolean>(false); // Reuse if needed, but Audit is read-only
+  isDetailsModalOpen = signal<boolean>(false);
+  selectedAuditLog = signal<AuditLog | null>(null);
+
+  private readonly destroy$ = new Subject<void>();
   filterForm: FormGroup;
+
+  // Pagination state (Signals)
+  currentPage = signal<number>(1);
+  pageSize = signal<number>(20);
+  totalItems = signal<number>(0);
+  totalPages = computed(() => Math.ceil(this.totalItems() / this.pageSize()));
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -70,9 +82,8 @@ export class AuditComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 1,
       transform: (value: any) =>
-        value ? `${value.first_name} ${value.last_name}` : 'N/A',
+        value ? `${value.first_name} ${value.last_name}` : 'Sistema',
     },
-
     {
       key: 'action',
       label: 'Acción',
@@ -83,16 +94,16 @@ export class AuditComponent implements OnInit, OnDestroy {
         type: 'custom',
         size: 'sm',
         colorMap: {
-          CREATE: '#22c55e',
-          UPDATE: '#3b82f6',
-          DELETE: '#ef4444',
-          LOGIN: '#10b981',
-          LOGOUT: '#6b7280',
-          READ: '#f59e0b',
-          PERMISSION_CHANGE: '#8b5cf6',
+          CREATE: '#10b981', // green-500
+          UPDATE: '#3b82f6', // blue-500
+          DELETE: '#ef4444', // red-500
+          LOGIN: '#34d399',  // emerald-400
+          LOGOUT: '#6b7280', // gray-500
+          READ: '#f59e0b',   // amber-500
+          PERMISSION_CHANGE: '#8b5cf6', // violet-500
         },
       },
-      transform: (value: AuditAction) => this.getActionDisplay(value).text,
+      transform: (value: AuditAction) => this.getActionLabel(value),
     },
     {
       key: 'resource',
@@ -101,62 +112,41 @@ export class AuditComponent implements OnInit, OnDestroy {
       priority: 2,
       transform: (value: AuditResource) => this.getResourceDisplay(value),
     },
-
-    {
-      key: 'users',
-      label: 'Organización',
-      sortable: true,
-      priority: 2,
-      transform: (value: any) =>
-        value?.organization_id ? `Org ${value.organization_id}` : 'N/A',
-    },
     {
       key: 'stores',
       label: 'Tienda',
       sortable: true,
       priority: 2,
-      transform: (value: any) => value?.name || 'N/A',
+      transform: (value: any) => value?.name || '---',
     },
     {
       key: 'ip_address',
-      label: 'IP',
+      label: 'Dirección IP',
       sortable: true,
       priority: 3,
       transform: (value: string) => value || 'N/A',
     },
     {
       key: 'created_at',
-      label: 'Fecha',
+      label: 'Fecha y Hora',
       sortable: true,
-      priority: 3,
+      priority: 1,
       transform: (value: string) => this.formatDate(value),
     },
   ];
 
   tableActions: TableAction[] = [
     {
-      label: 'Ver Detalles',
+      label: 'Detalles',
       icon: 'eye',
       action: (log: AuditLog) => this.viewLogDetails(log),
       variant: 'primary',
     },
   ];
 
-  // Pagination
-  pagination = {
-    page: 1,
-    limit: 20,
-    total: 0,
-    totalPages: 0,
-  };
-
-  // Audit Details Modal state
-  isDetailsModalOpen = false;
-  selectedAuditLog: AuditLog | null = null;
-
   // Filter options
   actionOptions = [
-    { value: '', label: 'Todas las acciones' },
+    { value: '', label: 'Acciones' },
     { value: AuditAction.CREATE, label: 'Crear' },
     { value: AuditAction.UPDATE, label: 'Actualizar' },
     { value: AuditAction.DELETE, label: 'Eliminar' },
@@ -167,7 +157,7 @@ export class AuditComponent implements OnInit, OnDestroy {
   ];
 
   resourceOptions = [
-    { value: '', label: 'Todos los recursos' },
+    { value: '', label: 'Recursos' },
     { value: AuditResource.USERS, label: 'Usuarios' },
     { value: AuditResource.ORGANIZATIONS, label: 'Organizaciones' },
     { value: AuditResource.STORES, label: 'Tiendas' },
@@ -178,53 +168,32 @@ export class AuditComponent implements OnInit, OnDestroy {
     { value: AuditResource.CATEGORIES, label: 'Categorías' },
   ];
 
-  constructor(
-    private auditService: AuditService,
-    private fb: FormBuilder,
-    private toastService: ToastService,
-  ) {
+  constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       action: [''],
       resource: [''],
-      userId: [''],
-      storeId: [''],
-      organizationId: [''],
       fromDate: [''],
       toDate: [''],
     });
-
-    // Setup search debounce
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
-      .subscribe((searchTerm: string) => {
-        this.filterForm.patchValue(
-          { search: searchTerm },
-          { emitEvent: false },
-        );
-        this.pagination.page = 1;
-        this.loadAuditLogs();
-      });
   }
 
   ngOnInit(): void {
     this.loadAuditLogs();
     this.loadAuditStats();
 
-    // Subscribe to form changes
+    // Reactive filters
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
-        this.pagination.page = 1;
+        this.currentPage.set(1);
         this.loadAuditLogs();
       });
 
-    // Subscribe to service loading states
-    this.auditService.isLoading
+    // Loading state from service
+    this.auditService.isLoading$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => {
-        this.isLoading = loading;
-      });
+      .subscribe(loading => this.isLoading.set(loading));
   }
 
   ngOnDestroy(): void {
@@ -232,112 +201,47 @@ export class AuditComponent implements OnInit, OnDestroy {
     this.destroy$.complete();
   }
 
-  toggleFiltersDropdown(): void {
-    this.showFiltersDropdown = !this.showFiltersDropdown;
-  }
-
-  hasActiveFilters(): boolean {
-    const filters = this.filterForm.value;
-    return !!(
-      filters.action ||
-      filters.resource ||
-      filters.fromDate ||
-      filters.toDate ||
-      filters.organizationId ||
-      filters.storeId
-    );
-  }
-
-  getActiveFiltersCount(): number {
-    const filters = this.filterForm.value;
-    let count = 0;
-    if (filters.action) count++;
-    if (filters.resource) count++;
-    if (filters.fromDate) count++;
-    if (filters.toDate) count++;
-    if (filters.organizationId) count++;
-    if (filters.storeId) count++;
-    return count;
-  }
-
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: MouseEvent): void {
-    const target = event.target as HTMLElement;
-    const dropdownElement = target.closest('.relative');
-
-    if (!dropdownElement && this.showFiltersDropdown) {
-      this.showFiltersDropdown = false;
-    }
-  }
-
   loadAuditLogs(): void {
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
-      limit: this.pagination.limit,
-      offset: (this.pagination.page - 1) * this.pagination.limit,
-      // search: filters.search || undefined,
+      limit: this.pageSize(),
+      offset: (this.currentPage() - 1) * this.pageSize(),
       action: filters.action || undefined,
       resource: filters.resource || undefined,
-      userId: filters.userId || undefined,
-      storeId: filters.storeId || undefined,
-      organizationId: filters.organizationId || undefined,
       fromDate: filters.fromDate || undefined,
       toDate: filters.toDate || undefined,
     };
 
-    this.auditService.getAuditLogs(query).subscribe({
-      next: (response: AuditLogsResponse) => {
-        this.auditLogs = response.logs || [];
-        this.pagination.total = response.total || 0;
-        this.pagination.totalPages = Math.ceil(response.total / response.limit);
-      },
-      error: (error) => {
-        console.error('Error loading audit logs:', error);
-        this.auditLogs = [];
-        this.pagination.total = 0;
-        this.pagination.totalPages = 0;
-        this.toastService.error('Error al cargar los logs de auditoría');
-      },
-    });
+    this.auditService.getAuditLogs(query)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe({
+        next: (response: AuditLogsResponse) => {
+          this.auditLogs.set(response.logs || []);
+          this.totalItems.set(response.total || 0);
+        },
+        error: () => {
+          this.auditLogs.set([]);
+          this.toastService.error('Error al cargar logs');
+        }
+      });
   }
 
   loadAuditStats(): void {
     const filters = this.filterForm.value;
-    this.auditService
-      .getAuditStats(filters.fromDate, filters.toDate)
+    this.auditService.getAuditStats(filters.fromDate, filters.toDate)
+      .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: (stats: AuditStats) => {
-          this.auditStats = stats;
-        },
-        error: (error) => {
-          console.error('Error loading audit stats:', error);
-          // Establecer valores por defecto
-          this.auditStats = {
-            total_logs: 0,
-            logs_by_action: {} as Record<AuditAction, number>,
-            logs_by_resource: {} as Record<AuditResource, number>,
-            logs_by_user: [],
-            logs_by_day: [],
-          };
-        },
+        next: (stats) => this.auditStats.set(stats),
+        error: () => this.toastService.error('Error al cargar estadísticas')
       });
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchSubject.next(searchTerm);
+    this.filterForm.patchValue({ search: searchTerm });
   }
 
   onPageChange(page: number): void {
-    this.pagination.page = page;
-    this.loadAuditLogs();
-  }
-
-  onSortChange(event: {
-    column: string;
-    direction: 'asc' | 'desc' | null;
-  }): void {
-    // TODO: Implement sorting logic
-    console.log('Sort changed:', event.column, event.direction);
+    this.currentPage.set(page);
     this.loadAuditLogs();
   }
 
@@ -347,8 +251,8 @@ export class AuditComponent implements OnInit, OnDestroy {
   }
 
   viewLogDetails(log: AuditLog): void {
-    this.selectedAuditLog = log;
-    this.isDetailsModalOpen = true;
+    this.selectedAuditLog.set(log);
+    this.isDetailsModalOpen.set(true);
   }
 
   clearFilters(): void {
@@ -356,66 +260,26 @@ export class AuditComponent implements OnInit, OnDestroy {
       search: '',
       action: '',
       resource: '',
-      userId: '',
-      storeId: '',
-      organizationId: '',
       fromDate: '',
       toDate: '',
     });
   }
 
-  getActionDisplay(action: AuditAction): { text: string; class: string } {
-    switch (action) {
-      case AuditAction.CREATE:
-        return {
-          text: 'Crear',
-          class:
-            'bg-green-50 text-green-700 border border-green-200 font-medium',
-        };
-      case AuditAction.UPDATE:
-        return {
-          text: 'Actualizar',
-          class: 'bg-blue-50 text-blue-700 border border-blue-200 font-medium',
-        };
-      case AuditAction.DELETE:
-        return {
-          text: 'Eliminar',
-          class: 'bg-red-50 text-red-700 border border-red-200 font-medium',
-        };
-      case AuditAction.LOGIN:
-        return {
-          text: 'Login',
-          class:
-            'bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium',
-        };
-      case AuditAction.LOGOUT:
-        return {
-          text: 'Logout',
-          class:
-            'bg-slate-50 text-slate-700 border border-slate-200 font-medium',
-        };
-      case AuditAction.READ:
-        return {
-          text: 'Lectura',
-          class:
-            'bg-amber-50 text-amber-700 border border-amber-200 font-medium',
-        };
-      case AuditAction.PERMISSION_CHANGE:
-        return {
-          text: 'Cambio Permisos',
-          class:
-            'bg-violet-50 text-violet-700 border border-violet-200 font-medium',
-        };
-      default:
-        return {
-          text: 'Desconocido',
-          class: 'bg-gray-50 text-gray-700 border border-gray-200 font-medium',
-        };
-    }
+  getActionLabel(action: AuditAction): string {
+    const map: Record<string, string> = {
+      CREATE: 'Crear',
+      UPDATE: 'Actualizar',
+      DELETE: 'Eliminar',
+      LOGIN: 'Login',
+      LOGOUT: 'Logout',
+      READ: 'Lectura',
+      PERMISSION_CHANGE: 'Permisos',
+    };
+    return map[action] || action;
   }
 
   getResourceDisplay(resource: AuditResource): string {
-    const resourceMap: Record<AuditResource, string> = {
+    const map: Record<string, string> = {
       [AuditResource.USERS]: 'Usuarios',
       [AuditResource.ORGANIZATIONS]: 'Organizaciones',
       [AuditResource.STORES]: 'Tiendas',
@@ -425,12 +289,13 @@ export class AuditComponent implements OnInit, OnDestroy {
       [AuditResource.ORDERS]: 'Órdenes',
       [AuditResource.CATEGORIES]: 'Categorías',
     };
-    return resourceMap[resource] || resource;
+    return map[resource] || resource;
   }
 
   formatDate(dateString: string): string {
+    if (!dateString) return '---';
     const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
+    return date.toLocaleString('es-ES', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -439,26 +304,18 @@ export class AuditComponent implements OnInit, OnDestroy {
     });
   }
 
-  onDetailsModalChange(isOpen: boolean): void {
-    this.isDetailsModalOpen = isOpen;
-    if (!isOpen) {
-      this.selectedAuditLog = null;
-    }
-  }
-
   getEmptyStateTitle(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.action || filters.resource) {
-      return 'No se encontraron logs con los filtros aplicados';
-    }
-    return 'No hay logs de auditoría';
+    return this.hasActiveFilters() ? 'Sin resultados para la búsqueda' : 'No hay registros de auditoría';
   }
 
   getEmptyStateDescription(): string {
-    const filters = this.filterForm.value;
-    if (filters.search || filters.action || filters.resource) {
-      return 'Intenta ajustar los términos de búsqueda o filtros';
-    }
-    return 'Los logs de auditoría aparecerán aquí cuando se realicen acciones en el sistema.';
+    return this.hasActiveFilters()
+      ? 'Intenta ajustar los filtros para encontrar lo que buscas.'
+      : 'Aún no se ha registrado actividad en el sistema.';
+  }
+
+  private hasActiveFilters(): boolean {
+    const f = this.filterForm.value;
+    return !!(f.search || f.action || f.resource || f.fromDate || f.toDate);
   }
 }

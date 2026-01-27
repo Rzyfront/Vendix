@@ -24,6 +24,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Angular components | `vendix-frontend-component` |
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating Seeds | `vendix-prisma-seed` |
+| Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
 | Editing Schema | `vendix-prisma-schema` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |

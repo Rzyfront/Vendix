@@ -23,23 +23,19 @@ export class AuditService {
   private http = inject(HttpClient);
   private apiUrl = environment.apiUrl;
 
-  // Estado de carga
-  private isLoading$ = new BehaviorSubject<boolean>(false);
-  private isLoadingStats$ = new BehaviorSubject<boolean>(false);
+  // Loading states
+  private readonly isLoading$$ = new BehaviorSubject<boolean>(false);
+  private readonly isLoadingStats$$ = new BehaviorSubject<boolean>(false);
 
-  // Exponer estados como observables
-  get isLoading() {
-    return this.isLoading$.asObservable();
-  }
-  get isLoadingStats() {
-    return this.isLoadingStats$.asObservable();
-  }
+  // Exposed observables
+  public readonly isLoading$ = this.isLoading$$.asObservable();
+  public readonly isLoadingStats$ = this.isLoadingStats$$.asObservable();
 
   /**
    * Obtener logs de auditoría con paginación y filtros
    */
   getAuditLogs(query: AuditQueryDto = {}): Observable<AuditLogsResponse> {
-    this.isLoading$.next(true);
+    this.isLoading$$.next(true);
 
     let params = new HttpParams();
     if (query.userId) params = params.set('userId', query.userId);
@@ -66,7 +62,7 @@ export class AuditService {
             offset: response.meta?.offset || 0,
           } as AuditLogsResponse;
         }),
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading$$.next(false)),
         catchError((error) => {
           console.error('Error loading audit logs:', error);
           return throwError(() => error);
@@ -78,7 +74,7 @@ export class AuditService {
    * Obtener estadísticas de auditoría
    */
   getAuditStats(fromDate?: string, toDate?: string): Observable<AuditStats> {
-    this.isLoadingStats$.next(true);
+    this.isLoadingStats$$.next(true);
 
     let params = new HttpParams();
     if (fromDate) params = params.set('fromDate', fromDate);
@@ -90,7 +86,7 @@ export class AuditService {
         map((response) => {
           return response.data as AuditStats;
         }),
-        finalize(() => this.isLoadingStats$.next(false)),
+        finalize(() => this.isLoadingStats$$.next(false)),
         catchError((error) => {
           console.error('Error loading audit stats:', error);
           return throwError(() => error);

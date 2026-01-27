@@ -98,10 +98,10 @@ export interface RemoveRoleFromUserDto {
 }
 
 export interface RoleStats {
-  total_roles: number;
-  system_roles: number;
-  custom_roles: number;
-  total_permissions: number;
+  totalRoles: number;
+  systemRoles: number;
+  customRoles: number;
+  totalPermissions: number;
 }
 
 export interface PaginatedRolesResponse {

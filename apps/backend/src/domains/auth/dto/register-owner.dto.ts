@@ -7,6 +7,7 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 
 export class RegisterOwnerDto {
   @ApiProperty({
@@ -15,6 +16,11 @@ export class RegisterOwnerDto {
   })
   @IsString()
   @IsNotEmpty({ message: 'El nombre de la organización es requerido' })
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? value.trim().replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ\s.,'&@()-]/g, '')
+      : value,
+  )
   organization_name: string;
 
   @ApiProperty({
@@ -23,6 +29,7 @@ export class RegisterOwnerDto {
   })
   @IsEmail({}, { message: 'Debe ser un email válido' })
   @IsNotEmpty({ message: 'El email es requerido' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   email: string;
 
   @ApiProperty({

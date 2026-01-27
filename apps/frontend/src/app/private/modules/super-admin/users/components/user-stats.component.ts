@@ -1,4 +1,4 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { Component, input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StatsComponent } from '../../../../../shared/components/index';
 import { UserStats } from '../interfaces/user.interface';
@@ -8,10 +8,10 @@ import { UserStats } from '../interfaces/user.interface';
   standalone: true,
   imports: [CommonModule, StatsComponent],
   template: `
-    <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
       <app-stats
         title="Total Usuarios"
-        [value]="stats?.total_usuarios || 0"
+        [value]="stats()?.total_usuarios || 0"
         iconName="users"
         iconBgColor="bg-primary/10"
         iconColor="text-primary"
@@ -19,9 +19,9 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Activos"
-        [value]="stats?.activos || 0"
+        [value]="stats()?.activos || 0"
         [smallText]="
-          calculatePercentage(stats?.activos || 0, stats?.total_usuarios || 0) +
+          calculatePercentage(stats()?.activos || 0, stats()?.total_usuarios || 0) +
           '% del total'
         "
         iconName="check-circle"
@@ -31,11 +31,11 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Pendientes"
-        [value]="stats?.pendientes || 0"
+        [value]="stats()?.pendientes || 0"
         [smallText]="
           calculatePercentage(
-            stats?.pendientes || 0,
-            stats?.total_usuarios || 0
+            stats()?.pendientes || 0,
+            stats()?.total_usuarios || 0
           ) + '% del total'
         "
         iconName="clock"
@@ -45,9 +45,9 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Con 2FA"
-        [value]="stats?.con_2fa || 0"
+        [value]="stats()?.con_2fa || 0"
         [smallText]="
-          calculatePercentage(stats?.con_2fa || 0, stats?.total_usuarios || 0) +
+          calculatePercentage(stats()?.con_2fa || 0, stats()?.total_usuarios || 0) +
           '% del total'
         "
         iconName="shield"
@@ -57,11 +57,11 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Inactivos"
-        [value]="stats?.inactivos || 0"
+        [value]="stats()?.inactivos || 0"
         [smallText]="
           calculatePercentage(
-            stats?.inactivos || 0,
-            stats?.total_usuarios || 0
+            stats()?.inactivos || 0,
+            stats()?.total_usuarios || 0
           ) + '% del total'
         "
         iconName="user-x"
@@ -71,11 +71,11 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Suspendidos"
-        [value]="stats?.suspendidos || 0"
+        [value]="stats()?.suspendidos || 0"
         [smallText]="
           calculatePercentage(
-            stats?.suspendidos || 0,
-            stats?.total_usuarios || 0
+            stats()?.suspendidos || 0,
+            stats()?.total_usuarios || 0
           ) + '% del total'
         "
         iconName="alert-triangle"
@@ -85,11 +85,11 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Email Verificado"
-        [value]="stats?.email_verificado || 0"
+        [value]="stats()?.email_verificado || 0"
         [smallText]="
           calculatePercentage(
-            stats?.email_verificado || 0,
-            stats?.total_usuarios || 0
+            stats()?.email_verificado || 0,
+            stats()?.total_usuarios || 0
           ) + '% del total'
         "
         iconName="mail-check"
@@ -99,11 +99,11 @@ import { UserStats } from '../interfaces/user.interface';
 
       <app-stats
         title="Archivados"
-        [value]="stats?.archivados || 0"
+        [value]="stats()?.archivados || 0"
         [smallText]="
           calculatePercentage(
-            stats?.archivados || 0,
-            stats?.total_usuarios || 0
+            stats()?.archivados || 0,
+            stats()?.total_usuarios || 0
           ) + '% del total'
         "
         iconName="archive"
@@ -121,7 +121,7 @@ import { UserStats } from '../interfaces/user.interface';
   ],
 })
 export class UserStatsComponent implements OnInit {
-  @Input() stats: UserStats | null = null;
+  stats = input<UserStats | null>(null);
 
   constructor() { }
 

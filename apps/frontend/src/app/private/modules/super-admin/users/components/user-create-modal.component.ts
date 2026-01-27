@@ -1,8 +1,7 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnInit,
   OnDestroy,
   inject,
@@ -21,7 +20,7 @@ import {
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
-import { Observable, Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'app-user-create-modal',
@@ -35,7 +34,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -169,41 +168,39 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
 })
 export class UserCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserCreated = new EventEmitter<void>();
+  isOpen = input<boolean>(false);
+  isOpenChange = output<boolean>();
+  onUserCreated = output<void>();
 
-  userForm: FormGroup;
+  private fb = inject(FormBuilder);
+  private usersService = inject(UsersService);
+
+  userForm: FormGroup = this.fb.group({
+    first_name: ['', [Validators.required, Validators.maxLength(100)]],
+    last_name: ['', [Validators.required, Validators.maxLength(100)]],
+    username: [
+      '',
+      [
+        Validators.required,
+        Validators.minLength(3),
+        Validators.maxLength(50),
+      ],
+    ],
+    email: [
+      '',
+      [Validators.required, Validators.email, Validators.maxLength(255)],
+    ],
+    organization_id: [null, [Validators.required]],
+    password: ['', [Validators.required, Validators.minLength(8)]],
+    app: [''],
+    state: [UserState.PENDING_VERIFICATION],
+  });
+
   isCreating: boolean = false;
   UserState = UserState;
   private destroy$ = new Subject<void>();
 
-  usersService = inject(UsersService);
-
-  constructor(private fb: FormBuilder) {
-    this.userForm = this.fb.group({
-      first_name: ['', [Validators.required, Validators.maxLength(100)]],
-      last_name: ['', [Validators.required, Validators.maxLength(100)]],
-      username: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(3),
-          Validators.maxLength(50),
-        ],
-      ],
-      email: [
-        '',
-        [Validators.required, Validators.email, Validators.maxLength(255)],
-      ],
-      organization_id: [null, [Validators.required]],
-      password: ['', [Validators.required, Validators.minLength(8)]],
-      app: [''],
-      state: [UserState.PENDING_VERIFICATION],
-    });
-  }
-
-  ngOnInit(): void {}
+  ngOnInit(): void { }
 
   ngOnDestroy(): void {
     this.destroy$.next();

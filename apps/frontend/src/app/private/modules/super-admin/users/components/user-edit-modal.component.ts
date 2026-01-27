@@ -1,8 +1,7 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnInit,
   OnChanges,
   OnDestroy,
@@ -25,7 +24,7 @@ import {
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
-import { Observable, Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'app-user-edit-modal',
@@ -40,17 +39,17 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Usuario"
       [subtitle]="
-        user
+        user()
           ? 'Modificando información de ' +
-            user.first_name +
+            user()!.first_name +
             ' ' +
-            user.last_name
+            user()!.last_name
           : ''
       "
     >
@@ -173,20 +172,20 @@ import { Observable, Subject, takeUntil } from 'rxjs';
                   </p>
                   <p class="text-xs text-[var(--color-text-secondary)] mt-1">
                     {{
-                      user?.email_verified
+                      user()?.email_verified
                         ? 'Email ya verificado'
                         : 'Marcar email como verificado'
                     }}
                   </p>
                 </div>
                 <app-button
-                  [variant]="user?.email_verified ? 'success' : 'primary'"
+                  [variant]="user()?.email_verified ? 'success' : 'primary'"
                   size="sm"
                   (clicked)="verifyEmail()"
-                  [disabled]="isUpdating || !!user?.email_verified"
+                  [disabled]="isUpdating || !!user()?.email_verified"
                 >
                   <app-icon
-                    [name]="user?.email_verified ? 'check' : 'mail-check'"
+                    [name]="user()?.email_verified ? 'check' : 'mail-check'"
                     class="w-4 h-4"
                     slot="icon"
                   ></app-icon>
@@ -205,18 +204,18 @@ import { Observable, Subject, takeUntil } from 'rxjs';
                   </p>
                   <p class="text-xs text-[var(--color-text-secondary)] mt-1">
                     {{
-                      user?.two_factor_enabled ? '2FA activado' : 'Activar 2FA'
+                      user()?.two_factor_enabled ? '2FA activado' : 'Activar 2FA'
                     }}
                   </p>
                 </div>
                 <app-button
-                  [variant]="user?.two_factor_enabled ? 'danger' : 'primary'"
+                  [variant]="user()?.two_factor_enabled ? 'danger' : 'primary'"
                   size="sm"
                   (clicked)="toggle2FA()"
                   [disabled]="isUpdating"
                 >
                   <app-icon
-                    [name]="user?.two_factor_enabled ? 'shield-off' : 'shield'"
+                    [name]="user()?.two_factor_enabled ? 'shield-off' : 'shield'"
                     class="w-4 h-4"
                     slot="icon"
                   ></app-icon>
@@ -234,7 +233,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
                     Desbloquear
                   </p>
                   <p class="text-xs text-[var(--color-text-secondary)] mt-1">
-                    @if (user?.locked_until) {
+                    @if (user()?.locked_until) {
                       Bloqueado hasta {{ lockedUntilDisplay }}
                     } @else {
                       No bloqueado
@@ -245,7 +244,7 @@ import { Observable, Subject, takeUntil } from 'rxjs';
                   variant="outline"
                   size="sm"
                   (clicked)="unlockUser()"
-                  [disabled]="isUpdating || !user?.locked_until"
+                  [disabled]="isUpdating || !user()?.locked_until"
                 >
                   <app-icon
                     name="unlock"
@@ -287,73 +286,64 @@ import { Observable, Subject, takeUntil } from 'rxjs';
   ],
 })
 export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
-  @Input() user: User | null = null;
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserUpdated = new EventEmitter<void>();
-
-  userForm: FormGroup;
-  isUpdating: boolean = false;
-  UserState = UserState;
-  private destroy$ = new Subject<void>();
+  user = input<User | null>(null);
+  isOpen = input<boolean>(false);
+  isOpenChange = output<boolean>();
+  onUserUpdated = output<void>();
 
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
   private toastService = inject(ToastService);
 
-  constructor() {
-    this.userForm = this.fb.group({
-      first_name: ['', [Validators.required, Validators.maxLength(100)]],
-      last_name: ['', [Validators.required, Validators.maxLength(100)]],
-      username: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(3),
-          Validators.maxLength(50),
-        ],
+  userForm: FormGroup = this.fb.group({
+    first_name: ['', [Validators.required, Validators.maxLength(100)]],
+    last_name: ['', [Validators.required, Validators.maxLength(100)]],
+    username: [
+      '',
+      [
+        Validators.required,
+        Validators.minLength(3),
+        Validators.maxLength(50),
       ],
-      email: [
-        '',
-        [Validators.required, Validators.email, Validators.maxLength(255)],
-      ],
-      organization_id: [null, [Validators.required]],
-      password: ['', [Validators.minLength(8)]],
-      app: [''],
-      state: [UserState.ACTIVE],
-    });
-  }
+    ],
+    email: [
+      '',
+      [Validators.required, Validators.email, Validators.maxLength(255)],
+    ],
+    organization_id: [null, [Validators.required]],
+    password: ['', [Validators.minLength(8)]],
+    app: [''],
+    state: [UserState.ACTIVE],
+  });
+
+  isUpdating: boolean = false;
+  UserState = UserState;
+  private destroy$ = new Subject<void>();
 
   ngOnInit(): void {
-    if (this.user) {
-      this.userForm.patchValue({
-        first_name: this.user.first_name,
-        last_name: this.user.last_name,
-        username: this.user.username,
-        email: this.user.email,
-        organization_id: this.user.organization_id,
-        app: this.user.app || '',
-        state: this.user.state,
-        password: '', // No mostrar la contraseña actual
-      });
+    const user = this.user();
+    if (user) {
+      this.patchUserForm(user);
     }
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    // When the modal opens or user changes, update the form
     if (changes['user'] && changes['user'].currentValue) {
-      const user = changes['user'].currentValue;
-      this.userForm.patchValue({
-        first_name: user.first_name,
-        last_name: user.last_name,
-        username: user.username,
-        email: user.email,
-        organization_id: user.organization_id,
-        app: user.app || '',
-        state: user.state,
-        password: '', // No mostrar la contraseña actual
-      });
+      this.patchUserForm(changes['user'].currentValue);
     }
+  }
+
+  private patchUserForm(user: User): void {
+    this.userForm.patchValue({
+      first_name: user.first_name,
+      last_name: user.last_name,
+      username: user.username,
+      email: user.email,
+      organization_id: user.organization_id,
+      app: user.app || '',
+      state: user.state,
+      password: '',
+    });
   }
 
   onCancel(): void {
@@ -366,20 +356,20 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   onSubmit(): void {
-    if (this.userForm.invalid || this.isUpdating || !this.user) {
+    const currentUser = this.user();
+    if (this.userForm.invalid || this.isUpdating || !currentUser) {
       return;
     }
 
     this.isUpdating = true;
     const updateData: UpdateUserDto = this.userForm.value;
 
-    // No enviar password si está vacío
     if (!updateData.password) {
       delete updateData.password;
     }
 
     this.usersService
-      .updateUser(this.user.id, updateData)
+      .updateUser(currentUser.id, updateData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -397,16 +387,16 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   verifyEmail(): void {
-    if (!this.user || this.isUpdating) return;
+    const currentUser = this.user();
+    if (!currentUser || this.isUpdating) return;
 
     this.isUpdating = true;
     this.usersService
-      .verifyUserEmail(this.user.id)
+      .verifyUserEmail(currentUser.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
-          this.user = updatedUser;
           this.userForm.patchValue({ state: updatedUser.state });
           this.toastService.success('Email verificado exitosamente');
           this.onUserUpdated.emit();
@@ -420,18 +410,18 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   toggle2FA(): void {
-    if (!this.user || this.isUpdating) return;
+    const currentUser = this.user();
+    if (!currentUser || this.isUpdating) return;
 
     this.isUpdating = true;
-    const newState = !this.user.two_factor_enabled;
+    const newState = !currentUser.two_factor_enabled;
 
     this.usersService
-      .toggleUser2FA(this.user.id, newState)
+      .toggleUser2FA(currentUser.id, newState)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
-          this.user = updatedUser;
           this.toastService.success(
             `2FA ${newState ? 'activado' : 'desactivado'} exitosamente`,
           );
@@ -446,16 +436,16 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
   }
 
   unlockUser(): void {
-    if (!this.user || this.isUpdating) return;
+    const currentUser = this.user();
+    if (!currentUser || this.isUpdating) return;
 
     this.isUpdating = true;
     this.usersService
-      .unlockUser(this.user.id)
+      .unlockUser(currentUser.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
-          this.user = updatedUser;
           this.toastService.success('Usuario desbloqueado exitosamente');
           this.onUserUpdated.emit();
         },
@@ -472,9 +462,9 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
     return new Date(dateString).toLocaleDateString('es-ES');
   }
 
-  // Computed property for locked until display
   get lockedUntilDisplay(): string {
-    if (!this.user?.locked_until) return '';
-    return this.formatDate(this.user.locked_until);
+    const currentUser = this.user();
+    if (!currentUser?.locked_until) return '';
+    return this.formatDate(currentUser.locked_until);
   }
 }

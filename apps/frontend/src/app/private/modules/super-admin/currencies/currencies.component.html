@@ -1,106 +1,91 @@
-<div class="space-y-2 md:space-y-4">
-  <!-- Stats Cards -->
-  <app-currency-stats [stats]="currencyStats"></app-currency-stats>
+<!-- Standard Module Layout -->
+<div class="flex flex-col gap-6">
 
-  <!-- Lista de Currencies -->
-  <div class="bg-surface rounded-card shadow-card border border-border min-h-[600px]">
-    <div class="p-2 md:px-6 md:py-4 border-b border-border">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
-        <div class="flex-1 min-w-0">
-          <h2 class="text-lg font-semibold text-text-primary">
-            Todas las Monedas ({{ currencies.length }})
-          </h2>
+  <!-- Stats Grid (Gold Standard) -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+    <app-stats title="Total Monedas" [value]="currencyStats()?.total_currencies || 0" iconName="dollar-sign"
+      iconBgColor="bg-blue-100" iconColor="text-blue-600"></app-stats>
+
+    <app-stats title="Monedas Activas" [value]="currencyStats()?.active_currencies || 0" iconName="check-circle"
+      iconBgColor="bg-green-100" iconColor="text-green-600"></app-stats>
+
+    <app-stats title="Monedas Inactivas" [value]="currencyStats()?.inactive_currencies || 0" iconName="slash"
+      iconBgColor="bg-yellow-100" iconColor="text-yellow-600"></app-stats>
+
+    <app-stats title="Monedas Obsoletas" [value]="currencyStats()?.deprecated_currencies || 0" iconName="archive"
+      iconBgColor="bg-red-100" iconColor="text-red-600"></app-stats>
+  </div>
+
+  <!-- Main Content Card -->
+  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+
+    <!-- Table Header (Compact & Symmetric) -->
+    <div
+      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
+
+      <!-- LeftSide (Title & Help) -->
+      <div class="flex-1 min-w-0">
+        <h3 class="text-lg font-semibold text-text-primary">
+          Listado de Monedas
+        </h3>
+        <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+          Gestiona las divisas disponibles en el sistema (ISO 4217)
+        </p>
+      </div>
+
+      <!-- RightSide (Controls) -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+
+        <!-- Search -->
+        <div class="w-full sm:w-60">
+          <app-inputsearch placeholder="Buscar monedas..." [debounceTime]="300" (searchChange)="onSearchChange($event)"
+            size="sm" fullWidth="true"></app-inputsearch>
         </div>
 
-        <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-          <!-- Filter by state -->
-          <select
-            class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            (change)="onStateChange($event)">
-            <option *ngFor="let filter of stateFilters" [value]="filter.value">
-              {{ filter.label }}
-            </option>
-          </select>
+        <!-- Selector (No Label, size="sm") -->
+        <div class="w-full sm:w-48">
+          <app-selector placeholder="Filtrar por estado" [options]="stateOptions"
+            [formControl]="$any(filterForm.get('state'))" size="sm" variant="outline"></app-selector>
+        </div>
 
-          <!-- Search input -->
-          <app-inputsearch
-            class="w-full sm:w-64 flex-shrink-0"
-            size="sm"
-            placeholder="Buscar monedas..."
-            [debounceTime]="1000"
-            (searchChange)="onSearchChange($event)">
-          </app-inputsearch>
-
-          <!-- Action buttons -->
-          <div class="flex gap-2 items-center ml-auto">
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="refreshCurrencies()"
-              [disabled]="isLoading"
-              title="Actualizar">
-              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-            </app-button>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="openCreateCurrencyModal()"
-              title="Nueva Moneda">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              <span class="hidden sm:inline">Nueva Moneda</span>
-            </app-button>
-          </div>
+        <!-- Actions -->
+        <div class="flex gap-2 items-center sm:ml-auto">
+          <app-button variant="primary" size="sm" iconName="plus" (clicked)="openCreateModal()">
+            <span class="hidden sm:inline">Nueva Moneda</span>
+            <span class="sm:hidden">Nuevo</span>
+          </app-button>
         </div>
       </div>
     </div>
 
-    <!-- Estado de Carga -->
-    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando monedas...</p>
-    </div>
+    <!-- Table Container -->
+    <div class="relative min-h-[400px] p-2 md:p-4">
 
-    <!-- Estado Vacío -->
-    <app-currency-empty-state
-      *ngIf="!isLoading && currencies.length === 0"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      (actionClick)="openCreateCurrencyModal()">
-    </app-currency-empty-state>
+      <!-- Loading Overlay -->
+      <div *ngIf="isLoading()" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
 
-    <!-- Tabla de Currencies -->
-    <div *ngIf="!isLoading && currencies.length > 0" class="p-2 md:p-4">
-      <app-table
-        [data]="currencies"
-        [columns]="tableColumns"
-        [actions]="tableActions"
-        [loading]="isLoading"
-        [sortable]="true"
-        [hoverable]="true"
-        [striped]="true"
-        size="md"
-        (sort)="onSortChange($event)"
-        (rowClick)="editCurrency($event)">
+      <!-- Table -->
+      <app-table [columns]="tableColumns" [data]="currencies()" [actions]="tableActions" [loading]="isLoading()"
+        (sort)="onSortChange($event.column, $event.direction)">
+        <!-- Empty State Slot (if table supports it, otherwise after table) -->
+        <div class="p-8 flex justify-center w-full" *ngIf="!isLoading() && currencies().length === 0">
+          <app-currency-empty-state
+            [title]="filterForm.get('search')?.value || filterForm.get('state')?.value ? 'Sin resultados' : 'No hay monedas'"
+            [description]="filterForm.get('search')?.value || filterForm.get('state')?.value ? 'Ajusta tus filtros de búsqueda' : 'Comienza creando la primera moneda del sistema'"
+            [showAction]="!filterForm.get('search')?.value && !filterForm.get('state')?.value"
+            (actionClick)="openCreateModal()"></app-currency-empty-state>
+        </div>
       </app-table>
     </div>
   </div>
 </div>
 
-<!-- Create Currency Modal -->
-<app-currency-create-modal
-  [isOpen]="isCreateModalOpen"
-  [isSubmitting]="isCreatingCurrency"
-  (isOpenChange)="onCreateModalChange($event)"
-  (submit)="createCurrency($event)"
-  (cancel)="onCreateModalCancel()">
-</app-currency-create-modal>
+<!-- Modals -->
+<app-currency-create-modal [isOpen]="showCreateModal()" (isOpenChange)="showCreateModal.set($event)"
+  [isSubmitting]="isSubmitting()" (submit)="createCurrency($event)"></app-currency-create-modal>
 
-<!-- Edit Currency Modal -->
-<app-currency-edit-modal
-  [isOpen]="isEditModalOpen"
-  [isSubmitting]="isUpdatingCurrency"
-  [currency]="selectedCurrency"
-  (isOpenChange)="onEditModalChange($event)"
-  (submit)="updateCurrency($event)"
-  (cancel)="onEditModalCancel()">
-</app-currency-edit-modal>
+<app-currency-edit-modal [isOpen]="showEditModal()" (isOpenChange)="showEditModal.set($event)"
+  [currency]="selectedCurrency()" [isSubmitting]="isSubmitting()"
+  (submit)="updateCurrency($event)"></app-currency-edit-modal>

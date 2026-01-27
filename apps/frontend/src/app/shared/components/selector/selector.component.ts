@@ -192,7 +192,6 @@ export class SelectorComponent
   get containerClasses(): string {
     return [
       'w-full',
-      'mt-4', // Add margin-top to align with InputComponent
     ]
       .filter(Boolean)
       .join(' ');

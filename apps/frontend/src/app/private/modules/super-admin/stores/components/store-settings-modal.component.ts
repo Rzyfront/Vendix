@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges } from '@angular/core';
+import { Component, inject, input, output, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -26,7 +26,7 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -163,8 +163,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="settingsForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="settingsForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             Save Settings
           </app-button>
@@ -173,22 +173,20 @@ import {
     </app-modal>
   `,
 })
-export class StoreSettingsModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() settings?: StoreSettings;
+export class StoreSettingsModalComponent {
+  private readonly fb = inject(FormBuilder);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<StoreSettingsUpdateDto>();
-  @Output() cancel = new EventEmitter<void>();
+  isOpen = input<boolean>(false);
+  isSubmitting = input<boolean>(false);
+  settings = input<StoreSettings | undefined>();
 
-  settingsForm!: FormGroup;
+  isOpenChange = output<boolean>();
+  submit = output<StoreSettingsUpdateDto>();
+  cancel = output<void>();
 
-  constructor(private fb: FormBuilder) {
-    this.initializeForm();
-  }
+  settingsForm: FormGroup;
 
-  private initializeForm(): void {
+  constructor() {
     this.settingsForm = this.fb.group({
       theme: [''],
       notifications: [true],
@@ -199,53 +197,49 @@ export class StoreSettingsModalComponent implements OnChanges {
       inventory_alerts: [true],
       low_stock_threshold: [10],
     });
+
+    effect(() => {
+      const settingsVal = this.settings();
+      if (settingsVal) {
+        this.populateForm(settingsVal);
+      }
+    });
+
+    effect(() => {
+      if (!this.isOpen()) {
+        this.resetForm();
+      }
+    });
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['settings'] && changes['settings'].currentValue) {
-      this.populateForm();
-    }
-  }
-
-  private populateForm(): void {
-    if (!this.settings) return;
-
+  private populateForm(settings: StoreSettings): void {
     this.settingsForm.patchValue({
-      theme: this.settings.theme || '',
+      theme: settings.theme || '',
       notifications:
-        this.settings.notifications !== undefined
-          ? this.settings.notifications
-          : true,
-      language: this.settings.language || '',
-      currency_format: this.settings.currency_format || '',
+        settings.notifications !== undefined ? settings.notifications : true,
+      language: settings.language || '',
+      currency_format: settings.currency_format || '',
       email_notifications:
-        this.settings.email_notifications !== undefined
-          ? this.settings.email_notifications
+        settings.email_notifications !== undefined
+          ? settings.email_notifications
           : true,
       sms_notifications:
-        this.settings.sms_notifications !== undefined
-          ? this.settings.sms_notifications
+        settings.sms_notifications !== undefined
+          ? settings.sms_notifications
           : false,
       inventory_alerts:
-        this.settings.inventory_alerts !== undefined
-          ? this.settings.inventory_alerts
+        settings.inventory_alerts !== undefined
+          ? settings.inventory_alerts
           : true,
       low_stock_threshold:
-        this.settings.low_stock_threshold !== undefined
-          ? this.settings.low_stock_threshold
+        settings.low_stock_threshold !== undefined
+          ? settings.low_stock_threshold
           : 10,
     });
   }
 
-  onModalChange(isOpen: boolean): void {
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onSubmit(): void {
     if (this.settingsForm.invalid) {
-      // Mark all fields as touched to trigger validation messages
       Object.keys(this.settingsForm.controls).forEach((key) => {
         this.settingsForm.get(key)?.markAsTouched();
       });

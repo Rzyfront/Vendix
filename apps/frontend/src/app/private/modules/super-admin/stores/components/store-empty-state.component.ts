@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 // Import shared components
@@ -22,26 +22,26 @@ import {
 
       <!-- Title -->
       <h3 class="text-xl font-semibold text-text-primary mb-2 text-center">
-        {{ title }}
+        {{ title() }}
       </h3>
 
       <!-- Description -->
       <p class="text-text-secondary text-center max-w-md mb-8">
-        {{ description }}
+        {{ description() }}
       </p>
 
       <!-- Action Button -->
       <app-button
         variant="primary"
         (clicked)="actionClick.emit()"
-        *ngIf="showActionButton"
+        *ngIf="showActionButton()"
       >
         <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-        {{ actionButtonText }}
+        {{ actionButtonText() }}
       </app-button>
 
       <!-- Additional Actions -->
-      <div class="flex gap-3 mt-4" *ngIf="showAdditionalActions">
+      <div class="flex gap-3 mt-4" *ngIf="showAdditionalActions()">
         <app-button variant="outline" (clicked)="refreshClick.emit()">
           <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
           Actualizar
@@ -63,15 +63,13 @@ import {
   ],
 })
 export class StoreEmptyStateComponent {
-  @Input() title = 'No stores found';
-  @Input() description = 'Get started by creating your first store.';
-  @Input() showActionButton = true;
-  @Input() actionButtonText = 'Crear Tienda';
-  @Input() showAdditionalActions = false;
+  title = input<string>('No stores found');
+  description = input<string>('Get started by creating your first store.');
+  showActionButton = input<boolean>(true);
+  actionButtonText = input<string>('Crear Tienda');
+  showAdditionalActions = input<boolean>(false);
 
-  @Output() actionClick = new EventEmitter<void>();
-  @Output() refreshClick = new EventEmitter<void>();
-  @Output() clearFiltersClick = new EventEmitter<void>();
-
-  constructor() {}
+  actionClick = output<void>();
+  refreshClick = output<void>();
+  clearFiltersClick = output<void>();
 }

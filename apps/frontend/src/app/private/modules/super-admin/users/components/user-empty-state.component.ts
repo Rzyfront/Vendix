@@ -1,4 +1,4 @@
-import { Component, Input, EventEmitter, Output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/index';
 
@@ -17,22 +17,22 @@ import { IconComponent } from '../../../../../shared/components/index';
 
       <!-- Title -->
       <h3 class="text-xl font-semibold text-text mb-2">
-        {{ title }}
+        {{ title() }}
       </h3>
 
       <!-- Description -->
       <p class="text-text-muted text-center max-w-md mb-6">
-        {{ description }}
+        {{ description() }}
       </p>
 
       <!-- Action Button (optional) -->
       <button
-        *ngIf="showActionButton"
+        *ngIf="showActionButton()"
         (click)="actionClick.emit()"
         class="px-4 py-2 rounded-button text-white font-medium bg-primary hover:bg-primary/90 transition-colors flex items-center gap-2"
       >
         <app-icon name="plus" [size]="16"></app-icon>
-        {{ actionText }}
+        {{ actionText() }}
       </button>
     </div>
   `,
@@ -45,12 +45,12 @@ import { IconComponent } from '../../../../../shared/components/index';
   ],
 })
 export class UserEmptyStateComponent {
-  @Input() title: string = 'No users found';
-  @Input() description: string = 'Get started by creating your first user.';
-  @Input() showActionButton: boolean = true;
-  @Input() actionText: string = 'Create User';
+  title = input<string>('No users found');
+  description = input<string>('Get started by creating your first user.');
+  showActionButton = input<boolean>(true);
+  actionText = input<string>('Create User');
 
-  @Output() actionClick = new EventEmitter<void>();
+  actionClick = output<void>();
 
-  constructor() {}
+  constructor() { }
 }

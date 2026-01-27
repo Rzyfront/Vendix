@@ -1,60 +1,52 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent, ButtonComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-currency-empty-state',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent, ButtonComponent],
   template: `
-    <div class="text-center py-12">
-      <div class="mx-auto h-12 w-12 text-gray-400">
-        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
+    <div class="flex flex-col items-center justify-center py-12 px-4 text-center">
+      <!-- Icon Container -->
+      <div class="w-16 h-16 bg-muted/30 rounded-full flex items-center justify-center mb-4 transition-transform hover:scale-105">
+        <app-icon name="dollar-sign" class="w-8 h-8 text-text-secondary"></app-icon>
       </div>
 
-      <h3 class="mt-2 text-sm font-medium text-gray-900">
-        {{ title }}
+      <!-- Content -->
+      <h3 class="text-lg font-semibold text-text-primary mb-1">
+        {{ title() }}
       </h3>
-
-      <p class="mt-1 text-sm text-gray-500">
-        {{ description }}
+      <p class="text-sm text-text-secondary max-w-xs mb-6 px-4">
+        {{ description() }}
       </p>
 
-      <div class="mt-6" *ngIf="showAction">
-        <button
-          type="button"
-          class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-          (click)="actionClick.emit()"
-        >
-          <svg
-            class="-ml-1 mr-2 h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-            />
-          </svg>
-          {{ actionText }}
-        </button>
-      </div>
+      <!-- Action -->
+      <app-button
+        *ngIf="showAction()"
+        variant="primary"
+        size="md"
+        iconName="plus"
+        (clicked)="actionClick.emit()"
+      >
+        {{ actionText() }}
+      </app-button>
     </div>
   `,
+  styles: [
+    `
+      :host {
+        display: block;
+        width: 100%;
+      }
+    `,
+  ],
 })
 export class CurrencyEmptyStateComponent {
-  @Input() title = 'No currencies found';
-  @Input() description = 'Get started by creating your first currency.';
-  @Input() showAction = true;
-  @Input() actionText = 'Create Currency';
-  @Output() actionClick = new EventEmitter<void>();
+  title = input<string>('No se encontraron monedas');
+  description = input<string>('Comienza agregando una nueva moneda al sistema para habilitar transacciones.');
+  showAction = input<boolean>(true);
+  actionText = input<string>('Nueva Moneda');
+
+  actionClick = output<void>();
 }

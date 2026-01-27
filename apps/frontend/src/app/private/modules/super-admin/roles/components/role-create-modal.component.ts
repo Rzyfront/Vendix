@@ -1,9 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnChanges,
+  inject,
+  SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -15,7 +16,7 @@ import {
 } from '@angular/forms';
 import { CreateRoleDto } from '../interfaces/role.interface';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 
 @Component({
   selector: 'app-role-create-modal',
@@ -25,14 +26,14 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
-    IconComponent,
+    ButtonComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
-      title="Create New Role"
-      subtitle="Fill in the details to create a new role"
+      title="Crear Nuevo Rol"
+      subtitle="Complete los detalles para crear un nuevo rol"
       size="md"
       [showCloseButton]="true"
       (closed)="onCancel()"
@@ -41,13 +42,13 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         <div class="space-y-6">
           <!-- Role Name -->
           <div class="form-group">
-            <label for="name" class="form-label"> Role Name * </label>
+            <label for="name" class="form-label"> Nombre del Rol * </label>
             <input
               id="name"
               type="text"
               formControlName="name"
               class="form-input"
-              placeholder="e.g., store_manager"
+              placeholder="ej., store_manager"
               [class.form-input-error]="
                 roleForm.get('name')?.invalid && roleForm.get('name')?.touched
               "
@@ -59,23 +60,23 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
               class="form-error"
             >
               <span *ngIf="roleForm.get('name')?.errors?.['required']"
-                >Role name is required</span
+                >El nombre es requerido</span
               >
               <span *ngIf="roleForm.get('name')?.errors?.['minlength']"
-                >Role name must be at least 2 characters</span
+                >El nombre debe tener al menos 2 caracteres</span
               >
             </div>
           </div>
 
           <!-- Description -->
           <div class="form-group">
-            <label for="description" class="form-label"> Description * </label>
+            <label for="description" class="form-label"> Descripción * </label>
             <textarea
               id="description"
               formControlName="description"
               rows="3"
               class="form-input"
-              placeholder="Describe the role and its responsibilities"
+              placeholder="Describe el rol y sus responsabilidades"
               [class.form-input-error]="
                 roleForm.get('description')?.invalid &&
                 roleForm.get('description')?.touched
@@ -89,10 +90,10 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
               class="form-error"
             >
               <span *ngIf="roleForm.get('description')?.errors?.['required']"
-                >Description is required</span
+                >La descripción es requerida</span
               >
               <span *ngIf="roleForm.get('description')?.errors?.['minlength']"
-                >Description must be at least 10 characters</span
+                >La descripción debe tener al menos 10 caracteres</span
               >
             </div>
           </div>
@@ -110,164 +111,53 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
               </div>
               <div class="ml-3">
                 <label for="is_system_role" class="form-checkbox-label">
-                  System Role
+                  Rol de Sistema
                 </label>
                 <p class="form-checkbox-description">
-                  System roles cannot be modified or deleted after creation
+                  Los roles de sistema no pueden ser modificados o eliminados después de creados
                 </p>
               </div>
             </div>
           </div>
         </div>
-      </form>
 
-      <div slot="footer" class="modal-footer">
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="onCancel()"
-          [disabled]="isSubmitting"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          class="btn btn-primary"
-          [disabled]="isSubmitting || roleForm.invalid"
-          (click)="onSubmit()"
-        >
-          <app-icon
-            *ngIf="isSubmitting"
-            name="refresh"
-            class="animate-spin"
-            size="16"
-          ></app-icon>
-          <span *ngIf="!isSubmitting">Create Role</span>
-          <span *ngIf="isSubmitting">Creating...</span>
-        </button>
-      </div>
+        <div class="modal-footer mt-6">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isSubmitting()"
+          >
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
+            [disabled]="isSubmitting() || roleForm.invalid"
+            [loading]="isSubmitting()"
+          >
+            <span *ngIf="!isSubmitting()">Crear Rol</span>
+            <span *ngIf="isSubmitting()">Creando...</span>
+          </app-button>
+        </div>
+      </form>
     </app-modal>
   `,
-  styles: [
-    `
-      .form-group {
-        @apply mb-6;
-      }
-
-      .form-label {
-        @apply block text-sm font-medium text-text-primary mb-2;
-      }
-
-      .form-input {
-        @apply w-full px-3 py-2 border border-border rounded-md shadow-sm focus:outline-none focus:ring-2 focus:border-primary transition-colors;
-        background-color: var(--color-surface);
-        color: var(--color-text-primary);
-        focus-ring-color: rgba(var(--color-primary), 0.5);
-      }
-
-      .form-input:focus {
-        background-color: var(--color-surface);
-      }
-
-      .form-input-error {
-        border-color: var(--color-destructive);
-        box-shadow: 0 0 0 1px var(--color-destructive);
-      }
-
-      .form-error {
-        @apply mt-1 text-sm text-destructive;
-      }
-
-      .form-checkbox {
-        @apply h-4 w-4 text-primary border-border rounded focus:ring-2;
-        focus-ring-color: rgba(var(--color-primary), 0.5);
-      }
-
-      .form-checkbox-label {
-        @apply block text-sm font-medium text-text-primary;
-      }
-
-      .form-checkbox-description {
-        @apply mt-1 text-sm text-text-secondary;
-      }
-
-      .modal-footer {
-        @apply flex justify-end gap-3;
-      }
-
-      .btn {
-        @apply inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
-      }
-
-      .btn-primary {
-        background-color: var(--color-primary);
-        color: var(--color-text-on-primary);
-        border: 1px solid var(--color-primary);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-secondary);
-          border-color: var(--color-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-primary), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      .btn-secondary {
-        background-color: var(--color-surface);
-        color: var(--color-text-primary);
-        border: var(--border-width) solid var(--color-border);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-background);
-          border-color: var(--color-text-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-muted), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      @keyframes spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .animate-spin {
-        animation: spin 1s linear infinite;
-      }
-    `,
-  ],
+  styleUrls: ['./role-create-modal.component.scss'],
 })
 export class RoleCreateModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<CreateRoleDto>();
-  @Output() cancel = new EventEmitter<void>();
+  // Signals
+  readonly isOpen = input<boolean>(false);
+  readonly isSubmitting = input<boolean>(false);
+
+  // Outputs
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<CreateRoleDto>();
+  readonly cancel = output<void>();
 
   roleForm: FormGroup;
+  private fb = inject(FormBuilder);
 
-  constructor(private fb: FormBuilder) {
+  constructor() {
     this.roleForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       description: ['', [Validators.required, Validators.minLength(10)]],
@@ -275,7 +165,7 @@ export class RoleCreateModalComponent implements OnChanges {
     });
   }
 
-  onOpenChange(isOpen: any): void {
+  onOpenChange(isOpen: boolean): void {
     if (!isOpen) {
       this.onCancel();
     }
@@ -290,6 +180,8 @@ export class RoleCreateModalComponent implements OnChanges {
         is_system_role: this.roleForm.value.is_system_role || false,
       };
       this.submit.emit(roleData);
+    } else {
+      this.roleForm.markAllAsTouched();
     }
   }
 
@@ -303,8 +195,8 @@ export class RoleCreateModalComponent implements OnChanges {
   }
 
   // Reset form when modal opens
-  ngOnChanges(): void {
-    if (this.isOpen) {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['isOpen'] && changes['isOpen'].currentValue) {
       this.roleForm.reset({
         name: '',
         description: '',

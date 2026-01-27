@@ -1,25 +1,22 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnInit,
   OnChanges,
   OnDestroy,
   SimpleChanges,
+  inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
   ReactiveFormsModule,
-  FormBuilder,
-  FormGroup,
 } from '@angular/forms';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
   Role,
   Permission,
-  PermissionQueryDto,
   AssignPermissionsDto,
 } from '../interfaces/role.interface';
 import { RolesService } from '../services/roles.service';
@@ -47,10 +44,10 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
       title="Configurar Permisos"
-      [subtitle]="role ? 'Gestionar permisos del rol: ' + role.name : ''"
+      [subtitle]="role() ? 'Gestionar permisos del rol: ' + role()?.name : ''"
       size="lg"
       [showCloseButton]="true"
       (closed)="onCancel()"
@@ -220,176 +217,34 @@ import {
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
+          [disabled]="isSubmitting()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSave()"
-          [disabled]="isSubmitting || selectedPermissions.length === 0"
-          [loading]="isSubmitting"
+          [disabled]="isSubmitting() || selectedPermissions.length === 0"
+          [loading]="isSubmitting()"
         >
-          <span *ngIf="!isSubmitting">Guardar Cambios</span>
+          <span *ngIf="!isSubmitting()">Guardar Cambios</span>
         </app-button>
       </div>
     </app-modal>
   `,
-  styles: [
-    `
-      .permissions-table-container {
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-      }
-
-      .permission-checkbox {
-        @apply h-4 w-4 text-primary border-border rounded focus:ring-primary;
-      }
-
-      .method-badge {
-        @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-      }
-
-      .method-get {
-        @apply bg-green-100 text-green-800;
-      }
-
-      .method-post {
-        @apply bg-blue-100 text-blue-800;
-      }
-
-      .method-put {
-        @apply bg-yellow-100 text-yellow-800;
-      }
-
-      .method-patch {
-        @apply bg-orange-100 text-orange-800;
-      }
-
-      .method-delete {
-        @apply bg-red-100 text-red-800;
-      }
-
-      .method-options {
-        @apply bg-purple-100 text-purple-800;
-      }
-
-      .method-head {
-        @apply bg-gray-100 text-gray-800;
-      }
-
-      .status-badge {
-        @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-      }
-
-      .status-active {
-        @apply bg-green-100 text-green-800;
-      }
-
-      .status-inactive {
-        @apply bg-gray-100 text-gray-800;
-      }
-
-      .status-deprecated {
-        @apply bg-red-100 text-red-800;
-      }
-
-      .selected-summary {
-        @apply p-4 bg-muted/10 rounded-md border border-border;
-      }
-
-      .modal-footer {
-        @apply flex justify-end gap-3;
-      }
-
-      .btn {
-        @apply inline-flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2;
-      }
-
-      .btn-primary {
-        background-color: var(--color-primary);
-        color: var(--color-text-on-primary);
-        border: 1px solid var(--color-primary);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-secondary);
-          border-color: var(--color-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-primary), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      .btn-secondary {
-        background-color: var(--color-surface);
-        color: var(--color-text-primary);
-        border: var(--border-width) solid var(--color-border);
-
-        &:hover:not(:disabled) {
-          background-color: var(--color-background);
-          border-color: var(--color-text-secondary);
-          transform: translateY(-1px);
-          box-shadow: var(--shadow-sm);
-        }
-
-        &:focus {
-          focus-ring-color: rgba(var(--color-muted), 0.5);
-        }
-
-        &:disabled {
-          @apply opacity-50 cursor-not-allowed;
-          transform: none;
-        }
-      }
-
-      @keyframes spin {
-        from {
-          transform: rotate(0deg);
-        }
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .animate-spin {
-        animation: spin 1s linear infinite;
-      }
-
-      /* Indeterminate checkbox styling */
-      input[type='checkbox']:indeterminate {
-        background-color: var(--color-primary);
-        border-color: var(--color-primary);
-      }
-
-      input[type='checkbox']:indeterminate::after {
-        content: '';
-        display: block;
-        width: 4px;
-        height: 4px;
-        background-color: white;
-        margin: 6px auto;
-      }
-    `,
-  ],
+  styleUrls: ['./role-permissions-modal.component.scss'],
 })
 export class RolePermissionsModalComponent
   implements OnInit, OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() role: Role | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<AssignPermissionsDto>();
-  @Output() cancel = new EventEmitter<void>();
+  // Signals
+  readonly isOpen = input<boolean>(false);
+  readonly isSubmitting = input<boolean>(false);
+  readonly role = input<Role | null>(null);
+
+  // Outputs
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<AssignPermissionsDto>();
+  readonly cancel = output<void>();
 
   permissions: Permission[] = [];
   filteredPermissions: Permission[] = [];
@@ -397,6 +252,7 @@ export class RolePermissionsModalComponent
   isLoading = false;
   searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
+  private rolesService = inject(RolesService);
 
   // Module filter
   availableModules: SelectorOption[] = [
@@ -419,7 +275,7 @@ export class RolePermissionsModalComponent
   selectedModule = '';
   searchTerm = '';
 
-  constructor(private rolesService: RolesService) { }
+  constructor() { }
 
   ngOnInit(): void {
     // Setup search debounce
@@ -435,7 +291,7 @@ export class RolePermissionsModalComponent
     this.destroy$.complete();
   }
 
-  onOpenChange(isOpen: any): void {
+  onOpenChange(isOpen: boolean): void {
     if (!isOpen) {
       this.onCancel();
     }
@@ -443,13 +299,16 @@ export class RolePermissionsModalComponent
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && changes['isOpen'].currentValue && this.role) {
+    // Using current values from signals or change object
+    const currentRole = this.role();
+    if (changes['isOpen'] && changes['isOpen'].currentValue && currentRole) {
       this.loadPermissions();
     }
   }
 
   loadPermissions(): void {
-    if (!this.role) return;
+    const currentRole = this.role();
+    if (!currentRole) return;
 
     this.isLoading = true;
 
@@ -470,13 +329,15 @@ export class RolePermissionsModalComponent
   }
 
   loadRolePermissions(): void {
-    if (!this.role) return;
+    const currentRole = this.role();
+    if (!currentRole) return;
 
     // Get role permissions using the dedicated method
-    this.rolesService.getRolePermissions(this.role.id).subscribe({
+    this.rolesService.getRolePermissions(currentRole.id).subscribe({
       next: (permissionIds) => {
         this.selectedPermissions = permissionIds || [];
         this.isLoading = false;
+        // Re-filter to ensure everything is in sync if needed, though usually not strictly necessary for checks
       },
       error: (error) => {
         console.error('Error loading role permissions:', error);
@@ -594,7 +455,8 @@ export class RolePermissionsModalComponent
   }
 
   onSave(): void {
-    if (!this.role) return;
+    const currentRole = this.role();
+    if (!currentRole) return;
 
     const permissionData: AssignPermissionsDto = {
       permission_ids: this.selectedPermissions,

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -24,6 +24,7 @@ import {
   InputsearchComponent,
   IconComponent,
   ButtonComponent,
+  SelectorComponent,
   DialogService,
   ToastService,
 } from '../../../../shared/components/index';
@@ -48,6 +49,7 @@ import {
     PaymentMethodEmptyStateComponent,
     TableComponent,
     InputsearchComponent,
+    SelectorComponent,
     IconComponent,
     ButtonComponent,
   ],
@@ -55,6 +57,11 @@ import {
 
 })
 export class PaymentMethodsComponent implements OnInit, OnDestroy {
+  private readonly paymentMethodsService = inject(SuperAdminPaymentMethodsService);
+  private readonly fb = inject(FormBuilder);
+  private readonly dialogService = inject(DialogService);
+  private readonly toastService = inject(ToastService);
+
   paymentMethods: PaymentMethod[] = [];
   paymentMethodStats: PaymentMethodStats = {
     total_methods: 0,
@@ -67,11 +74,11 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   currentPaymentMethod: PaymentMethod | null = null;
   showCreateModal = false;
   showEditModal = false;
-  paymentMethodToDelete: PaymentMethod | null = null;
-  searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
   isCreatingPaymentMethod = false;
   isUpdatingPaymentMethod = false;
+
+  private destroy$ = new Subject<void>();
+  private searchSubject = new Subject<string>();
 
   // Form for filters
   filterForm: FormGroup;
@@ -162,7 +169,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Filter states
   paymentMethodTypes = [
     { value: '', label: 'Todos los tipos' },
     { value: 'cash', label: 'Efectivo' },
@@ -172,28 +178,18 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
     { value: 'voucher', label: 'Voucher' },
   ];
 
-  constructor(
-    private paymentMethodsService: SuperAdminPaymentMethodsService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
+  activeStates = [
+    { value: '', label: 'Todos los estados' },
+    { value: 'true', label: 'Activo' },
+    { value: 'false', label: 'Inactivo' },
+  ];
+
+  constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       type: [''],
       is_active: [''],
     });
-
-    // Setup search debounce
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
-      .subscribe((searchTerm: string) => {
-        this.filterForm.patchValue(
-          { search: searchTerm },
-          { emitEvent: false },
-        );
-        this.loadPaymentMethods();
-      });
   }
 
   ngOnInit(): void {
@@ -202,19 +198,23 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
 
     // Subscribe to form changes
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
         this.loadPaymentMethods();
       });
 
     // Subscribe to service loading states
-    this.paymentMethodsService.isCreatingPaymentMethod
+    this.paymentMethodsService.isLoading$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((loading) => (this.isLoading = loading));
+
+    this.paymentMethodsService.isCreatingPaymentMethod$
       .pipe(takeUntil(this.destroy$))
       .subscribe((isCreating) => {
         this.isCreatingPaymentMethod = isCreating || false;
       });
 
-    this.paymentMethodsService.isUpdatingPaymentMethod
+    this.paymentMethodsService.isUpdatingPaymentMethod$
       .pipe(takeUntil(this.destroy$))
       .subscribe((isUpdating) => {
         this.isUpdatingPaymentMethod = isUpdating || false;
@@ -270,7 +270,7 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchSubject.next(searchTerm);
+    this.filterForm.patchValue({ search: searchTerm });
   }
 
   onSortChange(event: {
@@ -291,7 +291,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   }
 
   onPaymentMethodCreated(paymentMethodData: CreatePaymentMethodDto): void {
-    this.isCreatingPaymentMethod = true;
     this.paymentMethodsService
       .createPaymentMethod(paymentMethodData)
       .subscribe({
@@ -305,9 +304,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
           console.error('Error creating payment method:', error);
           this.toastService.error('Error al crear el método de pago');
         },
-      })
-      .add(() => {
-        this.isCreatingPaymentMethod = false;
       });
   }
 
@@ -319,7 +315,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   onPaymentMethodUpdated(paymentMethodData: UpdatePaymentMethodDto): void {
     if (!this.currentPaymentMethod) return;
 
-    this.isUpdatingPaymentMethod = true;
     this.paymentMethodsService
       .updatePaymentMethod(this.currentPaymentMethod.id, paymentMethodData)
       .subscribe({
@@ -334,9 +329,6 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
           console.error('Error updating payment method:', error);
           this.toastService.error('Error al actualizar el método de pago');
         },
-      })
-      .add(() => {
-        this.isUpdatingPaymentMethod = false;
       });
   }
 
@@ -410,16 +402,24 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   getEmptyStateTitle(): string {
     const filters = this.filterForm.value;
     if (filters.search || filters.type || filters.is_active) {
-      return 'No methods match your filters';
+      return 'No hay métodos que coincidan';
     }
-    return 'No payment methods found';
+    return 'No hay métodos de pago';
   }
 
   getEmptyStateDescription(): string {
     const filters = this.filterForm.value;
     if (filters.search || filters.type || filters.is_active) {
-      return 'Try adjusting your search terms or filters';
+      return 'Intenta ajustar los filtros de búsqueda';
     }
-    return 'Get started by creating your first payment method.';
+    return 'Comienza creando tu primer método de pago.';
+  }
+
+  clearFilters(): void {
+    this.filterForm.reset({
+      search: '',
+      type: '',
+      is_active: '',
+    });
   }
 }

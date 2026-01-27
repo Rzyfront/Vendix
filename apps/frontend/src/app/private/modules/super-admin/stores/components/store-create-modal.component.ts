@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, inject, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -27,7 +27,7 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -264,8 +264,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="storeForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="storeForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             Crear Tienda
           </app-button>
@@ -275,20 +275,18 @@ import {
   `,
 })
 export class StoreCreateModalComponent {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
+  private readonly fb = inject(FormBuilder);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<CreateStoreDto>();
-  @Output() cancel = new EventEmitter<void>();
+  isOpen = input<boolean>(false);
+  isSubmitting = input<boolean>(false);
 
-  storeForm!: FormGroup;
+  isOpenChange = output<boolean>();
+  submit = output<CreateStoreDto>();
+  cancel = output<void>();
 
-  constructor(private fb: FormBuilder) {
-    this.initializeForm();
-  }
+  storeForm: FormGroup;
 
-  private initializeForm(): void {
+  constructor() {
     this.storeForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: [
@@ -321,7 +319,6 @@ export class StoreCreateModalComponent {
 
   onSubmit(): void {
     if (this.storeForm.invalid) {
-      // Mark all fields as touched to trigger validation messages
       Object.keys(this.storeForm.controls).forEach((key) => {
         this.storeForm.get(key)?.markAsTouched();
       });

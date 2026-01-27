@@ -1,40 +1,47 @@
-<div class="space-y-2 md:space-y-4">
-  <!-- Stats Cards -->
+<!-- Standard Module Layout -->
+<div class="flex flex-col gap-6">
+
+  <!-- Stats Grid -->
   <app-payment-method-stats [stats]="paymentMethodStats"></app-payment-method-stats>
 
-  <!-- Payment Methods List Header -->
-  <div class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 md:gap-4">
+  <!-- Main Content Card -->
+  <div class="flex flex-col bg-surface border border-border rounded-xl shadow-sm overflow-hidden">
+
+    <!-- Table Header (Title, Description, Controls) -->
+    <div
+      class="p-2 md:px-6 md:py-4 border-b border-border flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-surface">
+
+      <!-- Left: Title & Description -->
       <div class="flex-1 min-w-0">
-        <h2 class="text-lg font-semibold text-text-primary">
-          Todos los Métodos de Pago
-        </h2>
+        <h3 class="text-lg font-semibold text-text-primary">
+          Listado de Métodos de Pago
+        </h3>
+        <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+          Gestiona los métodos de pago disponibles en la plataforma
+        </p>
       </div>
 
-      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
-        <!-- Filter by payment method type -->
-        <select
-          class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-          [(ngModel)]="filterForm.value.type" (ngModelChange)="filterForm.patchValue({ type: $event })">
-          <option *ngFor="let type of paymentMethodTypes" [value]="type.value">
-            {{ type.label }}
-          </option>
-        </select>
+      <!-- Right: Controls (Search, Filters, Actions) -->
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full sm:w-auto">
+        <!-- Search -->
+        <div class="w-full sm:w-60">
+          <app-inputsearch placeholder="Buscar métodos..." (searchChange)="onSearchChange($event)" size="sm">
+          </app-inputsearch>
+        </div>
 
-        <!-- Filter by status -->
-        <select
-          class="px-3 py-2 border border-border rounded-button text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-          [(ngModel)]="filterForm.value.is_active" (ngModelChange)="filterForm.patchValue({ is_active: $event })">
-          <option value="">Todos los estados</option>
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-        </select>
+        <!-- Filter Tipo -->
+        <div class="w-full sm:w-48">
+          <app-selector placeholder="Todos los Tipos" [options]="paymentMethodTypes"
+            [formControl]="$any(filterForm.get('type'))" size="sm" variant="outline"></app-selector>
+        </div>
 
-        <!-- Input de búsqueda compacto -->
-        <app-inputsearch class="w-full sm:w-64" size="sm" placeholder="Buscar métodos..." [debounceTime]="1000"
-          (searchChange)="onSearchChange($event)"></app-inputsearch>
+        <!-- Filter Estado -->
+        <div class="w-full sm:w-48">
+          <app-selector placeholder="Todos los Estados" [options]="activeStates"
+            [formControl]="$any(filterForm.get('is_active'))" size="sm" variant="outline"></app-selector>
+        </div>
 
-        <div class="flex gap-2 items-center">
+        <div class="flex gap-2 items-center sm:ml-auto">
           <app-button variant="outline" size="sm" (clicked)="refreshPaymentMethods()" [disabled]="isLoading"
             title="Actualizar">
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -42,36 +49,40 @@
           <app-button variant="primary" size="sm" (clicked)="createPaymentMethod()" title="Nuevo Método">
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Nuevo Método</span>
+            <span class="sm:hidden">Nuevo</span>
           </app-button>
         </div>
       </div>
     </div>
 
-    <!-- Loading State -->
-    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando métodos de pago...</p>
+    <!-- Table Content Wrapper -->
+    <div class="relative min-h-[400px] p-2 md:p-4">
+      <!-- Loading Overlay -->
+      <div *ngIf="isLoading" class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+
+      <!-- Empty State -->
+      <div class="p-8 flex justify-center w-full" *ngIf="!isLoading && paymentMethods.length === 0">
+        <app-payment-method-empty-state [title]="getEmptyStateTitle()" [description]="getEmptyStateDescription()"
+          [showAdditionalActions]="true" (actionClick)="createPaymentMethod()" (refreshClick)="refreshPaymentMethods()"
+          (clearFiltersClick)="clearFilters()">
+        </app-payment-method-empty-state>
+      </div>
+
+      <!-- Payment Methods Table -->
+      <app-table *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods" [columns]="tableColumns"
+        [actions]="tableActions" [loading]="isLoading" [sortable]="true" [hoverable]="true" [striped]="true" size="md"
+        (sort)="onSortChange($event)" (rowClick)="editPaymentMethod($event)">
+      </app-table>
     </div>
-
-    <!-- Empty State -->
-    <app-payment-method-empty-state *ngIf="!isLoading && paymentMethods.length === 0" [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()" (actionClick)="createPaymentMethod()">
-    </app-payment-method-empty-state>
-
-    <!-- Payment Methods Table -->
-    <app-table *ngIf="!isLoading && paymentMethods.length > 0" [data]="paymentMethods" [columns]="tableColumns"
-      [actions]="tableActions" [loading]="isLoading" [sortable]="true" [hoverable]="true" [striped]="true" size="md"
-      (sort)="onSortChange($event)" (rowClick)="editPaymentMethod($event)">
-    </app-table>
   </div>
 
-  <!-- Create Payment Method Modal -->
-  <app-payment-method-create-modal [(isOpen)]="showCreateModal"
-    (onPaymentMethodCreated)="onPaymentMethodCreated($event)">
-  </app-payment-method-create-modal>
+  <!-- Modals -->
+  <app-payment-method-create-modal [(isOpen)]="showCreateModal" [isSubmitting]="isCreatingPaymentMethod"
+    (onPaymentMethodCreated)="onPaymentMethodCreated($event)"></app-payment-method-create-modal>
 
-  <!-- Edit Payment Method Modal -->
-  <app-payment-method-edit-modal [(isOpen)]="showEditModal" [paymentMethod]="currentPaymentMethod"
-    (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)">
-  </app-payment-method-edit-modal>
+  <app-payment-method-edit-modal [(isOpen)]="showEditModal" [isSubmitting]="isUpdatingPaymentMethod"
+    [paymentMethod]="currentPaymentMethod"
+    (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)"></app-payment-method-edit-modal>
 </div>
