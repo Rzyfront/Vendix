@@ -85,6 +85,14 @@ export class AuthGuard implements CanActivate {
     );
   }
 
+  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
+    // Siempre redirigir al login contextual unificado
+    const loginPath = '/auth/login';
+    return of(
+      this.router.createUrlTree([loginPath], { queryParams: { returnUrl } }),
+    );
+  }
+
   /**
    * Check if the user has the required role for the route
    */
