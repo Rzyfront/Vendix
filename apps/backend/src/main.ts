@@ -34,13 +34,18 @@ async function bootstrap() {
   const baseDomain = DomainConfigService.getBaseDomain();
 
   // Parse additional origins from env
-  const additionalOriginsRaw =
+  const corsOriginEnv = process.env.CORS_ORIGIN?.split(',') || [];
+  const additionalCorsOriginEnv =
     process.env.ADDITIONAL_CORS_ORIGINS?.split(',') || [];
+  const allCustomOrigins = [...corsOriginEnv, ...additionalCorsOriginEnv];
+
   const additionalStaticOrigins: string[] = [];
   const additionalRegexOrigins: RegExp[] = [];
 
-  additionalOriginsRaw.forEach((origin) => {
+  allCustomOrigins.forEach((origin) => {
     const trimmed = origin.trim();
+    if (!trimmed) return;
+
     if (trimmed.includes('*')) {
       // Convert wildcard string to regex (e.g. https://*.example.com -> ^https://.*\.example\.com$)
       try {
