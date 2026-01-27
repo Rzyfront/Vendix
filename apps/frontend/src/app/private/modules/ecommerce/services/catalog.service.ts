@@ -41,9 +41,6 @@ export interface ProductDetail extends Product {
   }[];
   avg_rating: number;
   review_count: number;
-  is_on_sale: boolean;
-  sale_price?: number;
-  final_price: number;
 }
 
 export interface Category {
