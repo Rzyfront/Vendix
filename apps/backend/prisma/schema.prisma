@@ -1773,7 +1773,7 @@ model shipping_rates {
   id                      Int                      @id @default(autoincrement())
   shipping_method_id      Int
   shipping_zone_id        Int
-  name                    String                   @db.VarChar(100)
+  name                    String?                  @db.VarChar(100)
   type                    shipping_rate_type_enum  @default(flat)
   base_cost               Decimal                  @db.Decimal(12, 2)
   per_unit_cost           Decimal?                 @db.Decimal(12, 2)
