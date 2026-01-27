@@ -346,7 +346,7 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.updateOnboardingModal();
   }
 
-  private updateOnboardingModal(): void {
+  private   updateOnboardingModal(): void {
     // Double-check owner role before showing modal
     const isOwner = this.authFacade.isOwner();
     if (!isOwner) {
@@ -362,24 +362,8 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
 
-  formatStoreType(type: string | null): string {
-    if (!type) return 'Not defined';
-
-    const typeMap: Record<string, string> = {
-      physical: 'Physical Store',
-      online: 'Online Store',
-      hybrid: 'Hybrid Store',
-      retail: 'Retail',
-      restaurant: 'Restaurante',
-      warehouse: 'Almacén',
-      ecommerce: 'E-commerce',
-      wholesale: 'Mayorista',
-    };
-
-    return typeMap[type] || type;
-  }
-
   breadcrumb = {
+
     parent: 'Tienda',
     current: 'Panel Principal',
   };
