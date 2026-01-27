@@ -17,8 +17,6 @@ export interface Product {
   image_url: string | null;
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
-  is_on_sale: boolean;
-  sale_price?: number;
   final_price: number;
 }
 
@@ -86,6 +84,7 @@ export interface PaginatedResponse<T> {
   providedIn: 'root',
 })
 export class CatalogService {
+  // Base API URL for catalog operations
   private api_url = `${environment.apiUrl}/ecommerce/catalog`;
 
   constructor(
