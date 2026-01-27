@@ -84,6 +84,7 @@ export interface PaginatedResponse<T> {
   providedIn: 'root',
 })
 export class CatalogService {
+  // v1.0.1 - Force refresh to resolve duplicate identifiers
   // Base API URL for catalog operations
   private api_url = `${environment.apiUrl}/ecommerce/catalog`;
 
