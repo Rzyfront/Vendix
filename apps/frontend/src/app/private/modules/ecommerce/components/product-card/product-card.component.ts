@@ -1,7 +1,7 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { EcommerceProduct } from '../../services/catalog.service';
+import { Product } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
@@ -234,11 +234,11 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   `],
 })
 export class ProductCardComponent {
-  @Input() product!: EcommerceProduct;
+  @Input() product!: Product;
   @Input() in_wishlist = false;
-  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
-  @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
-  @Output() quick_view = new EventEmitter<EcommerceProduct>();
+  @Output() add_to_cart = new EventEmitter<Product>();
+  @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Output() quick_view = new EventEmitter<Product>();
 
   private router = inject(Router);
 

@@ -25,7 +25,6 @@ import {
 } from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
-import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class UsersService {

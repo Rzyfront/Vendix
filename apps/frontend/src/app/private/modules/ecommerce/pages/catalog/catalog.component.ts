@@ -6,7 +6,7 @@ import { Subject } from 'rxjs';
 import { takeUntil, debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import {
   CatalogService,
-  EcommerceProduct,
+  Product,
   Category,
   Brand,
   CatalogQuery,
@@ -23,7 +23,7 @@ import { ProductQuickViewModalComponent } from '../../components/product-quick-v
   styleUrls: ['./catalog.component.scss'],
 })
 export class CatalogComponent implements OnInit, OnDestroy {
-  products: EcommerceProduct[] = [];
+  products: Product[] = [];
   categories: Category[] = [];
   brands: Brand[] = [];
 
@@ -212,7 +212,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     }
   }
 
-  onAddToCart(product: EcommerceProduct): void {
+  onAddToCart(product: Product): void {
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) {
       result.subscribe();
@@ -220,11 +220,11 @@ export class CatalogComponent implements OnInit, OnDestroy {
     // TODO: Show toast notification
   }
 
-  onToggleWishlist(product: EcommerceProduct): void {
+  onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
   }
 
-  onQuickView(product: EcommerceProduct): void {
+  onQuickView(product: Product): void {
     this.selectedProductSlug = product.slug;
     this.quickViewOpen = true;
   }

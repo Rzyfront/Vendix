@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CatalogService, ProductDetail, EcommerceProduct, CatalogQuery } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, Product, CatalogQuery } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -372,7 +372,7 @@ export class ProductDetailComponent implements OnInit {
   selectedProductSlug: string | null = null;
 
   // Recommendations
-  recommendedProducts = signal<EcommerceProduct[]>([]);
+  recommendedProducts = signal<Product[]>([]);
 
   // Review Form
   reviewForm = this.fb.group({
@@ -433,8 +433,8 @@ export class ProductDetailComponent implements OnInit {
   setActiveImage(url: string): void { this.activeImageUrl.set(url); }
   selectVariant(variant: any): void { this.selectedVariantId.set(variant.id); }
   toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
-  onAddToCart(product: EcommerceProduct | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
-  onQuickView(product: EcommerceProduct): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
+  onAddToCart(product: Product | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
+  onQuickView(product: Product): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
 
   onSubmitReview(): void {
     if (this.reviewForm.invalid) return;

@@ -49,7 +49,9 @@ import { takeUntil } from 'rxjs/operators';
                     <app-icon name="store" [size]="9"></app-icon>
                     <span class="footer-info-label">Type</span>
                   </div>
-                  <span class="footer-info-value">{{ formatStoreType((storeType$ | async)) }}</span>
+                  <span class="footer-info-value">{{
+                    formatStoreType(storeType$ | async)
+                  }}</span>
                 </div>
               </div>
               <div class="footer-divider"></div>
@@ -367,17 +369,17 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     if (!type) return 'Not defined';
 
     const typeMap: Record<string, string> = {
-      'physical': 'Physical Store',
-      'online': 'Online Store',
-      'hybrid': 'Hybrid Store',
+      physical: 'Physical Store',
+      online: 'Online Store',
+      hybrid: 'Hybrid Store',
+      retail: 'Retail',
+      restaurant: 'Restaurante',
+      warehouse: 'Almacén',
+      ecommerce: 'E-commerce',
+      wholesale: 'Mayorista',
     };
 
     return typeMap[type] || type;
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   breadcrumb = {
@@ -401,23 +403,16 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     }
   }
 
-  formatStoreType(storeType: string | null | undefined): string {
-    if (!storeType) return 'N/A';
-    const typeMap: { [key: string]: string } = {
-      'retail': 'Retail',
-      'restaurant': 'Restaurante',
-      'warehouse': 'Almacén',
-      'ecommerce': 'E-commerce',
-      'wholesale': 'Mayorista',
-    };
-    return typeMap[storeType] || storeType;
-  }
-
   onOnboardingCompleted(event: any): void {
     console.log('Onboarding completed:', event);
     // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
     // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 }

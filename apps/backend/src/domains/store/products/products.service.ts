@@ -216,8 +216,9 @@ export class ProductsService {
 
           // 2. Procesar images (structured with possible base64)
           if (images && images.length > 0) {
-            const { org, store: storeContext } = await this.getStoreWithOrgContext(store_id);
-            const uploadedImages = await this.handleImageUploads(images, slug, org, storeContext);
+            const { org, store: storeContext } =
+              await this.getStoreWithOrgContext(store_id);
+            const uploadedImages = await this.handleImageUploads(images, slug);
             finalImages.push(
               ...uploadedImages.map((img) => ({
                 ...img,
@@ -616,7 +617,8 @@ export class ProductsService {
           cost_price: product.cost_price,
           image_url: signed_image_url || null,
           brand: product.brands,
-          categories: product.product_categories?.map((pc: any) => pc.categories) || [],
+          categories:
+            product.product_categories?.map((pc: any) => pc.categories) || [],
           product_tax_assignments: product.product_tax_assignments,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
@@ -959,12 +961,11 @@ export class ProductsService {
 
             // 2. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
-              const { org, store: storeContext } = await this.getStoreWithOrgContext(existingProduct.store_id);
+              const { org, store: storeContext } =
+                await this.getStoreWithOrgContext(existingProduct.store_id);
               const uploadedImages = await this.handleImageUploads(
                 images,
                 product.slug,
-                org,
-                storeContext,
               );
               finalImages.push(
                 ...uploadedImages.map((img) => ({
@@ -1375,8 +1376,6 @@ export class ProductsService {
   private async handleImageUploads(
     images: ProductImageDto[],
     productSlug: string,
-    org: S3OrgContext,
-    store: S3StoreContext,
   ): Promise<any[]> {
     const processedImages: any[] = [];
     const context = RequestContextService.getContext();

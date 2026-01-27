@@ -24,7 +24,6 @@ import {
 } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
-import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class AuthService {
@@ -37,7 +36,7 @@ export class AuthService {
     private readonly auditService: AuditService,
     private readonly onboardingService: OnboardingService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
-  ) { }
+  ) {}
 
   async updateProfile(userId: number, updateProfileDto: any) {
     const {

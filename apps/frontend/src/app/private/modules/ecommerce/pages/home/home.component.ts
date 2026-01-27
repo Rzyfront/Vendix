@@ -1,7 +1,7 @@
 import { Component, OnInit, inject, DestroyRef, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { CatalogService, EcommerceProduct, Category } from '../../services/catalog.service';
+import { CatalogService, Product, Category } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { TenantFacade } from '../../../../../../app/core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
@@ -23,9 +23,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   styleUrls: ['./home.component.scss'],
 })
 export class HomeComponent implements OnInit {
-  featured_products: EcommerceProduct[] = [];
-  new_arrivals: EcommerceProduct[] = [];
-  sale_products: EcommerceProduct[] = [];
+  featured_products: Product[] = [];
+  new_arrivals: Product[] = [];
+  sale_products: Product[] = [];
   is_loading_featured = true;
   slider_config: any = null;
   show_slider = false;
@@ -119,18 +119,18 @@ export class HomeComponent implements OnInit {
       });
   }
 
-  onAddToCart(product: EcommerceProduct): void {
+  onAddToCart(product: Product): void {
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) {
       result.subscribe();
     }
   }
 
-  onToggleWishlist(product: EcommerceProduct): void {
+  onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
   }
 
-  onQuickView(product: EcommerceProduct): void {
+  onQuickView(product: Product): void {
     this.selectedProductSlug = product.slug;
     this.quickViewOpen = true;
   }

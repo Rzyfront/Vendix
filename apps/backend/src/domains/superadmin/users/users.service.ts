@@ -15,7 +15,6 @@ import {
 import { user_state_enum } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
-import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
 export class UsersService {

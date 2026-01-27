@@ -7,7 +7,7 @@ import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart } from '../../services/cart.service';
 import { CheckoutService, PaymentMethod, CheckoutRequest } from '../../services/checkout.service';
 import { AccountService, Address } from '../../services/account.service';
-import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
+import { CatalogService, Product } from '../../services/catalog.service';
 import { CountryService, Country, Department, City } from '../../../../../services/country.service';
 
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
@@ -40,7 +40,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   step = 1; // 1: Address, 2: Payment, 3: Confirm
 
   // Recommendations
-  recommendedProducts = signal<EcommerceProduct[]>([]);
+  recommendedProducts = signal<Product[]>([]);
   quickViewOpen = false;
   selectedProductSlug: string | null = null;
 
@@ -406,12 +406,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.router.navigate(['/cart']);
   }
 
-  onQuickView(product: EcommerceProduct): void {
+  onQuickView(product: Product): void {
     this.selectedProductSlug = product.slug;
     this.quickViewOpen = true;
   }
 
-  onAddToCartFromSlider(product: EcommerceProduct): void {
+  onAddToCartFromSlider(product: Product): void {
     const result = this.cart_service.addToCart(product.id, 1);
     if (result) result.subscribe();
   }
