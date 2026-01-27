@@ -157,45 +157,9 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
-      name: 'organization:onboarding:create:organization',
-      description: 'Crear organización en onboarding',
-      path: '/api/organization/onboarding/organization/create',
-      method: 'POST',
-    },
-    {
-      name: 'organization:onboarding:wizard:status',
-      description: 'Ver estado onboarding wizard',
-      path: '/api/organization/onboarding-wizard/status',
-      method: 'GET',
-    },
-    {
-      name: 'organization:onboarding:wizard:setup:organization',
-      description: 'Configurar organización en wizard',
-      path: '/api/organization/onboarding-wizard/setup-organization',
-      method: 'POST',
-    },
-    {
-      name: 'organization:onboarding:wizard:setup:store',
-      description: 'Configurar tienda en wizard',
-      path: '/api/organization/onboarding-wizard/setup-store',
-      method: 'POST',
-    },
-    {
-      name: 'organization:onboarding:wizard:complete',
-      description: 'Completar onboarding wizard',
-      path: '/api/organization/onboarding-wizard/complete',
-      method: 'POST',
-    },
-    {
-      name: 'organization:onboarding:wizard:setup:user',
-      description: 'Configurar usuario en wizard',
-      path: '/api/organization/onboarding-wizard/setup-user',
-      method: 'POST',
-    },
-    {
-      name: 'organization:onboarding:wizard:select-app-type',
-      description: 'Seleccionar tipo de app en wizard',
-      path: '/api/organization/onboarding-wizard/select-app-type',
+      name: 'organization:onboarding:update',
+      description: 'Actualizar/Completar onboarding',
+      path: '/api/organization/onboarding/complete',
       method: 'POST',
     },
 
@@ -213,13 +177,7 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
     {
-      name: 'organization:users:stats',
-      description: 'Estadísticas de usuarios',
-      path: '/api/organization/users/stats',
-      method: 'GET',
-    },
-    {
-      name: 'organization:users:read:one',
+      name: 'organization:users:read',
       description: 'Leer usuario específico',
       path: '/api/organization/users/:id',
       method: 'GET',
@@ -263,27 +221,9 @@ export async function seedPermissionsAndRoles(
 
     // Organizaciones
     {
-      name: 'organization:organizations:create',
-      description: 'Crear organización',
-      path: '/api/organization/organizations',
-      method: 'POST',
-    },
-    {
       name: 'organization:organizations:read',
       description: 'Leer organizaciones',
       path: '/api/organization/organizations',
-      method: 'GET',
-    },
-    {
-      name: 'organization:organizations:read:one',
-      description: 'Leer organización específica',
-      path: '/api/organization/organizations/:id',
-      method: 'GET',
-    },
-    {
-      name: 'organization:organizations:read:slug',
-      description: 'Leer organización por slug',
-      path: '/api/organization/organizations/slug/:slug',
       method: 'GET',
     },
     {
@@ -292,17 +232,19 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/organizations/:id',
       method: 'PATCH',
     },
+
+    // Organizations Payment Policies (usado en store/payments)
     {
-      name: 'organization:organizations:delete',
-      description: 'Eliminar organización',
-      path: '/api/organization/organizations/:id',
-      method: 'DELETE',
+      name: 'organizations:read',
+      description: 'Leer políticas de pago de organización',
+      path: '/api/organizations/:organizationId/payment-policies',
+      method: 'GET',
     },
     {
-      name: 'organization:organizations:stats',
-      description: 'Estadísticas de organización',
-      path: '/api/organization/organizations/:id/stats',
-      method: 'GET',
+      name: 'organizations:update',
+      description: 'Actualizar políticas de pago de organización',
+      path: '/api/organizations/:organizationId/payment-policies',
+      method: 'POST',
     },
 
     // Tiendas
@@ -316,12 +258,6 @@ export async function seedPermissionsAndRoles(
       name: 'organization:stores:read',
       description: 'Leer tiendas',
       path: '/api/organization/stores',
-      method: 'GET',
-    },
-    {
-      name: 'organization:stores:read:one',
-      description: 'Leer tienda específica',
-      path: '/api/organization/stores/:id',
       method: 'GET',
     },
     {
@@ -341,12 +277,6 @@ export async function seedPermissionsAndRoles(
       description: 'Actualizar configuración de tienda',
       path: '/api/organization/stores/:id/settings',
       method: 'PATCH',
-    },
-    {
-      name: 'organization:stores:stats',
-      description: 'Estadísticas de tienda',
-      path: '/api/organization/stores/:id/stats',
-      method: 'GET',
     },
 
     // Clientes (Tienda)
@@ -425,7 +355,7 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
-      name: 'store:products:deactivate',
+      name: 'store:products:delete',
       description: 'Desactivar producto',
       path: '/api/store/products/:id/deactivate',
       method: 'PATCH',
@@ -671,6 +601,46 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Store Domains
+    {
+      name: 'store:domains:create',
+      description: 'Crear dominio de tienda',
+      path: '/api/store/domains',
+      method: 'POST',
+    },
+    {
+      name: 'store:domains:read',
+      description: 'Leer dominios de tienda',
+      path: '/api/store/domains',
+      method: 'GET',
+    },
+    {
+      name: 'store:domains:update',
+      description: 'Actualizar dominio de tienda',
+      path: '/api/store/domains/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:domains:delete',
+      description: 'Eliminar dominio de tienda',
+      path: '/api/store/domains/:id',
+      method: 'DELETE',
+    },
+
+    // Store Ecommerce
+    {
+      name: 'store:ecommerce:read',
+      description: 'Leer configuración de ecommerce',
+      path: '/api/store/ecommerce/settings',
+      method: 'GET',
+    },
+    {
+      name: 'store:ecommerce:update',
+      description: 'Actualizar configuración de ecommerce',
+      path: '/api/store/ecommerce/settings',
+      method: 'PATCH',
+    },
+
     // Direcciones
     {
       name: 'organization:addresses:create',
@@ -682,18 +652,6 @@ export async function seedPermissionsAndRoles(
       name: 'organization:addresses:read',
       description: 'Leer direcciones',
       path: '/api/organization/addresses',
-      method: 'GET',
-    },
-    {
-      name: 'organization:addresses:read:store',
-      description: 'Leer direcciones de tienda',
-      path: '/api/organization/addresses/store/:storeId',
-      method: 'GET',
-    },
-    {
-      name: 'organization:addresses:read:one',
-      description: 'Leer dirección específica',
-      path: '/api/organization/addresses/:id',
       method: 'GET',
     },
     {
@@ -711,125 +669,9 @@ export async function seedPermissionsAndRoles(
 
     // Roles
     {
-      name: 'organization:roles:create',
-      description: 'Crear rol',
-      path: '/api/organization/roles',
-      method: 'POST',
-    },
-    {
-      name: 'organization:roles:read',
-      description: 'Leer roles',
-      path: '/api/organization/roles',
-      method: 'GET',
-    },
-    {
-      name: 'organization:roles:stats',
-      description: 'Estadísticas de roles',
-      path: '/api/organization/roles/stats',
-      method: 'GET',
-    },
-    {
-      name: 'organization:roles:read:one',
-      description: 'Leer rol específico',
-      path: '/api/organization/roles/:id',
-      method: 'GET',
-    },
-    {
-      name: 'organization:roles:update',
-      description: 'Actualizar rol',
-      path: '/api/organization/roles/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'organization:roles:delete',
-      description: 'Eliminar rol',
-      path: '/api/organization/roles/:id',
-      method: 'DELETE',
-    },
-    {
       name: 'organization:roles:permissions:read',
       description: 'Leer permisos de rol',
       path: '/api/organization/roles/:id/permissions',
-      method: 'GET',
-    },
-    {
-      name: 'organization:roles:permissions:assign',
-      description: 'Asignar permisos a rol',
-      path: '/api/organization/roles/:id/permissions',
-      method: 'POST',
-    },
-    {
-      name: 'organization:roles:permissions:remove',
-      description: 'Remover permisos de rol',
-      path: '/api/organization/roles/:id/permissions',
-      method: 'DELETE',
-    },
-    {
-      name: 'organization:roles:assign:user',
-      description: 'Asignar rol a usuario',
-      path: '/api/organization/roles/assign-to-user',
-      method: 'POST',
-    },
-    {
-      name: 'organization:roles:remove:user',
-      description: 'Remover rol de usuario',
-      path: '/api/organization/roles/remove-from-user',
-      method: 'POST',
-    },
-    {
-      name: 'organization:roles:user:permissions',
-      description: 'Ver permisos de usuario',
-      path: '/api/organization/roles/user/:userId/permissions',
-      method: 'GET',
-    },
-    {
-      name: 'organization:roles:user:roles',
-      description: 'Ver roles de usuario',
-      path: '/api/organization/roles/user/:userId/roles',
-      method: 'GET',
-    },
-
-    // Permisos
-    {
-      name: 'organization:permissions:create',
-      description: 'Crear permiso',
-      path: '/api/superadmin/permissions',
-      method: 'POST',
-    },
-    {
-      name: 'organization:permissions:read',
-      description: 'Leer permisos',
-      path: '/api/superadmin/permissions',
-      method: 'GET',
-    },
-    {
-      name: 'organization:permissions:read:one',
-      description: 'Leer permiso específico',
-      path: '/api/superadmin/permissions/:id',
-      method: 'GET',
-    },
-    {
-      name: 'organization:permissions:update',
-      description: 'Actualizar permiso',
-      path: '/api/superadmin/permissions/:id',
-      method: 'PATCH',
-    },
-    {
-      name: 'organization:permissions:delete',
-      description: 'Eliminar permiso',
-      path: '/api/superadmin/permissions/:id',
-      method: 'DELETE',
-    },
-    {
-      name: 'organization:permissions:search:name',
-      description: 'Buscar permiso por nombre',
-      path: '/api/superadmin/permissions/search/by-name/:name',
-      method: 'GET',
-    },
-    {
-      name: 'organization:permissions:search:path',
-      description: 'Buscar permiso por ruta y método',
-      path: '/api/superadmin/permissions/search/by-path-method',
       method: 'GET',
     },
 
@@ -1404,8 +1246,7 @@ export async function seedPermissionsAndRoles(
       !p.name.startsWith('system.') &&
       !p.name.startsWith('security.') &&
       !p.name.startsWith('rate.limiting.') &&
-      !p.name.includes('users.impersonate') &&
-      !p.name.includes('organization:organizations:delete'),
+      !p.name.includes('users.impersonate'),
   );
 
   for (const permission of adminPermissions) {
@@ -1548,7 +1389,6 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:orders:read:one') ||
       p.name.includes('organization:addresses:create') ||
       p.name.includes('organization:addresses:read') ||
-      p.name.includes('organization:addresses:read:one') ||
       p.name.includes('organization:addresses:update') ||
       p.name.includes('organization:addresses:delete') ||
       p.name.includes('domains.resolve') ||
