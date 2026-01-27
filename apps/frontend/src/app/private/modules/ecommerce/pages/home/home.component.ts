@@ -26,11 +26,16 @@ export class HomeComponent implements OnInit {
   is_loading_featured = true;
   slider_config: any = null;
 
+  // Quick View
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
   private destroy_ref = inject(DestroyRef);
 
   constructor(
     private catalog_service: CatalogService,
     private cart_service: CartService,
+    private router: Router
   ) {}
 
   ngOnInit(): void {

@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, OnInit, inject, DestroyRef, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -73,7 +73,7 @@ export class ProductDetailComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    this.route.params.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
+    this.route.params.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params: any) => {
       const slug = params['slug'];
       if (slug) this.loadProduct(slug);
     });
@@ -84,7 +84,7 @@ export class ProductDetailComponent implements OnInit {
     this.isLoading.set(true);
     this.hasError.set(false);
     this.catalogService.getProductBySlug(slug).subscribe({
-      next: (response) => {
+      next: (response: any) => {
         if (response.success) {
           const product = response.data;
           this.product.set(product);
@@ -107,15 +107,15 @@ export class ProductDetailComponent implements OnInit {
     const query: CatalogQuery = { limit: 10, sort_by: 'newest' };
     if (product.categories?.length) query.category_id = product.categories[0].id;
     this.catalogService.getProducts(query).subscribe({
-      next: (response) => {
-        this.recommendedProducts.set(response.data.filter(p => p.id !== product.id));
+      next: (response: any) => {
+        this.recommendedProducts.set(response.data.filter((p: any) => p.id !== product.id));
       }
     });
   }
 
   setActiveImage(url: string): void { this.activeImageUrl.set(url); }
   selectVariant(variant: any): void { this.selectedVariantId.set(variant.id); }
-  toggleDescription(): void { this.isDescriptionExpanded.update(v => !v); }
+  toggleDescription(): void { this.isDescriptionExpanded.update((v: boolean) => !v); }
   onAddToCart(product: Product | ProductDetail): void { const result = this.cartService.addToCart(product.id, this.quantity()); if (result) { result.subscribe(); } }
   onQuickView(product: Product): void { this.selectedProductSlug = product.slug; this.quickViewOpen = true; }
 

@@ -62,6 +62,7 @@ export interface Brand {
 
 export interface CatalogQuery {
   search?: string;
+  ids?: string;
   category_id?: number;
   brand_id?: number;
   min_price?: number;
@@ -109,6 +110,7 @@ export class CatalogService {
     let params = new HttpParams();
 
     if (query.search) params = params.set('search', query.search);
+    if (query.ids) params = params.set('ids', query.ids);
     if (query.category_id)
       params = params.set('category_id', query.category_id.toString());
     if (query.brand_id)

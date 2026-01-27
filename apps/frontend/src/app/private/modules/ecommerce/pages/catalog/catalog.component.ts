@@ -43,6 +43,10 @@ export class CatalogComponent implements OnInit, OnDestroy {
   is_loading = false;
   show_filters = false;
 
+  // Quick View
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
   private destroy$ = new Subject<void>();
   private search_subject = new Subject<string>();
 
