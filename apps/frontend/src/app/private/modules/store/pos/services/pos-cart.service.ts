@@ -29,8 +29,7 @@ export class PosCartService {
   );
   private readonly loading$ = new BehaviorSubject<boolean>(false);
 
-
-  constructor() { }
+  constructor() {}
 
   // Observable getters
   get cartState(): Observable<CartState> {
@@ -226,7 +225,8 @@ export class PosCartService {
         quantity: newQuantity,
         taxAmount: this.calculateItemTax(existingItem.product, newQuantity),
         finalPrice: this.calculateItemFinalPrice(existingItem.product),
-        totalPrice: newQuantity * this.calculateItemFinalPrice(existingItem.product),
+        totalPrice:
+          newQuantity * this.calculateItemFinalPrice(existingItem.product),
         notes: request.notes || existingItem.notes,
       };
     } else {

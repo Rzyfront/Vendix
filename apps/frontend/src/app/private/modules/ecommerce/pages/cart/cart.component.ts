@@ -5,6 +5,13 @@ import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { AuthFacade } from '../../../../../core/store';
+import { StoreUiService } from '../../services/store-ui.service';
+import { CatalogService, Product } from '../../services/catalog.service';
+
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
+import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 
 @Component({
   selector: 'app-cart',
@@ -18,6 +25,11 @@ export class CartComponent implements OnInit, OnDestroy {
   is_loading = true;
   is_authenticated = false;
   updating_item_id: number | null = null;
+
+  // Recommendations
+  recommendedProducts = signal<Product[]>([]);
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
 
   private destroy$ = new Subject<void>();
 
@@ -116,5 +128,15 @@ export class CartComponent implements OnInit, OnDestroy {
 
   continueShopping(): void {
     this.router.navigate(['/catalog']);
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
+  }
+
+  onAddToCartFromSlider(product: Product): void {
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) result.subscribe();
   }
 }

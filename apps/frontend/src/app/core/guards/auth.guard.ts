@@ -57,7 +57,14 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * Check if the user was recently logged out to prevent stale state navigation
+   * Check if the user was recently logged out via localStorage flag
+   */
+  private wasRecentlyLoggedOut(): boolean {
+    return localStorage.getItem('logged_out') === 'true';
+  }
+
+  /**
+   * Check if a route is public (doesn't require authentication)
    */
   private wasRecentlyLoggedOut(): boolean {
     if (typeof localStorage === 'undefined') return false;
@@ -80,6 +87,14 @@ export class AuthGuard implements CanActivate {
     // Siempre redirigir al login contextual unificado
     const loginPath = '/auth/login';
     return of(this.router.createUrlTree([loginPath], { queryParams: { returnUrl } }));
+  }
+
+  private redirectToLogin(returnUrl: string): Observable<UrlTree> {
+    // Siempre redirigir al login contextual unificado
+    const loginPath = '/auth/login';
+    return of(
+      this.router.createUrlTree([loginPath], { queryParams: { returnUrl } }),
+    );
   }
 
   /**

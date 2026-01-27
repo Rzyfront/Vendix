@@ -812,6 +812,14 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   goToPurchase(): void {
-    this.router.navigate(['/admin/orders/purchase-orders']);
+    // Si tenemos ID de producto, vamos al punto de compra filtrado
+    if (this.productId) {
+      this.router.navigate(['/admin/inventory/pop'], {
+        queryParams: { product_id: this.productId },
+      });
+    } else {
+      // Si no, vamos a la lista general de órdenes de compra
+      this.router.navigate(['/admin/orders/purchase-orders']);
+    }
   }
 }

@@ -10,15 +10,16 @@ import { NotificationsSettingsForm } from './components/notifications-settings-f
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
-import { LucideAngularModule } from "lucide-angular";
+import { LucideAngularModule } from 'lucide-angular';
 import { IconComponent } from '../../../../../shared/components/index';
-
 
 @Component({
   selector: 'app-general-settings',
   standalone: true,
   imports: [
     CommonModule,
+    LucideAngularModule,
+    IconComponent,
     ButtonComponent,
     IconComponent,
     LucideAngularModule,
@@ -100,7 +101,7 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
         this.saveError = error.message || 'Error al guardar cambios';
         this.isAutoSaving = false;
         this.toast_service.error('Error al guardar cambios');
-      }
+      },
     });
   }
 
@@ -162,5 +163,5 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     }
   }
 
-  ngOnDestroy() { }
+  ngOnDestroy() {}
 }

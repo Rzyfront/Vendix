@@ -13,7 +13,6 @@ import {
   StoreListItem,
   StoreQueryDto,
   Store,
-
   StoreFilters,
   StoreType,
 } from './interfaces/store.interface';
@@ -27,7 +26,10 @@ import {
   StoreDeleteConfirmationComponent,
 } from './components/index';
 
-import { StoreConfigurationModalComponent, SettingsSavedEvent } from './components/store-configuration-modal/store-configuration-modal.component';
+import {
+  StoreConfigurationModalComponent,
+  SettingsSavedEvent,
+} from './components/store-configuration-modal/store-configuration-modal.component';
 
 import { EnvironmentSwitchService } from '../../../../core/services/environment-switch.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
@@ -222,8 +224,8 @@ interface StatItem {
         [isOpen]="isSettingsModalOpen"
         [storeId]="selectedStoreForSettings?.id || null"
         [storeName]="selectedStoreForSettings?.name || ''"
-        (openChange)="onSettingsModalChange($event)"
-        (settingsSaved)="updateStoreSettings($event)"
+        (isOpenChange)="onSettingsModalChange($event)"
+        (settingsSaved)="onSettingsSaved($event)"
       ></app-store-configuration-modal>
 
       <!-- Delete Store Confirmation Modal -->
@@ -252,7 +254,13 @@ export class StoresComponent implements OnInit, OnDestroy {
 
   // Table configuration
   tableColumns: TableColumn[] = [
-    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
+    {
+      key: 'name',
+      label: 'Nombre',
+      sortable: true,
+      width: '200px',
+      priority: 1,
+    },
     { key: 'slug', label: 'Slug', sortable: true, width: '150px', priority: 3 },
     {
       key: 'organizations.name',
@@ -343,8 +351,6 @@ export class StoresComponent implements OnInit, OnDestroy {
       variant: 'danger',
     },
   ];
-
-
 
   // Modal state
   isCreateModalOpen = false;
@@ -547,7 +553,7 @@ export class StoresComponent implements OnInit, OnDestroy {
               smallText: 'Registradas',
               iconName: 'building',
               iconBgColor: 'bg-primary/10',
-              iconColor: 'text-primary'
+              iconColor: 'text-primary',
             },
             {
               title: 'Activas',
@@ -555,7 +561,7 @@ export class StoresComponent implements OnInit, OnDestroy {
               smallText: 'En funcionamiento',
               iconName: 'check-circle',
               iconBgColor: 'bg-green-100',
-              iconColor: 'text-green-600'
+              iconColor: 'text-green-600',
             },
             {
               title: 'Total Pedidos',
@@ -563,7 +569,7 @@ export class StoresComponent implements OnInit, OnDestroy {
               smallText: 'Procesados',
               iconName: 'shopping-cart',
               iconBgColor: 'bg-pink-100',
-              iconColor: 'text-pink-600'
+              iconColor: 'text-pink-600',
             },
             {
               title: 'Total Ganancias',
@@ -571,8 +577,8 @@ export class StoresComponent implements OnInit, OnDestroy {
               smallText: 'Ingresos totales',
               iconName: 'dollar-sign',
               iconBgColor: 'bg-blue-100',
-              iconColor: 'text-blue-600'
-            }
+              iconColor: 'text-blue-600',
+            },
           ];
         },
         error: (error) => {
@@ -733,11 +739,8 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isDeleteModalOpen = true;
   }
 
-  onDeleteModalChange(isOpen: boolean | Event): void {
-    this.isDeleteModalOpen = isOpen as boolean;
-    if (!isOpen) {
-      this.selectedStoreForDelete = null;
-    }
+  onSettingsModalChange(isOpen: boolean | Event): void {
+    this.isSettingsModalOpen = isOpen as boolean;
   }
 
   onSettingsModalChange(isOpen: boolean | Event): void {
@@ -769,9 +772,7 @@ export class StoresComponent implements OnInit, OnDestroy {
             this.isDeleteModalOpen = false;
             this.selectedStoreForDelete = null;
           } else {
-            this.toastService.error(
-              'Respuesta inválida al eliminar la tienda',
-            );
+            this.toastService.error('Respuesta inválida al eliminar la tienda');
           }
         },
         error: (error) => {
@@ -790,7 +791,9 @@ export class StoresComponent implements OnInit, OnDestroy {
     // Settings were saved successfully in the modal
     // Update only the current store in the list instead of reloading all stores
     if (this.selectedStoreForSettings && event?.storeName) {
-      const storeIndex = this.stores.findIndex(s => s.id === this.selectedStoreForSettings!.id);
+      const storeIndex = this.stores.findIndex(
+        (s) => s.id === this.selectedStoreForSettings!.id,
+      );
       if (storeIndex !== -1) {
         // Update the store name in the list
         this.stores[storeIndex].name = event.storeName;

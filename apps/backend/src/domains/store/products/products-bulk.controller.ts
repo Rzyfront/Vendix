@@ -57,8 +57,8 @@ export class ProductsBulkController {
   /**
    * Carga masiva desde JSON directo
    */
-  @Post('upload')
-  @Permissions('store:products:create')
+  @Post('upload/json')
+  @Permissions('store:products:bulk:upload')
   async uploadProducts(
     @Body() bulkUploadDto: BulkProductUploadDto,
     @Req() req: AuthenticatedRequest,
@@ -123,7 +123,7 @@ export class ProductsBulkController {
    * Carga masiva desde archivo Excel/CSV
    */
   @Post('upload/file')
-  @Permissions('store:products:create')
+  @Permissions('store:products:bulk:upload')
   @UseInterceptors(FileInterceptor('file'))
   async uploadProductsFromFile(
     @UploadedFile(

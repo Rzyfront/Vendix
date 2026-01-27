@@ -235,7 +235,7 @@ export class StoresService {
         store_type: true,
         timezone: true,
         organization_id: true,
-      }
+      },
     });
 
     if (!store) {
@@ -252,9 +252,11 @@ export class StoresService {
 
     // Mapear colores del dominio a la estructura de AppSettings
     const primaryColor = branding.primary_color || '#7ED7A5';
-    const secondaryColor = branding.secondary_color || branding.surface_color || '#2F6F4E';
+    const secondaryColor =
+      branding.secondary_color || branding.surface_color || '#2F6F4E';
     const accentColor = branding.accent_color || '#FFFFFF';
-    const theme = branding.theme === 'light' ? 'default' : branding.theme || 'default';
+    const theme =
+      branding.theme === 'light' ? 'default' : branding.theme || 'default';
 
     if (!storeSettings || !storeSettings.settings) {
       return {
@@ -273,9 +275,9 @@ export class StoresService {
           secondary_color: secondaryColor,
           accent_color: accentColor,
           theme: theme,
-          logo_url: (branding.logo_url || store?.logo_url),
+          logo_url: branding.logo_url || store?.logo_url,
           favicon_url: branding.favicon_url,
-        }
+        },
       };
     }
 
@@ -296,9 +298,9 @@ export class StoresService {
         secondary_color: secondaryColor,
         accent_color: accentColor,
         theme: theme,
-        logo_url: (branding.logo_url || store?.logo_url),
+        logo_url: branding.logo_url || store?.logo_url,
         favicon_url: branding.favicon_url,
-      }
+      },
     };
   }
 
@@ -332,14 +334,14 @@ export class StoresService {
         store_id: storeId,
         is_primary: true,
       },
-      select: { config: true }
+      select: { config: true },
     });
 
     // If no primary domain, try to find any domain associated with the store
     if (!domain) {
       const anyDomain = await this.prisma.domain_settings.findFirst({
         where: { store_id: storeId },
-        select: { config: true }
+        select: { config: true },
       });
       return anyDomain?.config || {};
     }

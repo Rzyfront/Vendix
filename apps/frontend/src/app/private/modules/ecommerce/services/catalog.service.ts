@@ -10,6 +10,8 @@ export interface Product {
   slug: string;
   description: string | null;
   base_price: number;
+  sale_price?: number;
+  is_on_sale: boolean;
   sku: string | null;
   stock_quantity: number | null;
   image_url: string | null;

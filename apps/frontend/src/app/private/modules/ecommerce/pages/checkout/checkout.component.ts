@@ -7,6 +7,12 @@ import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart } from '../../services/cart.service';
 import { CheckoutService, PaymentMethod, CheckoutRequest } from '../../services/checkout.service';
 import { AccountService, Address } from '../../services/account.service';
+import { CatalogService, Product } from '../../services/catalog.service';
+import { CountryService, Country, Department, City } from '../../../../../services/country.service';
+
+import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
+import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
 
 @Component({
   selector: 'app-checkout',
@@ -32,6 +38,18 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   error_message = '';
 
   step = 1; // 1: Address, 2: Payment, 3: Confirm
+
+  // Recommendations
+  recommendedProducts = signal<Product[]>([]);
+  quickViewOpen = false;
+  selectedProductSlug: string | null = null;
+
+  // Location data (Country API)
+  countries: Country[] = [];
+  departments: Department[] = [];
+  cities: City[] = [];
+  loading_departments = false;
+  loading_cities = false;
 
   private destroy$ = new Subject<void>();
 
@@ -187,5 +205,55 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
+  }
+
+  onAddToCartFromSlider(product: Product): void {
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) result.subscribe();
+  }
+
+  // Helper getters for displaying selected location names in confirmation
+  getSelectedCountryName(): string {
+    const code = this.address_form.get('country_code')?.value;
+    const country = this.countries.find(c => c.code === code);
+    return country?.name || code || '';
+  }
+
+  getSelectedDepartmentName(): string {
+    const depId = Number(this.address_form.get('state_province')?.value);
+    const department = this.departments.find(d => d.id === depId);
+    return department?.name || this.address_form.get('state_province')?.value || '';
+  }
+
+  getSelectedCityName(): string {
+    const cityId = Number(this.address_form.get('city')?.value);
+    const city = this.cities.find(c => c.id === cityId);
+    return city?.name || this.address_form.get('city')?.value || '';
+  }
+
+  // Helper method for field validation errors
+  getFieldError(fieldName: string): string {
+    const control = this.address_form.get(fieldName);
+    if (!control || !control.touched || !control.errors) {
+      return '';
+    }
+
+    const errors = control.errors;
+    if (errors['required']) {
+      return 'Este campo es requerido';
+    }
+    if (errors['minlength']) {
+      return `Mínimo ${errors['minlength'].requiredLength} caracteres`;
+    }
+    if (errors['pattern']) {
+      return 'Formato inválido';
+    }
+
+    return '';
   }
 }

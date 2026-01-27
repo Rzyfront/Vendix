@@ -216,6 +216,8 @@ export class ProductsService {
 
           // 2. Procesar images (structured with possible base64)
           if (images && images.length > 0) {
+            const { org, store: storeContext } =
+              await this.getStoreWithOrgContext(store_id);
             const uploadedImages = await this.handleImageUploads(images, slug);
             finalImages.push(
               ...uploadedImages.map((img) => ({
@@ -598,8 +600,21 @@ export class ProductsService {
           ) || 0;
 
         return {
-          ...product,
-          image_url: await this.signProductImage(product, true),
+          id: product.id,
+          name: product.name,
+          slug: product.slug,
+          description: product.description,
+          base_price: product.base_price,
+          sale_price: product.sale_price,
+          is_on_sale: product.is_on_sale,
+          final_price: this.calculateFinalPrice(product),
+          sku: product.sku,
+          cost_price: product.cost_price,
+          image_url: signed_image_url || null,
+          brand: product.brands,
+          categories:
+            product.product_categories?.map((pc: any) => pc.categories) || [],
+          product_tax_assignments: product.product_tax_assignments,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
           // Nuevos campos agregados para mayor claridad
@@ -939,6 +954,8 @@ export class ProductsService {
 
             // 2. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
+              const { org, store: storeContext } =
+                await this.getStoreWithOrgContext(existingProduct.store_id);
               const uploadedImages = await this.handleImageUploads(
                 images,
                 product.slug,

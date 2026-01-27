@@ -56,6 +56,7 @@ export class ProductVariantService {
 
     return variant;
   }
+
   async createVariant(
     product_id: number,
     createVariantDto: CreateProductVariantDto,
@@ -63,7 +64,6 @@ export class ProductVariantService {
   ) {
     const context = RequestContextService.getContext();
     try {
-      // Verify user context for audit
       const user_id = context?.user_id;
       if (
         !user_id &&
@@ -75,7 +75,6 @@ export class ProductVariantService {
         );
       }
 
-      // Verificar que el producto existe y está activo
       const prisma = tx || this.prisma;
       const product = await prisma.products.findFirst({
         where: {
@@ -88,7 +87,6 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // Verificar que el SKU sea único dentro de la tienda (auto-scoped por StorePrismaService)
       const existingSku = await prisma.product_variants.findFirst({
         where: {
           sku: createVariantDto.sku,
@@ -127,8 +125,7 @@ export class ProductVariantService {
     createVariantDto: CreateProductVariantDto,
     user_id?: number,
   ) {
-    // Crear variante usando scoped client
-    const variant = await prisma.product_variants.create({
+    const variant = await (prisma as any).product_variants.create({
       data: {
         product_id: product.id,
         sku: createVariantDto.sku,
@@ -142,10 +139,9 @@ export class ProductVariantService {
         sale_price: createVariantDto.sale_price,
         created_at: new Date(),
         updated_at: new Date(),
-      } as any,
+      },
     });
 
-    // Inicializar stock levels para la variante si se proporciona stock
     if (
       createVariantDto.stock_quantity &&
       createVariantDto.stock_quantity > 0
@@ -163,7 +159,7 @@ export class ProductVariantService {
           quantity_change: createVariantDto.stock_quantity || 0,
           movement_type: 'initial',
           reason: 'Initial stock on variant creation',
-          user_id: user_id!, // Non-null assertion safe because we checked above
+          user_id: user_id!,
           create_movement: true,
           validate_availability: false,
         },
@@ -252,18 +248,16 @@ export class ProductVariantService {
   ) {
     const { stock_quantity, attributes, ...variantData } = updateVariantDto;
 
-    // Actualizar variante
-    const variant = await prisma.product_variants.update({
+    const variant = await (prisma as any).product_variants.update({
       where: { id: variantId },
       data: {
         ...variantData,
         price_override: variantData.price_override || updateVariantDto.price,
         attributes: attributes !== undefined ? attributes : undefined,
         updated_at: new Date(),
-      } as any,
+      },
     });
 
-    // Si cambió el stock, actualizar stock levels
     if (stock_quantity !== undefined) {
       const stockDifference = stock_quantity - existingVariant.stock_quantity;
 
@@ -281,7 +275,7 @@ export class ProductVariantService {
             quantity_change: stockDifference,
             movement_type: 'adjustment',
             reason: 'Stock quantity updated from variant edit',
-            user_id: user_id!, // Non-null assertion safe because we checked above
+            user_id: user_id!,
             create_movement: true,
             validate_availability: false,
           },
@@ -302,7 +296,6 @@ export class ProductVariantService {
     }
 
     return await this.prisma.$transaction(async (tx) => {
-      // Verificar que no haya stock en ninguna ubicación
       const stockLevels = await tx.stock_levels.findMany({
         where: {
           product_id: existingVariant.product_id,
@@ -320,8 +313,6 @@ export class ProductVariantService {
         );
       }
 
-      // Eliminación lógica: archivar variante (si tuviera estado)
-      // Por ahora, eliminamos físicamente las variantes ya que no tienen estado
       return await tx.product_variants.delete({
         where: { id: variantId },
       });

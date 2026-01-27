@@ -1,7 +1,8 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { Product } from '../../services/catalog.service';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
     selector: 'app-product-card',
@@ -186,10 +187,11 @@ import { Product } from '../../services/catalog.service';
   `],
 })
 export class ProductCardComponent {
-    @Input() product!: Product;
-    @Input() in_wishlist = false;
-    @Output() add_to_cart = new EventEmitter<Product>();
-    @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Input() product!: Product;
+  @Input() in_wishlist = false;
+  @Output() add_to_cart = new EventEmitter<Product>();
+  @Output() toggle_wishlist = new EventEmitter<Product>();
+  @Output() quick_view = new EventEmitter<Product>();
 
     onAddToCart(event: Event): void {
         event.stopPropagation();

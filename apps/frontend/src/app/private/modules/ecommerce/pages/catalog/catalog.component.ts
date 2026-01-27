@@ -208,12 +208,20 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: Product): void {
-    this.cart_service.addToLocalCart(product.id, 1);
+    const result = this.cart_service.addToCart(product.id, 1);
+    if (result) {
+      result.subscribe();
+    }
     // TODO: Show toast notification
   }
 
   onToggleWishlist(product: Product): void {
     // TODO: Implement wishlist toggle
+  }
+
+  onQuickView(product: Product): void {
+    this.selectedProductSlug = product.slug;
+    this.quickViewOpen = true;
   }
 
   private updateUrl(): void {

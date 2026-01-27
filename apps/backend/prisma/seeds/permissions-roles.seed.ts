@@ -385,7 +385,7 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:products:bulk:upload',
       description: 'Carga masiva de productos',
-      path: '/api/store/products/bulk/upload/csv',
+      path: '/api/store/products/bulk/upload',
       method: 'POST',
     },
     {
@@ -1191,7 +1191,7 @@ export async function seedPermissionsAndRoles(
   ];
 
   // Get valid permission names from our list
-  const validPermissionNames = new Set(permissions.map(p => p.name));
+  const validPermissionNames = new Set(permissions.map((p) => p.name));
 
   // Delete permissions that are not in our list (to avoid conflicts)
   const deletedCount = await client.permissions.deleteMany({

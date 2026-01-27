@@ -49,7 +49,9 @@ import { takeUntil } from 'rxjs/operators';
                     <app-icon name="store" [size]="9"></app-icon>
                     <span class="footer-info-label">Type</span>
                   </div>
-                  <span class="footer-info-value">{{ formatStoreType((storeType$ | async)) }}</span>
+                  <span class="footer-info-value">{{
+                    formatStoreType(storeType$ | async)
+                  }}</span>
                 </div>
               </div>
               <div class="footer-divider"></div>
@@ -359,9 +361,22 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
 
     this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
   }
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+
+  formatStoreType(type: string | null): string {
+    if (!type) return 'Not defined';
+
+    const typeMap: Record<string, string> = {
+      physical: 'Physical Store',
+      online: 'Online Store',
+      hybrid: 'Hybrid Store',
+      retail: 'Retail',
+      restaurant: 'Restaurante',
+      warehouse: 'Almacén',
+      ecommerce: 'E-commerce',
+      wholesale: 'Mayorista',
+    };
+
+    return typeMap[type] || type;
   }
 
   breadcrumb = {
@@ -403,5 +418,10 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy {
     this.authFacade.setOnboardingCompleted(true);
     // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
+  }
+
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 }
