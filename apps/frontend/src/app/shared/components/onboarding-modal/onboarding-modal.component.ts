@@ -26,6 +26,7 @@ import { OrganizationSetupStepComponent } from './steps/organization-setup-step.
 import { StoreSetupStepComponent } from './steps/store-setup-step.component';
 import { AppConfigStepComponent } from './steps/app-config-step.component';
 import { CompletionStepComponent } from './steps/completion-step.component';
+import { TermsStepComponent } from './steps/terms-step.component';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ToastService } from '../toast/toast.service';
@@ -58,6 +59,7 @@ interface WizardStep {
     StoreSetupStepComponent,
     AppConfigStepComponent,
     CompletionStepComponent,
+    TermsStepComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -137,8 +139,16 @@ interface WizardStep {
             ></app-app-config-step>
           </ng-container>
 
-          <!-- Step 6: Completion -->
+          <!-- Step 6: Terms & Conditions -->
           <ng-container *ngIf="currentStep === 6">
+            <app-terms-step
+              (completed)="onTermsAccepted()"
+              (back)="previousStep()"
+            ></app-terms-step>
+          </ng-container>
+
+          <!-- Step 7: Completion -->
+          <ng-container *ngIf="currentStep === 7">
             <app-completion-step
               [wizardData]="wizardData"
               (complete)="completeWizard()"
@@ -146,7 +156,7 @@ interface WizardStep {
           </ng-container>
         </ng-container>
 
-        <!-- Organization Flow (Steps 4-7) -->
+        <!-- Organization Flow (Steps 4-8) -->
         <ng-container
           *ngIf="businessType === 'ORGANIZATION' && currentStep > 3"
         >
@@ -178,8 +188,16 @@ interface WizardStep {
             ></app-app-config-step>
           </ng-container>
 
-          <!-- Step 7: Completion -->
+          <!-- Step 7: Terms & Conditions -->
           <ng-container *ngIf="currentStep === 7">
+            <app-terms-step
+              (completed)="onTermsAccepted()"
+              (back)="previousStep()"
+            ></app-terms-step>
+          </ng-container>
+
+          <!-- Step 8: Completion -->
+          <ng-container *ngIf="currentStep === 8">
             <app-completion-step
               [wizardData]="wizardData"
               (complete)="completeWizard()"
@@ -192,6 +210,7 @@ interface WizardStep {
       <div
         class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
         slot="footer"
+        *ngIf="!isTermsStep"
       >
         <div class="flex space-x-3">
           <app-button
@@ -240,8 +259,8 @@ interface WizardStep {
             {{
               isSubmitting
                 ? 'Procesando...'
-                : currentStep === 6 ||
-                    (currentStep === 5 && businessType === 'STORE')
+                : currentStep === 7 ||
+                    (currentStep === 6 && businessType === 'STORE')
                   ? 'Finalizar configuración'
                   : 'Siguiente'
             }}
@@ -323,6 +342,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     },
     {
       id: 6,
+      title: 'Términos y Condiciones',
+      description: 'Revisa y acepta los documentos legales',
+      icon: 'file-text',
+      canSkip: false,
+    },
+    {
+      id: 7,
       title: '¡Todo listo!',
       description: 'Tu tienda está configurada',
       icon: 'check-circle',
@@ -330,7 +356,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Organization-specific steps (7 steps total - Organization first)
+  // Organization-specific steps (8 steps total - Organization first)
   organizationSteps: WizardStep[] = [
     {
       id: 1,
@@ -376,6 +402,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     },
     {
       id: 7,
+      title: 'Términos y Condiciones',
+      description: 'Revisa y acepta los documentos legales',
+      icon: 'file-text',
+      canSkip: false,
+    },
+    {
+      id: 8,
       title: '¡Todo listo!',
       description: 'Tu organización está configurada',
       icon: 'check-circle',
@@ -719,10 +752,17 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     return this.currentStep < this.steps.length;
   }
 
-  get isCompletionStep(): boolean {
+  get isTermsStep(): boolean {
     return (
       (this.businessType === 'STORE' && this.currentStep === 6) ||
       (this.businessType === 'ORGANIZATION' && this.currentStep === 7)
+    );
+  }
+
+  get isCompletionStep(): boolean {
+    return (
+      (this.businessType === 'STORE' && this.currentStep === 7) ||
+      (this.businessType === 'ORGANIZATION' && this.currentStep === 8)
     );
   }
 
@@ -749,13 +789,22 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           this.submitStoreSetup();
         }
         break;
-      case 6: // App Configuration (Org flow) or Completion (Store flow)
+      case 6: // App Configuration (Org flow) or Terms (Store flow)
         if (this.businessType === 'STORE') {
-          // Store flow: step 6 is completion, no form submission needed
+          // Store flow: step 6 is Terms, handled by component
+          this.isProcessing = false;
+        } else {
+          this.submitAppConfig();
+        }
+        break;
+      case 7: // Terms (Org flow) or Completion (Store flow)
+        if (this.businessType === 'STORE') {
+          // Store flow: step 7 is completion
           this.isProcessing = false;
           this.wizardService.nextStep();
         } else {
-          this.submitAppConfig();
+          // Org flow: step 7 is Terms, handled by component
+          this.isProcessing = false;
         }
         break;
       default:
@@ -763,6 +812,10 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.isProcessing = false;
         this.wizardService.nextStep();
     }
+  }
+
+  onTermsAccepted(): void {
+    this.wizardService.nextStep();
   }
 
   previousStep(): void {
@@ -809,7 +862,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => this.handleOnboardingError(error, 'Error al configurar tu perfil'),
+      error: (error) =>
+        this.handleOnboardingError(error, 'Error al configurar tu perfil'),
     });
   }
 
@@ -841,7 +895,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => this.handleOnboardingError(error, 'Error al configurar la tienda'),
+      error: (error) =>
+        this.handleOnboardingError(error, 'Error al configurar la tienda'),
     });
   }
 
@@ -873,7 +928,11 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => this.handleOnboardingError(error, 'Error al configurar la organización'),
+      error: (error) =>
+        this.handleOnboardingError(
+          error,
+          'Error al configurar la organización',
+        ),
     });
   }
 
@@ -913,7 +972,11 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     }
 
     // Only include custom_domain if using custom domain and has a value
-    if (formData.use_custom_domain && formData.custom_domain && formData.custom_domain.trim()) {
+    if (
+      formData.use_custom_domain &&
+      formData.custom_domain &&
+      formData.custom_domain.trim()
+    ) {
       appConfigData.custom_domain = formData.custom_domain.trim();
     }
 
@@ -928,7 +991,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         }
         this.cdr.markForCheck();
       },
-      error: (error) => this.handleOnboardingError(error, 'Error al guardar la configuración'),
+      error: (error) =>
+        this.handleOnboardingError(error, 'Error al guardar la configuración'),
     });
   }
 
@@ -1018,7 +1082,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           'Error',
         );
       }
-
     } catch (error: any) {
       this.handleOnboardingError(error, 'Error al completar la configuración');
     } finally {
@@ -1040,26 +1103,35 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     // Check for "Missing steps" error specifically
     const errorMessage = error?.error?.message || error?.message || '';
 
-    if (errorMessage.includes('Missing steps') || errorMessage.includes('missing steps')) {
+    if (
+      errorMessage.includes('Missing steps') ||
+      errorMessage.includes('missing steps')
+    ) {
       // Extract the missing steps list
       const match = errorMessage.match(/steps: (.+)/i);
       if (match && match[1]) {
         const rawSteps = match[1].split(',').map((s: string) => s.trim());
         const friendlySteps = rawSteps.map((step: string) => {
           switch (step) {
-            case 'email_verification': return 'Verificación de Correo';
-            case 'app_type_selection': return 'Selección de Tipo de Negocio';
-            case 'organization_setup': return 'Configuración de Organización';
-            case 'store_setup': return 'Configuración de Tienda';
-            case 'app_configuration': return 'Configuración de Aplicación';
-            default: return step;
+            case 'email_verification':
+              return 'Verificación de Correo';
+            case 'app_type_selection':
+              return 'Selección de Tipo de Negocio';
+            case 'organization_setup':
+              return 'Configuración de Organización';
+            case 'store_setup':
+              return 'Configuración de Tienda';
+            case 'app_configuration':
+              return 'Configuración de Aplicación';
+            default:
+              return step;
           }
         });
 
         this.toastService.warning(
           `No se puede completar el proceso. Pasos pendientes: ${friendlySteps.join(', ')}`,
           'Pasos Incompletos',
-          6000
+          6000,
         );
         return;
       }
@@ -1074,9 +1146,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
       // Simple translation map for common auth/validation errors
       if (displayMessage.includes('Unique constraint failed')) {
-        if (displayMessage.includes('hostname')) displayMessage = 'Este dominio ya está en uso. Por favor elige otro.';
-        else if (displayMessage.includes('email')) displayMessage = 'Este correo electrónico ya está registrado.';
-        else if (displayMessage.includes('slug')) displayMessage = 'El identificador generado ya existe, intenta con otro nombre.';
+        if (displayMessage.includes('hostname'))
+          displayMessage = 'Este dominio ya está en uso. Por favor elige otro.';
+        else if (displayMessage.includes('email'))
+          displayMessage = 'Este correo electrónico ya está registrado.';
+        else if (displayMessage.includes('slug'))
+          displayMessage =
+            'El identificador generado ya existe, intenta con otro nombre.';
         else displayMessage = 'Ya existe un registro con esta información.';
       }
     }
