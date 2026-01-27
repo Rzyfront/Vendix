@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
 export interface LegalDocument {
@@ -34,7 +35,12 @@ export class LegalService {
    * Get all pending terms that the user needs to accept
    */
   getPendingTerms(): Observable<LegalDocument[]> {
-    return this.http.get<LegalDocument[]>(`${this.apiUrl}/pending`);
+    return this.http
+      .get<{
+        success: boolean;
+        data: LegalDocument[];
+      }>(`${this.apiUrl}/pending`)
+      .pipe(map((response) => response.data));
   }
 
   /**
@@ -44,13 +50,20 @@ export class LegalService {
     documentId: number,
     context: string = 'onboarding',
   ): Observable<AcceptanceResponse> {
-    return this.http.post<AcceptanceResponse>(
-      `${this.apiUrl}/${documentId}/accept`,
-      {
-        accepted: true,
-        context,
-      },
-    );
+    return this.http
+      .post<{ success: boolean; data: any; message: string }>(
+        `${this.apiUrl}/${documentId}/accept`,
+        {
+          accepted: true,
+          context,
+        },
+      )
+      .pipe(
+        map((response) => ({
+          success: response.success,
+          message: response.message,
+        })),
+      );
   }
 
   /**
@@ -60,8 +73,11 @@ export class LegalService {
     pending: boolean;
     documents: LegalDocument[];
   }> {
-    return this.http.get<{ pending: boolean; documents: LegalDocument[] }>(
-      `${this.apiUrl}/check-required`,
-    );
+    return this.http
+      .get<{
+        success: boolean;
+        data: { pending: boolean; documents: LegalDocument[] };
+      }>(`${this.apiUrl}/check-required`)
+      .pipe(map((response) => response.data));
   }
 }
