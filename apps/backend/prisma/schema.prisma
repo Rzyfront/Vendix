@@ -1724,12 +1724,62 @@ enum legal_document_type_enum {
   MERCHANT_AGREEMENT
 }
 
-enum legal_document_type_enum {
-  TERMS_OF_SERVICE
-  PRIVACY_POLICY
-  REFUND_POLICY
-  SHIPPING_POLICY
-  RETURN_POLICY
-  COOKIES_POLICY
-  MERCHANT_AGREEMENT
+enum expenses_state_enum {
+  pending
+  approved
+  rejected
+  paid
+}
+
+model shipping_zones {
+  id               Int                @id @default(autoincrement())
+  store_id         Int
+  name             String             @db.VarChar(100)
+  countries        String[]           @db.VarChar(3)
+  states           String[]           @db.VarChar(100)
+  is_active        Boolean            @default(true)
+  created_at       DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?          @default(now()) @db.Timestamp(6)
+  store            stores             @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_methods shipping_methods[]
+
+  @@index([store_id])
+}
+
+model shipping_methods {
+  id               Int                        @id @default(autoincrement())
+  store_id         Int
+  shipping_zone_id Int
+  name             String                     @db.VarChar(100)
+  code             String                     @db.VarChar(50)
+  description      String?                    @db.Text
+  type             shipping_method_type_enum  @default(custom)
+  min_delivery_days Int?
+  max_delivery_days Int?
+  is_active        Boolean                    @default(true)
+  created_at       DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?                  @default(now()) @db.Timestamp(6)
+  store            stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  shipping_zone    shipping_zones             @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
+  shipping_rates   shipping_rates[]
+  orders           orders[]
+
+  @@unique([store_id, code])
+  @@index([store_id])
+}
+
+model shipping_rates {
+  id                 Int                      @id @default(autoincrement())
+  shipping_method_id Int
+  name               String                   @db.VarChar(100)
+  rate_type          shipping_rate_type_enum  @default(flat)
+  price              Decimal                  @db.Decimal(12, 2)
+  condition_min      Decimal?                 @db.Decimal(12, 2)
+  condition_max      Decimal?                 @db.Decimal(12, 2)
+  is_active          Boolean                  @default(true)
+  created_at         DateTime?                @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                @default(now()) @db.Timestamp(6)
+  shipping_method    shipping_methods         @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
+
+  @@index([shipping_method_id])
 }
