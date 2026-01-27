@@ -402,11 +402,7 @@ export class AuthService {
         const config = settings?.config;
 
         // Backward compatibility: Transform old format to new format
-        if (
-          config?.panel_ui &&
-          !config.panel_ui.ORG_ADMIN &&
-          !config.panel_ui.STORE_ADMIN
-        ) {
+        if (config?.panel_ui && !config.panel_ui.ORG_ADMIN && !config.panel_ui.STORE_ADMIN) {
           // Old format detected - panel_ui is not nested by app type
           const appType = config.app || 'ORG_ADMIN';
 
@@ -415,13 +411,13 @@ export class AuthService {
             config: {
               ...config,
               panel_ui: {
-                [appType]: config.panel_ui,
+                [appType]: config.panel_ui
               },
               preferences: config.preferences || {
                 language: 'es',
-                theme: 'aura',
-              },
-            },
+                theme: 'aura'
+              }
+            }
           };
         }
 
@@ -433,14 +429,14 @@ export class AuthService {
               ...config,
               preferences: {
                 language: 'es',
-                theme: 'aura',
-              },
-            },
+                theme: 'aura'
+              }
+            }
           };
         }
 
         return response;
-      }),
+      })
     );
   }
 

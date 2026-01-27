@@ -127,7 +127,6 @@ export class ProductsBulkService {
           if (/^\d+$/.test(catStr)) categoryIds.push(parseInt(catStr, 10));
           else categoryIds.push(await this.findOrCreateCategory(catStr, storeId));
         }
-        product.category_ids = categoryIds;
       }
     }
     const cost = parseFloat(product.cost_price || 0);

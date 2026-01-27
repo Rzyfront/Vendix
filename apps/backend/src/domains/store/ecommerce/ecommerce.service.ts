@@ -1,27 +1,16 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EcommerceSettingsDto } from './dto/ecommerce-settings.dto';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
-import {
-  DomainGeneratorHelper,
-  DomainContext,
-} from '../../../common/helpers/domain-generator.helper';
-import { DomainConfigStandardizerHelper } from '../../../common/helpers/domain-config-standardizer.helper';
+import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
 import { RequestContextService } from '@common/context/request-context.service';
-import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper } from '@common/helpers/s3-path.helper';
 
 @Injectable()
 export class EcommerceService {
-  private readonly logger = new Logger(EcommerceService.name);
-
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
-    private readonly configStandardizer: DomainConfigStandardizerHelper,
-    private readonly s3Service: S3Service,
-    private readonly s3PathHelper: S3PathHelper,
   ) { }
 
   /**
@@ -41,76 +30,17 @@ export class EcommerceService {
       return null;
     }
 
-    const config = domain.config as any;
-
-    // Firmar URLs del slider para que sean visibles en el frontend
-    if (config.slider?.photos) {
-      for (const photo of config.slider.photos) {
-        if (photo.url && !photo.url.startsWith('http')) {
-          // Si la URL es una key de S3, la firmamos
-          photo.url = await this.s3Service.signUrl(photo.url);
-        }
-      }
-    }
-
-    // Firmar logo_url en inicio y branding si es necesario
-    if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
-      const signedLogo = await this.s3Service.signUrl(config.inicio.logo_url);
-      config.inicio.logo_url = signedLogo;
-
-      // Sincronizar con branding para visualización
-      if (config.branding) {
-        config.branding.logo_url = signedLogo;
-      }
-    } else if (
-      config.branding?.logo_url &&
-      !config.branding.logo_url.startsWith('http')
-    ) {
-      // Si solo está en branding (migración), firmarlo también
-      config.branding.logo_url = await this.s3Service.signUrl(
-        config.branding.logo_url,
-      );
-    }
-
-    // Construir la URL del dominio de Ecommerce
-    const ecommerceUrl = this.buildEcommerceUrl(domain.hostname);
-
-    // Retornar config junto con la URL
-    return {
-      config,
-      ecommerceUrl,
-    };
-  }
-
-  /**
-   * Construye la URL completa del dominio de Ecommerce
-   */
-  private buildEcommerceUrl(hostname: string): string {
-    // Si el hostname ya incluye el protocolo, retornarlo tal cual
-    if (hostname.startsWith('http://') || hostname.startsWith('https://')) {
-      return hostname;
-    }
-
-    // Construir la URL con https
-    return `https://${hostname}`;
+    return domain.config as any;
   }
 
   /**
    * Get default template for e-commerce configuration
    */
   async getDefaultTemplate(type: 'basic' | 'advanced' = 'basic') {
-    // Siempre retorna la plantilla default
-    const templateName = 'ecommerce_default_settings';
+    const templateName = type === 'basic' ? 'ecommerce_basic' : 'ecommerce_advanced';
 
-    const template = await this.prisma.default_templates.findFirst({
-      where: {
-        template_name: templateName,
-        is_active: true,
-        is_system: true,
-      },
-      orderBy: {
-        updated_at: 'desc',
-      },
+    const template = await this.prisma.default_templates.findUnique({
+      where: { template_name: templateName },
     });
 
     if (!template) {
@@ -126,10 +56,11 @@ export class EcommerceService {
    * Updates domain if exists (edit mode)
    */
   async updateSettings(ecommerceDto: EcommerceSettingsDto) {
-    const appType = 'STORE_ECOMMERCE';
-
-    // Aplicar auto-relleno si es necesario
-    const settings_with_defaults = this.applyDefaultValues(ecommerceDto);
+    // Always ensure app field is set
+    const configWithApp = {
+      ...ecommerceDto,
+      app: 'STORE_ECOMMERCE',
+    };
 
     // Buscar domain existente de tipo ecommerce
     const existingDomain = await this.prisma.domain_settings.findFirst({
@@ -140,439 +71,97 @@ export class EcommerceService {
 
     if (existingDomain) {
       // MODO EDICIÓN: actualizar domain existente
+      // Preserve existing branding if not provided in update (unlikely for now as DTO doesn't have it)
+      // Ideally we merge with existing config
       const existingConfig: any = existingDomain.config;
-
-      // Mezclamos la configuración existente con los nuevos cambios
-      // Importante: No sobreescribir con arrays vacíos si el DTO no los trae
-      const mergedRaw = {
+      const mergedConfig = {
         ...existingConfig,
-        ...settings_with_defaults,
-        slider: {
-          ...existingConfig.slider,
-          ...settings_with_defaults.slider,
-        },
-        inicio: {
-          ...existingConfig.inicio,
-          ...settings_with_defaults.inicio,
-        },
+        ...configWithApp,
+        // Ensure branding persists if we overwrite config
+        branding: existingConfig.branding || (configWithApp as any).branding
       };
 
-      // Limpiar y asegurar persistencia de KEYS de S3 en lugar de URLs firmadas
-      if (mergedRaw.slider?.photos && Array.isArray(mergedRaw.slider.photos)) {
-        mergedRaw.slider.photos = mergedRaw.slider.photos.map((photo: any) => {
-          const persistedPhoto = { ...photo };
-          // Si el frontend envió una KEY, esa es la que DEBE quedar en el campo 'url' de la DB
-          if (photo.key) {
-            persistedPhoto.url = photo.key;
-          } else if (photo.url && photo.url.includes('?X-Amz-Algorithm')) {
-            // Si es una URL firmada, buscamos la key en la config anterior
-            const oldPhoto = existingConfig.slider?.photos?.find(
-              (p: any) =>
-                p.key === photo.key ||
-                (p.title === photo.title && p.caption === photo.caption),
-            );
-            if (oldPhoto) persistedPhoto.url = oldPhoto.url || oldPhoto.key;
-          }
-          return persistedPhoto;
-        });
-      }
-
-      // Lo mismo para el logo_url
-      if (
-        mergedRaw.inicio?.logo_url &&
-        mergedRaw.inicio.logo_url.includes('?X-Amz-Algorithm')
-      ) {
-        // Intentar mantener el logo anterior si el nuevo es solo una firma temporal
-        mergedRaw.inicio.logo_url =
-          existingConfig.inicio?.logo_url || mergedRaw.inicio.logo_url;
-      }
-
-      // Sincronizar colores de inicio.colores con branding en modo edición
-      if (mergedRaw.inicio?.colores) {
-        if (!mergedRaw.branding) {
-          mergedRaw.branding = {};
-        }
-
-        // Actualizar colores en branding
-        mergedRaw.branding.primary_color =
-          mergedRaw.inicio.colores.primary_color ||
-          mergedRaw.branding.primary_color;
-        mergedRaw.branding.secondary_color =
-          mergedRaw.inicio.colores.secondary_color ||
-          mergedRaw.branding.secondary_color;
-        mergedRaw.branding.accent_color =
-          mergedRaw.inicio.colores.accent_color ||
-          mergedRaw.branding.accent_color;
-      }
-
-      // ===== NUEVO: Generación de Favicon =====
-      // Detectar si el logo cambió y generar favicon
-      if (
-        mergedRaw.inicio?.logo_url &&
-        mergedRaw.inicio.logo_url !== existingConfig.inicio?.logo_url
-      ) {
-        const newLogoUrl = mergedRaw.inicio.logo_url;
-
-        // Generar favicon asíncronamente (fire-and-forget)
-        this.generateFaviconForEcommerce(newLogoUrl).catch((error) =>
-          this.logger.warn(`Favicon generation failed: ${error.message}`),
-        );
-      }
-      // ========================================
-
-      // Estandarizamos para asegurar que branding y app sean correctos
-      const standardizedConfig = this.configStandardizer.standardize(
-        mergedRaw,
-        appType,
-      );
-
-      // Sincronizar con el nombre de la tienda y organización si el título de inicio cambió
-      if (mergedRaw.inicio?.titulo) {
-        try {
-          const store_id = RequestContextService.getStoreId();
-          if (store_id) {
-            const store = await this.prisma.stores.findUnique({
-              where: { id: store_id },
-              select: { organization_id: true }
-            });
-
-            // Actualizar nombre de la tienda
-            await this.prisma.stores.update({
-              where: { id: store_id },
-              data: { name: mergedRaw.inicio.titulo }
-            });
-
-            // Actualizar nombre de la organización
-            if (store?.organization_id) {
-              await this.prisma.organizations.update({
-                where: { id: store.organization_id },
-                data: { name: mergedRaw.inicio.titulo }
-              });
-            }
-          }
-        } catch (error) {
-          this.logger.warn(`Failed to sync name from ecommerce: ${error.message}`);
-        }
-      }
-
-      // Actualizar TODOS los dominios de tipo ecommerce para esta tienda
-      const store_id = RequestContextService.getStoreId();
-      const domains = await this.prisma.domain_settings.findMany({
-        where: {
-          store_id: store_id,
-          domain_type: 'ecommerce',
+      return this.prisma.domain_settings.update({
+        where: { id: existingDomain.id },
+        data: {
+          config: mergedConfig,
+          updated_at: new Date(),
         },
       });
-
-      const updatePromises = domains.map(domain => {
-        // Para otros dominios ecommerce, hacemos un merge similar o usamos la misma config estandarizada?
-        // Generalmente, si son dominios del mismo tipo para la misma tienda, deberían compartir la config de ecommerce
-        return this.prisma.domain_settings.update({
-          where: { id: domain.id },
-          data: {
-            config: standardizedConfig,
-            updated_at: new Date(),
-          },
-        });
-      });
-
-      await Promise.all(updatePromises);
-      return standardizedConfig; // Retornamos la config actualizada
     } else {
       // MODO CREACIÓN: crear nuevo domain
+      // StorePrismaService auto-injecta store_id, pero necesitamos el valor para el hostname
       const store_id = RequestContextService.getStoreId();
       if (!store_id) throw new Error('Store ID not found in context');
 
+      // Get store info for branding
       const store = await this.prisma.stores.findUnique({
         where: { id: store_id },
-        include: { organizations: true },
+        include: { organizations: true }
       });
 
+      // Get org branding
+      // Since StorePrismaService handles scoping, we might need a way to get org info
+      // Or just use defaults if not found.
       const orgDomain = await this.prisma.domain_settings.findFirst({
         where: {
           organization_id: store?.organization_id,
           ownership: 'vendix_subdomain',
-          domain_type: 'organization',
-        },
+          domain_type: 'organization'
+        }
       });
       const orgBranding = (orgDomain?.config as any)?.branding || null;
 
+      // Generate branding
       const branding = this.brandingGeneratorHelper.generateBranding({
         name: store?.name || 'Vendix Shop',
-        primaryColor:
-          settings_with_defaults.inicio?.colores?.primary_color ||
-          orgBranding?.primary_color,
-        secondaryColor:
-          settings_with_defaults.inicio?.colores?.secondary_color ||
-          orgBranding?.secondary_color,
+        primaryColor: orgBranding?.primary_color,
+        secondaryColor: orgBranding?.secondary_color,
         theme: 'light',
-        logoUrl:
-          settings_with_defaults.inicio?.logo_url || orgBranding?.logo_url,
+        logoUrl: orgBranding?.logo_url,
         faviconUrl: orgBranding?.favicon_url,
       });
 
-      // Si hay accent_color en inicio.colores, agregarlo al branding
-      if (settings_with_defaults.inicio?.colores?.accent_color) {
-        branding.accent_color =
-          settings_with_defaults.inicio.colores.accent_color;
-      }
-
+      // Generate hostname
+      // We can use the helper, but we need standard slug based on store slug if possible
+      // Store slug might be stored in store record.
       const slug = store?.slug || `${store_id}`;
-      const existingDomains = await this.prisma.domain_settings.findMany({
-        select: { hostname: true },
-      });
-      const existingHostnames: Set<string> = new Set(
-        existingDomains.map((d) => d.hostname as string),
-      );
+
+      // We need to check existing hostnames to generate unique
+      const existingDomains = await this.prisma.domain_settings.findMany({ select: { hostname: true } });
+      const existingHostnames: Set<string> = new Set(existingDomains.map((d) => d.hostname as string));
 
       const hostname = this.domainGeneratorHelper.generateUnique(
         slug,
         DomainContext.ECOMMERCE,
-        existingHostnames,
+        existingHostnames
       );
 
-      // Estandarizamos la configuración inicial
-      const standardizedConfig = this.configStandardizer.standardize(
-        {
-          ...settings_with_defaults,
-          branding,
-        },
-        appType,
-      );
-
-      // Ensure only one active ecommerce domain
-      await this.prisma.domain_settings.updateMany({
-        where: {
-          store_id: store_id,
-          domain_type: 'ecommerce',
-          status: 'active',
-        },
-        data: {
-          status: 'disabled',
-          is_primary: false,
-          updated_at: new Date(),
-        },
-      });
-
-      const newDomain = await this.prisma.domain_settings.create({
+      return this.prisma.domain_settings.create({
         data: {
           hostname,
-          store_id: store_id,
           domain_type: 'ecommerce',
           is_primary: false,
           ownership: 'vendix_subdomain',
-          status: 'active',
-          config: standardizedConfig,
+          config: {
+            ...configWithApp,
+            branding,
+          },
         },
       });
-
-      // ===== NUEVO: Generación de Favicon en Setup =====
-      if (standardizedConfig.inicio?.logo_url) {
-        this.generateFaviconForEcommerce(
-          standardizedConfig.inicio.logo_url,
-        ).catch((error) =>
-          this.logger.warn(
-            `Favicon generation failed during setup: ${error.message}`,
-          ),
-        );
-      }
-
-      return newDomain;
     }
-  }
-
-  /**
-   * Aplica valores por defecto a la configuración de e-commerce
-   * Auto-rellena título y párrafo si están vacíos
-   * Sincroniza colores de inicio.colores con branding
-   */
-  private applyDefaultValues(
-    ecommerceDto: EcommerceSettingsDto,
-  ): EcommerceSettingsDto {
-    const settings = { ...ecommerceDto };
-
-    // Auto-relleno de la sección inicio
-    if (settings.inicio) {
-      // Auto-relleno del título
-      if (!settings.inicio.titulo || settings.inicio.titulo.trim() === '') {
-        // Intentar obtener el nombre de la tienda del contexto
-        const store_id = RequestContextService.getStoreId();
-        settings.inicio.titulo = `Bienvenido a nuestra tienda`;
-      }
-
-      // Auto-relleno del párrafo
-      if (!settings.inicio.parrafo || settings.inicio.parrafo.trim() === '') {
-        settings.inicio.parrafo =
-          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...';
-      }
-
-      // Sincronizar colores de inicio.colores con branding
-      if (settings.inicio.colores) {
-        // Asegurar que branding existe
-        if (!settings.branding) {
-          settings.branding = {};
-        }
-
-        // Sincronizar colores
-        if (settings.inicio.colores.primary_color) {
-          settings.branding.primary_color =
-            settings.inicio.colores.primary_color;
-        }
-        if (settings.inicio.colores.secondary_color) {
-          settings.branding.secondary_color =
-            settings.inicio.colores.secondary_color;
-        }
-        if (settings.inicio.colores.accent_color) {
-          settings.branding.accent_color = settings.inicio.colores.accent_color;
-        }
-      }
-    }
-
-    return settings;
   }
 
   /**
    * Upload slider image to S3
+   * This method will be implemented when S3Service is available
    */
   async uploadSliderImage(file: Buffer, filename: string) {
-    const store_id = RequestContextService.getStoreId();
-    if (!store_id) throw new Error('Store ID not found in context');
-
-    // Obtener store con org para construir path con slugs
-    const store = await this.prisma.stores.findUnique({
-      where: { id: store_id },
-      select: {
-        id: true,
-        slug: true,
-        organizations: {
-          select: { id: true, slug: true },
-        },
-      },
-    });
-
-    if (!store || !store.organizations) {
-      throw new Error('Store or organization not found');
-    }
-
-    // Generar path organizado con slug-id
-    const timestamp = Date.now();
-    const clean_filename = filename.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
-    const basePath = this.s3PathHelper.buildEcommerceSliderPath(
-      store.organizations,
-      store,
-    );
-    const key = `${basePath}/${timestamp}-${clean_filename}`;
-
-    // Cargar y optimizar imagen (S3Service se encarga de convertir a WebP y hacer el thumb)
-    const result = await this.s3Service.uploadImage(file, key, {
-      generateThumbnail: true,
-    });
-
-    // Generar URL firmada temporal para previsualización inmediata en el frontend
-    const signed_url = await this.s3Service.getPresignedUrl(result.key);
-
+    // TODO: Implement S3 upload when S3Service is available
+    // For now, return a mock response
     return {
-      key: result.key, // Esta es la clave que guardaremos en la DB
-      url: signed_url, // Esta es la URL para verla ahora
-      thumbKey: result.thumbKey,
+      key: `https://s3.amazonaws.com/vendix-assets/ecommerce/slider/${filename}`,
+      thumbKey: `https://s3.amazonaws.com/vendix-assets/ecommerce/slider/thumb_${filename}`,
     };
-  }
-
-  /**
-   * Genera favicon desde el logo de ecommerce y lo agrega a branding
-   * Se ejecuta asíncronamente para no bloquear la respuesta
-   */
-  private async generateFaviconForEcommerce(logoUrl: string): Promise<void> {
-    try {
-      const store_id = RequestContextService.getStoreId();
-      if (!store_id) {
-        this.logger.warn('Store ID not found in context');
-        return;
-      }
-
-      // 1. Obtener store con organization y slugs para path S3
-      const store = await this.prisma.stores.findUnique({
-        where: { id: store_id },
-        select: {
-          id: true,
-          slug: true,
-          organization_id: true,
-          organizations: {
-            select: { id: true, slug: true },
-          },
-        },
-      });
-
-      if (!store?.organization_id || !store.organizations) {
-        this.logger.warn(`Store ${store_id} missing organization data`);
-        return;
-      }
-
-      // 2. Descargar logo desde S3
-      let logoBuffer: Buffer;
-      if (logoUrl.startsWith('http')) {
-        this.logger.warn(
-          'External logo URL detected, skipping favicon generation',
-        );
-        return;
-      }
-
-      try {
-        logoBuffer = await this.s3Service.downloadImage(logoUrl);
-      } catch (error) {
-        this.logger.error(`Failed to download logo: ${error.message}`);
-        return;
-      }
-
-      // 3. Generar y subir favicons usando path con slug-id
-      const faviconPath = this.s3PathHelper.buildFaviconPath(
-        store.organizations,
-        store,
-      );
-
-      const result = await this.s3Service.generateAndUploadFaviconFromLogo(
-        logoBuffer,
-        faviconPath,
-      );
-
-      if (!result) {
-        this.logger.warn(`Favicon generation failed for store ${store_id}`);
-        return;
-      }
-
-      this.logger.log(`Favicons generated: ${result.sizes.join(', ')}px`);
-
-      // 4. Actualizar domain_settings.config.branding.favicon_url
-      // Buscamos específicamente el dominio de esta tienda
-      const domain = await this.prisma.domain_settings.findFirst({
-        where: {
-          domain_type: 'ecommerce',
-          store_id: store_id,
-        },
-      });
-
-      if (domain) {
-        const existingConfig = (domain.config as any) || {};
-        const updatedConfig = {
-          ...existingConfig,
-          branding: {
-            ...existingConfig.branding,
-            favicon_url: result.faviconKey, // Standardized to favicon_url
-          },
-        };
-
-        await this.prisma.domain_settings.update({
-          where: { id: domain.id },
-          data: { config: updatedConfig },
-        });
-
-        this.logger.log(`Favicon updated for domain ${domain.hostname}`);
-      }
-    } catch (error) {
-      this.logger.error(
-        `Error in generateFaviconForEcommerce: ${error.message}`,
-      );
-      // No re-lanzamos el error para no afectar el flujo principal si esto falla
-    }
   }
 }

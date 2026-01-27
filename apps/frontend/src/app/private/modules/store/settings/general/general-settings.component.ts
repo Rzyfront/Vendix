@@ -21,6 +21,8 @@ import { IconComponent } from '../../../../../shared/components/index';
     LucideAngularModule,
     IconComponent,
     ButtonComponent,
+    IconComponent,
+    LucideAngularModule,
     GeneralSettingsForm,
     InventorySettingsForm,
     NotificationsSettingsForm,

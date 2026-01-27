@@ -15,7 +15,6 @@ export interface WishlistItem {
         name: string;
         slug: string;
         base_price: number;
-        final_price: number;
         sku: string | null;
         stock_quantity: number | null;
         image_url: string | null;
@@ -67,40 +66,11 @@ export class WishlistService {
     }
 
     addItem(product_id: number, product_variant_id?: number): Observable<any> {
-        // Optimistic update: agregar al principio de la lista local inmediatamente (modo pila/LIFO)
-        const current = this.wishlist_subject.value;
-        if (current) {
-            const tempItem: WishlistItem = {
-                id: Date.now(), // ID temporal
-                product_id,
-                product_variant_id: product_variant_id || null,
-                added_at: new Date().toISOString(),
-                product: {
-                    id: product_id,
-                    name: 'Cargando...',
-                    slug: '',
-                    base_price: 0,
-                    final_price: 0,
-                    sku: null,
-                    stock_quantity: null,
-                    image_url: null,
-                },
-                variant: null,
-            };
-            const updated: Wishlist = {
-                ...current,
-                item_count: current.item_count + 1,
-                items: [tempItem, ...current.items], // Agregar al principio (stack/push)
-            };
-            this.wishlist_subject.next(updated);
-        }
-
         return this.http
             .post(this.api_url, { product_id, product_variant_id }, { headers: this.getHeaders() })
             .pipe(
                 tap((response: any) => {
                     if (response.success) {
-                        // Reemplazar con datos reales del backend
                         this.wishlist_subject.next(response.data);
                     }
                 }),

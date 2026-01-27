@@ -743,6 +743,14 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isSettingsModalOpen = isOpen as boolean;
   }
 
+  onSettingsModalChange(isOpen: boolean | Event): void {
+    this.isSettingsModalOpen = isOpen as boolean;
+  }
+
+  updateStoreSettings(event: SettingsSavedEvent): void {
+    this.onSettingsSaved(event);
+  }
+
   onDeleteModalCancel(): void {
     this.isDeleteModalOpen = false;
   }

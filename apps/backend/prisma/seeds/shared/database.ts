@@ -27,24 +27,7 @@ export async function clearDatabase(prisma?: PrismaClient) {
     // LEVEL 1: Leaf tables (no dependents) - deepest dependencies first
     // ============================================
 
-    // Inventory and movements (deepest dependencies)
-    {
-      name: 'inventory_serial_numbers',
-      model: client.inventory_serial_numbers,
-    },
-    { name: 'inventory_batches', model: client.inventory_batches },
-    { name: 'inventory_movements', model: client.inventory_movements },
-    { name: 'inventory_transactions', model: client.inventory_transactions },
-    { name: 'stock_reservations', model: client.stock_reservations },
-    { name: 'inventory_adjustments', model: client.inventory_adjustments },
-    { name: 'stock_levels', model: client.stock_levels },
-    { name: 'inventory_locations', model: client.inventory_locations },
-
-    // Stock transfers (must delete before users, stores, products)
-    { name: 'stock_transfer_items', model: client.stock_transfer_items },
-    { name: 'stock_transfers', model: client.stock_transfers },
-
-    // Order-related items (must delete after inventory transactions)
+    // Order-related items (must delete before anything else)
     { name: 'sales_order_items', model: client.sales_order_items },
     { name: 'purchase_order_items', model: client.purchase_order_items },
     { name: 'return_order_items', model: client.return_order_items },
@@ -54,11 +37,15 @@ export async function clearDatabase(prisma?: PrismaClient) {
     { name: 'orders', model: client.orders },
 
     // Sales and purchase orders (have Restrict FK to users and addresses)
+    { name: 'sales_order_items', model: client.sales_order_items },
     { name: 'sales_orders', model: client.sales_orders },
+    { name: 'purchase_order_items', model: client.purchase_order_items },
     { name: 'purchase_orders', model: client.purchase_orders },
+    { name: 'return_order_items', model: client.return_order_items },
     { name: 'return_orders', model: client.return_orders },
 
     // Payments and refunds
+    { name: 'refund_items', model: client.refund_items },
     { name: 'refunds', model: client.refunds },
     { name: 'payments', model: client.payments },
 
@@ -73,6 +60,20 @@ export async function clearDatabase(prisma?: PrismaClient) {
 
     // Login attempts (has Restrict FK to stores - CRITICAL)
     { name: 'login_attempts', model: client.login_attempts },
+
+    // Inventory (must delete before products, users, stores)
+    { name: 'inventory_serial_numbers', model: client.inventory_serial_numbers },
+    { name: 'inventory_batches', model: client.inventory_batches },
+    { name: 'inventory_movements', model: client.inventory_movements },
+    { name: 'inventory_transactions', model: client.inventory_transactions },
+    { name: 'stock_reservations', model: client.stock_reservations },
+    { name: 'inventory_adjustments', model: client.inventory_adjustments },
+    { name: 'stock_levels', model: client.stock_levels },
+    { name: 'inventory_locations', model: client.inventory_locations },
+
+    // Stock transfers (must delete before users, stores, products)
+    { name: 'stock_transfer_items', model: client.stock_transfer_items },
+    { name: 'stock_transfers', model: client.stock_transfers },
 
     // Supplier products (must delete before products and suppliers)
     { name: 'supplier_products', model: client.supplier_products },
@@ -107,10 +108,7 @@ export async function clearDatabase(prisma?: PrismaClient) {
     // LEVEL 5: User-related tables
     // ============================================
     { name: 'password_reset_tokens', model: client.password_reset_tokens },
-    {
-      name: 'email_verification_tokens',
-      model: client.email_verification_tokens,
-    },
+    { name: 'email_verification_tokens', model: client.email_verification_tokens },
     { name: 'refresh_tokens', model: client.refresh_tokens },
     { name: 'user_sessions', model: client.user_sessions },
     { name: 'user_settings', model: client.user_settings },
@@ -125,10 +123,7 @@ export async function clearDatabase(prisma?: PrismaClient) {
     { name: 'audit_logs', model: client.audit_logs },
     { name: 'suppliers', model: client.suppliers },
     { name: 'organization_settings', model: client.organization_settings },
-    {
-      name: 'organization_payment_policies',
-      model: client.organization_payment_policies,
-    },
+    { name: 'organization_payment_policies', model: client.organization_payment_policies },
     { name: 'organizations', model: client.organizations },
 
     // ============================================
@@ -172,7 +167,7 @@ export async function clearDatabase(prisma?: PrismaClient) {
  */
 export async function resetDatabase(
   seedFunction: () => Promise<void>,
-  prisma?: PrismaClient,
+  prisma?: PrismaClient
 ) {
   console.log('🔄 Resetting database...');
   await clearDatabase(prisma);
@@ -188,23 +183,14 @@ export async function resetDatabase(
  * @param module - Name of module to clear ('products', 'users', 'organizations', etc.)
  * @param prisma - Optional PrismaClient instance
  */
-export async function clearModule(module: string, prisma?: PrismaClient) {
+export async function clearModule(
+  module: string,
+  prisma?: PrismaClient
+) {
   const client = prisma || getPrismaClient();
 
   const moduleMaps: Record<string, Array<{ name: string; model: any }>> = {
     products: [
-      // Inventory dependencies (must be deleted before products and orders)
-      {
-        name: 'inventory_serial_numbers',
-        model: client.inventory_serial_numbers,
-      },
-      { name: 'inventory_batches', model: client.inventory_batches },
-      { name: 'inventory_movements', model: client.inventory_movements },
-      { name: 'inventory_transactions', model: client.inventory_transactions },
-      { name: 'stock_reservations', model: client.stock_reservations },
-      { name: 'inventory_adjustments', model: client.inventory_adjustments },
-      { name: 'stock_levels', model: client.stock_levels },
-      { name: 'stock_transfer_items', model: client.stock_transfer_items },
       // Order-related dependencies
       { name: 'order_items', model: client.order_items },
       { name: 'sales_order_items', model: client.sales_order_items },
@@ -213,22 +199,27 @@ export async function clearModule(module: string, prisma?: PrismaClient) {
       { name: 'cart_items', model: client.cart_items },
       { name: 'wishlist_items', model: client.wishlist_items },
       { name: 'reviews', model: client.reviews },
+      // Inventory dependencies
+      { name: 'inventory_serial_numbers', model: client.inventory_serial_numbers },
+      { name: 'inventory_batches', model: client.inventory_batches },
+      { name: 'inventory_movements', model: client.inventory_movements },
+      { name: 'inventory_transactions', model: client.inventory_transactions },
+      { name: 'stock_reservations', model: client.stock_reservations },
+      { name: 'inventory_adjustments', model: client.inventory_adjustments },
+      { name: 'stock_levels', model: client.stock_levels },
+      { name: 'stock_transfer_items', model: client.stock_transfer_items },
       { name: 'supplier_products', model: client.supplier_products },
       // Product tables
       { name: 'product_images', model: client.product_images },
       { name: 'product_variants', model: client.product_variants },
       { name: 'products', model: client.products },
-      {
-        name: 'product_tax_assignments',
-        model: client.product_tax_assignments,
-      },
+      { name: 'product_tax_assignments', model: client.product_tax_assignments },
       { name: 'product_categories', model: client.product_categories },
       { name: 'brands', model: client.brands },
       { name: 'categories', model: client.categories },
       { name: 'tax_rates', model: client.tax_rates },
       { name: 'tax_categories', model: client.tax_categories },
     ],
-
     users: [
       // Order dependencies (have Restrict FK to users)
       { name: 'sales_orders', model: client.sales_orders },
@@ -240,10 +231,7 @@ export async function clearModule(module: string, prisma?: PrismaClient) {
       { name: 'stock_reservations', model: client.stock_reservations },
       { name: 'api_keys', model: client.api_keys },
       { name: 'password_reset_tokens', model: client.password_reset_tokens },
-      {
-        name: 'email_verification_tokens',
-        model: client.email_verification_tokens,
-      },
+      { name: 'email_verification_tokens', model: client.email_verification_tokens },
       { name: 'refresh_tokens', model: client.refresh_tokens },
       { name: 'user_sessions', model: client.user_sessions },
       { name: 'user_settings', model: client.user_settings },
@@ -274,10 +262,7 @@ export async function clearModule(module: string, prisma?: PrismaClient) {
       { name: 'suppliers', model: client.suppliers },
       { name: 'domain_settings', model: client.domain_settings },
       { name: 'organization_settings', model: client.organization_settings },
-      {
-        name: 'organization_payment_policies',
-        model: client.organization_payment_policies,
-      },
+      { name: 'organization_payment_policies', model: client.organization_payment_policies },
       { name: 'organizations', model: client.organizations },
     ],
     permissions: [
@@ -286,14 +271,14 @@ export async function clearModule(module: string, prisma?: PrismaClient) {
       { name: 'roles', model: client.roles },
       { name: 'permissions', model: client.permissions },
     ],
-    templates: [{ name: 'default_templates', model: client.default_templates }],
+    templates: [
+      { name: 'default_templates', model: client.default_templates },
+    ],
   };
 
   const operations = moduleMaps[module];
   if (!operations) {
-    throw new Error(
-      `Unknown module: ${module}. Available modules: ${Object.keys(moduleMaps).join(', ')}`,
-    );
+    throw new Error(`Unknown module: ${module}. Available modules: ${Object.keys(moduleMaps).join(', ')}`);
   }
 
   console.log(`🧹 Clearing ${module} module...`);

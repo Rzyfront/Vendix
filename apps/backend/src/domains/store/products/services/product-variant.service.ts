@@ -286,7 +286,6 @@ export class ProductVariantService {
 
     return variant;
   }
-
   async removeVariant(variantId: number) {
     const existingVariant = await this.prisma.product_variants.findUnique({
       where: { id: variantId },

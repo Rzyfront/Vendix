@@ -20,9 +20,9 @@ export class StorePrismaService extends BasePrismaService {
     'store_payment_methods',
     'addresses',
     'domain_settings',
+    'expenses',
     'shipping_zones',
     'shipping_methods',
-    'expenses',
   ];
 
   constructor() {

@@ -113,45 +113,6 @@ export const storeEcommercePublicRoutes: Routes = [
             '../../private/modules/ecommerce/pages/cart/cart.component'
           ).then((c) => c.CartComponent),
       },
-      {
-        path: 'wishlist',
-        loadComponent: () =>
-          import(
-            '../../private/modules/ecommerce/pages/wishlist/wishlist.component'
-          ).then((c) => c.WishlistComponent),
-      },
-      {
-        path: 'checkout',
-        canActivate: [AuthGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/ecommerce/pages/checkout/checkout.component'
-          ).then((c) => c.CheckoutComponent),
-      },
-      {
-        path: 'account',
-        canActivate: [AuthGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/ecommerce/pages/account/account.component'
-          ).then((c) => c.AccountComponent),
-      },
-      {
-        path: 'account/orders',
-        canActivate: [AuthGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/ecommerce/pages/account/orders/orders.component'
-          ).then((c) => c.OrdersComponent),
-      },
-      {
-        path: 'account/orders/:id',
-        canActivate: [AuthGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/ecommerce/pages/account/order-detail/order-detail.component'
-          ).then((c) => c.OrderDetailComponent),
-      },
     ],
   },
 ];

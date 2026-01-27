@@ -247,7 +247,6 @@ export class ProductsBulkController {
                 'stock_quantity',
                 'weight',
                 'sale_price',
-                'profit_margin',
               ].includes(key)
             ) {
               const num = parseFloat(val);

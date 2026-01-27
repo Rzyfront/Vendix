@@ -5,6 +5,7 @@ import { takeUntil, tap } from 'rxjs/operators';
 import { ReplaySubject, Subject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
+import { NotFoundGuard } from '../guards/not-found.guard';
 
 @Injectable({
   providedIn: 'root',
@@ -101,6 +102,7 @@ export class RouteManagerService implements OnDestroy {
       // Catch-all route: redirect to home and show toast via component
       {
         path: '**',
+        canActivate: [NotFoundGuard],
         loadComponent: () =>
           import(
             '../../shared/components/not-found-redirect/not-found-redirect.component'

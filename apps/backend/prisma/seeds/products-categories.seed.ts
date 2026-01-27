@@ -459,43 +459,29 @@ export async function seedProductsAndCategories(
 
   const createdProducts: any[] = [];
   for (const product of products) {
-    const p = product as any;
     const createdProduct = await client.products.upsert({
       where: {
         store_id_sku: {
-          store_id: p.store_id,
-          sku: p.sku || '',
+          store_id: product.store_id,
+          sku: product.sku || '',
         },
       },
       update: {},
       create: {
-        name: p.name,
-        description: p.description,
-        sku: p.sku,
-        base_price: p.base_price,
-        cost_price: p.cost_price,
-        profit_margin: p.profit_margin,
-        is_on_sale: p.is_on_sale || false,
-        sale_price: p.sale_price,
-        weight: p.weight,
-        dimensions: p.dimensions,
-        track_inventory: p.track_inventory || false,
-        min_stock_level: p.min_stock_level || 0,
-        max_stock_level: p.max_stock_level || 0,
-        reorder_point: p.reorder_point || 0,
-        reorder_quantity: p.reorder_quantity || 0,
-        requires_serial_numbers: p.requires_serial_numbers || false,
-        requires_batch_tracking: p.requires_batch_tracking || false,
-        slug: p.name.toLowerCase().replace(/\s+/g, '-'),
-        store_id: p.store_id,
-        product_categories: p.category_id
+        name: product.name,
+        description: product.description,
+        sku: product.sku,
+        base_price: product.base_price,
+        slug: product.name.toLowerCase().replace(/\s+/g, '-'),
+        store_id: product.store_id,
+        product_categories: product.category_id
           ? {
               create: {
-                category_id: p.category_id,
+                category_id: product.category_id,
               },
             }
           : undefined,
-        brand_id: p.brand_id,
+        brand_id: product.brand_id,
       },
     });
     createdProducts.push(createdProduct);
@@ -745,18 +731,13 @@ export async function seedProductsAndCategories(
       });
 
       if (!existing) {
-        const v = variant as any;
         await client.product_variants.create({
           data: {
-            product_id: v.product_id,
-            sku: v.sku,
-            price_override: v.base_price,
-            cost_price: v.cost_price,
-            profit_margin: v.profit_margin,
-            is_on_sale: v.is_on_sale || false,
-            sale_price: v.sale_price,
-            stock_quantity: v.stock_quantity,
-            attributes: v.attributes,
+            product_id: variant.product_id,
+            sku: variant.sku,
+            price_override: variant.base_price,
+            stock_quantity: variant.stock_quantity,
+            attributes: variant.attributes,
           },
         });
         variantsCreated++;

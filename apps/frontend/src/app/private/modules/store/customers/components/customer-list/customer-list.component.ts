@@ -142,7 +142,7 @@ export class CustomerListComponent {
       label: 'Unido',
       sortable: true,
       priority: 3,
-      transform: (val) => (val ? new Date(val).toLocaleDateString() : '-'),
+      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
     },
   ];
 

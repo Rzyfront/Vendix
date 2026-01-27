@@ -40,12 +40,11 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
-      (cancel)="onCancel()"
+      [(isOpen)]="isOpen"
       [size]="'lg'"
       title="Editar Método de Pago"
       [subtitle]="paymentMethod ? 'Modificando ' + paymentMethod.display_name : ''"
+      (opened)="onModalOpen()"
       (closed)="onModalClose()"
     >
       <form [formGroup]="paymentMethodForm" (ngSubmit)="onSubmit()">
@@ -427,7 +426,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy, OnCha
   }
 
   onCancel(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen = false;
     this.resetForm();
   }
 

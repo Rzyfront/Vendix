@@ -1,11 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { BehaviorSubject, Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CatalogService, Product } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
-import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
 export interface CartItem {
   id: number;

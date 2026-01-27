@@ -542,23 +542,6 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   onAddToCart(product: any): void {
-    if (product.price <= 0) {
-      this.dialogService
-        .confirm({
-          title: 'Precio no configurado',
-          message:
-            'Este producto no tiene un precio de venta válido (0 o menor). Debes configurar el precio antes de agregarlo al carrito.',
-          confirmText: 'Configurar producto',
-          cancelText: 'Cancelar',
-        })
-        .then((confirmed) => {
-          if (confirmed) {
-            this.router.navigate([`/admin/products/edit/${product.id}`]);
-          }
-        });
-      return;
-    }
-
     if (product.stock > 0 && product.stock <= 5) {
       this.toastService.warning(
         `Producto con existencias bajo (${product.stock} unidades restantes)`,

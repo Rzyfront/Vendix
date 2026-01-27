@@ -95,6 +95,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (create)="openCreateModal()"
         (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
+
         (bulkUpload)="openBulkUploadModal()"
       ></app-product-list>
 

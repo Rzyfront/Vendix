@@ -306,13 +306,6 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/settings/domains/store-domains.component'
               ).then((c) => c.StoreDomainsComponent),
           },
-          {
-            path: 'shipping',
-            loadChildren: () =>
-              import(
-                '../../private/modules/store/settings/shipping/shipping.module'
-              ).then((m) => m.ShippingModule),
-          },
         ],
       },
       // Expenses Routes

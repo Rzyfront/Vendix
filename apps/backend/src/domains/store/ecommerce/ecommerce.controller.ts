@@ -27,11 +27,7 @@ export class EcommerceController {
       }
 
       return this.responseService.success(
-        {
-          exists: true,
-          config: settings.config,
-          ecommerceUrl: settings.ecommerceUrl,
-        },
+        { exists: true, config: settings },
         'Configuración de e-commerce obtenida exitosamente',
       );
     } catch (error) {

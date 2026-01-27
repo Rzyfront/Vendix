@@ -1,32 +1,13 @@
 <div class="catalog-page">
     <!-- Header -->
     <div class="catalog-header">
-        <h2 class="catalog-title">
-            @if (search_term) {
-            {{ search_term }}: {{ total_products }} Resultados
-            } @else {
-            Todos: {{ total_products }} Resultados
-            }
-        </h2>
-
-        <div class="catalog-actions">
-            <!-- Sort dropdown moved here -->
-            <div class="catalog-toolbar">
-                <select [(ngModel)]="sort_by" (ngModelChange)="onSortChange()" class="sort-select">
-                    <option value="newest">Más recientes</option>
-                    <option value="oldest">Menos recientes</option>
-                    <option value="name">Nombre A-Z</option>
-                    <option value="price_asc">Precio: menor a mayor</option>
-                    <option value="price_desc">Precio: mayor a menor</option>
-                </select>
-            </div>
-
-            <div class="catalog-meta">
-                <button class="filter-toggle" (click)="toggleFilters()">
-                    <i class="pi pi-filter"></i>
-                    Filtros
-                </button>
-            </div>
+        <h1>Productos</h1>
+        <div class="catalog-meta">
+            <span class="product-count">{{ total_products }} productos</span>
+            <button class="filter-toggle" (click)="toggleFilters()">
+                <i class="pi pi-filter"></i>
+                Filtros
+            </button>
         </div>
     </div>
 
@@ -40,10 +21,17 @@
                 </button>
             </div>
 
+            <!-- Search -->
+            <div class="filter-section">
+                <label>Buscar</label>
+                <input type="text" [(ngModel)]="search_term" (ngModelChange)="onSearchChange()"
+                    placeholder="Buscar productos..." class="filter-input">
+            </div>
+
             <!-- Categories -->
             <div class="filter-section">
                 <label>Categorías</label>
-                <ul class="filter-options-list">
+                <ul class="filter-list">
                     <li [class.active]="!selected_category_id" (click)="onCategorySelect(null)">
                         Todas las categorías
                     </li>
@@ -58,7 +46,7 @@
             <!-- Brands -->
             <div class="filter-section">
                 <label>Marcas</label>
-                <ul class="filter-options-list">
+                <ul class="filter-list">
                     <li [class.active]="!selected_brand_id" (click)="onBrandSelect(null)">
                         Todas las marcas
                     </li>
@@ -75,6 +63,7 @@
                 <label>Precio</label>
                 <div class="price-inputs">
                     <input type="number" [(ngModel)]="min_price" placeholder="Mín" class="filter-input">
+                    <span>-</span>
                     <input type="number" [(ngModel)]="max_price" placeholder="Máx" class="filter-input">
                 </div>
                 <button class="apply-price-btn" (click)="applyPriceFilter()">Aplicar</button>
@@ -88,6 +77,16 @@
 
         <!-- Products Grid -->
         <main class="catalog-main">
+            <!-- Sort -->
+            <div class="catalog-toolbar">
+                <select [(ngModel)]="sort_by" (ngModelChange)="onSortChange()" class="sort-select">
+                    <option value="newest">Más recientes</option>
+                    <option value="name">Nombre A-Z</option>
+                    <option value="price_asc">Precio: menor a mayor</option>
+                    <option value="price_desc">Precio: mayor a menor</option>
+                </select>
+            </div>
+
             <!-- Loading -->
             @if (is_loading) {
             <div class="loading-grid">
@@ -105,7 +104,7 @@
             <div class="products-grid">
                 @for (product of products; track product.id) {
                 <app-product-card [product]="product" (add_to_cart)="onAddToCart($event)"
-                    (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" />
+                    (toggle_wishlist)="onToggleWishlist($event)" />
                 }
             </div>
             } @else {
@@ -142,7 +141,3 @@
 @if (show_filters) {
 <div class="filter-overlay" (click)="toggleFilters()"></div>
 }
-
-<!-- Product Quick View Modal -->
-<app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-    (closed)="quickViewOpen = false" (addedToCart)="onAddToCart($event)" />

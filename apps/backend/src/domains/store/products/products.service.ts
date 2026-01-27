@@ -394,8 +394,6 @@ export class ProductsService {
         },
         { timeout: 30000 },
       );
-
-      return result;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
@@ -601,9 +599,6 @@ export class ProductsService {
             0,
           ) || 0;
 
-        const raw_image_url = product.product_images?.[0]?.image_url || null;
-        const signed_image_url = await this.s3Service.signUrl(raw_image_url);
-
         return {
           id: product.id,
           name: product.name,
@@ -633,8 +628,6 @@ export class ProductsService {
               available: stock.quantity_available,
               reserved: stock.quantity_reserved,
             })) || [],
-          stock_levels: product.stock_levels,
-          stores: product.stores,
         };
       }),
     );
@@ -1214,6 +1207,15 @@ export class ProductsService {
   }
 
   // Gestión de variantes
+  async createVariant(
+    productId: number,
+    createVariantDto: CreateProductVariantDto,
+  ) {
+    return this.productVariantService.createVariant(
+      productId,
+      createVariantDto,
+    );
+  }
 
   // Gestión de imágenes
   async addImage(productId: number, imageDto: ProductImageDto) {
@@ -1347,30 +1349,6 @@ export class ProductsService {
         `Error calculating product stats: ${error.message}`,
       );
     }
-  }
-
-  async createVariant(
-    productId: number,
-    createVariantDto: CreateProductVariantDto,
-  ) {
-    return this.productVariantService.createVariant(
-      productId,
-      createVariantDto,
-    );
-  }
-
-  async updateVariant(
-    variantId: number,
-    updateVariantDto: UpdateProductVariantDto,
-  ) {
-    return this.productVariantService.updateVariant(
-      variantId,
-      updateVariantDto,
-    );
-  }
-
-  async removeVariant(variantId: number) {
-    return this.productVariantService.removeVariant(variantId);
   }
 
   private async handleImageUploads(

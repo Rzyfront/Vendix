@@ -262,14 +262,3 @@ export const updateUserSettingsFailure = createAction(
   '[Auth] Update User Settings Failure',
   props<{ error: NormalizedApiPayload | string }>(),
 );
-
-// Update Store Settings Actions
-export const updateStoreSettings = createAction(
-  '[Auth] Update Store Settings',
-  props<{ store_settings: any }>(),
-);
-
-export const updateStoreSettingsSuccess = createAction(
-  '[Auth] Update Store Settings Success',
-  props<{ store_settings: any }>(),
-);

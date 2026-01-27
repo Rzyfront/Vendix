@@ -835,9 +835,8 @@ export class AuthService {
       },
     });
 
-    // Crear user_settings para el usuario staff usando el servicio centralizado (siempre STORE_ADMIN)
-    const staffConfig =
-      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    // Crear user_settings para el usuario staff usando el servicio centralizado
+    const staffConfig = await this.defaultPanelUIService.generatePanelUI(app);
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,

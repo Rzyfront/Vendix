@@ -158,17 +158,19 @@ import './templates.component.css';
 
       <!-- Create Template Modal -->
       <app-template-create-modal
-        [(isOpen)]="isCreateModalOpen"
+        [isOpen]="isCreateModalOpen"
         [isSubmitting]="isCreatingTemplate"
         (submit)="createTemplate($event)"
+        (cancel)="onCreateModalCancel()"
       ></app-template-create-modal>
 
       <!-- Edit Template Modal -->
       <app-template-edit-modal
-        [(isOpen)]="isEditModalOpen"
+        [isOpen]="isEditModalOpen"
         [isSubmitting]="isUpdatingTemplate"
         [template]="selectedTemplate"
         (submit)="updateTemplate($event)"
+        (cancel)="onEditModalCancel()"
       ></app-template-edit-modal>
     </div>
   `,

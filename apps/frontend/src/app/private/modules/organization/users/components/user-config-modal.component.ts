@@ -34,8 +34,8 @@ import { Subject, takeUntil } from 'rxjs';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
-      title="Configuración de Usuario"
-      subtitle="Administra los roles, tiendas y configuraciones del panel UI"
+      title=""
+      
     >
       <form [formGroup]="configForm" (ngSubmit)="onSubmit()" *ngIf="user">
         <!-- Tabs -->
@@ -170,10 +170,8 @@ import { Subject, takeUntil } from 'rxjs';
         </div>
       </form>
 
-      <div
-        class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
-        slot="footer"
-      >
+      <div  class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
+        slot="footer">
         <app-button
           variant="outline-danger"
           (clicked)="onCancel()"
@@ -276,7 +274,6 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         billing: true,
         ecommerce: true,
         orders: true,
-        expenses: true,
       },
       STORE_ADMIN: {
         dashboard: true,
@@ -301,12 +298,6 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         analytics_sales: true,
         analytics_traffic: false,
         analytics_performance: false,
-        expenses: true,
-        expenses_overview: true,
-        expenses_all: true,
-        expenses_create: true,
-        expenses_categories: true,
-        expenses_reports: true,
         settings: true,
         settings_general: true,
         settings_payments: true,

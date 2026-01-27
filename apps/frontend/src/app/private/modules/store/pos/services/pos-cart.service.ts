@@ -382,7 +382,7 @@ export class PosCartService {
       0,
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
-    const total = subtotal - discountAmount; // subtotal ya tiene el taxAmount sumado en cada item.totalPrice
+    const total = subtotal - discountAmount + taxAmount;
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -407,33 +407,22 @@ export class PosCartService {
    * Calculate tax for a single item
    */
   private calculateItemTax(product: any, quantity: number): number {
-    const rateSum = this.calculateRateSum(product);
-    return product.price * quantity * rateSum;
+    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return (product.price * quantity) * rateSum;
   }
 
   /**
-   * Calculate final price for a single item (unit)
+   * Calculate final price for a single item (price with tax included)
    */
   private calculateItemFinalPrice(product: any): number {
-    if (product.final_price) return product.final_price;
-    const rateSum = this.calculateRateSum(product);
-    return product.price * (1 + rateSum);
-  }
-
-  /**
-   * Helper to calculate sum of tax rates
-   */
-  private calculateRateSum(product: any): number {
-    return (
-      product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
-        const assignmentRate =
-          assignment.tax_categories?.tax_rates?.reduce(
-            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
-            0,
-          ) || 0;
-        return rateSum + assignmentRate;
-      }, 0) || 0
-    );
+    const rateSum = product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
+      const assignmentRate = assignment.tax_categories?.tax_rates?.reduce((sum: number, tr: any) => sum + parseFloat(tr.rate || '0'), 0) || 0;
+      return rateSum + assignmentRate;
+    }, 0) || 0;
+    return product.price + (product.price * rateSum);
   }
 
   /**
