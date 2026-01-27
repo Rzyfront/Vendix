@@ -5,6 +5,7 @@ import {
   EventEmitter,
   OnInit,
   ChangeDetectionStrategy,
+  ChangeDetectorRef,
   inject,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -239,6 +240,7 @@ export class TermsStepComponent implements OnInit {
 
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
+  private cdr = inject(ChangeDetectorRef);
 
   loading = true;
   submitting = false;
@@ -256,7 +258,12 @@ export class TermsStepComponent implements OnInit {
     this.loading = true;
     this.legalService
       .getPendingTerms()
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(
+        finalize(() => {
+          this.loading = false;
+          this.cdr.markForCheck();
+        }),
+      )
       .subscribe({
         next: (docs) => {
           this.documents = docs.map((doc) => ({
@@ -269,12 +276,14 @@ export class TermsStepComponent implements OnInit {
           if (this.documents.length === 0) {
             this.completed.emit();
           }
+          this.cdr.markForCheck();
         },
         error: (err) => {
           console.error('Error loading terms', err);
           this.toastService.error(
             'Error al cargar los términos y condiciones. Por favor intenta nuevamente.',
           );
+          this.cdr.markForCheck();
         },
       });
   }
@@ -283,6 +292,7 @@ export class TermsStepComponent implements OnInit {
     if (!this.allAccepted) return;
 
     this.submitting = true;
+    this.cdr.markForCheck();
 
     // Process acceptances sequentially or in parallel
     // Since we need all of them accepted, we'll try to accept all pending ones
@@ -295,15 +305,18 @@ export class TermsStepComponent implements OnInit {
 
     const acceptanceRequests = pendingDocs.map((doc) => {
       doc.loading = true;
+      this.cdr.markForCheck();
       return this.legalService
         .acceptDocument(doc.id, 'onboarding')
         .toPromise()
         .then(() => {
           doc.loading = false;
+          this.cdr.markForCheck();
           return { success: true, id: doc.id };
         })
         .catch((err) => {
           doc.loading = false;
+          this.cdr.markForCheck();
           return { success: false, id: doc.id, error: err };
         });
     });
@@ -320,6 +333,7 @@ export class TermsStepComponent implements OnInit {
           'Hubo un error al aceptar algunos documentos. Por favor intenta nuevamente.',
         );
       }
+      this.cdr.markForCheck();
     });
   }
 
