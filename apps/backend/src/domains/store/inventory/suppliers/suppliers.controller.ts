@@ -9,7 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { SuppliersService } from './suppliers.service';
-import { CreateSupplierDto } from './dto/create-supplier.dto';
+import { CreateInventorySupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
 import { ResponseService } from '@common/responses/response.service';
@@ -22,7 +22,7 @@ export class SuppliersController {
   ) {}
 
   @Post()
-  async create(@Body() createSupplierDto: CreateSupplierDto) {
+  async create(@Body() createSupplierDto: CreateInventorySupplierDto) {
     try {
       const result = await this.suppliersService.create(createSupplierDto);
       return this.responseService.created(

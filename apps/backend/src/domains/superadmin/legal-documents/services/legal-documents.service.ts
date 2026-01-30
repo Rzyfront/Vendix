@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { AuditService } from '../../../../common/audit/audit.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import {
   CreateSystemDocumentDto,
   LegalDocumentTypeEnum,
@@ -23,6 +24,7 @@ export class LegalDocumentsService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly auditService: AuditService,
+    private readonly s3Service: S3Service,
   ) {}
 
   // ==========================================
@@ -33,7 +35,7 @@ export class LegalDocumentsService {
     document_type?: LegalDocumentTypeEnum;
     is_active?: boolean;
   }) {
-    return this.globalPrisma.legal_documents.findMany({
+    const documents = await this.globalPrisma.legal_documents.findMany({
       where: {
         is_system: true,
         organization_id: null,
@@ -44,6 +46,9 @@ export class LegalDocumentsService {
         effective_date: 'desc',
       },
     });
+
+    // We don't fetch all content from S3 for list view to keep it fast
+    return documents;
   }
 
   async getSystemDocument(id: number) {
@@ -76,6 +81,18 @@ export class LegalDocumentsService {
       throw new NotFoundException('Document not found');
     }
 
+    // Fetch content from S3 if document_url exists
+    if (document.document_url) {
+      try {
+        const buffer = await this.s3Service.downloadImage(
+          document.document_url,
+        );
+        document.content = buffer.toString('utf-8');
+      } catch (error) {
+        console.error(`Error fetching document from S3: ${error.message}`);
+      }
+    }
+
     return document;
   }
 
@@ -87,23 +104,30 @@ export class LegalDocumentsService {
         is_system: true,
         organization_id: null,
         store_id: null,
-        OR: [
-          { expiry_date: null },
-          { expiry_date: { gte: new Date() } },
-        ],
+        OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
       },
       orderBy: {
         effective_date: 'desc',
       },
     });
 
+    if (document && document.document_url) {
+      try {
+        const buffer = await this.s3Service.downloadImage(
+          document.document_url,
+        );
+        document.content = buffer.toString('utf-8');
+      } catch (error) {
+        console.error(
+          `Error fetching active document from S3: ${error.message}`,
+        );
+      }
+    }
+
     return document;
   }
 
-  async createSystemDocument(
-    userId: number,
-    dto: CreateSystemDocumentDto,
-  ) {
+  async createSystemDocument(userId: number, dto: CreateSystemDocumentDto) {
     // Verificar si ya existe una versión con ese número
     const existing = await this.globalPrisma.legal_documents.findFirst({
       where: { version: dto.version },
@@ -114,6 +138,14 @@ export class LegalDocumentsService {
         `Document version ${dto.version} already exists`,
       );
     }
+
+    // Upload to S3 first
+    const s3Key = `legal-documents/${dto.document_type.toLowerCase()}/${dto.version}.md`;
+    await this.s3Service.uploadFile(
+      Buffer.from(dto.content, 'utf-8'),
+      s3Key,
+      'text/markdown',
+    );
 
     // Si se está creando una nueva versión activa, desactivar la anterior
     if (dto.effective_date) {
@@ -140,6 +172,7 @@ export class LegalDocumentsService {
     const document = await this.globalPrisma.legal_documents.create({
       data: {
         ...dto,
+        document_url: s3Key,
         effective_date: new Date(dto.effective_date),
         expiry_date: dto.expiry_date ? new Date(dto.expiry_date) : null,
         is_system: true,
@@ -173,10 +206,17 @@ export class LegalDocumentsService {
       );
     }
 
+    // Nunca poder editar el contenido de un documento legal
+    const { content, ...rest } = dto;
+    if (content && content !== document.content) {
+      // Silently ignore or throw error? Rule says "Nunca poder editar".
+      // We'll ignore it in the update to satisfy "no permitir".
+    }
+
     const updated = await this.globalPrisma.legal_documents.update({
       where: { id },
       data: {
-        ...dto,
+        ...rest,
         effective_date: dto.effective_date
           ? new Date(dto.effective_date)
           : undefined,
@@ -273,7 +313,10 @@ export class LegalDocumentsService {
   // ACCEPTANCES REPORTING
   // ==========================================
 
-  async getDocumentAcceptances(documentId: number, filters?: AcceptanceFilters) {
+  async getDocumentAcceptances(
+    documentId: number,
+    filters?: AcceptanceFilters,
+  ) {
     const where: any = { document_id: documentId };
 
     if (filters?.startDate || filters?.endDate) {

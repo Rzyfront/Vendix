@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
-export type ModalSize = 'sm' | 'md' | 'lg' | 'xl';
+export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
 
 @Component({
   selector: 'app-modal',
@@ -197,6 +197,7 @@ export class ModalComponent implements OnInit, OnDestroy {
       sm: ['max-w-sm'],
       md: ['max-w-2xl'],
       lg: ['max-w-5xl', 'w-full', 'max-h-[90vh]'],
+      'xl-mid': ['max-w-[85vw]', 'w-full', 'max-h-[90vh]'],
       xl: ['max-w-[95vw]', 'w-full', 'max-h-[90vh]'],
     };
 
@@ -233,7 +234,10 @@ export class ModalComponent implements OnInit, OnDestroy {
     if (!this.closeOnBackdrop) return;
 
     // Check if the click target is the modal container or one of its descendants
-    if (this.modalContainer && this.modalContainer.nativeElement.contains(event.target)) {
+    if (
+      this.modalContainer &&
+      this.modalContainer.nativeElement.contains(event.target)
+    ) {
       return; // Click inside modal, ignore
     }
 

@@ -67,7 +67,7 @@ interface WizardStep {
       [(isOpen)]="isOpen"
       [title]="currentStepInfo?.title || ''"
       [subtitle]="currentStepInfo?.description || ''"
-      size="lg"
+      size="xl-mid"
       [showCloseButton]="false"
       [closeOnBackdrop]="false"
       (closed)="onClosed()"
@@ -297,6 +297,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   currentStep = 1;
   isSubmitting = false;
   wizardData: any = {};
+  wizardStatus: any = null; // Store full status from backend
   businessType: 'STORE' | 'ORGANIZATION' | null = null;
   userName: string = '';
 
@@ -447,6 +448,23 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.isProcessing = true;
 
     this.businessType = event.type;
+
+    // Smart Check: Skip if already selected same type
+    const currentAppType =
+      this.wizardStatus?.user_settings?.config?.selected_app_type;
+    const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
+
+    if (currentAppType === newAppType) {
+      console.log('Skipping app type selection (already matches)');
+      this.steps =
+        event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
+      this.updateAppConfigForm();
+      this.updateFormBasedOnBusinessType();
+      this.wizardService.nextStep();
+      this.isProcessing = false;
+      this.cdr.markForCheck();
+      return;
+    }
 
     // Call backend to save app type selection
     this.wizardService
@@ -698,6 +716,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.wizardService.getWizardStatus().subscribe({
       next: (response) => {
         if (response.success && response.data) {
+          this.wizardStatus = response.data; // Save status for smart navigation
           // Set business type based on selected app type
           const userSettings = response.data.user_settings?.config;
           const selectedAppType = userSettings?.selected_app_type;
@@ -715,6 +734,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
                 : this.organizationSteps;
             this.updateAppConfigForm();
             this.updateFormBasedOnBusinessType();
+
+            // Pre-fill App Config form with previous data if exists
+            if (response.data.onboarding_data) {
+              this.appConfigForm.patchValue(response.data.onboarding_data, {
+                emitEvent: false,
+              });
+            }
           }
 
           // Sync current step from backend
@@ -851,6 +877,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
     const userData = this.userForm.value;
 
+    // Smart Check: Skip if already done and form not modified
+    if (
+      this.wizardStatus?.has_user_data &&
+      this.wizardStatus?.has_user_address &&
+      this.userForm.pristine
+    ) {
+      console.log('Skipping user setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
+
     this.wizardService.setupUser(userData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
@@ -884,6 +924,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
     const storeData = this.storeForm.value;
 
+    // Smart Check
+    if (
+      this.wizardStatus?.has_store &&
+      this.wizardStatus?.has_store_address &&
+      this.storeForm.pristine
+    ) {
+      console.log('Skipping store setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
+
     this.wizardService.setupStore(storeData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
@@ -916,6 +970,16 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.isSubmitting = true;
     this.cdr.markForCheck();
     const organizationData = this.organizationForm.value;
+
+    // Smart Check
+    if (this.wizardStatus?.has_organization && this.organizationForm.pristine) {
+      console.log('Skipping organization setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
 
     this.wizardService.setupOrganization(organizationData).subscribe({
       next: (response) => {
@@ -952,6 +1016,19 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.isSubmitting = true;
     this.cdr.markForCheck();
     const formData = this.appConfigForm.value;
+
+    // Smart Check
+    if (
+      this.wizardStatus?.step_app_config_completed &&
+      this.appConfigForm.pristine
+    ) {
+      console.log('Skipping app config submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
 
     // Sanitize payload: only send fields the backend expects
     const appConfigData: any = {

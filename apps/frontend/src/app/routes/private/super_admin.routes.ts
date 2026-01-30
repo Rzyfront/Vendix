@@ -92,6 +92,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/shipping/shipping.component'
           ).then((c) => c.ShippingLayoutComponent),
       },
+      {
+        path: 'legal-documents',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/legal-documents/legal-documents.component'
+          ).then((c) => c.LegalDocumentsComponent),
+      },
     ],
   },
 ];

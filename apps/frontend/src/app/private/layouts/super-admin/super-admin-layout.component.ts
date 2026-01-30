@@ -121,6 +121,11 @@ export class SuperAdminLayoutComponent {
       route: '/super-admin/domains',
     },
     {
+      label: 'Documentos Legales',
+      icon: 'file-text',
+      route: '/super-admin/legal-documents',
+    },
+    {
       label: 'Monedas',
       icon: 'dollar-sign',
       route: '/super-admin/currencies',

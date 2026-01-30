@@ -7,6 +7,7 @@ import { environment } from '../../../environments/environment';
 export interface LegalDocument {
   id: number;
   title: string;
+  content?: string;
   content_url?: string;
   version: string;
   document_type:
@@ -38,9 +39,21 @@ export class LegalService {
     return this.http
       .get<{
         success: boolean;
-        data: LegalDocument[];
+        data: any[];
       }>(`${this.apiUrl}/pending`)
-      .pipe(map((response) => response.data));
+      .pipe(
+        map((response) =>
+          response.data.map((item) => ({
+            id: item.document_id || item.id,
+            title: item.title,
+            content: item.content,
+            content_url: item.content_url,
+            version: item.current_version || item.version,
+            document_type: item.document_type,
+            is_required: true,
+          })),
+        ),
+      );
   }
 
   /**
@@ -76,8 +89,20 @@ export class LegalService {
     return this.http
       .get<{
         success: boolean;
-        data: { pending: boolean; documents: LegalDocument[] };
+        data: { pending: boolean; documents: any[] };
       }>(`${this.apiUrl}/check-required`)
-      .pipe(map((response) => response.data));
+      .pipe(
+        map((response) => ({
+          pending: response.data.pending,
+          documents: response.data.documents.map((item) => ({
+            id: item.document_id || item.id,
+            title: item.title,
+            content: item.content,
+            version: item.version,
+            document_type: item.document_type,
+            is_required: item.is_required,
+          })),
+        })),
+      );
   }
 }

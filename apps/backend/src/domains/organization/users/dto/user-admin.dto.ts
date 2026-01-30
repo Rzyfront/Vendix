@@ -6,7 +6,7 @@ export class VerifyEmailDto {
   user_id: string;
 }
 
-export class ResetPasswordDto {
+export class AdminResetPasswordDto {
   @IsNotEmpty({ message: 'New password is required' })
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters long' })

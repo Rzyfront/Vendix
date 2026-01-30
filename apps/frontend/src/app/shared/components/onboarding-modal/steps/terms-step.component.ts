@@ -1,3 +1,4 @@
+/** REBUILD TRIGGER 2 **/
 import {
   Component,
   Input,
@@ -7,9 +8,12 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   inject,
+  signal,
+  computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ButtonComponent } from '../../button/button.component';
 import { IconComponent } from '../../icon/icon.component';
 import {
@@ -19,6 +23,9 @@ import {
 import { ToastService } from '../../toast/toast.service';
 import { catchError, finalize } from 'rxjs/operators';
 import { of } from 'rxjs';
+
+// Use a more flexible import for marked to avoid compilation issues in monorepo
+import { marked } from 'marked';
 
 interface DocumentStatus extends LegalDocument {
   accepted: boolean;
@@ -34,7 +41,8 @@ interface DocumentStatus extends LegalDocument {
     `
       .terms-step {
         padding: 1rem 0;
-        max-width: 600px;
+        width: 100%;
+        max-width: 1200px; /* Wider for XL modal */
         margin: 0 auto;
       }
 
@@ -44,8 +52,8 @@ interface DocumentStatus extends LegalDocument {
       }
 
       .terms-icon-wrapper {
-        width: 64px;
-        height: 64px;
+        width: 48px;
+        height: 48px;
         background: var(--color-primary-light);
         border-radius: 50%;
         display: flex;
@@ -59,22 +67,33 @@ interface DocumentStatus extends LegalDocument {
       }
 
       .terms-title {
-        font-size: var(--fs-xl);
+        font-size: var(--fs-lg);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
         margin-bottom: 0.5rem;
       }
 
       .terms-description {
-        font-size: var(--fs-base);
+        font-size: var(--fs-sm);
         color: var(--color-text-secondary);
+      }
+
+      .terms-layout {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+
+      @media (min-width: 1024px) {
+        .terms-layout.has-selection {
+          grid-template-columns: 350px 1fr;
+        }
       }
 
       .terms-list {
         display: flex;
         flex-direction: column;
-        gap: 1rem;
-        margin-bottom: 2rem;
+        gap: 0.75rem;
       }
 
       .term-item {
@@ -85,6 +104,7 @@ interface DocumentStatus extends LegalDocument {
         border-radius: var(--radius-md);
         transition: all 0.2s ease;
         background: var(--color-surface);
+        cursor: pointer;
       }
 
       .term-item:hover {
@@ -92,41 +112,88 @@ interface DocumentStatus extends LegalDocument {
         background: var(--color-background-hover);
       }
 
+      .term-item.is-selected {
+        border-color: var(--color-primary);
+        ring: 1px solid var(--color-primary);
+        background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.05);
+      }
+
       .term-checkbox {
         margin-top: 0.25rem;
         margin-right: 1rem;
-        width: 1.25rem;
-        height: 1.25rem;
+        width: 1.15rem;
+        height: 1.15rem;
         cursor: pointer;
       }
 
       .term-content {
         flex: 1;
+        min-width: 0;
       }
 
       .term-label {
         font-weight: var(--fw-semibold);
         color: var(--color-text-primary);
         display: block;
-        margin-bottom: 0.25rem;
+        margin-bottom: 0.15rem;
         cursor: pointer;
+        font-size: var(--fs-sm);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .term-details {
-        font-size: var(--fs-sm);
+        font-size: 11px;
         color: var(--color-text-secondary);
-        line-height: 1.4;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
       }
 
-      .term-link {
+      .view-action {
         color: var(--color-primary);
-        text-decoration: underline;
-        cursor: pointer;
+        font-size: 11px;
         font-weight: var(--fw-medium);
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        margin-left: auto;
       }
 
-      .term-link:hover {
-        color: var(--color-primary-dark);
+      .view-action:hover {
+        text-decoration: underline;
+      }
+
+      .document-viewer {
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-lg);
+        background: var(--color-surface);
+        display: flex;
+        flex-direction: column;
+        height: 500px;
+        overflow: hidden;
+      }
+
+      .viewer-header {
+        padding: 0.75rem 1.25rem;
+        border-b: 1px solid var(--color-border);
+        background: var(--color-background);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .viewer-title {
+        font-weight: var(--fw-bold);
+        font-size: var(--fs-sm);
+        color: var(--color-text-primary);
+      }
+
+      .viewer-body {
+        flex: 1;
+        padding: 1.5rem;
+        overflow-y: auto;
       }
 
       .terms-actions {
@@ -135,7 +202,7 @@ interface DocumentStatus extends LegalDocument {
         gap: 1rem;
         margin-top: 2rem;
         border-top: 1px solid var(--color-border);
-        padding-top: 1rem;
+        padding-top: 1.25rem;
       }
 
       .loading-state {
@@ -156,12 +223,12 @@ interface DocumentStatus extends LegalDocument {
     <div class="terms-step">
       <div class="terms-header">
         <div class="terms-icon-wrapper">
-          <app-icon name="shield-check" size="32" class="terms-icon"></app-icon>
+          <app-icon name="shield-check" size="24" class="terms-icon"></app-icon>
         </div>
-        <h2 class="terms-title">Términos y Condiciones</h2>
+        <h2 class="terms-title">Documentos Legales</h2>
         <p class="terms-description">
-          Para continuar, por favor revisa y acepta los siguientes documentos
-          legales.
+          Revisa y acepta los términos del servicio y políticas de privacidad
+          para activar tu cuenta.
         </p>
       </div>
 
@@ -172,63 +239,117 @@ interface DocumentStatus extends LegalDocument {
 
       <div *ngIf="!loading && documents.length === 0" class="empty-state">
         <p>No hay documentos pendientes por aceptar.</p>
-        <app-button variant="primary" (clicked)="onComplete()"
-          >Continuar</app-button
-        >
+        <div class="mt-4">
+          <app-button variant="primary" (clicked)="onComplete()"
+            >Continuar</app-button
+          >
+        </div>
       </div>
 
-      <div *ngIf="!loading && documents.length > 0" class="terms-list">
-        <div *ngFor="let doc of documents" class="term-item">
-          <input
-            type="checkbox"
-            [id]="'doc-' + doc.id"
-            [(ngModel)]="doc.accepted"
-            class="term-checkbox"
-            [disabled]="doc.loading"
-          />
-          <div class="term-content">
-            <label [for]="'doc-' + doc.id" class="term-label">
-              Acepto los {{ doc.title }}
-            </label>
-            <div class="term-details">
-              Versión {{ doc.version }} •
-              <a
-                *ngIf="doc.content_url"
-                [href]="doc.content_url"
-                target="_blank"
-                class="term-link"
+      <div
+        *ngIf="!loading && documents.length > 0"
+        class="terms-layout"
+        [class.has-selection]="!!selectedDoc()"
+      >
+        <!-- Document List -->
+        <div class="terms-list">
+          <div
+            *ngFor="let doc of documents"
+            class="term-item"
+            [class.is-selected]="selectedDoc()?.id === doc.id"
+            (click)="selectDocument(doc)"
+          >
+            <input
+              type="checkbox"
+              [id]="'doc-' + doc.id"
+              [(ngModel)]="doc.accepted"
+              class="term-checkbox"
+              [disabled]="doc.loading"
+              (click)="$event.stopPropagation()"
+            />
+
+            <div class="term-content">
+              <label
+                [for]="'doc-' + doc.id"
+                class="term-label"
+                (click)="$event.stopPropagation()"
               >
-                Leer documento completo
-                <app-icon
-                  name="external-link"
-                  size="12"
-                  class="inline ml-1"
-                ></app-icon>
-              </a>
-              <span *ngIf="!doc.content_url" class="text-gray-400"
-                >(Documento no disponible)</span
-              >
+                {{ doc.title }}
+              </label>
+              <div class="term-details">
+                <span
+                  class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono"
+                  >v{{ doc.version }}</span
+                >
+                <span class="view-action">
+                  Ver documento
+                  <app-icon name="chevron-right" size="12"></app-icon>
+                </span>
+              </div>
             </div>
+
+            <app-icon
+              *ngIf="doc.loading"
+              name="loader-2"
+              [spin]="true"
+              size="14"
+              class="text-primary ml-2"
+            ></app-icon>
           </div>
-          <app-icon
-            *ngIf="doc.loading"
-            name="loader-2"
-            [spin]="true"
-            size="16"
-            class="text-primary ml-2"
-          ></app-icon>
+        </div>
+
+        <!-- Document Viewer -->
+        <div
+          *ngIf="selectedDoc()"
+          class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
+        >
+          <div class="viewer-header">
+            <span class="viewer-title">{{ selectedDoc()?.title }}</span>
+            <span
+              class="text-[10px] text-text-secondary font-mono uppercase tracking-wider"
+            >
+              Versión {{ selectedDoc()?.version }}
+            </span>
+          </div>
+          <div
+            class="viewer-body prose prose-sm max-w-none prose-slate"
+            [innerHTML]="renderedContent()"
+          ></div>
+        </div>
+
+        <!-- Empty Selection State (if on desktop and nothing selected) -->
+        <div
+          *ngIf="!selectedDoc() && documents.length > 0"
+          class="hidden lg:flex document-viewer items-center justify-center bg-gray-50 border-dashed"
+        >
+          <div class="text-center p-8">
+            <app-icon
+              name="file-text"
+              size="48"
+              class="text-gray-200 mb-4 mx-auto"
+            ></app-icon>
+            <p class="text-sm text-gray-400">
+              Selecciona un documento para leer su contenido completo
+            </p>
+          </div>
         </div>
       </div>
 
       <div class="terms-actions" *ngIf="!loading && documents.length > 0">
-        <app-button variant="outline" (clicked)="onBack()"> Atrás </app-button>
+        <app-button variant="outline" size="sm" (clicked)="onBack()">
+          Atrás
+        </app-button>
         <app-button
           variant="primary"
+          size="sm"
           [disabled]="!allAccepted || submitting"
           (clicked)="submitAcceptances()"
         >
           <span *ngIf="!submitting">Aceptar y Continuar</span>
-          <span *ngIf="submitting">Procesando...</span>
+          <span *ngIf="submitting" class="flex items-center gap-2">
+            <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
+            Procesando...
+          </span>
         </app-button>
       </div>
     </div>
@@ -241,10 +362,29 @@ export class TermsStepComponent implements OnInit {
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
   private cdr = inject(ChangeDetectorRef);
+  private sanitizer = inject(DomSanitizer);
 
   loading = true;
   submitting = false;
   documents: DocumentStatus[] = [];
+
+  // Selected document for viewing
+  selectedDoc = signal<DocumentStatus | null>(null);
+
+  // Rendered HTML from Markdown
+  renderedContent = computed(() => {
+    const doc = this.selectedDoc();
+    if (!doc || !doc.content) return '';
+
+    try {
+      // Use the standard parse method from the library
+      const html = marked.parse(doc.content);
+      return this.sanitizer.bypassSecurityTrustHtml(html as string);
+    } catch (e) {
+      console.error('Error parsing markdown', e);
+      return 'Error al cargar el contenido.';
+    }
+  });
 
   get allAccepted(): boolean {
     return this.documents.every((doc) => doc.accepted);
@@ -275,6 +415,9 @@ export class TermsStepComponent implements OnInit {
           // If no documents are pending, automatically proceed
           if (this.documents.length === 0) {
             this.completed.emit();
+          } else {
+            // Auto-select first document
+            this.selectDocument(this.documents[0]);
           }
           this.cdr.markForCheck();
         },
@@ -288,20 +431,18 @@ export class TermsStepComponent implements OnInit {
       });
   }
 
+  selectDocument(doc: DocumentStatus) {
+    this.selectedDoc.set(doc);
+    this.cdr.markForCheck();
+  }
+
   submitAcceptances() {
     if (!this.allAccepted) return;
 
     this.submitting = true;
     this.cdr.markForCheck();
 
-    // Process acceptances sequentially or in parallel
-    // Since we need all of them accepted, we'll try to accept all pending ones
-    const pendingDocs = this.documents.filter((d) => !d.loading); // filter out already processing if any logic added later
-
-    // For simplicity, we'll accept them one by one and track progress
-    // Or we could use forkJoin if we want parallel
-    // Let's do a simple Promise.all approach with observables converted to promises for clarity
-    // effectively parallel requests
+    const pendingDocs = this.documents.filter((d) => !d.loading);
 
     const acceptanceRequests = pendingDocs.map((doc) => {
       doc.loading = true;

@@ -14,7 +14,8 @@
     "importHelpers": true,
     "target": "ES2022",
     "module": "preserve",
-    "moduleResolution": "bundler"
+    "moduleResolution": "bundler",
+    "paths": {}
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
@@ -24,12 +25,5 @@
     "strictTemplates": true
   },
   "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.spec.json"
-    }
-  ]
+  "references": []
 }

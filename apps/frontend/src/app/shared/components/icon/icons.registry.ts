@@ -110,6 +110,8 @@ import {
   Phone,
   Printer,
   Wallet,
+  Edit2,
+  Slash,
 } from 'lucide-angular';
 
 /**
@@ -130,6 +132,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   check: Check,
   search: Search,
   edit: Pencil,
+  'edit-2': Edit2,
   delete: Trash2,
   'trash-2': Trash2,
   trash: Trash2,
@@ -262,6 +265,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   phone: Phone,
   printer: Printer,
   wallet: Wallet,
+  slash: Slash,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

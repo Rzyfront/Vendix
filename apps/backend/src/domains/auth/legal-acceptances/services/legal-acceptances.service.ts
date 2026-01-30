@@ -1,6 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
-import { AuditService, AuditAction } from '../../../../common/audit/audit.service';
+import {
+  AuditService,
+  AuditAction,
+} from '../../../../common/audit/audit.service';
+import { S3Service } from '../../../../common/services/s3.service';
 
 export interface PendingTermsNotification {
   document_id: number;
@@ -10,6 +14,7 @@ export interface PendingTermsNotification {
   user_version: string | null;
   effective_date: Date;
   is_system: boolean;
+  content?: string;
 }
 
 export interface RequiredDocument {
@@ -18,14 +23,33 @@ export interface RequiredDocument {
   title: string;
   version: string;
   is_required: boolean;
+  content?: string;
 }
 
 @Injectable()
 export class LegalAcceptancesService {
+  private readonly logger = new Logger(LegalAcceptancesService.name);
+
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly auditService: AuditService,
+    private readonly s3Service: S3Service,
   ) {}
+
+  private async fetchContentFromS3(
+    url: string | null,
+  ): Promise<string | undefined> {
+    if (!url) return undefined;
+    try {
+      const buffer = await this.s3Service.downloadImage(url);
+      return buffer.toString('utf-8');
+    } catch (error) {
+      this.logger.error(
+        `Error fetching document from S3 (${url}): ${error.message}`,
+      );
+      return undefined;
+    }
+  }
 
   async acceptDocument(
     userId: number,
@@ -137,13 +161,15 @@ export class LegalAcceptancesService {
 
     for (const document of systemDocuments) {
       // Verificar si el usuario ha aceptado este documento
-      const acceptance = await this.globalPrisma.document_acceptances.findFirst({
-        where: {
-          user_id: userId,
-          document_id: document.id,
-          acceptance_version: document.version,
+      const acceptance = await this.globalPrisma.document_acceptances.findFirst(
+        {
+          where: {
+            user_id: userId,
+            document_id: document.id,
+            acceptance_version: document.version,
+          },
         },
-      });
+      );
 
       if (!acceptance) {
         requiredDocuments.push({
@@ -152,6 +178,7 @@ export class LegalAcceptancesService {
           title: document.title,
           version: document.version,
           is_required: true,
+          content: await this.fetchContentFromS3(document.document_url),
         });
       }
     }
@@ -231,24 +258,23 @@ export class LegalAcceptancesService {
         is_active: true,
         organization_id: null,
         store_id: null,
-        OR: [
-          { expiry_date: null },
-          { expiry_date: { gte: new Date() } },
-        ],
+        OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
       },
     });
 
     for (const document of systemDocuments) {
       // Verificar si el usuario ha aceptado la versión actual
-      const acceptance = await this.globalPrisma.document_acceptances.findFirst({
-        where: {
-          user_id: userId,
-          document_id: document.id,
+      const acceptance = await this.globalPrisma.document_acceptances.findFirst(
+        {
+          where: {
+            user_id: userId,
+            document_id: document.id,
+          },
+          orderBy: {
+            accepted_at: 'desc',
+          },
         },
-        orderBy: {
-          accepted_at: 'desc',
-        },
-      });
+      );
 
       const hasAcceptedCurrentVersion =
         acceptance && acceptance.acceptance_version === document.version;
@@ -262,6 +288,7 @@ export class LegalAcceptancesService {
           user_version: acceptance?.acceptance_version || null,
           effective_date: document.effective_date,
           is_system: true,
+          content: await this.fetchContentFromS3(document.document_url),
         });
       }
     }
@@ -274,23 +301,21 @@ export class LegalAcceptancesService {
           is_active: true,
           organization_id: user.organizations.id,
           store_id: null,
-          OR: [
-            { expiry_date: null },
-            { expiry_date: { gte: new Date() } },
-          ],
+          OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
         },
       });
 
       for (const document of orgDocuments) {
-        const acceptance = await this.globalPrisma.document_acceptances.findFirst({
-          where: {
-            user_id: userId,
-            document_id: document.id,
-          },
-          orderBy: {
-            accepted_at: 'desc',
-          },
-        });
+        const acceptance =
+          await this.globalPrisma.document_acceptances.findFirst({
+            where: {
+              user_id: userId,
+              document_id: document.id,
+            },
+            orderBy: {
+              accepted_at: 'desc',
+            },
+          });
 
         const hasAcceptedCurrentVersion =
           acceptance && acceptance.acceptance_version === document.version;
@@ -304,6 +329,7 @@ export class LegalAcceptancesService {
             user_version: acceptance?.acceptance_version || null,
             effective_date: document.effective_date,
             is_system: false,
+            content: await this.fetchContentFromS3(document.document_url),
           });
         }
       }
