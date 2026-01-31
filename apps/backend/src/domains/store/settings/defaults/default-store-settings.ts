@@ -20,11 +20,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_partial_payments: false,
       require_payment_confirmation: true,
     },
-    shipping: {
-      enabled: true,
-      default_weight_unit: 'kg',
-      default_dimension_unit: 'cm',
-    },
+    shipping: getDefaultShippingSettings(),
     notifications: {
       email_enabled: true,
       sms_enabled: false,
@@ -79,5 +75,30 @@ function getDefaultBusinessHours(): Record<
     friday: { open: '09:00', close: '20:00' },
     saturday: { open: '10:00', close: '18:00' },
     sunday: { open: '11:00', close: '16:00' },
+  };
+}
+
+function getDefaultShippingSettings() {
+  return {
+    enabled: true,
+    free_shipping_threshold: 0,
+    allow_pickup: true,
+    default_shipping_method: 'standard',
+    shipping_zones: [],
+    shipping_types: {
+      standard: {
+        enabled: true,
+        carriers: [],
+      },
+      express: {
+        enabled: false,
+        carriers: [],
+      },
+      local: {
+        enabled: false,
+        allow_manual: false,
+        delivery_providers: [],
+      },
+    },
   };
 }

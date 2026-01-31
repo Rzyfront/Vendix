@@ -653,8 +653,8 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
 
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store.select(fromAuth.selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
-      // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
-      const settings = storeSettings?.settings;
+      // store_settings is the StoreSettings object directly: { pos: { ... }, general: { ... }, ... }
+      const settings = storeSettings;
       if (settings?.pos) {
         const prevAllowAnonymous = this.allowAnonymousSales;
 

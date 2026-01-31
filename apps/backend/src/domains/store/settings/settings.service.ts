@@ -281,10 +281,12 @@ export class SettingsService {
       throw new ForbiddenException('Store context required');
     }
 
-    await this.prisma.store_settings.delete({
+    // Delete existing settings if any (deleteMany doesn't fail if record doesn't exist)
+    await this.prisma.store_settings.deleteMany({
       where: { store_id },
     });
 
+    // Return default settings
     return getDefaultStoreSettings();
   }
 

@@ -1,3 +1,8 @@
+import {
+  ShippingTypesConfigDto,
+  ShippingZoneDto,
+} from '../dto/shipping-carriers.dto';
+
 export interface AppSettings {
   name: string;
   primary_color: string;
@@ -46,11 +51,12 @@ export interface CheckoutSettings {
 
 export interface ShippingSettings {
   enabled: boolean;
-  default_weight_unit: 'kg' | 'lb';
-  default_dimension_unit: 'cm' | 'in';
+  free_shipping_threshold: number;
+  allow_pickup: boolean;
+  default_shipping_method?: string | null;
+  shipping_types: ShippingTypesConfigDto;
+  shipping_zones: ShippingZoneDto[];
 }
-
-
 
 export interface NotificationsSettings {
   email_enabled: boolean;

@@ -78,6 +78,7 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
   }
 
   onSectionChange(section: keyof StoreSettings, new_settings: any) {
+    // Only update local state - don't save automatically
     this.settings = {
       ...this.settings,
       [section]: new_settings,
@@ -85,22 +86,6 @@ export class GeneralSettingsComponent implements OnInit, OnDestroy {
     this.hasUnsavedChanges = true;
     this.lastSaved = null;
     this.saveError = null;
-
-    // Suscribirse para recibir feedback del auto-guardado
-    this.settings_service.saveSettings({ [section]: new_settings }).subscribe({
-      next: (response) => {
-        this.hasUnsavedChanges = false;
-        this.lastSaved = new Date();
-        this.isAutoSaving = false;
-        this.toast_service.success('Cambios guardados automáticamente');
-      },
-      error: (error) => {
-        this.hasUnsavedChanges = true;
-        this.saveError = error.message || 'Error al guardar cambios';
-        this.isAutoSaving = false;
-        this.toast_service.error('Error al guardar cambios');
-      }
-    });
   }
 
   saveAllSettings() {

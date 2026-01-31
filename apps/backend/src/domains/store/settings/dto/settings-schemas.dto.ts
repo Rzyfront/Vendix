@@ -101,34 +101,39 @@ export class CheckoutSettingsDto {
 }
 
 export class ShippingSettingsDto {
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  enabled: boolean;
+  enabled?: boolean;
 
-  @ApiProperty({ example: 0 })
+  @ApiProperty({ example: 0, required: false })
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  free_shipping_threshold: number;
+  free_shipping_threshold?: number;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: true, required: false })
+  @IsOptional()
   @IsBoolean()
-  allow_pickup: boolean;
+  allow_pickup?: boolean;
 
   @ApiProperty({ example: null, required: false })
   @IsOptional()
   @IsString()
-  default_shipping_method?: string;
+  default_shipping_method?: string | null;
 
-  @ApiProperty({ type: ShippingTypesConfigDto })
+  @ApiProperty({ type: ShippingTypesConfigDto, required: false })
+  @IsOptional()
   @ValidateNested()
   @Type(() => ShippingTypesConfigDto)
-  shipping_types: ShippingTypesConfigDto;
+  shipping_types?: ShippingTypesConfigDto;
 
-  @ApiProperty({ type: [ShippingZoneDto] })
+  @ApiProperty({ type: [ShippingZoneDto], required: false })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ShippingZoneDto)
-  shipping_zones: ShippingZoneDto[];
+  shipping_zones?: ShippingZoneDto[];
 }
 
 export class NotificationsSettingsDto {
