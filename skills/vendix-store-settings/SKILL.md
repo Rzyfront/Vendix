@@ -602,5 +602,5 @@ docker logs --tail 40 vendix_backend | grep -i "error"
 - `vendix-backend-domain` - Arquitectura hexagonal
 - `vendix-backend-prisma` - PrismaService multi-tenant
 - `vendix-multi-tenant-context` - RequestContextService
-- `vendix-build-verification` - Verificación OBLIGATORIA de build
+- `buildcheck-dev` - Verificación OBLIGATORIA de build
 - `vendix-validation` - Validación con class-validator

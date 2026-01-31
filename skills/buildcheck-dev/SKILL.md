@@ -1,11 +1,11 @@
 ---
-name: vendix-build-verification
-description: Build verification steps.
+name: buildcheck-dev
+description: Build verification steps for development.
 metadata:
   scope: [root]
   auto_invoke: "Verifying Build"
 ---
-# Vendix Build Verification
+# Buildcheck Dev
 
 > **CRITICAL SKILL - ALWAYS ACTIVE** - La verificación del build es la RESPONSABILIDAD MÁS CRÍTICA. Una tarea NUNCA está completa si hay errores de compilación.
 
@@ -21,9 +21,6 @@ metadata:
 6. ✅ Verify **recursively** - check dependencies and related components
 
 ---
-metadata:
-  scope: [root]
-  auto_invoke: "Verifying Build"
 
 ## 📋 Verification Workflow
 

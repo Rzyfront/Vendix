@@ -24,7 +24,7 @@ Estos skills contienen las reglas más críticas que **SIEMPRE** deben respetars
 |-------|-------------|---------|
 | `vendix-development-rules` | Reglas críticas de desarrollo, uso de Task tools | **SIEMPRE ACTIVO** |
 | `vendix-naming-conventions` | Convenciones de nombres (snake_case, CamelCase, PascalCase) | **SIEMPRE ACTIVO** |
-| `vendix-build-verification` | Verificación con Docker logs antes de completar tareas | **SIEMPRE ACTIVO** |
+| `buildcheck-dev` | Verificación con Docker logs antes de completar tareas | **SIEMPRE ACTIVO** |
 
 ### BACKEND_ARCHITECTURE - NestJS + Prisma
 Patrones específicos del backend con NestJS:
@@ -82,7 +82,7 @@ Múltiples skills pueden estar activos simultáneamente:
 // 1. vendix-frontend-component (estructura del componente)
 // 2. vendix-frontend-state (servicio y notificaciones)
 // 3. vendix-naming-conventions (NOMBRES CRÍTICOS)
-// 4. vendix-build-verification (verificar al final)
+// 4. buildcheck-dev (verificar al final)
 ```
 
 ### 3. Prioridad de Skills
@@ -90,7 +90,7 @@ Los skills CORE tienen prioridad absoluta y **SIEMPRE** deben respetarse:
 
 ```
 1. vendix-naming-conventions (CRITICAL)
-2. vendix-build-verification (CRITICAL)
+2. buildcheck-dev (CRITICAL)
 3. vendix-development-rules (CRITICAL)
 4. Skills específicos del dominio
 5. Skills generales

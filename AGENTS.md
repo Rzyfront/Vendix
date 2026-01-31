@@ -40,7 +40,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Styling and Theming | `vendix-frontend-theme` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
-| Verifying Build | `vendix-build-verification` |
+| Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working with Prisma services | `vendix-backend-prisma` |

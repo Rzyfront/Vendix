@@ -17,11 +17,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 | Action | Skill |
 |--------|-------|
+| -- | `vendix-monorepo-workspaces` |
+| Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
+| Configuring CI/CD | `vendix-monorepo-workspaces` |
 | Configuring middleware | `vendix-backend-middleware` |
 | Creating API endpoints | `vendix-backend-api` |
 | Creating API tests (Bruno) | `vendix-bruno-test` |
 | Creating Angular components | `vendix-frontend-component` |
+| Creating Dockerfiles | `vendix-monorepo-workspaces` |
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
@@ -33,13 +37,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Handling store context | `vendix-multi-tenant-context` |
 | Implementing authentication | `vendix-backend-auth` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
+| Installing dependencies | `vendix-monorepo-workspaces` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Modifying package.json | `vendix-monorepo-workspaces` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
-| Verifying Build | `vendix-build-verification` |
+| Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working with Prisma services | `vendix-backend-prisma` |
