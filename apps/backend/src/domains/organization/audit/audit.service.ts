@@ -77,7 +77,7 @@ export class OrganizationAuditService {
         }
 
         // OrganizationPrismaService automatically scopes these queries
-        const [totalLogs, logsByAction, logsByResource] = await Promise.all([
+        const [totalLogs, logsByAction, logsByResource, logsByActionAndResource] = await Promise.all([
             this.prismaService.audit_logs.count({ where }),
             this.prismaService.audit_logs.groupBy({
                 by: ['action'],
@@ -86,6 +86,12 @@ export class OrganizationAuditService {
             }),
             this.prismaService.audit_logs.groupBy({
                 by: ['resource'],
+                where,
+                _count: { id: true },
+            }),
+            // Agrupación cruzada acción-recurso para filtrar cambios reales
+            this.prismaService.audit_logs.groupBy({
+                by: ['action', 'resource'],
                 where,
                 _count: { id: true },
             }),
@@ -102,10 +108,19 @@ export class OrganizationAuditService {
             logsByResourceFormatted[item.resource] = item._count.id;
         });
 
+        // Crear mapa combinado para cálculos específicos en frontend
+        // Formato: { "CREATE_users": 5, "UPDATE_users": 2, "VIEW_users": 10, ... }
+        const logsByActionAndResourceFormatted: Record<string, number> = {};
+        logsByActionAndResource.forEach((item) => {
+            const key = `${item.action}_${item.resource}`;
+            logsByActionAndResourceFormatted[key] = item._count.id;
+        });
+
         return {
             total_logs: totalLogs,
             logs_by_action: logsByActionFormatted,
             logs_by_resource: logsByResourceFormatted,
+            logs_by_action_and_resource: logsByActionAndResourceFormatted,
         };
     }
 }
