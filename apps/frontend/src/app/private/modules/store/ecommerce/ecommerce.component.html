@@ -8,74 +8,12 @@
   <!-- Main Content -->
   <ng-container *ngIf="!isLoading">
     <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-4">
-      <!-- Page Header Sticky -->
-      <div
-        class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 md:px-6 md:py-4 shadow-sm mb-4 rounded-b-xl">
-        <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div class="flex items-center gap-4">
-            <div
-              class="w-12 h-12 rounded-xl bg-primary-50 flex items-center justify-center border border-primary-100 shadow-sm">
-              <app-icon name="shopping-bag" size="24" class="text-primary-600"></app-icon>
-            </div>
-            <div class="flex flex-col">
-              <div class="flex items-center gap-3">
-                <h1 class="text-xl font-bold text-gray-900 leading-tight">
-                  {{
-                  isEditMode
-                  ? "Configuración de E-commerce"
-                  : "Configurar Tienda E-commerce"
-                  }}
-                </h1>
-                <div class="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-lg">
-                  <span class="w-2 h-2 rounded-full" [class.bg-green-500]="isEditMode"
-                    [class.bg-blue-500]="isSetupMode"></span>
-                  <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide">
-                    {{ isSetupMode ? "Configurar" : "Editar" }}
-                  </span>
-                </div>
-              </div>
-              <p class="text-sm text-gray-500 font-medium">
-                {{
-                isEditMode
-                ? "Administra la configuración de tu tienda en línea"
-                : "Configura tu tienda e-commerce con los parámetros básicos para empezar a vender"
-                }}
-              </p>
-            </div>
-          </div>
-
-          <!-- Header Actions -->
-          <div class="flex items-center gap-3">
-            <!-- Botón Restablecer (solo en modo setup) -->
-            <app-button *ngIf="isSetupMode" variant="outline" size="sm" (clicked)="onReset()"
-              [disabled]="isSaving || settingsForm.pristine">
-              Restablecer
-            </app-button>
-
-            <!-- Botón Abrir Tienda (solo en modo edit, cuando la tienda ya está creada) -->
-            <app-button *ngIf="isEditMode && ecommerceUrl" variant="outline" size="sm" (clicked)="openEcommerceStore()"
-              [disabled]="!ecommerceUrl">
-              <app-icon name="external-link" size="16" slot="icon"></app-icon>
-              <span>Abrir Tienda</span>
-            </app-button>
-
-            <!-- Botón Guardar -->
-            <app-button variant="primary" size="sm" (clicked)="onSubmit()"
-              [disabled]="isSaving || settingsForm.pristine" [loading]="isSaving">
-              <ng-container *ngIf="!isSaving" slot="icon">
-                <app-icon name="save" size="16"></app-icon>
-              </ng-container>
-              <span>{{
-                isSaving
-                ? "Guardando..."
-                : isSetupMode
-                ? "Configurar Tienda"
-                : "Guardar Cambios"
-                }}</span>
-            </app-button>
-          </div>
-        </div>
-      </div>
+      <app-sticky-header [title]="isEditMode() ? 'Configuración de E-commerce' : 'Configurar Tienda E-commerce'"
+        [subtitle]="isEditMode() ? 'Administra la configuración de tu tienda en línea' : 'Configura tu tienda e-commerce con los parámetros básicos para empezar a vender'"
+        icon="shopping-bag" [badgeText]="isSetupMode() ? 'Configurar' : 'Editar'"
+        [badgeColor]="isEditMode() ? 'green' : 'blue'" [actions]="ecommerceHeaderActions()"
+        (actionClicked)="onHeaderAction($event)">
+      </app-sticky-header>
 
       <div class="p-2 md:p-4 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <!-- Columna Izquierda -->

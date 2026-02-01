@@ -7,6 +7,7 @@ import {
   OnChanges,
   DestroyRef,
   SimpleChanges,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -24,6 +25,8 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { LegalService, PendingDocument } from '../../../../../public/ecommerce/services/legal.service';
+import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/components/legal-preview-modal/legal-preview-modal.component';
 
 @Component({
   selector: 'app-auth-modal',
@@ -35,6 +38,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     ButtonComponent,
     InputComponent,
     IconComponent,
+    LegalPreviewModalComponent,
   ],
   template: `
     <app-modal [isOpen]="isOpen" (closed)="onClose()" size="sm" title=" " [overlayCloseButton]="true">
@@ -145,6 +149,27 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             </p>
           }
 
+          <!-- Documentos Legales -->
+          @if (!isLogin && pendingDocuments.length > 0) {
+            <div class="space-y-3 pt-2">
+              <p class="text-xs font-medium text-[var(--color-text-primary)]">Documentos Legales</p>
+              @for (doc of pendingDocuments; track doc.document_id) {
+                <div class="flex items-start gap-2">
+                  <input 
+                    type="checkbox" 
+                    [id]="'doc-' + doc.document_id" 
+                    [checked]="acceptedDocuments[doc.document_id]"
+                    (change)="toggleDoc(doc.document_id)"
+                    class="mt-1 h-3.5 w-3.5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
+                  >
+                  <label [for]="'doc-' + doc.document_id" class="text-[11px] leading-tight text-[var(--color-text-secondary)]">
+                    Acepto los <button type="button" (click)="previewDocument(doc)" class="text-[var(--color-primary)] font-medium hover:underline focus:outline-none">{{ doc.title }}</button>
+                  </label>
+                </div>
+              }
+            </div>
+          }
+
           <div class="pt-4">
             <app-button
               type="submit"
@@ -158,6 +183,14 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </form>
       </div>
     </app-modal>
+
+    <!-- Preview Modal -->
+    <app-legal-preview-modal
+      [(isOpen)]="showPreviewModal"
+      [title]="previewDoc.title"
+      [content]="previewDoc.content"
+      [version]="previewDoc.version"
+    ></app-legal-preview-modal>
   `,
 })
 export class AuthModalComponent implements OnChanges {
@@ -170,10 +203,18 @@ export class AuthModalComponent implements OnChanges {
   isLogin = true;
   errorMessage: string | null = null;
 
+  // Legal Documents state
+  pendingDocuments: PendingDocument[] = [];
+  acceptedDocuments: Record<number, boolean> = {};
+  showPreviewModal = false;
+  previewDoc = { title: '', content: '', version: '' };
+
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
   private tenantFacade = inject(TenantFacade);
+  private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
+  private cdr = inject(ChangeDetectorRef);
 
   loading$ = this.authFacade.loading$;
   authForm: FormGroup;
@@ -201,6 +242,8 @@ export class AuthModalComponent implements OnChanges {
         filter((isAuth) => isAuth && this.isOpen),
       )
       .subscribe(() => {
+        // Al autenticarse (especialmente tras registro), registrar aceptaciones si hay pendientes
+        this.processPendingAcceptances();
         this.onClose();
       });
 
@@ -216,20 +259,116 @@ export class AuthModalComponent implements OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    let shouldLoadDocs = false;
+
     if (changes['initialMode']) {
       this.isLogin = this.initialMode === 'login';
       this.updateValidators();
+      if (!this.isLogin) {
+        shouldLoadDocs = true;
+      }
     }
     // Clear error when modal opens
     if (changes['isOpen'] && this.isOpen) {
       this.errorMessage = null;
+      if (!this.isLogin) {
+        shouldLoadDocs = true;
+      }
     }
+
+    if (shouldLoadDocs) {
+      this.loadPendingDocuments();
+    }
+  }
+
+  loadPendingDocuments(): void {
+    this.legalService.getPendingDocumentsForCustomer().subscribe({
+      next: (docs) => {
+        if (docs && docs.length > 0) {
+          this.pendingDocuments = docs;
+        } else {
+          // Fallback if no documents returned: Show generic Terms
+          this.pendingDocuments = [
+            {
+              document_id: -1, // ID negativo para identificar que es local
+              title: 'Términos y Condiciones',
+              content:
+                'Al registrarte, aceptas los Términos y Condiciones y la Política de Privacidad de la tienda. Por favor, asegúrate de leerlos atentamente.\n\n(El contenido detallado de los términos no está disponible en este momento).',
+              is_required: true,
+              version: '1.0',
+              document_type: 'TERMS_OF_SERVICE',
+            },
+          ];
+        }
+
+        // Initialize acceptance state
+        this.acceptedDocuments = {};
+        this.pendingDocuments.forEach((doc) => {
+          this.acceptedDocuments[doc.document_id] = false;
+        });
+
+        this.cdr.markForCheck();
+      },
+      error: (err) => {
+        console.error('Error loading legal docs', err);
+        // On error also show fallback
+        this.pendingDocuments = [
+          {
+            document_id: -1,
+            title: 'Términos y Condiciones',
+            content:
+              'Al registrarte, aceptas los Términos y Condiciones y la Política de Privacidad de la tienda.',
+            is_required: true,
+            version: '1.0',
+            document_type: 'TERMS_OF_SERVICE',
+          },
+        ];
+        this.acceptedDocuments = {};
+        this.pendingDocuments.forEach((doc) => {
+          this.acceptedDocuments[doc.document_id] = false;
+        });
+      },
+    });
+  }
+
+  toggleDoc(id: number): void {
+    this.acceptedDocuments[id] = !this.acceptedDocuments[id];
+  }
+
+  previewDocument(doc: PendingDocument): void {
+    this.previewDoc = {
+      title: doc.title,
+      content: doc.content,
+      version: doc.version
+    };
+    this.showPreviewModal = true;
+  }
+
+  private processPendingAcceptances(): void {
+    const docIds = Object.keys(this.acceptedDocuments)
+      .map(Number)
+      .filter((id) => this.acceptedDocuments[id] && id > 0);
+
+    // Gather metadata for acceptance
+    const metadata = {
+      ip: 'unknown', // Could be extracted from headers if available
+      userAgent: navigator.userAgent || 'unknown'
+    };
+
+    docIds.forEach(id => {
+      this.legalService.acceptDocument(id, metadata).subscribe({
+        error: (err) => console.error(`Error accepting document ${id}`, err)
+      });
+    });
   }
 
   switchMode(isLogin: boolean): void {
     this.isLogin = isLogin;
     this.errorMessage = null;
     this.updateValidators();
+    if (!this.isLogin) {
+      this.loadPendingDocuments();
+    }
   }
 
   updateValidators(): void {
@@ -253,12 +392,23 @@ export class AuthModalComponent implements OnChanges {
     this.errorMessage = null;
     this.closed.emit();
     this.authForm.reset();
+    this.pendingDocuments = [];
+    this.acceptedDocuments = {};
   }
 
   onSubmit(): void {
     if (this.authForm.invalid) {
       this.authForm.markAllAsTouched();
       return;
+    }
+
+    // Verificar aceptación de documentos legales en registro
+    if (!this.isLogin && this.pendingDocuments.length > 0) {
+      const allAccepted = this.pendingDocuments.every(doc => this.acceptedDocuments[doc.document_id]);
+      if (!allAccepted) {
+        this.errorMessage = 'Debes aceptar todos los documentos legales para continuar.';
+        return;
+      }
     }
 
     // Clear previous errors

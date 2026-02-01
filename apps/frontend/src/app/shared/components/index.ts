@@ -30,8 +30,11 @@ export {
   AppConfigStepComponent,
   CompletionStepComponent,
 } from './onboarding-modal';
+export { StickyHeaderComponent } from './sticky-header/sticky-header.component';
+export { BadgeComponent } from './badge/badge.component';
 
 // Types
+export type { BadgeVariant } from './badge/badge.component';
 export type { ButtonVariant, ButtonSize } from './button/button.component';
 export type { InputType, InputSize } from './input/input.component';
 export type { SpinnerSize } from './spinner/spinner.component';
@@ -63,4 +66,9 @@ export type {
   ChartTheme,
   EChartsOption,
 } from './chart';
+export type {
+  StickyHeaderActionButton,
+  StickyHeaderVariant,
+  StickyHeaderBadgeColor,
+} from './sticky-header/sticky-header.component';
 export { CHART_THEMES } from './chart';

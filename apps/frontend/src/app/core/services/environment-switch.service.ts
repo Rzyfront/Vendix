@@ -251,13 +251,6 @@ export class EnvironmentSwitchService {
         'vendix_user_environment',
         response_data.updated_environment,
       );
-
-      if (tokens.accessToken) {
-        localStorage.setItem('access_token', tokens.accessToken);
-      }
-      if (tokens.refreshToken) {
-        localStorage.setItem('refresh_token', tokens.refreshToken);
-      }
     } catch (error) {
       console.error('❌ Failed to save auth state to localStorage:', error);
     }

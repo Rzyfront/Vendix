@@ -4,6 +4,7 @@ import { CartModule } from './cart/cart.module';
 import { WishlistModule } from './wishlist/wishlist.module';
 import { CheckoutModule } from './checkout/checkout.module';
 import { AccountModule } from './account/account.module';
+import { EcommerceLegalModule } from './legal/ecommerce-legal.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -22,6 +23,7 @@ import { AccountModule } from './account/account.module';
         WishlistModule,
         CheckoutModule,
         AccountModule,
+        EcommerceLegalModule,
     ],
 })
 export class EcommerceDomainModule { }

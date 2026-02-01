@@ -79,7 +79,7 @@ export class AuditService {
                     organization_id:
                         auditData.organizationId ||
                         RequestContextService.getContext()?.organization_id,
-                    // Si la acción no es parte del Enum, se guarda tal cual (si la BD lo permite) o se mapea a CUSTOM si es muy estricto. 
+                    // Si la acción no es parte del Enum, se guarda tal cual (si la BD lo permite) o se mapea a CUSTOM si es muy estricto.
                     // Asumimos que la columna en BD es string o enum compatible.
                     action: auditData.action as any,
                     resource: auditData.resource as any,
@@ -97,7 +97,18 @@ export class AuditService {
 
 
         } catch (error) {
-            // Error registrando auditoría
+            // Error registrando auditoría - log for debugging
+            console.error('[AuditService] Error creating audit log:', error.message);
+            console.error('[AuditService] Audit data:', {
+                userId: auditData.userId,
+                action: auditData.action,
+                resource: auditData.resource,
+                resourceId: auditData.resourceId,
+                hasOldValues: !!auditData.oldValues,
+                hasNewValues: !!auditData.newValues,
+                oldValuesSize: auditData.oldValues ? JSON.stringify(auditData.oldValues).length : 0,
+                newValuesSize: auditData.newValues ? JSON.stringify(auditData.newValues).length : 0,
+            });
         }
     }
 
@@ -180,11 +191,22 @@ export class AuditService {
         ipAddress?: string,
         userAgent?: string,
     ): Promise<void> {
+        // Extract organization_id and store_id from metadata if provided
+        // This is important for auth events (LOGIN, LOGOUT) where RequestContext
+        // might not have the context yet
+        const organizationId = metadata?.organization_id as number | undefined;
+        const storeId = metadata?.store_id as number | undefined;
+
+        // Remove organization_id and store_id from metadata to avoid duplication
+        const { organization_id, store_id, ...cleanMetadata } = metadata || {};
+
         await this.log({
             userId,
             action,
             resource: AuditResource.AUTH,
-            metadata,
+            organizationId,
+            storeId,
+            metadata: cleanMetadata,
             ipAddress,
             userAgent,
         });

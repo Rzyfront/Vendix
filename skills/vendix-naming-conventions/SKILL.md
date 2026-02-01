@@ -298,6 +298,6 @@ Before committing code, verify:
 ## Related Skills
 
 - `vendix-development-rules` - General development rules
-- `vendix-build-verification` - Build verification workflow
+- `buildcheck-dev` - Build verification workflow
 - `vendix-backend-domain` - Backend naming patterns
 - `vendix-frontend-component` - Frontend component patterns

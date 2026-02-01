@@ -1,0 +1,93 @@
+meta {
+  name: "Variant Sale Status Tests"
+  type: http
+  seq: 16
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "AIRPODS-MAX-SILVER-SALE",
+    "price": 549.00,
+    "price_override": 499.00,
+    "is_on_sale": true,
+    "sale_price": 449.99,
+    "available_for_ecommerce": true,
+    "stock_quantity": 20
+  }
+}
+
+vars:post-response {
+  sale_variant_id: res.body.data.id
+}
+
+tests {
+  test("Variant with sale status created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Data structure is valid", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Is on sale flag is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("is_on_sale");
+    expect(variant.is_on_sale).to.be.a("boolean");
+    expect(variant.is_on_sale).to.equal(true);
+  });
+
+  test("Sale price field is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("sale_price");
+    expect(variant.sale_price).to.be.a("number");
+    expect(variant.sale_price).to.equal(449.99);
+  });
+
+  test("Available for ecommerce flag is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("available_for_ecommerce");
+    expect(variant.available_for_ecommerce).to.be.a("boolean");
+    expect(variant.available_for_ecommerce).to.equal(true);
+  });
+
+  test("Sale price is less than regular price", function() {
+    const variant = res.body.data;
+    expect(variant.sale_price).to.be.lessThan(variant.price);
+  });
+
+  test("Sale price is less than price override", function() {
+    const variant = res.body.data;
+    expect(variant.sale_price).to.be.lessThan(variant.price_override);
+  });
+
+  test("All price values are positive", function() {
+    const variant = res.body.data;
+    expect(variant.price).to.be.greaterThan(0);
+    expect(variant.price_override).to.be.greaterThan(0);
+    expect(variant.sale_price).to.be.greaterThan(0);
+  });
+
+  test("Variant is marked as available for ecommerce", function() {
+    const variant = res.body.data;
+    expect(variant.available_for_ecommerce).to.equal(true);
+  });
+
+  test("Variant ID is captured for further tests", function() {
+    const variantId = res.body.data.id;
+    expect(variantId).to.be.a("number");
+    expect(variantId).to.be.greaterThan(0);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

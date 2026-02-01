@@ -364,7 +364,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   private maxPollingAttempts = 60; // Max 5 minutes (60 * 5s)
   private currentPollingAttempt = 0;
 
-  // State
+  // State (public for parent component access)
   isEmailVerified = false;
   isCheckingStatus = true;
   isResendingEmail = false;

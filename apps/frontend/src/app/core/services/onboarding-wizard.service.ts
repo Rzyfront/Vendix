@@ -80,6 +80,7 @@ export interface SetupAppConfigData {
   app_type: 'ORG_ADMIN' | 'STORE_ADMIN';
   primary_color: string;
   secondary_color: string;
+  accent_color?: string;
   use_custom_domain: boolean;
   custom_domain?: string;
   subdomain?: string;
@@ -111,7 +112,7 @@ export class OnboardingWizardService {
   private _created_store_slug: string | null = null;
   private _app_type: 'STORE_ADMIN' | 'ORG_ADMIN' | null = null;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   /**
    * Get created store slug
@@ -195,9 +196,10 @@ export class OnboardingWizardService {
 
   /**
    * Resend verification email
+   * Uses authenticated endpoint - no need to pass email in body
    */
   resendVerificationEmail(): Observable<any> {
-    return this.http.post(`${environment.apiUrl}/auth/resend-verification`, {});
+    return this.http.post(`${this.apiUrl}/resend-verification-email`, {});
   }
 
   /**

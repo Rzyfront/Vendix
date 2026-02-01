@@ -8,6 +8,7 @@ import {
   ToastService,
   SpinnerComponent,
   CardComponent,
+  BadgeComponent,
 } from '../../../../shared/components';
 import {
   PosCartService,
@@ -44,6 +45,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
     PosOrderConfirmationComponent,
     PosCartComponent,
     PosRegisterConfigModalComponent,
+    BadgeComponent,
   ],
   template: `
     <div class="h-full flex flex-col gap-4 overflow-hidden">
@@ -72,8 +74,9 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                 ></app-icon>
               </div>
               <div class="flex flex-col">
-                <h1 class="font-bold text-text-primary text-lg leading-none">
+                <h1 class="font-bold text-text-primary text-lg leading-none flex items-center gap-2">
                   Vendix POS
+                  <app-badge variant="success">Vende</app-badge>
                 </h1>
                 <span class="text-xs text-text-secondary font-medium">
                   Punto de venta
@@ -269,7 +272,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.setupSubscriptions();
@@ -468,14 +471,20 @@ export class PosComponent implements OnInit, OnDestroy {
         discount_amount:
           paymentData.order?.discount_amount || this.cartSummary.discountAmount,
         total_amount: paymentData.order?.total_amount || this.cartSummary.total,
-        // Only include customer info if NOT an anonymous sale
-        // and customer data is not already in the order from backend
-        customer_name: (!paymentData.isAnonymousSale && this.selectedCustomer)
-          ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
-          : paymentData.order?.customer_name || '',
+        // For anonymous sales, use "Consumidor Final" as customer name
+        // For regular sales, use customer data from backend or selected customer
+        customer_name: paymentData.isAnonymousSale
+          ? 'Consumidor Final'
+          : (paymentData.order?.customer_name || (this.selectedCustomer
+              ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
+              : '')),
         customer_email: (!paymentData.isAnonymousSale && this.selectedCustomer?.email)
           ? this.selectedCustomer.email
           : paymentData.order?.customer_email || '',
+        // For anonymous sales, use "000" as tax ID
+        customer_tax_id: paymentData.isAnonymousSale
+          ? '000'
+          : (paymentData.order?.customer_tax_id || this.selectedCustomer?.document_number || ''),
         customer: paymentData.order?.customer || this.selectedCustomer,
         payment: paymentData.order?.payment || paymentData.payment,
       };

@@ -102,7 +102,7 @@ export class AuthInterceptor implements HttpInterceptor {
       this.isRefreshing = true;
       this.refreshTokenSubject.next(null);
 
-      const refreshToken = localStorage.getItem('refresh_token');
+      const refreshToken = this.getRefreshToken();
 
       if (refreshToken) {
         return this.authService.refreshToken().pipe(
@@ -112,10 +112,7 @@ export class AuthInterceptor implements HttpInterceptor {
             const newRefreshToken = response.data?.refresh_token;
 
             if (newToken) {
-              localStorage.setItem('access_token', newToken);
-              if (newRefreshToken) {
-                localStorage.setItem('refresh_token', newRefreshToken);
-              }
+              this.updateTokensInAuthState(newToken, newRefreshToken);
               this.refreshTokenSubject.next(newToken);
               return next.handle(this.addTokenToRequest(request, newToken));
             }
@@ -146,5 +143,43 @@ export class AuthInterceptor implements HttpInterceptor {
       take(1),
       switchMap((token) => next.handle(this.addTokenToRequest(request, token))),
     );
+  }
+
+  /**
+   * Helper method to get refresh token from vendix_auth_state
+   */
+  private getRefreshToken(): string | null {
+    try {
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) return null;
+      const parsed = JSON.parse(authState);
+      return parsed.tokens?.refresh_token || null;
+    } catch (e) {
+      console.error('❌ Error reading refresh token from auth state:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to update tokens in vendix_auth_state
+   */
+  private updateTokensInAuthState(accessToken: string, refreshToken?: string): void {
+    try {
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) {
+        console.warn('[AUTH INTERCEPTOR] No auth state found to update tokens');
+        return;
+      }
+      const parsed = JSON.parse(authState);
+      if (parsed.tokens) {
+        parsed.tokens.access_token = accessToken;
+        if (refreshToken) {
+          parsed.tokens.refresh_token = refreshToken;
+        }
+        localStorage.setItem('vendix_auth_state', JSON.stringify(parsed));
+      }
+    } catch (e) {
+      console.error('❌ Error updating tokens in auth state:', e);
+    }
   }
 }

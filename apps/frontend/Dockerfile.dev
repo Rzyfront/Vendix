@@ -1,7 +1,8 @@
 FROM node:20-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --force && \
+    npm install --save-optional @rollup/rollup-linux-arm64-musl --force
 COPY . .
 EXPOSE 4200
-CMD ["npm", "run", "start"]
+CMD ["npx", "ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]

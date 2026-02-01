@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -6,7 +6,8 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, map, startWith } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { EcommerceService } from './services/ecommerce.service';
 import {
   EcommerceSettings,
@@ -14,12 +15,16 @@ import {
   SliderImage,
   SliderPhoto,
 } from './interfaces';
-import { ToastService } from '../../../../shared/components/toast/toast.service';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
-import { InputComponent } from '../../../../shared/components/input/input.component';
-import { SelectorComponent } from '../../../../shared/components/selector/selector.component';
-import { SettingToggleComponent } from '../../../../shared/components/setting-toggle/setting-toggle.component';
+import {
+  ToastService,
+  IconComponent,
+  ButtonComponent,
+  InputComponent,
+  SelectorComponent,
+  SettingToggleComponent,
+  StickyHeaderComponent,
+  StickyHeaderActionButton,
+} from '../../../../shared/components';
 
 @Component({
   selector: 'app-ecommerce',
@@ -32,21 +37,29 @@ import { SettingToggleComponent } from '../../../../shared/components/setting-to
     InputComponent,
     SelectorComponent,
     SettingToggleComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
 })
 export class EcommerceComponent implements OnInit, OnDestroy {
+  private fb = inject(FormBuilder);
+  private ecommerceService = inject(EcommerceService);
+  private toastService = inject(ToastService);
+
   private destroy$ = new Subject<void>();
 
   // Mode detection
-  isSetupMode = false;
-  isEditMode = false;
+  isSetupMode = signal(false);
+  isEditMode = signal(false);
 
   // Form & UI state
-  settingsForm: FormGroup;
+  settingsForm: FormGroup = this.createForm();
   isLoading = false;
-  isSaving = false;
+  isSaving = signal(false);
+
+  // Trigger for computed units to react to non-signal form state changes
+  private formUpdateTrigger = signal(0);
 
   // Slider images
   sliderImages: SliderImage[] = [];
@@ -68,12 +81,52 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   // Ecommerce URL for "Open Store" button
   ecommerceUrl: string | null = null;
 
-  constructor(
-    private fb: FormBuilder,
-    private ecommerceService: EcommerceService,
-    private toastService: ToastService,
-  ) {
-    this.settingsForm = this.createForm();
+  readonly ecommerceHeaderActions = computed<StickyHeaderActionButton[]>(() => {
+    this.formUpdateTrigger(); // Dependency
+    const actions: StickyHeaderActionButton[] = [];
+    const isPristine = this.settingsForm.pristine;
+    const isInvalid = this.settingsForm.invalid;
+    const isSaving = this.isSaving();
+
+    if (this.isSetupMode()) {
+      actions.push({
+        id: 'reset',
+        label: 'Restablecer',
+        variant: 'outline',
+        disabled: isSaving || isPristine,
+      });
+    }
+
+    if (this.isEditMode() && this.ecommerceUrl) {
+      actions.push({
+        id: 'open',
+        label: 'Abrir Tienda',
+        variant: 'outline',
+        icon: 'external-link',
+        disabled: !this.ecommerceUrl,
+      });
+    }
+
+    actions.push({
+      id: 'save',
+      label: isSaving
+        ? 'Guardando...'
+        : this.isSetupMode()
+          ? 'Configurar Tienda'
+          : 'Guardar Cambios',
+      variant: 'primary',
+      icon: isSaving ? undefined : 'save',
+      loading: isSaving,
+      disabled: isSaving || isPristine || isInvalid,
+    });
+
+    return actions;
+  });
+
+  constructor() {
+    // Sincronizar trigger con cambios del formulario
+    this.settingsForm.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
+    this.settingsForm.statusChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
   }
 
   ngOnInit(): void {
@@ -192,8 +245,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         next: (response: SettingsResponse) => {
           if (response.exists && response.config) {
             // MODO EDICIÓN: configuración existe
-            this.isEditMode = true;
-            this.isSetupMode = false;
+            this.isEditMode.set(true);
+            this.isSetupMode.set(false);
             this.settingsForm.patchValue(response.config);
 
             // Cargar logo si existe
@@ -218,8 +271,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             this.ecommerceUrl = response.ecommerceUrl || null;
           } else {
             // MODO SETUP: no existe configuración
-            this.isSetupMode = true;
-            this.isEditMode = false;
+            this.isSetupMode.set(true);
+            this.isEditMode.set(false);
             this.ecommerceUrl = null;
             this.loadTemplate();
           }
@@ -437,6 +490,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           if (inicioGroup) {
             inicioGroup.patchValue({ logo_url: result.key });
             this.settingsForm.markAsDirty();
+            this.formUpdateTrigger.update(v => v + 1);
           }
 
           this.isUploadingLogo = false;
@@ -461,6 +515,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     if (inicioGroup) {
       inicioGroup.patchValue({ logo_url: '' });
       this.settingsForm.markAsDirty();
+      this.formUpdateTrigger.update(v => v + 1);
     }
   }
 
@@ -496,7 +551,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     // Apply auto-fill before submitting
     this.applyAutoFill();
 
-    this.isSaving = true;
+    this.isSaving.set(true);
 
     // Preparar el objeto de configuración
     const settings: EcommerceSettings = {
@@ -521,7 +576,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (savedSettings) => {
-          const message = this.isSetupMode
+          const message = this.isSetupMode()
             ? 'Tienda e-commerce configurada exitosamente'
             : 'Configuración actualizada exitosamente';
 
@@ -529,19 +584,19 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           this.settingsForm.markAsPristine();
 
           // If we were in setup mode, transition to edit mode
-          if (this.isSetupMode) {
-            this.isSetupMode = false;
-            this.isEditMode = true;
+          if (this.isSetupMode()) {
+            this.isSetupMode.set(false);
+            this.isEditMode.set(true);
 
             // Reload to get the saved configuration
             this.loadSettings();
           }
 
-          this.isSaving = false;
+          this.isSaving.set(false);
         },
         error: (error) => {
           this.toastService.error('Error al guardar: ' + error.message);
-          this.isSaving = false;
+          this.isSaving.set(false);
         },
       });
   }
@@ -550,7 +605,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Reset the form
    */
   onReset(): void {
-    if (this.isSetupMode) {
+    if (this.isSetupMode()) {
       this.loadTemplate();
     } else {
       this.loadSettings();
@@ -567,6 +622,12 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     } else {
       this.toastService.warning('No se pudo obtener la URL de la tienda');
     }
+  }
+
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'reset') this.onReset();
+    else if (actionId === 'open') this.openEcommerceStore();
+    else if (actionId === 'save') this.onSubmit();
   }
 
   /**

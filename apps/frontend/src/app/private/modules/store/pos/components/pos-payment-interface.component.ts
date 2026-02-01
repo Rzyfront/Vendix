@@ -517,6 +517,7 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
   storeSettingsSubscription: any;
   allowAnonymousSales = false;
   anonymousSalesAsDefault = false;
+  requireCashDrawerOpen = false;
 
   // Document type options for customer creation
   documentTypeOptions = [
@@ -660,10 +661,12 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
 
         this.allowAnonymousSales = settings.pos.allow_anonymous_sales || false;
         this.anonymousSalesAsDefault = settings.pos.anonymous_sales_as_default || false;
+        this.requireCashDrawerOpen = settings.pos.require_cash_drawer_open || false;
 
         console.log('[POS Payment] Store settings updated:', {
           allowAnonymousSales: this.allowAnonymousSales,
           anonymousSalesAsDefault: this.anonymousSalesAsDefault,
+          requireCashDrawerOpen: this.requireCashDrawerOpen,
           prevAllowAnonymous,
           isAnonymousSale: this.paymentState.isAnonymousSale,
           rawSettings: settings,
@@ -803,7 +806,14 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
+    let register_id = localStorage.getItem('pos_register_id');
+
+    // Auto-configure default register if not required
+    if (!register_id && !this.requireCashDrawerOpen) {
+      register_id = 'DEFAULT-POS';
+      localStorage.setItem('pos_register_id', register_id);
+    }
+
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
       this.requestRegisterConfig.emit();
@@ -870,7 +880,14 @@ export class PosPaymentInterfaceComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const register_id = localStorage.getItem('pos_register_id');
+    let register_id = localStorage.getItem('pos_register_id');
+
+    // Auto-configure default register if not required
+    if (!register_id && !this.requireCashDrawerOpen) {
+      register_id = 'DEFAULT-POS';
+      localStorage.setItem('pos_register_id', register_id);
+    }
+
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
       this.requestRegisterConfig.emit();

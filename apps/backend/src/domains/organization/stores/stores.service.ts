@@ -17,6 +17,8 @@ import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { DomainGeneratorHelper, DomainContext } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
+import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
 
 @Injectable()
 export class StoresService {
@@ -218,6 +220,126 @@ export class StoresService {
       update: { settings: settingsDto.settings, updated_at: new Date() },
       create: { store_id: storeId, settings: settingsDto.settings },
     });
+  }
+
+  async getStoreSettings(storeId: number) {
+    // Obtener datos de la tienda desde la tabla stores
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        id: true,
+        name: true,
+        logo_url: true,
+        store_type: true,
+        timezone: true,
+        organization_id: true,
+      }
+    });
+
+    if (!store) {
+      throw new NotFoundException('Store not found');
+    }
+
+    let storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+    });
+
+    // Get domain config for the app section
+    const domainConfig = await this.getDomainConfig(storeId);
+    const branding = domainConfig?.branding || {};
+
+    // Mapear colores del dominio a la estructura de AppSettings
+    const primaryColor = branding.primary_color || '#7ED7A5';
+    const secondaryColor = branding.secondary_color || branding.surface_color || '#2F6F4E';
+    const accentColor = branding.accent_color || '#FFFFFF';
+    const theme = branding.theme === 'light' ? 'default' : branding.theme || 'default';
+
+    if (!storeSettings || !storeSettings.settings) {
+      return {
+        ...getDefaultStoreSettings(),
+        general: {
+          ...getDefaultStoreSettings().general,
+          name: store?.name,
+          logo_url: store?.logo_url,
+          store_type: store?.store_type as any,
+          timezone: store?.timezone || getDefaultStoreSettings().general.timezone,
+        },
+        app: {
+          name: branding.name || store?.name || 'Vendix',
+          primary_color: primaryColor,
+          secondary_color: secondaryColor,
+          accent_color: accentColor,
+          theme: theme,
+          logo_url: (branding.logo_url || store?.logo_url),
+          favicon_url: branding.favicon_url,
+        }
+      };
+    }
+
+    // Merge existing settings with store data and app config from domain
+    const settings = storeSettings.settings as any as StoreSettings;
+    return {
+      ...settings,
+      general: {
+        ...settings.general,
+        name: store?.name,
+        logo_url: store?.logo_url,
+        store_type: store?.store_type as any,
+        timezone: store?.timezone || settings.general?.timezone,
+      },
+      app: {
+        name: branding.name || store?.name || 'Vendix',
+        primary_color: primaryColor,
+        secondary_color: secondaryColor,
+        accent_color: accentColor,
+        theme: theme,
+        logo_url: (branding.logo_url || store?.logo_url),
+        favicon_url: branding.favicon_url,
+      }
+    };
+  }
+
+  async resetStoreSettings(storeId: number) {
+    await this.findOne(storeId);
+
+    // Delete existing settings
+    await this.prisma.store_settings.delete({
+      where: { store_id: storeId },
+    }).catch(() => {
+      // Ignore if settings don't exist
+    });
+
+    // Return default settings with store data and branding
+    return this.getStoreSettings(storeId);
+  }
+
+  /**
+   * Gets the domain configuration for a store.
+   * Prioritizes the primary domain, falls back to any domain associated with the store.
+   *
+   * @param storeId - Store ID
+   * @returns Domain config object or empty object if no domain found
+   */
+  private async getDomainConfig(storeId: number): Promise<any> {
+    // Try to find primary domain first
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        is_primary: true,
+      },
+      select: { config: true }
+    });
+
+    // If no primary domain, try to find any domain associated with the store
+    if (!domain) {
+      const anyDomain = await this.prisma.domain_settings.findFirst({
+        where: { store_id: storeId },
+        select: { config: true }
+      });
+      return anyDomain?.config || {};
+    }
+
+    return domain?.config || {};
   }
 
   async getDashboard(id: number, query: StoreDashboardDto) {

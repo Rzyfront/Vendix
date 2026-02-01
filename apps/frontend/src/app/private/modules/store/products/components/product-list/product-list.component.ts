@@ -85,6 +85,15 @@ export class ProductListComponent {
       width: '250px',
       priority: 1,
     },
+    {
+      key: 'brand',
+      label: 'Marca',
+      sortable: true,
+      width: '120px',
+      priority: 2,
+      transform: (value: Brand) => value?.name || '-',
+    },
+
     { key: 'sku', label: 'SKU', sortable: true, width: '120px', priority: 2 },
     {
       key: 'base_price',

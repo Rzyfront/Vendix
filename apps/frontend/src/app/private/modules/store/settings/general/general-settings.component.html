@@ -1,54 +1,13 @@
 <div class="general-settings min-h-screen">
-  <!-- Sticky Header -->
-  <div
-    class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 md:px-6 md:py-4 shadow-sm mb-6 rounded-b-xl">
-    <div class="max-w-[1600px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <!-- Left: Info & Badge -->
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100">
-          <app-icon name="settings" size="24" class="text-blue-600"></app-icon>
-        </div>
-        <div>
-          <div class="flex items-center gap-3">
-            <h1 class="text-xl font-bold text-gray-900">Configuración General</h1>
-            @if (hasUnsavedChanges) {
-            <span
-              class="px-2 py-1 bg-orange-100 text-orange-700 text-[10px] font-bold uppercase rounded-lg animate-pulse">Pendiente
-              de Guardar</span>
-            } @else {
-            <span
-              class="px-2 py-1 bg-green-100 text-green-700 text-[10px] font-bold uppercase rounded-lg">Sincronizado</span>
-            }
-          </div>
-          <p class="text-sm text-gray-500">Configura las preferencias administrativas y flujos de negocio</p>
-        </div>
-      </div>
-
-      <!-- Right: Actions -->
-      <div class="flex items-center gap-3">
-        @if (lastSaved) {
-        <span class="hidden md:block text-xs text-gray-400 italic mr-2">
-          Último guardado: {{ lastSaved | date: 'HH:mm:ss' }}
-        </span>
-        }
-
-        <app-button variant="outline-danger" size="sm" (clicked)="resetToDefaults()" class="flex-shrink-0">
-          <app-icon name="rotate-ccw" size="16" class="mr-2"></app-icon>
-          Restablecer
-        </app-button>
-
-        <app-button variant="primary" size="sm" [loading]="isSaving" [disabled]="!hasUnsavedChanges && !isSaving"
-          (clicked)="saveAllSettings()" class="flex-shrink-0">
-          <app-icon name="save" size="16" class="mr-2"></app-icon>
-          Guardar Cambios
-        </app-button>
-      </div>
-    </div>
-  </div>
+  <app-sticky-header title="Configuración General"
+    subtitle="Configura las preferencias administrativas y flujos de negocio" icon="settings" [badgeText]="badgeText()"
+    [badgeColor]="badgeColor()" [badgePulse]="badgePulse()" [metadataContent]="metadataContent()"
+    [actions]="headerActions()" (actionClicked)="onHeaderAction($event)">
+  </app-sticky-header>
 
   <!-- Main Content Area -->
   <div class="max-w-[1600px] mx-auto p-4 md:p-6 pb-20">
-    @if (isLoading) {
+    @if (isLoading()) {
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-12">
       <div class="text-center">
         <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-100 border-t-blue-600 mb-4">

@@ -17,12 +17,16 @@ import { UserRole } from '../../../auth/enums/user-role.enum';
 import { LegalDocumentsService } from '../services/legal-documents.service';
 import { CreateSystemDocumentDto } from '../dto/create-system-document.dto';
 import { UpdateSystemDocumentDto } from '../dto/update-system-document.dto';
+import { ResponseService } from '@common/responses/response.service';
 
 @Controller('superadmin/legal-documents')
 @UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class LegalDocumentsController {
-  constructor(private readonly legalDocumentsService: LegalDocumentsService) {}
+  constructor(
+    private readonly legalDocumentsService: LegalDocumentsService,
+    private readonly responseService: ResponseService,
+  ) {}
 
   @Get()
   async getSystemDocuments(@Query('document_type') documentType?: string) {
@@ -30,33 +34,38 @@ export class LegalDocumentsController {
     if (documentType) {
       filters.document_type = documentType;
     }
-    return this.legalDocumentsService.getSystemDocuments(filters);
+    const data = await this.legalDocumentsService.getSystemDocuments(filters);
+    return this.responseService.success(data);
   }
 
   @Get('active/:documentType')
   async getActiveDocument(@Param('documentType') documentType: string) {
-    return this.legalDocumentsService.getActiveSystemDocument(
+    const data = await this.legalDocumentsService.getActiveSystemDocument(
       documentType as any,
     );
+    return this.responseService.success(data);
   }
 
   @Get('history/:documentType')
   async getDocumentHistory(@Param('documentType') documentType: string) {
-    return this.legalDocumentsService.getDocumentHistory(
+    const data = await this.legalDocumentsService.getDocumentHistory(
       documentType as any,
     );
+    return this.responseService.success(data);
   }
 
   @Get('pending/:documentType')
   async getUsersPendingAcceptance(@Param('documentType') documentType: string) {
-    return this.legalDocumentsService.getUsersPendingAcceptance(
+    const data = await this.legalDocumentsService.getUsersPendingAcceptance(
       documentType as any,
     );
+    return this.responseService.success(data);
   }
 
   @Get(':id')
   async getSystemDocument(@Param('id', ParseIntPipe) id: number) {
-    return this.legalDocumentsService.getSystemDocument(id);
+    const data = await this.legalDocumentsService.getSystemDocument(id);
+    return this.responseService.success(data);
   }
 
   @Get(':id/acceptances')
@@ -73,23 +82,26 @@ export class LegalDocumentsController {
     if (organizationId) filters.organizationId = parseInt(organizationId);
     if (userId) filters.userId = parseInt(userId);
 
-    return this.legalDocumentsService.getDocumentAcceptances(id, filters);
+    const data = await this.legalDocumentsService.getDocumentAcceptances(
+      id,
+      filters,
+    );
+    return this.responseService.success(data);
   }
 
   @Get(':id/stats')
   async getAcceptanceStats(@Param('id', ParseIntPipe) id: number) {
-    return this.legalDocumentsService.getAcceptanceStats(id);
+    const data = await this.legalDocumentsService.getAcceptanceStats(id);
+    return this.responseService.success(data);
   }
 
   @Post()
-  async createDocument(
-    @Request() req,
-    @Body() dto: CreateSystemDocumentDto,
-  ) {
-    return this.legalDocumentsService.createSystemDocument(
+  async createDocument(@Request() req, @Body() dto: CreateSystemDocumentDto) {
+    const data = await this.legalDocumentsService.createSystemDocument(
       req.user.id,
       dto,
     );
+    return this.responseService.success(data, 'Document created successfully');
   }
 
   @Patch(':id')
@@ -98,11 +110,12 @@ export class LegalDocumentsController {
     @Request() req,
     @Body() dto: UpdateSystemDocumentDto,
   ) {
-    return this.legalDocumentsService.updateSystemDocument(
+    const data = await this.legalDocumentsService.updateSystemDocument(
       id,
       req.user.id,
       dto,
     );
+    return this.responseService.success(data, 'Document updated successfully');
   }
 
   @Patch(':id/activate')
@@ -110,7 +123,14 @@ export class LegalDocumentsController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ) {
-    return this.legalDocumentsService.activateDocument(id, req.user.id);
+    const data = await this.legalDocumentsService.activateDocument(
+      id,
+      req.user.id,
+    );
+    return this.responseService.success(
+      data,
+      'Document activated successfully',
+    );
   }
 
   @Patch(':id/deactivate')
@@ -118,7 +138,14 @@ export class LegalDocumentsController {
     @Param('id', ParseIntPipe) id: number,
     @Request() req,
   ) {
-    return this.legalDocumentsService.deactivateDocument(id, req.user.id);
+    const data = await this.legalDocumentsService.deactivateDocument(
+      id,
+      req.user.id,
+    );
+    return this.responseService.success(
+      data,
+      'Document deactivated successfully',
+    );
   }
 
   // TODO: Add PDF upload endpoint when S3 is configured

@@ -330,7 +330,7 @@ Start Task
 
 1. **NEVER skip Task tools** for complex operations
 2. **NEVER compromise naming conventions** (see `vendix-naming-conventions`)
-3. **NEVER skip build verification** (see `vendix-build-verification`)
+3. **NEVER skip build verification** (see `buildcheck-dev`)
 4. **ALWAYS read existing code** before changing
 5. **ALWAYS follow established patterns**
 
@@ -339,6 +339,6 @@ Start Task
 ## Related Skills
 
 - `vendix-naming-conventions` - ABSOLUTE PRIORITY for naming
-- `vendix-build-verification` - MANDATORY build checks
+- `buildcheck-dev` - MANDATORY build checks
 - `vendix-backend-domain` - Backend domain patterns
 - `vendix-frontend-component` - Frontend component patterns

@@ -276,4 +276,27 @@ export class OnboardingWizardController {
       );
     }
   }
+
+  @Post('resend-verification-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend verification email (authenticated)',
+    description: 'Resends the verification email for the authenticated user during onboarding',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Verification email sent successfully',
+  })
+  async resendVerificationEmail(@Req() req: AuthenticatedRequest) {
+    try {
+      const result = await this.wizardService.resendVerificationEmail(req.user.id);
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al reenviar email',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
 }

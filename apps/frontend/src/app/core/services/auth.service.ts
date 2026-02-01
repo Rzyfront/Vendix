@@ -108,11 +108,6 @@ export class AuthService {
           const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
 
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', refresh_token);
-          }
-
           const decodedToken = this.decodeJwtToken(access_token);
           // Los roles ahora vienen directamente como array de strings desde la API
           user.roles = user.roles || [];
@@ -165,11 +160,6 @@ export class AuthService {
 
           const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
-
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', refresh_token);
-          }
 
           const decodedToken = this.decodeJwtToken(access_token);
           user.roles = user.roles || [];
@@ -241,11 +231,6 @@ export class AuthService {
 
           const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
-
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', refresh_token);
-          }
 
           const decodedToken = this.decodeJwtToken(access_token);
           // Los roles ahora vienen directamente como array de strings desde la API
@@ -336,11 +321,6 @@ export class AuthService {
 
           const { user, user_settings, store_settings, access_token, refresh_token } =
             response.data;
-
-          if (typeof localStorage !== 'undefined') {
-            localStorage.setItem('access_token', access_token);
-            localStorage.setItem('refresh_token', refresh_token);
-          }
 
           const decodedToken = this.decodeJwtToken(access_token);
           user.roles = user.roles || [];
@@ -466,7 +446,10 @@ export class AuthService {
     return this.authFacade.getTokens()?.refresh_token || null;
   }
   private clearTokens(): void {
+    // This method is now a no-op since tokens are stored in vendix_auth_state
+    // The actual cleanup is handled by clearAllAuthData() and the NgRx reducer
     if (typeof localStorage !== 'undefined') {
+      // Still try to remove legacy keys for cleanup
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
     }
@@ -478,21 +461,27 @@ export class AuthService {
    */
   clearAllAuthData(): void {
     if (typeof localStorage !== 'undefined') {
-      // Eliminar TODAS las claves relacionadas con autenticación
-      const keysToRemove = [
+      // Eliminar claves principales de autenticación
+      const primaryKeysToRemove = [
         'vendix_auth_state',
+        'vendix_user_environment',
+      ];
+
+      primaryKeysToRemove.forEach((key) => {
+        localStorage.removeItem(key);
+      });
+
+      // Also try to remove legacy keys for cleanup (if they exist)
+      const legacyKeysToRemove = [
         'access_token',
         'refresh_token',
         'vendix_user_info',
         'user_settings',
         'permissions',
         'roles',
-        'vendix_user_environment',
-        'vendix_app_config', // Configuración del entorno
-        'vendix_logged_out_recently', // También limpiar banderas de logout
       ];
 
-      keysToRemove.forEach((key) => {
+      legacyKeysToRemove.forEach((key) => {
         localStorage.removeItem(key);
       });
 
@@ -509,6 +498,7 @@ export class AuthService {
 
     const hasResidues = [
       'vendix_auth_state',
+      // Also check legacy keys for cleanup
       'access_token',
       'refresh_token',
       'vendix_user_info',

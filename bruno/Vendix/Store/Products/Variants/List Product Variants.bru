@@ -1,0 +1,67 @@
+meta {
+  name: "List Product Variants"
+  type: http
+  seq: 12
+}
+
+get {
+  url: http://{{url}}/products/{{productId}}?include_variants=true
+  body: none
+  auth: inherit
+}
+
+query {
+  include_variants: true
+}
+
+tests {
+  test("Operation successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Data structure is valid", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Variants property exists as array", function() {
+    expect(res.body.data).to.have.property("variants");
+    expect(res.body.data.variants).to.be.an("array");
+  });
+
+  test("All variants belong to the product", function() {
+    const variants = res.body.data.variants;
+    const productId = parseInt({{productId}});
+    
+    variants.forEach(variant => {
+      expect(variant).to.have.property("product_id", productId);
+    });
+  });
+
+  test("Each variant has required fields", function() {
+    const variants = res.body.data.variants;
+    
+    variants.forEach(variant => {
+      expect(variant).to.have.property("id");
+      expect(variant).to.have.property("sku");
+      expect(variant).to.have.property("product_id");
+      expect(variant).to.have.property("stock_quantity");
+      expect(variant.sku).to.be.a("string");
+      expect(variant.id).to.be.a("number");
+    });
+  });
+
+  test("Variants have unique SKUs within the product", function() {
+    const variants = res.body.data.variants;
+    const skus = variants.map(v => v.sku);
+    const uniqueSkus = [...new Set(skus)];
+    
+    expect(skus.length).to.equal(uniqueSkus.length);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

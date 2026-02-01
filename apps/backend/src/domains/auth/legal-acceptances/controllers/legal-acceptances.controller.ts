@@ -9,8 +9,11 @@ import {
   Headers,
   ParseIntPipe,
   Body,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
+import { Public } from '../../decorators/public.decorator';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { LegalAcceptancesService } from '../services/legal-acceptances.service';
 import { AcceptDocumentDto } from '../dto/accept-document.dto';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -21,7 +24,7 @@ export class LegalAcceptancesController {
   constructor(
     private readonly legalAcceptancesService: LegalAcceptancesService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Get('pending')
   async getPendingTerms(@Request() req) {
@@ -30,6 +33,7 @@ export class LegalAcceptancesController {
     );
     return this.responseService.success(data);
   }
+
 
   @Get('my-acceptances')
   async getMyAcceptances(@Request() req) {

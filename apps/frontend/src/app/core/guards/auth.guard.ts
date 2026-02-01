@@ -25,13 +25,21 @@ export class AuthGuard implements CanActivate {
   ): Observable<boolean | UrlTree> {
     const path = state.url;
 
+    console.log('🛡️ [AUTH GUARD] canActivate() START', {
+      path,
+      loggedOutFlag: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_logged_out_recently') : 'N/A',
+      userEnv: typeof localStorage !== 'undefined' ? localStorage.getItem('vendix_user_environment') : 'N/A',
+    });
+
     // 1. Check if route is public (no auth required)
     if (this.isPublicRoute(path)) {
+      console.log('✅ [AUTH GUARD] Public route, allowing access');
       return of(true);
     }
 
     // 2. Check localStorage flag first for immediate logout detection
     if (this.wasRecentlyLoggedOut()) {
+      console.log('🚫 [AUTH GUARD] Recently logged out (< 5min), redirecting to login');
       this.toastService.warning(
         'Debes iniciar sesión para acceder a esta página',
       );
@@ -42,7 +50,13 @@ export class AuthGuard implements CanActivate {
     return this.authFacade.isAuthenticated$.pipe(
       take(1),
       switchMap((isAuthenticated) => {
+        console.log('🔐 [AUTH GUARD] Authentication check:', {
+          isAuthenticated,
+          roles: this.authFacade.getRoles(),
+        });
+
         if (!isAuthenticated) {
+          console.log('🚫 [AUTH GUARD] Not authenticated, redirecting to login');
           this.toastService.warning(
             'Debes iniciar sesión para acceder a esta página',
           );
@@ -50,18 +64,27 @@ export class AuthGuard implements CanActivate {
         }
 
         // 4. Check role-based permissions
-        if (!this.hasRolePermission(path)) {
+        const hasPermission = this.hasRolePermission(path);
+        console.log('👤 [AUTH GUARD] Role permission check:', {
+          path,
+          hasPermission,
+          roles: this.authFacade.getRoles(),
+        });
+
+        if (!hasPermission) {
+          console.log('🚫 [AUTH GUARD] No role permission, redirecting to dashboard');
           this.toastService.error(
             'No tienes permisos para acceder a esta página',
           );
           return of(this.getDashboardUrl());
         }
 
+        console.log('✅ [AUTH GUARD] All checks passed, allowing access');
         // If authenticated and has permission, allow access
         return of(true);
       }),
       catchError((error) => {
-        console.error('[AUTH GUARD] Error:', error);
+        console.error('❌ [AUTH GUARD] Error:', error);
         this.toastService.error('Error verificando autenticación');
         return of(this.router.createUrlTree(['/']));
       }),
@@ -142,19 +165,25 @@ export class AuthGuard implements CanActivate {
   private getDashboardUrl(): UrlTree {
     const userRoles = this.authFacade.getRoles();
 
+    console.log('🎯 [AUTH GUARD] getDashboardUrl() - Roles:', userRoles);
+
     if (userRoles.includes('super_admin')) {
+      console.log('✅ [AUTH GUARD] Redirecting to /superadmin/dashboard');
       return this.router.createUrlTree(['/superadmin/dashboard']);
     }
 
     if (userRoles.some((r) => ['admin', 'owner', 'manager'].includes(r))) {
+      console.log('✅ [AUTH GUARD] Redirecting to /admin/dashboard');
       return this.router.createUrlTree(['/admin/dashboard']);
     }
 
     if (userRoles.some((r) => ['supervisor', 'employee'].includes(r))) {
+      console.log('✅ [AUTH GUARD] Redirecting to /admin/dashboard');
       return this.router.createUrlTree(['/admin/dashboard']);
     }
 
     // Default fallback
+    console.log('⚠️ [AUTH GUARD] No valid roles, redirecting to / (landing)');
     return this.router.createUrlTree(['/']);
   }
 

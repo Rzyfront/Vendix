@@ -41,7 +41,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly environmentSwitchService: EnvironmentSwitchService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   @Post('register-owner')
   @Public()
@@ -373,6 +373,27 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al reenviar la verificación',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Post('check-verification-status')
+  @HttpCode(HttpStatus.OK)
+  async checkVerificationStatus(@Body() dto: { email: string }) {
+    try {
+      const result = await this.authService.checkEmailVerificationStatus(
+        dto.email,
+      );
+      return this.responseService.success(
+        result,
+        'Estado de verificación obtenido',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al verificar estado',
         error.response?.message || error.message,
         error.status || 400,
       );

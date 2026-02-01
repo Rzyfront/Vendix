@@ -8,34 +8,33 @@ export class DomainResolverMiddleware implements NestMiddleware {
   private cache = new Map<string, { context: any; timestamp: number }>();
   private readonly CACHE_TTL = 300000; // 5 minutos
 
-  constructor(private readonly publicDomains: PublicDomainsService) {}
+  constructor(private readonly publicDomains: PublicDomainsService) { }
 
   async use(req: Request, res: Response, next: NextFunction) {
-    this.logger.debug(
-      `MW: Entering DomainResolverMiddleware for ${req.originalUrl}`,
-    );
     // Usar originalUrl para asegurar que detectamos /ecommerce/ incluso con prefijos
     if (!req.originalUrl.includes('/ecommerce/')) {
       return next();
     }
 
+    this.logger.log(`Path matched for domain resolution: ${req.originalUrl}`);
+
     const hostname = this.extractHostname(req);
-    const x_store_id_header = req.headers['x-store-id'];
+    const x_store_id_header = req.headers['x-store-id'] || req.query.store_id;
     const x_store_id = Array.isArray(x_store_id_header)
       ? x_store_id_header[0]
       : x_store_id_header;
 
-    this.logger.debug(
-      `Resolving domain for path: ${req.originalUrl} (header x-store-id: ${x_store_id})`,
+    this.logger.log(
+      `Resolving domain for hostname: ${hostname} (header/query store-id: ${x_store_id})`,
     );
 
     try {
-      // Prioridad 1: x-store-id header (enviado por el frontend)
+      // Prioridad 1: x-store-id header o query param
       if (x_store_id && !isNaN(Number(x_store_id)) && Number(x_store_id) > 0) {
         req['domain_context'] = {
           store_id: Number(x_store_id),
         };
-        this.logger.debug(`Store resolved from header: ${x_store_id}`);
+        this.logger.log(`Store resolved from header/query: ${x_store_id}`);
         return next();
       }
 

@@ -97,6 +97,72 @@ Para un header profesional y "Premium":
 
 ---
 
+---
+
+## 🚀 Reusable Component Pattern
+
+Para evitar duplicación y mantener consistencia, usa el componente `app-sticky-header` disponible en `shared/components`.
+
+### API del Componente
+
+#### Inputs
+| Input | Tipo | Required | Default |
+|-------|------|----------|---------|
+| `title` | `string` | Sí | - |
+| `subtitle` | `string` | No | `''` |
+| `icon` | `string` | No | `'box'` |
+| `variant` | `'default' \| 'glass'` | No | `'glass'` |
+| `showBackButton` | `boolean` | No | `false` |
+| `backRoute` | `string \| string[]` | No | `'/'` |
+| `badgeText` | `string` | No | `''` |
+| `badgeColor` | `'green' \| 'blue' \| 'yellow' \| 'gray' \| 'red'` | No | `'blue'` |
+| `actions` | `StickyHeaderActionButton[]` | No | `[]` |
+
+#### Outputs
+| Output | Payload |
+|--------|---------|
+| `actionClicked` | `string` (ID del botón) |
+
+### Interfaces
+
+```typescript
+interface StickyHeaderActionButton {
+  id: string;           // ID único para emitir en actionClicked
+  label: string;        // Texto del botón
+  variant: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+  icon?: string;        // Icono Lucide opcional
+  loading?: boolean;    // Estado loading
+  disabled?: boolean;   // Deshabilitado
+  visible?: boolean;    // Mostrar/ocultar
+}
+```
+
+### Ejemplo de Uso
+
+```html
+<app-sticky-header
+  [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'"
+  [subtitle]="isEditMode ? 'Gestiona la información...' : 'Registra un nuevo producto...'"
+  [icon]="isEditMode ? 'package' : 'plus-circle'"
+  [showBackButton]="true"
+  backRoute="/admin/products"
+  [actions]="productHeaderActions()"
+  (actionClicked)="onHeaderAction($event)">
+</app-sticky-header>
+```
+
+```typescript
+readonly productHeaderActions = computed<StickyHeaderActionButton[]>(() => [
+  { id: 'cancel', label: 'Cancelar', variant: 'outline' },
+  { id: 'save', label: this.isEditMode() ? 'Guardar Cambios' : 'Crear Producto', variant: 'primary', loading: this.isSubmitting() },
+]);
+
+onHeaderAction(actionId: string): void {
+  if (actionId === 'cancel') this.onCancel();
+  else if (actionId === 'save') this.onSubmit();
+}
+```
+
 ## Related Skills
 - `vendix-frontend-component` - Basic component rules
 - `vendix-frontend-theme` - Branding and color patterns

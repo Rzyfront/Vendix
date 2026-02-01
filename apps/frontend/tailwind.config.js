@@ -32,9 +32,9 @@ module.exports = {
         "text-secondary": "var(--color-text-secondary)",
       },
       borderRadius: {
-        sm: "0.375rem",  /* 6px */
-        md: "0.625rem",  /* 10px */
-        lg: "0.875rem",  /* 14px */
+        sm: "0.375rem" /* 6px */,
+        md: "0.625rem" /* 10px */,
+        lg: "0.875rem" /* 14px */,
         pill: "9999px",
         // Legacy mappings
         button: "var(--radius-button)",
@@ -50,14 +50,14 @@ module.exports = {
         card: "var(--shadow-card)",
       },
       spacing: {
-        sm: "0.375rem",  /* 6px */
-        md: "0.75rem",   /* 12px */
-        lg: "1.25rem",   /* 20px */
+        sm: "0.375rem" /* 6px */,
+        md: "0.75rem" /* 12px */,
+        lg: "1.25rem" /* 20px */,
       },
       transitionDuration: {
         DEFAULT: "160",
       },
     },
   },
-  // plugins: [require('@tailwindcss/typography')],
+  plugins: [require("@tailwindcss/typography")],
 };

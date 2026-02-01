@@ -2,7 +2,7 @@ export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
   checkout: CheckoutSettings;
-  shipping: ShippingSettings;
+
   notifications: NotificationsSettings;
   pos: PosSettings;
   receipts: ReceiptsSettings;
@@ -44,14 +44,7 @@ export interface CheckoutSettings {
   require_payment_confirmation: boolean;
 }
 
-export interface ShippingSettings {
-  enabled: boolean;
-  free_shipping_threshold: number;
-  allow_pickup: boolean;
-  default_shipping_method: string | null;
-  shipping_types: ShippingTypesConfig;
-  shipping_zones: ShippingZone[];
-}
+
 
 export interface CarrierConfig {
   tracking_enabled: boolean;

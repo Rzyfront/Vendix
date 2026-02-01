@@ -110,6 +110,22 @@ import {
   Phone,
   Printer,
   Wallet,
+  Edit2,
+  Slash,
+  // NEW IMPORTS:
+  AppWindow,
+  Upload,
+  Clipboard,
+  Grid2x2,
+  ToggleLeft,
+  Banknote,
+  Smartphone,
+  Send,
+  Zap,
+  Monitor,
+  Bell,
+  FilterX,
+  ClipboardCheck,
 } from 'lucide-angular';
 
 /**
@@ -130,6 +146,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   check: Check,
   search: Search,
   edit: Pencil,
+  'edit-2': Edit2,
   delete: Trash2,
   'trash-2': Trash2,
   trash: Trash2,
@@ -262,6 +279,24 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   phone: Phone,
   printer: Printer,
   wallet: Wallet,
+  slash: Slash,
+
+  // NEW ICON REGISTRY ENTRIES:
+  'app-window': AppWindow,
+  upload: Upload,
+  clipboard: Clipboard,
+  grid: Grid2x2,
+  'grid-2x2': Grid2x2,
+  'toggle-left': ToggleLeft,
+  cash: Banknote,
+  banknote: Banknote,
+  smartphone: Smartphone,
+  send: Send,
+  zap: Zap,
+  monitor: Monitor,
+  bell: Bell,
+  'filter-x': FilterX,
+  'clipboard-check': ClipboardCheck,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

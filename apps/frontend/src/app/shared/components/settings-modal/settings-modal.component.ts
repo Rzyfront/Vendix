@@ -263,6 +263,11 @@ const APP_MODULES = {
           label: 'Envíos',
           description: 'Configuración de envíos y zonas',
         },
+        {
+          key: 'settings_legal_documents',
+          label: 'Documentos Legales',
+          description: 'Gestionar términos, privacidad y documentos legales',
+        },
       ],
     },
   ],
@@ -509,7 +514,7 @@ export class SettingsModalComponent implements OnInit {
     // Initialize panel_ui controls for ORG_ADMIN
     const orgAdminControls: any = {};
     APP_MODULES.ORG_ADMIN.forEach((module) => {
-      orgAdminControls[module.key] = [true]; // Default to true
+      orgAdminControls[module.key] = [false]; // Default to false
     });
 
     // Initialize panel_ui controls for STORE_ADMIN (all modules including submodules)
@@ -517,11 +522,11 @@ export class SettingsModalComponent implements OnInit {
     APP_MODULES.STORE_ADMIN.forEach((module) => {
       // For parent modules, initialize with true
       // For child modules, also initialize with true (all enabled by default now)
-      storeAdminControls[module.key] = [true];
+      storeAdminControls[module.key] = [false];
       // Also initialize children if they exist
       if (module.isParent && module.children) {
         module.children.forEach((child) => {
-          storeAdminControls[child.key] = [true];
+          storeAdminControls[child.key] = [false];
         });
       }
     });
@@ -720,7 +725,7 @@ export class SettingsModalComponent implements OnInit {
       const currentValue =
         config.panel_ui?.ORG_ADMIN?.[module.key] ??
         config.panel_ui?.[module.key] ??
-        true;
+        false;
       patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
     });
 
@@ -729,7 +734,7 @@ export class SettingsModalComponent implements OnInit {
       const currentValue =
         config.panel_ui?.STORE_ADMIN?.[module.key] ??
         config.panel_ui?.[module.key] ??
-        true;
+        false;
       patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
 
       // Also handle children if they exist
@@ -738,7 +743,7 @@ export class SettingsModalComponent implements OnInit {
           const childValue =
             config.panel_ui?.STORE_ADMIN?.[child.key] ??
             config.panel_ui?.[child.key] ??
-            true;
+            false;
           patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
         });
       }

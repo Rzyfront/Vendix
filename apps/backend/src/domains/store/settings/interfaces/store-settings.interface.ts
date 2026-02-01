@@ -12,7 +12,7 @@ export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
   checkout: CheckoutSettings;
-  shipping: ShippingSettings;
+
   notifications: NotificationsSettings;
   pos: PosSettings;
   receipts: ReceiptsSettings;
@@ -44,11 +44,7 @@ export interface CheckoutSettings {
   require_payment_confirmation: boolean;
 }
 
-export interface ShippingSettings {
-  enabled: boolean;
-  default_weight_unit: 'kg' | 'lb';
-  default_dimension_unit: 'cm' | 'in';
-}
+
 
 
 

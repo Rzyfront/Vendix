@@ -4,6 +4,7 @@ import {
   Output,
   EventEmitter,
   ChangeDetectionStrategy,
+  OnInit,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -201,11 +202,43 @@ import { ButtonComponent, IconComponent } from '../../index';
         margin-top: auto;
       }
 
+      .palette-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+      }
+
       .palette-title {
         font-size: var(--fs-xs);
         font-weight: var(--fw-semibold);
         color: var(--color-text-primary);
-        margin-bottom: 0.5rem;
+        margin: 0;
+      }
+
+      .random-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.25rem 0.5rem;
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-medium);
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: all var(--transition-fast) ease;
+      }
+
+      .random-btn:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+        background: var(--color-primary-light);
+      }
+
+      .random-icon {
+        color: inherit;
       }
 
       .palette-colors {
@@ -505,9 +538,15 @@ import { ButtonComponent, IconComponent } from '../../index';
                 </div>
               </div>
 
-              <!-- Color Palette Preview -->
+              <!-- Color Palette Generator -->
               <div class="palette-preview">
-                <h4 class="palette-title">Paleta rápida</h4>
+                <div class="palette-header">
+                  <h4 class="palette-title">Autogenerador de Paletas</h4>
+                  <button type="button" class="random-btn" (click)="generateRandomPalette()">
+                    <app-icon name="refresh" size="14" class="random-icon"></app-icon>
+                    <span>Aleatorio</span>
+                  </button>
+                </div>
                 <div class="palette-colors">
                   @for (color of suggestedColors; track color) {
                   <button
@@ -598,7 +637,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     </div>
   `,
 })
-export class AppConfigStepComponent {
+export class AppConfigStepComponent implements OnInit {
   @Input() formGroup: any;
   @Output() nextStep = new EventEmitter<void>();
   @Output() skipStep = new EventEmitter<void>();
@@ -608,6 +647,20 @@ export class AppConfigStepComponent {
   primaryColor: string = '#7ed7a5';
   secondaryColor: string = '#2f6f4e';
   tertiaryColor: string = '#f59e0b';
+
+  ngOnInit(): void {
+    if (this.formGroup) {
+      if (this.formGroup.get('primary_color')?.value) {
+        this.primaryColor = this.formGroup.get('primary_color').value;
+      }
+      if (this.formGroup.get('secondary_color')?.value) {
+        this.secondaryColor = this.formGroup.get('secondary_color').value;
+      }
+      if (this.formGroup.get('accent_color')?.value) {
+        this.tertiaryColor = this.formGroup.get('accent_color').value;
+      }
+    }
+  }
   suggestedColors: string[] = [
     '#7ed7a5',
     '#2f6f4e',
@@ -641,7 +694,30 @@ export class AppConfigStepComponent {
 
   selectColor(color: string): void {
     this.primaryColor = color;
+    // Generate harmonious secondary and tertiary based on primary
+    this.secondaryColor = this.adjustBrightness(color, -20);
+    this.tertiaryColor = this.adjustBrightness(color, 20);
     this.updateFormColors();
+  }
+
+  generateRandomPalette(): void {
+    const randomHex = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+    this.primaryColor = randomHex();
+    this.secondaryColor = randomHex();
+    this.tertiaryColor = randomHex();
+    this.updateFormColors();
+  }
+
+  private adjustBrightness(hex: string, percent: number): string {
+    let r = parseInt(hex.slice(1, 3), 16);
+    let g = parseInt(hex.slice(3, 5), 16);
+    let b = parseInt(hex.slice(5, 7), 16);
+
+    r = Math.min(255, Math.max(0, Math.round(r * (1 + percent / 100))));
+    g = Math.min(255, Math.max(0, Math.round(g * (1 + percent / 100))));
+    b = Math.min(255, Math.max(0, Math.round(b * (1 + percent / 100))));
+
+    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
   }
 
   toggleCustomDomain(): void {

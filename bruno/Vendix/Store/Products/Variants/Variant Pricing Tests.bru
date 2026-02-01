@@ -1,0 +1,93 @@
+meta {
+  name: "Variant Pricing Tests"
+  type: http
+  seq: 15
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPAD-PRO-12.9-1TB",
+    "price": 1899.99,
+    "price_override": 1799.99,
+    "cost_price": 1400.00,
+    "profit_margin": 28.5,
+    "stock_quantity": 8
+  }
+}
+
+vars:post-response {
+  pricing_variant_id: res.body.data.id
+}
+
+tests {
+  test("Variant with pricing created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Data structure is valid", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Price field is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("price");
+    expect(variant.price).to.be.a("number");
+    expect(variant.price).to.equal(1899.99);
+  });
+
+  test("Price override field is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("price_override");
+    expect(variant.price_override).to.be.a("number");
+    expect(variant.price_override).to.equal(1799.99);
+  });
+
+  test("Cost price field is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("cost_price");
+    expect(variant.cost_price).to.be.a("number");
+    expect(variant.cost_price).to.equal(1400.00);
+  });
+
+  test("Profit margin field is stored correctly", function() {
+    const variant = res.body.data;
+    expect(variant).to.have.property("profit_margin");
+    expect(variant.profit_margin).to.be.a("number");
+    expect(variant.profit_margin).to.equal(28.5);
+  });
+
+  test("All price values are positive", function() {
+    const variant = res.body.data;
+    expect(variant.price).to.be.greaterThan(0);
+    expect(variant.price_override).to.be.greaterThan(0);
+    expect(variant.cost_price).to.be.greaterThan(0);
+    expect(variant.profit_margin).to.be.greaterThan(0);
+  });
+
+  test("Profit margin calculation is reasonable", function() {
+    const variant = res.body.data;
+    const expectedMargin = ((variant.price_override - variant.cost_price) / variant.price_override * 100);
+    // Allow small rounding differences
+    const marginDiff = Math.abs(variant.profit_margin - expectedMargin);
+    expect(marginDiff).to.be.lessThan(1);
+  });
+
+  test("Variant ID is captured for further tests", function() {
+    const variantId = res.body.data.id;
+    expect(variantId).to.be.a("number");
+    expect(variantId).to.be.greaterThan(0);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

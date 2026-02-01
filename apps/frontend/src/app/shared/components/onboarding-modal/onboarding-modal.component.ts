@@ -7,6 +7,7 @@ import {
   OnDestroy,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
+  ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -67,7 +68,7 @@ interface WizardStep {
       [(isOpen)]="isOpen"
       [title]="currentStepInfo?.title || ''"
       [subtitle]="currentStepInfo?.description || ''"
-      size="lg"
+      size="xl-mid"
       [showCloseButton]="false"
       [closeOnBackdrop]="false"
       (closed)="onClosed()"
@@ -210,75 +211,112 @@ interface WizardStep {
       <div
         class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
         slot="footer"
-        *ngIf="!isTermsStep"
       >
-        <div class="flex space-x-3">
-          <app-button
-            *ngIf="canGoBack"
-            variant="outline"
-            size="sm"
-            (clicked)="previousStep()"
-          >
-            <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
-            Anterior
-          </app-button>
+        <!-- Generic Footer (all steps except Terms) -->
+        <ng-container *ngIf="!isTermsStep">
+          <div class="flex space-x-3">
+            <app-button
+              *ngIf="canGoBack"
+              variant="outline"
+              size="sm"
+              (clicked)="previousStep()"
+            >
+              <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
+              Anterior
+            </app-button>
 
-          <app-button
-            *ngIf="
-              canSkip &&
-              (currentStep < 5 ||
-                (currentStep < 6 && businessType === 'ORGANIZATION'))
-            "
-            variant="ghost"
-            size="sm"
-            (clicked)="skipStep()"
-          >
-            <app-icon name="skip-forward" size="16" slot="icon"></app-icon>
-            Omitir
-          </app-button>
-        </div>
+            <app-button
+              *ngIf="
+                canSkip &&
+                (currentStep < 5 ||
+                  (currentStep < 6 && businessType === 'ORGANIZATION'))
+              "
+              variant="ghost"
+              size="sm"
+              (clicked)="skipStep()"
+            >
+              <app-icon name="skip-forward" size="16" slot="icon"></app-icon>
+              Omitir
+            </app-button>
+          </div>
 
-        <div class="flex space-x-3">
-          <app-button
-            *ngIf="!isCompletionStep"
-            variant="outline-danger"
-            size="sm"
-            (clicked)="close()"
-          >
-            <app-icon name="x" size="16" slot="icon"></app-icon>
-            Omitir
-          </app-button>
+          <div class="flex space-x-3">
+            <app-button
+              *ngIf="!isCompletionStep"
+              variant="outline-danger"
+              size="sm"
+              (clicked)="close()"
+            >
+              <app-icon name="x" size="16" slot="icon"></app-icon>
+              Omitir
+            </app-button>
 
-          <app-button
-            *ngIf="!isCompletionStep"
-            variant="primary"
-            size="sm"
-            (clicked)="nextStep()"
-            [disabled]="isSubmitting || isProcessing"
-          >
-            {{
-              isSubmitting
-                ? 'Procesando...'
-                : currentStep === 7 ||
-                    (currentStep === 6 && businessType === 'STORE')
-                  ? 'Finalizar configuración'
-                  : 'Siguiente'
-            }}
-            <app-icon
-              name="arrow-right"
-              size="16"
-              slot="icon"
-              *ngIf="!isSubmitting"
-            ></app-icon>
-            <app-icon
-              name="loader-2"
-              size="16"
-              slot="icon"
-              [spin]="true"
-              *ngIf="isSubmitting"
-            ></app-icon>
-          </app-button>
-        </div>
+            <app-button
+              *ngIf="!isCompletionStep"
+              variant="primary"
+              size="sm"
+              (clicked)="nextStep()"
+              [disabled]="isSubmitting || isProcessing || !canProceedFromCurrentStep"
+            >
+              {{
+                isSubmitting
+                  ? 'Procesando...'
+                  : currentStep === 7 ||
+                      (currentStep === 6 && businessType === 'STORE')
+                    ? 'Finalizar configuración'
+                    : 'Siguiente'
+              }}
+              <app-icon
+                name="arrow-right"
+                size="16"
+                slot="icon"
+                *ngIf="!isSubmitting"
+              ></app-icon>
+              <app-icon
+                name="loader-2"
+                size="16"
+                slot="icon"
+                [spin]="true"
+                *ngIf="isSubmitting"
+              ></app-icon>
+            </app-button>
+          </div>
+        </ng-container>
+
+        <!-- Specific Footer for Terms Step -->
+        <ng-container *ngIf="isTermsStep">
+          <div class="flex space-x-3">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="termsStep?.onBack()"
+            >
+              <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
+              Atrás
+            </app-button>
+          </div>
+
+          <div class="flex space-x-3">
+            <app-button
+              variant="primary"
+              size="sm"
+              [disabled]="!(termsStep?.allAccepted ?? false) || (termsStep?.submitting ?? false)"
+              (clicked)="termsStep?.submitAcceptances()"
+            >
+              <span *ngIf="!termsStep?.submitting">Aceptar y Continuar</span>
+              <span *ngIf="termsStep?.submitting" class="flex items-center gap-2">
+                <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
+                Procesando...
+              </span>
+              <app-icon
+                *ngIf="!termsStep?.submitting"
+                name="arrow-right"
+                size="16"
+                slot="icon"
+              ></app-icon>
+            </app-button>
+          </div>
+        </ng-container>
       </div>
     </app-modal>
   `,
@@ -289,14 +327,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() completed = new EventEmitter<void>();
 
+  @ViewChild(TermsStepComponent) termsStep?: TermsStepComponent;
+  @ViewChild(EmailVerificationStepComponent)
+  emailVerificationStep?: EmailVerificationStepComponent;
+
   private destroy$ = new Subject<void>();
 
   // Prevent multiple simultaneous actions (public for template access)
   isProcessing = false;
 
   currentStep = 1;
+  isEmailVerified = false;
   isSubmitting = false;
   wizardData: any = {};
+  wizardStatus: any = null; // Store full status from backend
   businessType: 'STORE' | 'ORGANIZATION' | null = null;
   userName: string = '';
 
@@ -448,6 +492,23 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     this.businessType = event.type;
 
+    // Smart Check: Skip if already selected same type
+    const currentAppType =
+      this.wizardStatus?.user_settings?.config?.selected_app_type;
+    const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
+
+    if (currentAppType === newAppType) {
+      console.log('Skipping app type selection (already matches)');
+      this.steps =
+        event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
+      this.updateAppConfigForm();
+      this.updateFormBasedOnBusinessType();
+      this.wizardService.nextStep();
+      this.isProcessing = false;
+      this.cdr.markForCheck();
+      return;
+    }
+
     // Call backend to save app type selection
     this.wizardService
       .selectAppType({
@@ -556,7 +617,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.storeForm = this.fb.group({
       name: ['', Validators.required],
       description: [''],
-      store_type: ['physical', Validators.required],
+      store_type: ['hybrid', Validators.required],
       timezone: ['America/Bogota', Validators.required],
       // Address fields are now optional as requested
       address_line1: [''],
@@ -698,6 +759,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.wizardService.getWizardStatus().subscribe({
       next: (response) => {
         if (response.success && response.data) {
+          this.wizardStatus = response.data; // Save status for smart navigation
           // Set business type based on selected app type
           const userSettings = response.data.user_settings?.config;
           const selectedAppType = userSettings?.selected_app_type;
@@ -715,6 +777,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
                 : this.organizationSteps;
             this.updateAppConfigForm();
             this.updateFormBasedOnBusinessType();
+
+            // Pre-fill App Config form with previous data if exists
+            if (response.data.onboarding_data) {
+              this.appConfigForm.patchValue(response.data.onboarding_data, {
+                emitEvent: false,
+              });
+            }
           }
 
           // Sync current step from backend
@@ -750,6 +819,18 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
   get canGoNext(): boolean {
     return this.currentStep < this.steps.length;
+  }
+
+  /**
+   * Check if the user can proceed from the current step.
+   * For email verification (step 2), the email must be verified.
+   */
+  get canProceedFromCurrentStep(): boolean {
+    // Step 2 is email verification - require verified email
+    if (this.currentStep === 2) {
+      return this.emailVerificationStep?.isEmailVerified ?? false;
+    }
+    return true;
   }
 
   get isTermsStep(): boolean {
@@ -851,6 +932,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
     const userData = this.userForm.value;
 
+    // Smart Check: Skip if already done and form not modified
+    if (
+      this.wizardStatus?.has_user_data &&
+      this.wizardStatus?.has_user_address &&
+      this.userForm.pristine
+    ) {
+      console.log('Skipping user setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
+
     this.wizardService.setupUser(userData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
@@ -884,6 +979,20 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.cdr.markForCheck();
     const storeData = this.storeForm.value;
 
+    // Smart Check
+    if (
+      this.wizardStatus?.has_store &&
+      this.wizardStatus?.has_store_address &&
+      this.storeForm.pristine
+    ) {
+      console.log('Skipping store setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
+
     this.wizardService.setupStore(storeData).subscribe({
       next: (response) => {
         this.isSubmitting = false;
@@ -916,6 +1025,16 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.isSubmitting = true;
     this.cdr.markForCheck();
     const organizationData = this.organizationForm.value;
+
+    // Smart Check
+    if (this.wizardStatus?.has_organization && this.organizationForm.pristine) {
+      console.log('Skipping organization setup submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
 
     this.wizardService.setupOrganization(organizationData).subscribe({
       next: (response) => {
@@ -952,6 +1071,19 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.isSubmitting = true;
     this.cdr.markForCheck();
     const formData = this.appConfigForm.value;
+
+    // Smart Check
+    if (
+      this.wizardStatus?.step_app_config_completed &&
+      this.appConfigForm.pristine
+    ) {
+      console.log('Skipping app config submission (already completed)');
+      this.isSubmitting = false;
+      this.isProcessing = false;
+      this.wizardService.nextStep();
+      this.cdr.markForCheck();
+      return;
+    }
 
     // Sanitize payload: only send fields the backend expects
     const appConfigData: any = {

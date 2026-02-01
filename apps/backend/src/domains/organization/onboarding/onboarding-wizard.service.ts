@@ -6,6 +6,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { EmailService } from '../../../email/email.service';
 import { SetupUserWizardDto } from './dto/setup-user-wizard.dto';
 import { SetupOrganizationWizardDto } from './dto/setup-organization-wizard.dto';
 import { SetupStoreWizardDto } from './dto/setup-store-wizard.dto';
@@ -29,6 +30,7 @@ export class OnboardingWizardService {
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
+    private readonly emailService: EmailService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
@@ -61,6 +63,8 @@ export class OnboardingWizardService {
       throw new BadRequestException('User not found');
     }
 
+    const userConfig = user.user_settings?.config as any;
+
     return {
       user_id: userId,
       email_verified: user.email_verified,
@@ -79,8 +83,10 @@ export class OnboardingWizardService {
       has_app_config:
         user.organizations?.domain_settings &&
         user.organizations.domain_settings.length > 0,
+      step_app_config_completed: !!userConfig?.step_app_config_completed,
+      onboarding_data: userConfig?.onboarding_data || null,
       current_step: this.determineCurrentStep(user),
-      user_settings: user.user_settings, // Include user settings for app type
+      user_settings: user.user_settings,
     };
   }
 
@@ -123,6 +129,18 @@ export class OnboardingWizardService {
       selectAppTypeDto.app_type === 'ORG_ADMIN'
         ? 'MULTI_STORE_ORG'
         : 'SINGLE_STORE';
+
+    // Check if already selected the same type
+    const userConfig = user.user_settings?.config as any;
+    if (userConfig?.selected_app_type === selectAppTypeDto.app_type) {
+      return {
+        success: true,
+        app_type: selectAppTypeDto.app_type,
+        account_type: accountType,
+        message: 'Application type already selected',
+        already_completed: true,
+      };
+    }
 
     // Update organization's account_type if user has an organization
     if (user.organization_id) {
@@ -177,6 +195,31 @@ export class OnboardingWizardService {
    * Setup user with address
    */
   async setupUser(userId: number, setupUserDto: SetupUserWizardDto) {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      include: { addresses: { where: { type: 'home' } } },
+    });
+
+    if (!user) throw new BadRequestException('User not found');
+
+    const isSameUserData =
+      user.first_name === setupUserDto.first_name &&
+      user.last_name === setupUserDto.last_name &&
+      user.phone === setupUserDto.phone;
+
+    const existingAddress = user.addresses?.[0];
+    const isSameAddress =
+      !setupUserDto.address_line1 ||
+      (existingAddress &&
+        existingAddress.address_line1 === setupUserDto.address_line1 &&
+        existingAddress.city === setupUserDto.city &&
+        existingAddress.postal_code === setupUserDto.postal_code);
+
+    if (isSameUserData && isSameAddress) {
+      const { password, ...userWithoutPassword } = user;
+      return { ...userWithoutPassword, already_completed: true };
+    }
+
     // Update user data
     const updatedUser = await this.prismaService.users.update({
       where: { id: userId },
@@ -246,6 +289,29 @@ export class OnboardingWizardService {
 
     if (!user?.organization_id) {
       throw new BadRequestException('User has no organization');
+    }
+
+    const organization = await this.prismaService.organizations.findUnique({
+      where: { id: user.organization_id },
+      include: { addresses: { where: { type: 'billing' } } },
+    });
+
+    if (organization) {
+      const isSameOrgData =
+        organization.name === setupOrgDto.name &&
+        organization.tax_id === setupOrgDto.tax_id &&
+        organization.email === setupOrgDto.email;
+
+      const existingAddress = organization.addresses?.[0];
+      const isSameAddress =
+        !setupOrgDto.address_line1 ||
+        (existingAddress &&
+          existingAddress.address_line1 === setupOrgDto.address_line1 &&
+          existingAddress.city === setupOrgDto.city);
+
+      if (isSameOrgData && isSameAddress) {
+        return { ...organization, already_completed: true };
+      }
     }
 
     // Check if tax_id is already in use by another organization
@@ -415,6 +481,32 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
+    // Check if store already exists for this organization
+    const existingStore = await this.prismaService.stores.findFirst({
+      where: { organization_id: user.organization_id },
+      include: { addresses: { where: { type: 'store_physical' } } },
+    });
+
+    if (existingStore) {
+      const isSameStoreData = existingStore.name === setupStoreDto.name;
+      // You might want more strict check here, but name is the main one in DTO
+
+      if (isSameStoreData) {
+        return { ...existingStore, already_completed: true };
+      }
+
+      // If name changed, update it
+      const updatedStore = await this.prismaService.stores.update({
+        where: { id: existingStore.id },
+        data: {
+          name: setupStoreDto.name,
+          store_type: setupStoreDto.store_type || 'physical',
+          updated_at: new Date(),
+        },
+      });
+      return { ...updatedStore, updated: true };
+    }
+
     // Generate unique slug from name
     const slug = await this.generateUniqueStoreSlug(
       setupStoreDto.name,
@@ -438,8 +530,9 @@ export class OnboardingWizardService {
     // which is provided later in setupAppConfig. The domain will be created there.
 
     // Create store address if provided
+    let address = null;
     if (setupStoreDto.address_line1) {
-      await this.prismaService.addresses.create({
+      address = await this.prismaService.addresses.create({
         data: {
           store_id: store.id,
           address_line1: setupStoreDto.address_line1,
@@ -454,9 +547,38 @@ export class OnboardingWizardService {
       });
     }
 
+    // Create default location automatically
+    await this.createDefaultLocationForStore(store, user.organization_id, address);
+
     // Associate user with store - Note: store_users association may not be needed for owners during onboarding
 
     return store;
+  }
+
+  /**
+   * Create a default location for a store automatically
+   */
+  private async createDefaultLocationForStore(
+    store: any,
+    organization_id: number,
+    address: any = null,
+  ) {
+    try {
+      await this.prismaService.inventory_locations.create({
+        data: {
+          name: store.name,
+          code: `STORE-${store.slug}`,
+          type: 'store',
+          is_active: true,
+          organization_id,
+          store_id: store.id,
+          address_id: address?.id || null,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to create default location for store during onboarding:', error);
+      // Fallback: don't fail store creation if location creation fails
+    }
   }
 
   /**
@@ -492,12 +614,26 @@ export class OnboardingWizardService {
     // 1. Handle Automatic Subdomain (ALWAYS created/updated as primary initially)
     let autoSubdomain: string;
 
+    // Generate standardized branding config
+    const branding = this.brandingGeneratorHelper.generateBranding({
+      name: user.organizations?.name || 'Organization',
+      primaryColor: setupAppConfigDto.primary_color,
+      secondaryColor: setupAppConfigDto.secondary_color,
+      accentColor: setupAppConfigDto.accent_color,
+      theme: 'light',
+    });
+
+    const appLandingType =
+      setupAppConfigDto.app_type === 'ORG_ADMIN'
+        ? 'ORG_LANDING'
+        : 'STORE_LANDING';
+
     // Check if we already have an auto-domain for this org
     const existingAutoDomain =
       await this.prismaService.domain_settings.findFirst({
         where: {
           organization_id: user.organization_id,
-          ownership: 'vendix_subdomain',
+          // Removed ownership constraint to find any active/inactive org domain
         },
       });
 
@@ -528,6 +664,10 @@ export class OnboardingWizardService {
               hostname: newHostname,
               is_primary: true,
               status: 'active',
+              config: {
+                app: appLandingType,
+                branding: branding,
+              },
               updated_at: new Date(),
             },
           });
@@ -553,18 +693,26 @@ export class OnboardingWizardService {
               hostname: uniqueHostname,
               is_primary: true,
               status: 'active',
+              config: {
+                app: appLandingType,
+                branding: branding,
+              },
               updated_at: new Date(),
             },
           });
           autoSubdomain = uniqueHostname;
         }
       } else {
-        // Domain already has correct format, just ensure it's primary/active
+        // Domain already has correct format, just ensure it's primary/active and branding is updated
         await this.prismaService.domain_settings.update({
           where: { id: existingAutoDomain.id },
           data: {
             is_primary: true,
             status: 'active',
+            config: {
+              app: appLandingType,
+              branding: branding,
+            },
             updated_at: new Date(),
           },
         });
@@ -575,15 +723,6 @@ export class OnboardingWizardService {
         user.organizations?.slug || 'org',
         setupAppConfigDto.app_type,
       );
-
-      // Generate standardized branding config
-      const branding = this.brandingGeneratorHelper.generateBranding({
-        name: user.organizations?.name || 'Organization',
-        primaryColor: setupAppConfigDto.primary_color,
-        secondaryColor: setupAppConfigDto.secondary_color,
-        accentColor: setupAppConfigDto.accent_color,
-        theme: 'light',
-      });
 
       // Ensure only one active domain of this type
       await this.prismaService.domain_settings.updateMany({
@@ -604,10 +743,7 @@ export class OnboardingWizardService {
           hostname: autoSubdomain,
           organization_id: user.organization_id,
           config: {
-            app:
-              setupAppConfigDto.app_type === 'ORG_ADMIN'
-                ? 'ORG_LANDING'
-                : 'STORE_LANDING',
+            app: appLandingType,
             branding: branding,
           },
           domain_type: 'organization',
@@ -628,7 +764,7 @@ export class OnboardingWizardService {
           where: {
             store_id: store.id,
             domain_type: 'store',
-            ownership: 'vendix_subdomain',
+            // Removed ownership constraint to find any active/inactive store domain
           },
         });
 
@@ -685,23 +821,66 @@ export class OnboardingWizardService {
         });
 
         // Create new store domain with branding config
-        storeDomainRecord = await this.prismaService.domain_settings.create({
-          data: {
-            hostname: storeHostname,
-            store_id: store.id,
-            domain_type: 'store',
-            config: {
-              app: 'STORE_LANDING',
-              branding: storeBranding,
+        // Check if hostname already exists (to handle retries/back navigation)
+        const collidingDomain =
+          await this.prismaService.domain_settings.findUnique({
+            where: { hostname: storeHostname },
+          });
+
+        if (collidingDomain && collidingDomain.store_id === store.id) {
+          // Domain exists and belongs to this store -> Update it
+          storeDomainRecord = await this.prismaService.domain_settings.update({
+            where: { id: collidingDomain.id },
+            data: {
+              config: {
+                app: 'STORE_LANDING',
+                branding: storeBranding,
+              },
+              is_primary: true,
+              ownership: 'vendix_subdomain',
+              status: 'active',
+              updated_at: new Date(),
             },
-            is_primary: true,
-            ownership: 'vendix_subdomain',
-            status: 'active',
-            ssl_status: 'none',
-            created_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
+          });
+        } else {
+          // Create new store domain with branding config
+          let finalHostname = storeHostname;
+
+          // If collision exists (but belongs to someone else), regenerate!
+          if (collidingDomain) {
+            const latestDomains =
+              await this.prismaService.domain_settings.findMany({
+                select: { hostname: true },
+              });
+            const latestHostnames: Set<string> = new Set(
+              latestDomains.map((d) => d.hostname as string),
+            );
+
+            finalHostname = this.domainGeneratorHelper.generateUnique(
+              store.slug,
+              DomainContext.STORE,
+              latestHostnames,
+            );
+          }
+
+          storeDomainRecord = await this.prismaService.domain_settings.create({
+            data: {
+              hostname: finalHostname,
+              store_id: store.id,
+              domain_type: 'store',
+              config: {
+                app: 'STORE_LANDING',
+                branding: storeBranding,
+              },
+              is_primary: true,
+              ownership: 'vendix_subdomain',
+              status: 'active',
+              ssl_status: 'none',
+              created_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
       }
     }
 
@@ -783,15 +962,21 @@ export class OnboardingWizardService {
       where: { user_id: userId },
     });
 
-    const config = await this.defaultPanelUIService.generatePanelUI(
+    const uiConfig = await this.defaultPanelUIService.generatePanelUI(
       setupAppConfigDto.app_type,
     );
+
+    const updatedConfig = {
+      ...uiConfig,
+      step_app_config_completed: true,
+      onboarding_data: setupAppConfigDto,
+    };
 
     if (existingSettings) {
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
-          config: config,
+          config: updatedConfig,
           updated_at: new Date(),
         },
       });
@@ -799,7 +984,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.create({
         data: {
           user_id: userId,
-          config: config,
+          config: updatedConfig,
         },
       });
     }
@@ -810,7 +995,7 @@ export class OnboardingWizardService {
       custom_domain: customDomainRecord,
       subdomain: autoSubdomain, // Legacy support
       needs_dns_verification: !!customDomainRecord,
-      panel_ui: config.panel_ui,
+      panel_ui: uiConfig.panel_ui,
     };
   }
 
@@ -1283,5 +1468,78 @@ export class OnboardingWizardService {
       where: { user_id: userId },
     });
     return settings?.config || {};
+  }
+
+  /**
+   * Resend verification email for authenticated user
+   * This method uses the authenticated user's ID instead of requiring email in body
+   */
+  async resendVerificationEmail(userId: number): Promise<{
+    message: string;
+    alreadyVerified?: boolean;
+  }> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (user.email_verified) {
+      return {
+        message: 'Este email ya ha sido verificado anteriormente.',
+        alreadyVerified: true,
+      };
+    }
+
+    // Invalidar tokens anteriores
+    await this.globalPrisma.email_verification_tokens.updateMany({
+      where: { user_id: userId, verified: false },
+      data: { verified: true },
+    });
+
+    // Crear nuevo token
+    const token = this.generateRandomToken();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 24);
+
+    await this.globalPrisma.email_verification_tokens.create({
+      data: {
+        user_id: userId,
+        token,
+        expires_at: expiresAt,
+      },
+    });
+
+    // Obtener organization slug para el vLink
+    let organizationSlug: string | undefined;
+    if (user.organization_id) {
+      const organization = await this.prismaService.organizations.findUnique({
+        where: { id: user.organization_id },
+        select: { slug: true },
+      });
+      organizationSlug = organization?.slug;
+    }
+
+    // Enviar email usando EmailService
+    await this.emailService.sendVerificationEmail(
+      user.email,
+      token,
+      user.first_name,
+      organizationSlug,
+    );
+
+    return {
+      message: 'Email de verificación enviado',
+      alreadyVerified: false,
+    };
+  }
+
+  /**
+   * Generate random token for email verification
+   */
+  private generateRandomToken(): string {
+    return require('crypto').randomBytes(32).toString('hex');
   }
 }

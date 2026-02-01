@@ -468,4 +468,4 @@ export class ProductCardComponent {}
 - `vendix-frontend-module` - Module structure patterns
 - `vendix-frontend-routing` - Routing patterns
 - `vendix-naming-conventions` - Naming conventions (CRITICAL)
-- `vendix-build-verification` - Build verification (CRITICAL)
+- `buildcheck-dev` - Build verification (CRITICAL)

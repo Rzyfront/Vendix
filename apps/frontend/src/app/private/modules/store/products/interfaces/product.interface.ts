@@ -20,6 +20,12 @@ export interface Product {
   available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
+  weight?: number;
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
   state: ProductState;
   final_price: number;
   created_at: Date;
@@ -159,6 +165,12 @@ export interface CreateProductDto {
   available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
+  weight?: number;
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
   state?: ProductState;
   brand_id?: number | null;
   category_ids?: number[];
@@ -175,6 +187,12 @@ export interface UpdateProductDto {
   base_price?: number;
   sku?: string;
   stock_quantity?: number;
+  weight?: number;
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
   state?: ProductState;
   brand_id?: number;
   category_ids?: number[];

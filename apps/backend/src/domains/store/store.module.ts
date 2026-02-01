@@ -19,6 +19,7 @@ import { CustomersModule } from './customers/customers.module';
 import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { StoreLegalDocumentsModule } from './legal-documents/legal-documents.module';
 
 @Module({
   imports: [
@@ -40,8 +41,9 @@ import { ExpensesModule } from './expenses/expenses.module';
     StoreDomainsModule,
     ShippingModule,
     ExpensesModule,
+    StoreLegalDocumentsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule {}
+export class StoreDomainModule { }

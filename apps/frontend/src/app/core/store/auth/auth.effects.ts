@@ -249,17 +249,22 @@ export class AuthEffects {
             // Eliminar todas las claves de autenticación específicas
             const keysToRemove = [
               'vendix_auth_state',
+              'vendix_user_environment',
+            ];
+
+            keysToRemove.forEach((key) => localStorage.removeItem(key));
+
+            // Also try to remove legacy keys for cleanup (if they exist)
+            const legacyKeysToRemove = [
               'access_token',
               'refresh_token',
               'vendix_user_info',
               'user_settings',
               'permissions',
               'roles',
-              'vendix_user_environment',
-              'vendix_app_config',
             ];
 
-            keysToRemove.forEach((key) => localStorage.removeItem(key));
+            legacyKeysToRemove.forEach((key) => localStorage.removeItem(key));
 
             // Establecer bandera temporal para prevenir restauración automática
             localStorage.setItem(

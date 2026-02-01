@@ -70,19 +70,22 @@ export class PosTicketService {
 
     // Try to get from localStorage
     try {
-      const userInfo = localStorage.getItem('vendix_user_info');
-      if (userInfo) {
-        const parsedUser = JSON.parse(userInfo);
-        if (parsedUser.store) {
-          store = { ...store, ...parsedUser.store };
-        }
-        if (parsedUser.organizations) {
-          organization = parsedUser.organizations;
-          console.log('Organization from localStorage:', organization);
-        }
-        if (parsedUser.addresses && parsedUser.addresses.length > 0) {
-          const addr = parsedUser.addresses[0];
-          store.address = `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`;
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (authState) {
+        const parsedState = JSON.parse(authState);
+        const parsedUser = parsedState.user;
+        if (parsedUser) {
+          if (parsedUser.store) {
+            store = { ...store, ...parsedUser.store };
+          }
+          if (parsedUser.organizations) {
+            organization = parsedUser.organizations;
+            console.log('Organization from localStorage:', organization);
+          }
+          if (parsedUser.addresses && parsedUser.addresses.length > 0) {
+            const addr = parsedUser.addresses[0];
+            store.address = `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`;
+          }
         }
       }
       const appConfig = localStorage.getItem('vendix_app_config');
@@ -138,10 +141,14 @@ export class PosTicketService {
     `;
 
     if (ticketData.customer) {
+      // Show customer name, or "Consumidor Final" if empty/undefined (anonymous sale)
+      const displayName = ticketData.customer.name || 'Consumidor Final';
+      // For anonymous sales (empty name), show "000" as tax ID
+      const displayTaxId = ticketData.customer.name ? (ticketData.customer.taxId || '') : '000';
       html += `
         <div style="margin-bottom: 15px;">
-          <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${ticketData.customer.name}</p>
-          ${ticketData.customer.taxId ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Cédula:</strong> ${ticketData.customer.taxId}</p>` : ''}
+          <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${displayName}</p>
+          ${displayTaxId ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Cédula:</strong> ${displayTaxId}</p>` : ''}
         </div>
         <hr style="border: 1px dashed #000; margin: 10px 0;">
       `;

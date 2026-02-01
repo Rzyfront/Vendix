@@ -1815,7 +1815,10 @@ export class AuthService {
     return { message: 'Email verificado exitosamente' };
   }
 
-  async resendEmailVerification(email: string): Promise<{ message: string }> {
+  async resendEmailVerification(email: string): Promise<{
+    message: string;
+    alreadyVerified?: boolean;
+  }> {
     const user = await this.prismaService.users.findFirst({
       where: { email },
     });
@@ -1823,18 +1826,41 @@ export class AuthService {
     if (!user) {
       // Por seguridad, siempre devolvemos el mismo mensaje para evitar enumeración
       return {
-        message:
-          'Si el email existe y no está verificado, recibirás un nuevo email de verificación',
+        message: 'Si el email existe, recibirás instrucciones',
+        alreadyVerified: false,
       };
     }
 
+    // Si el email ya está verificado, retornamos un mensaje informativo sin error
     if (user.email_verified) {
-      throw new BadRequestException('El email ya está verificado');
+      return {
+        message:
+          'Este email ya ha sido verificado anteriormente. Puedes continuar con el inicio de sesión.',
+        alreadyVerified: true,
+      };
     }
 
+    // Enviar email de verificación
     await this.sendEmailVerification(user.id);
 
-    return { message: 'Email de verificación enviado' };
+    return {
+      message: 'Email de verificación enviado',
+      alreadyVerified: false,
+    };
+  }
+
+  async checkEmailVerificationStatus(
+    email: string,
+  ): Promise<{ exists: boolean; verified: boolean }> {
+    const user = await this.prismaService.users.findFirst({
+      where: { email },
+      select: { email_verified: true },
+    });
+
+    return {
+      exists: !!user,
+      verified: user?.email_verified || false,
+    };
   }
 
   // ===== FUNCIONES DE RECUPERACIÓN DE CONTRASEÑA =====

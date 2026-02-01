@@ -20,7 +20,7 @@ import {
   UpdateUserDto,
   UserQueryDto,
   UsersDashboardDto,
-  ResetPasswordDto,
+  AdminResetPasswordDto,
   UserConfigDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -34,7 +34,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('organization:users:create')
@@ -231,7 +231,7 @@ export class UsersController {
   @Permissions('organization:users:reset-password')
   async resetPassword(
     @Param('id', ParseIntPipe) id: number,
-    @Body() resetPasswordDto: ResetPasswordDto,
+    @Body() resetPasswordDto: AdminResetPasswordDto,
   ) {
     try {
       const result = await this.usersService.resetPassword(
