@@ -2,7 +2,7 @@ name: Deploy Frontend to AWS
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 env:
@@ -27,7 +27,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install -ws
 
       - name: Build frontend for production
         working-directory: apps/frontend

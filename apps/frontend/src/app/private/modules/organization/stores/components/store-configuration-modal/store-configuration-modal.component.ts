@@ -365,18 +365,6 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
       allow_partial_payments: false,
       require_payment_confirmation: false,
     },
-    shipping: {
-      enabled: true,
-      free_shipping_threshold: 0,
-      allow_pickup: true,
-      default_shipping_method: null,
-      shipping_types: {
-        standard: { enabled: true, carriers: [] },
-        express: { enabled: false, carriers: [] },
-        local: { enabled: false, allow_manual: true, delivery_providers: [] },
-      },
-      shipping_zones: [],
-    },
     notifications: {
       email_enabled: true,
       sms_enabled: false,
@@ -543,9 +531,6 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     }
     if (server.checkout) {
       merged.checkout = { ...server.checkout, ...local.checkout };
-    }
-    if (server.shipping) {
-      merged.shipping = { ...server.shipping, ...local.shipping };
     }
 
     return merged;
