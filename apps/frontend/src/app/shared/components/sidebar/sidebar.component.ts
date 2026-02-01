@@ -12,7 +12,7 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router'; // Updated import
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
 
@@ -201,6 +201,7 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     private renderer: Renderer2,
     private elementRef: ElementRef,
     private cdr: ChangeDetectorRef,
+    private router: Router, // Injected Router
   ) {
     // Initialize mobile detection
     this.checkMobile();
@@ -430,6 +431,27 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
       // Exclusive Accordion: Close all other submenus
       this.openSubmenus.clear();
       this.openSubmenus.add(menuLabel);
+
+      // Auto-navigate to first child with valid route
+      this.navigateToFirstChild(menuLabel);
+    }
+  }
+
+  private navigateToFirstChild(menuLabel: string): void {
+    // Find the menu item by label
+    const menuItem = this.menuItems.find((item) => item.label === menuLabel);
+
+    if (!menuItem?.children?.length) {
+      return;
+    }
+
+    // Find the first child that has a route (not an action)
+    const firstChildWithRoute = menuItem.children.find(
+      (child) => child.route && !child.action,
+    );
+
+    if (firstChildWithRoute?.route) {
+      this.router.navigateByUrl(firstChildWithRoute.route);
     }
   }
 

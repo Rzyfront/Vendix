@@ -3,16 +3,42 @@ import { PrismaClient, legal_document_type_enum } from '@prisma/client';
 export async function seedLegalDocuments(prisma: PrismaClient) {
   console.log('📜 Seeding legal documents...');
 
-  const termsOfService = await prisma.legal_documents.upsert({
-    where: {
-      version: '1.0',
-      document_type: 'TERMS_OF_SERVICE',
-    },
-    create: {
-      document_type: 'TERMS_OF_SERVICE',
-      title: 'Términos y Condiciones de Uso de Vendix',
-      version: '1.0',
-      content: `
+  async function systemUpsert(data: {
+    document_type: legal_document_type_enum;
+    title: string;
+    version: string;
+    content: string;
+    is_active: boolean;
+    is_system: boolean;
+    description?: string;
+    effective_date: Date;
+  }) {
+    const existing = await prisma.legal_documents.findFirst({
+      where: {
+        version: data.version,
+        document_type: data.document_type,
+        store_id: null,
+        organization_id: null,
+      },
+    });
+
+    if (existing) {
+      return prisma.legal_documents.update({
+        where: { id: existing.id },
+        data,
+      });
+    } else {
+      return prisma.legal_documents.create({
+        data,
+      });
+    }
+  }
+
+  const termsOfService = await systemUpsert({
+    document_type: 'TERMS_OF_SERVICE',
+    title: 'Términos y Condiciones de Uso de Vendix',
+    version: '1.0',
+    content: `
         <h1>Términos y Condiciones de Uso de Vendix</h1>
         <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
 
@@ -52,23 +78,17 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
 
         <p><em>Para más información, contacte a legal@vendix.com</em></p>
       `,
-      effective_date: new Date(),
-      is_active: true,
-      is_system: true,
-      description: 'Términos y condiciones generales de uso de la plataforma Vendix',
-    },
-    update: {},
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Términos y condiciones generales de uso de la plataforma Vendix',
   });
 
-  const privacyPolicy = await prisma.legal_documents.upsert({
-    where: {
-      version: '1.0-privacy',
-    },
-    create: {
-      document_type: 'PRIVACY_POLICY',
-      title: 'Política de Privacidad de Vendix',
-      version: '1.0-privacy',
-      content: `
+  const privacyPolicy = await systemUpsert({
+    document_type: 'PRIVACY_POLICY',
+    title: 'Política de Privacidad de Vendix',
+    version: '1.0-privacy',
+    content: `
         <h1>Política de Privacidad de Vendix</h1>
         <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
 
@@ -140,23 +160,17 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
         <h2>9. Cambios en esta Política</h2>
         <p>Nos reservamos el derecho de actualizar esta política. Le notificaremos cambios significativos.</p>
       `,
-      effective_date: new Date(),
-      is_active: true,
-      is_system: true,
-      description: 'Política de privacidad y protección de datos personales',
-    },
-    update: {},
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Política de privacidad y protección de datos personales',
   });
 
-  const merchantAgreement = await prisma.legal_documents.upsert({
-    where: {
-      version: '1.0-merchant',
-    },
-    create: {
-      document_type: 'MERCHANT_AGREEMENT',
-      title: 'Acuerdo de Comerciante de Vendix',
-      version: '1.0-merchant',
-      content: `
+  const merchantAgreement = await systemUpsert({
+    document_type: 'MERCHANT_AGREEMENT',
+    title: 'Acuerdo de Comerciante de Vendix',
+    version: '1.0-merchant',
+    content: `
         <h1>Acuerdo de Comerciante de Vendix</h1>
         <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
 
@@ -198,23 +212,17 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
         <h2>8. Jurisdicción</h2>
         <p>Este acuerdo se rige por las leyes de Colombia. Cualquier controversia se resolverá en los tribunales competentes.</p>
       `,
-      effective_date: new Date(),
-      is_active: true,
-      is_system: true,
-      description: 'Acuerdo marco para comerciantes que utilizan Vendix',
-    },
-    update: {},
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Acuerdo marco para comerciantes que utilizan Vendix',
   });
 
-  const refundPolicy = await prisma.legal_documents.upsert({
-    where: {
-      version: '1.0-refund',
-    },
-    create: {
-      document_type: 'REFUND_POLICY',
-      title: 'Política de Reembolso - Estándar Vendix',
-      version: '1.0-refund',
-      content: `
+  const refundPolicy = await systemUpsert({
+    document_type: 'REFUND_POLICY',
+    title: 'Política de Reembolso - Estándar Vendix',
+    version: '1.0-refund',
+    content: `
         <h1>Política de Reembolso</h1>
         <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
 
@@ -260,23 +268,17 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
         <h2>7. Métodos de Reembolso</h2>
         <p>Los reembolsos se acreditan al mismo método de pago utilizado en la compra original.</p>
       `,
-      effective_date: new Date(),
-      is_active: true,
-      is_system: true,
-      description: 'Política de reembolsos estándar para todas las tiendas',
-    },
-    update: {},
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Política de reembolsos estándar para todas las tiendas',
   });
 
-  const shippingPolicy = await prisma.legal_documents.upsert({
-    where: {
-      version: '1.0-shipping',
-    },
-    create: {
-      document_type: 'SHIPPING_POLICY',
-      title: 'Política de Envíos - Estándar Vendix',
-      version: '1.0-shipping',
-      content: `
+  const shippingPolicy = await systemUpsert({
+    document_type: 'SHIPPING_POLICY',
+    title: 'Política de Envíos - Estándar Vendix',
+    version: '1.0-shipping',
+    content: `
         <h1>Política de Envíos</h1>
         <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
 
@@ -320,12 +322,10 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
         <h2>7. Dirección Incompleta</h2>
         <p>Si la dirección proporcionada es incompleta o incorrecta, se contactará al cliente para corregirla. Esto puede generar costos adicionales.</p>
       `,
-      effective_date: new Date(),
-      is_active: true,
-      is_system: true,
-      description: 'Política de envíos estándar para todas las tiendas',
-    },
-    update: {},
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Política de envíos estándar para todas las tiendas',
   });
 
   console.log('✅ Legal documents seeded successfully');

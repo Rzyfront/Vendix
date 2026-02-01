@@ -81,17 +81,17 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           [class]="selectClasses"
           [disabled]="disabled"
           [required]="required"
-          [(ngModel)]="selectedValue"
-          (change)="onValueChange($event)"
+          [ngModel]="selectedValue"
+          (ngModelChange)="onModelChange($event)"
           (blur)="onBlur()"
           (focus)="onFocus()"
         >
-          <option *ngIf="placeholder" value="" disabled selected class="text-text-muted">
+          <option *ngIf="placeholder" [ngValue]="null" disabled selected class="text-text-muted">
             {{ placeholder }}
           </option>
           <option
             *ngFor="let option of options; trackBy: trackByOption"
-            [value]="option.value"
+            [ngValue]="option.value"
             [disabled]="option.disabled"
           >
             {{ option.label }}
@@ -166,10 +166,7 @@ export class SelectorComponent
     this.disabled = isDisabled;
   }
 
-  onValueChange(event: Event): void {
-    const target = event.target as HTMLSelectElement;
-    const value = target.value ? (target.value as string | number) : null;
-
+  onModelChange(value: string | number | null): void {
     this.selectedValue = value;
     this.onChange(value);
     this.valueChange.emit(value);

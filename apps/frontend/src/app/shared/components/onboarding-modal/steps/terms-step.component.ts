@@ -132,15 +132,27 @@ interface DocumentStatus extends LegalDocument {
       }
 
       .term-label {
-        font-weight: var(--fw-semibold);
+        font-weight: var(--fw-bold);
         color: var(--color-text-primary);
         display: block;
-        margin-bottom: 0.15rem;
-        cursor: pointer;
+        margin-bottom: 0.25rem;
         font-size: var(--fs-sm);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+
+      .term-acceptance {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        padding: 0.25rem 0;
+      }
+
+      .term-acceptance:hover {
+        color: var(--color-primary);
       }
 
       .term-details {
@@ -197,12 +209,7 @@ interface DocumentStatus extends LegalDocument {
       }
 
       .terms-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 1rem;
-        margin-top: 2rem;
-        border-top: 1px solid var(--color-border);
-        padding-top: 1.25rem;
+        display: none; /* Moved to parent modal footer */
       }
 
       .loading-state {
@@ -259,29 +266,34 @@ interface DocumentStatus extends LegalDocument {
             [class.is-selected]="selectedDoc()?.id === doc.id"
             (click)="selectDocument(doc)"
           >
-            <input
-              type="checkbox"
-              [id]="'doc-' + doc.id"
-              [(ngModel)]="doc.accepted"
-              class="term-checkbox"
-              [disabled]="doc.loading"
-              (click)="$event.stopPropagation()"
-            />
-
             <div class="term-content">
-              <label
-                [for]="'doc-' + doc.id"
-                class="term-label"
-                (click)="$event.stopPropagation()"
+              <span class="term-label">{{ doc.title }}</span>
+              
+              <div 
+                class="term-acceptance" 
+                (click)="$event.stopPropagation(); doc.accepted = !doc.accepted; cdr.markForCheck()"
               >
-                {{ doc.title }}
-              </label>
-              <div class="term-details">
-                <span
-                  class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono"
-                  >v{{ doc.version }}</span
+                <input
+                  type="checkbox"
+                  [id]="'doc-' + doc.id"
+                  [(ngModel)]="doc.accepted"
+                  class="term-checkbox"
+                  [disabled]="doc.loading"
+                  (click)="$event.stopPropagation()"
+                />
+                <label [for]="'doc-' + doc.id" class="cursor-pointer">
+                  Haz clic aquí para aceptar los términos y condiciones
+                </label>
+              </div>
+
+              <div class="term-details mt-2">
+                <span class="bg-gray-100 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                  v{{ doc.version }}
+                </span>
+                <span 
+                  class="view-action cursor-pointer" 
+                  (click)="$event.stopPropagation(); selectDocument(doc)"
                 >
-                <span class="view-action">
                   Ver documento
                   <app-icon name="chevron-right" size="12"></app-icon>
                 </span>
@@ -361,7 +373,7 @@ export class TermsStepComponent implements OnInit {
 
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
-  private cdr = inject(ChangeDetectorRef);
+  readonly cdr = inject(ChangeDetectorRef);
   private sanitizer = inject(DomSanitizer);
 
   loading = true;

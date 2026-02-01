@@ -7,6 +7,7 @@ import {
   OnDestroy,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
+  ViewChild,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -210,75 +211,112 @@ interface WizardStep {
       <div
         class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
         slot="footer"
-        *ngIf="!isTermsStep"
       >
-        <div class="flex space-x-3">
-          <app-button
-            *ngIf="canGoBack"
-            variant="outline"
-            size="sm"
-            (clicked)="previousStep()"
-          >
-            <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
-            Anterior
-          </app-button>
+        <!-- Generic Footer (all steps except Terms) -->
+        <ng-container *ngIf="!isTermsStep">
+          <div class="flex space-x-3">
+            <app-button
+              *ngIf="canGoBack"
+              variant="outline"
+              size="sm"
+              (clicked)="previousStep()"
+            >
+              <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
+              Anterior
+            </app-button>
 
-          <app-button
-            *ngIf="
-              canSkip &&
-              (currentStep < 5 ||
-                (currentStep < 6 && businessType === 'ORGANIZATION'))
-            "
-            variant="ghost"
-            size="sm"
-            (clicked)="skipStep()"
-          >
-            <app-icon name="skip-forward" size="16" slot="icon"></app-icon>
-            Omitir
-          </app-button>
-        </div>
+            <app-button
+              *ngIf="
+                canSkip &&
+                (currentStep < 5 ||
+                  (currentStep < 6 && businessType === 'ORGANIZATION'))
+              "
+              variant="ghost"
+              size="sm"
+              (clicked)="skipStep()"
+            >
+              <app-icon name="skip-forward" size="16" slot="icon"></app-icon>
+              Omitir
+            </app-button>
+          </div>
 
-        <div class="flex space-x-3">
-          <app-button
-            *ngIf="!isCompletionStep"
-            variant="outline-danger"
-            size="sm"
-            (clicked)="close()"
-          >
-            <app-icon name="x" size="16" slot="icon"></app-icon>
-            Omitir
-          </app-button>
+          <div class="flex space-x-3">
+            <app-button
+              *ngIf="!isCompletionStep"
+              variant="outline-danger"
+              size="sm"
+              (clicked)="close()"
+            >
+              <app-icon name="x" size="16" slot="icon"></app-icon>
+              Omitir
+            </app-button>
 
-          <app-button
-            *ngIf="!isCompletionStep"
-            variant="primary"
-            size="sm"
-            (clicked)="nextStep()"
-            [disabled]="isSubmitting || isProcessing"
-          >
-            {{
-              isSubmitting
-                ? 'Procesando...'
-                : currentStep === 7 ||
-                    (currentStep === 6 && businessType === 'STORE')
-                  ? 'Finalizar configuración'
-                  : 'Siguiente'
-            }}
-            <app-icon
-              name="arrow-right"
-              size="16"
-              slot="icon"
-              *ngIf="!isSubmitting"
-            ></app-icon>
-            <app-icon
-              name="loader-2"
-              size="16"
-              slot="icon"
-              [spin]="true"
-              *ngIf="isSubmitting"
-            ></app-icon>
-          </app-button>
-        </div>
+            <app-button
+              *ngIf="!isCompletionStep"
+              variant="primary"
+              size="sm"
+              (clicked)="nextStep()"
+              [disabled]="isSubmitting || isProcessing || !canProceedFromCurrentStep"
+            >
+              {{
+                isSubmitting
+                  ? 'Procesando...'
+                  : currentStep === 7 ||
+                      (currentStep === 6 && businessType === 'STORE')
+                    ? 'Finalizar configuración'
+                    : 'Siguiente'
+              }}
+              <app-icon
+                name="arrow-right"
+                size="16"
+                slot="icon"
+                *ngIf="!isSubmitting"
+              ></app-icon>
+              <app-icon
+                name="loader-2"
+                size="16"
+                slot="icon"
+                [spin]="true"
+                *ngIf="isSubmitting"
+              ></app-icon>
+            </app-button>
+          </div>
+        </ng-container>
+
+        <!-- Specific Footer for Terms Step -->
+        <ng-container *ngIf="isTermsStep">
+          <div class="flex space-x-3">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="termsStep?.onBack()"
+            >
+              <app-icon name="arrow-left" size="16" slot="icon"></app-icon>
+              Atrás
+            </app-button>
+          </div>
+
+          <div class="flex space-x-3">
+            <app-button
+              variant="primary"
+              size="sm"
+              [disabled]="!(termsStep?.allAccepted ?? false) || (termsStep?.submitting ?? false)"
+              (clicked)="termsStep?.submitAcceptances()"
+            >
+              <span *ngIf="!termsStep?.submitting">Aceptar y Continuar</span>
+              <span *ngIf="termsStep?.submitting" class="flex items-center gap-2">
+                <app-icon name="loader-2" [spin]="true" size="14"></app-icon>
+                Procesando...
+              </span>
+              <app-icon
+                *ngIf="!termsStep?.submitting"
+                name="arrow-right"
+                size="16"
+                slot="icon"
+              ></app-icon>
+            </app-button>
+          </div>
+        </ng-container>
       </div>
     </app-modal>
   `,
@@ -289,12 +327,17 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() completed = new EventEmitter<void>();
 
+  @ViewChild(TermsStepComponent) termsStep?: TermsStepComponent;
+  @ViewChild(EmailVerificationStepComponent)
+  emailVerificationStep?: EmailVerificationStepComponent;
+
   private destroy$ = new Subject<void>();
 
   // Prevent multiple simultaneous actions (public for template access)
   isProcessing = false;
 
   currentStep = 1;
+  isEmailVerified = false;
   isSubmitting = false;
   wizardData: any = {};
   wizardStatus: any = null; // Store full status from backend
@@ -574,7 +617,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     this.storeForm = this.fb.group({
       name: ['', Validators.required],
       description: [''],
-      store_type: ['physical', Validators.required],
+      store_type: ['hybrid', Validators.required],
       timezone: ['America/Bogota', Validators.required],
       // Address fields are now optional as requested
       address_line1: [''],
@@ -776,6 +819,18 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
   get canGoNext(): boolean {
     return this.currentStep < this.steps.length;
+  }
+
+  /**
+   * Check if the user can proceed from the current step.
+   * For email verification (step 2), the email must be verified.
+   */
+  get canProceedFromCurrentStep(): boolean {
+    // Step 2 is email verification - require verified email
+    if (this.currentStep === 2) {
+      return this.emailVerificationStep?.isEmailVerified ?? false;
+    }
+    return true;
   }
 
   get isTermsStep(): boolean {

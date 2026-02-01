@@ -5,10 +5,10 @@ import { Injectable } from '@angular/core';
 })
 export class StoreContextService {
   /**
-   * Get store ID from JWT token
+   * Get store ID from JWT token (reads from vendix_auth_state)
    */
   getStoreId(): number | null {
-    const token = localStorage.getItem('access_token');
+    const token = this.getAccessToken();
     if (!token) {
       return null;
     }
@@ -18,6 +18,21 @@ export class StoreContextService {
       return payload.store_id ? parseInt(payload.store_id) : null;
     } catch (e) {
       console.error('❌ Error parsing token for store ID:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to get access token from vendix_auth_state
+   */
+  private getAccessToken(): string | null {
+    try {
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) return null;
+      const parsed = JSON.parse(authState);
+      return parsed.tokens?.access_token || null;
+    } catch (e) {
+      console.error('❌ Error reading access token from auth state:', e);
       return null;
     }
   }
@@ -34,10 +49,10 @@ export class StoreContextService {
   }
 
   /**
-   * Get organization ID from JWT token
+   * Get organization ID from JWT token (reads from vendix_auth_state)
    */
   getOrganizationId(): number | null {
-    const token = localStorage.getItem('access_token');
+    const token = this.getAccessToken();
     if (!token) {
       return null;
     }
@@ -52,10 +67,10 @@ export class StoreContextService {
   }
 
   /**
-   * Get user ID from JWT token
+   * Get user ID from JWT token (reads from vendix_auth_state)
    */
   getUserId(): number | null {
-    const token = localStorage.getItem('access_token');
+    const token = this.getAccessToken();
     if (!token) {
       return null;
     }
@@ -70,10 +85,10 @@ export class StoreContextService {
   }
 
   /**
-   * Check if token exists and is valid
+   * Check if token exists and is valid (reads from vendix_auth_state)
    */
   hasValidToken(): boolean {
-    const token = localStorage.getItem('access_token');
+    const token = this.getAccessToken();
     if (!token) {
       return false;
     }

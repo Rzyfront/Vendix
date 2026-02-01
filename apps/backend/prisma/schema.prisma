@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -62,9 +62,9 @@ model users {
   document_acceptances      document_acceptances[]
 
   // Campos de tracking de términos
-  terms_accepted_version  String?                     @db.VarChar(20)
-  terms_accepted_at       DateTime?                   @db.Timestamp(6)
-  requires_terms_update   Boolean                    @default(false)
+  terms_accepted_version String?   @db.VarChar(20)
+  terms_accepted_at      DateTime? @db.Timestamp(6)
+  requires_terms_update  Boolean   @default(false)
 
   @@index([email_verified])
   @@index([state])
@@ -522,10 +522,10 @@ model orders {
   placed_at                                       DateTime?                @db.Timestamp(6)
   completed_at                                    DateTime?                @db.Timestamp(6)
   order_items                                     order_items[]
-  addresses_orders_billing_address_idToaddresses  addresses?       @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  addresses_orders_shipping_address_idToaddresses addresses?       @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                                          stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  users                                           users?           @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_billing_address_idToaddresses  addresses?               @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  addresses_orders_shipping_address_idToaddresses addresses?               @relation("orders_shipping_address_idToaddresses", fields: [shipping_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                                          stores                   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  users                                           users?                   @relation(fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payments                                        payments[]
   refunds                                         refunds[]
   shipping_method                                 shipping_methods?        @relation(fields: [shipping_method_id], references: [id], onDelete: SetNull)
@@ -974,29 +974,29 @@ model supplier_products {
 }
 
 model expenses {
-  id                    Int                    @id @default(autoincrement())
-  store_id              Int
-  organization_id       Int
-  category_id           Int?
-  amount                Decimal                @db.Decimal(12, 2)
-  currency              String?                @db.VarChar(10)
-  description           String?                @db.VarChar(500)
-  expense_date          DateTime               @db.Timestamp(6)
-  state                 expenses_state_enum    @default(pending)
-  receipt_url           String?                @db.Text
-  notes                 String?                @db.Text
-  created_by_user_id    Int?
-  approved_by_user_id   Int?
-  approved_at           DateTime?              @db.Timestamp(6)
-  created_at             DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at             DateTime?              @default(now()) @db.Timestamp(6)
-  
-  stores                 stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  organizations          organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  expense_categories    expense_categories?    @relation(fields: [category_id], references: [id])
-  created_by_user        users?                 @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
-  approved_by_user      users?                 @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
-  
+  id                  Int                 @id @default(autoincrement())
+  store_id            Int
+  organization_id     Int
+  category_id         Int?
+  amount              Decimal             @db.Decimal(12, 2)
+  currency            String?             @db.VarChar(10)
+  description         String?             @db.VarChar(500)
+  expense_date        DateTime            @db.Timestamp(6)
+  state               expenses_state_enum @default(pending)
+  receipt_url         String?             @db.Text
+  notes               String?             @db.Text
+  created_by_user_id  Int?
+  approved_by_user_id Int?
+  approved_at         DateTime?           @db.Timestamp(6)
+  created_at          DateTime?           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?           @default(now()) @db.Timestamp(6)
+
+  stores             stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organizations      organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expense_categories expense_categories? @relation(fields: [category_id], references: [id])
+  created_by_user    users?              @relation("expenses_created_by", fields: [created_by_user_id], references: [id])
+  approved_by_user   users?              @relation("expenses_approved_by", fields: [approved_by_user_id], references: [id])
+
   @@index([store_id, expense_date])
   @@index([organization_id, expense_date])
   @@index([state])
@@ -1004,18 +1004,18 @@ model expenses {
 }
 
 model expense_categories {
-  id               Int         @id @default(autoincrement())
-  organization_id  Int
-  name             String      @db.VarChar(100)
-  description      String?     @db.VarChar(255)
-  color            String?     @db.VarChar(7) // Hex color code
-  is_active        Boolean     @default(true)
-  created_at       DateTime?   @default(now()) @db.Timestamp(6)
-  updated_at       DateTime?   @default(now()) @db.Timestamp(6)
-  
-  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  expenses         expenses[]
-  
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  name            String    @db.VarChar(100)
+  description     String?   @db.VarChar(255)
+  color           String?   @db.VarChar(7) // Hex color code
+  is_active       Boolean   @default(true)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  organizations organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  expenses      expenses[]
+
   @@unique([organization_id, name])
 }
 
@@ -1745,30 +1745,31 @@ enum expenses_state_enum {
 // ===== LEGAL DOCUMENTS DOMAIN =====
 
 model legal_documents {
-  id                   Int                        @id @default(autoincrement())
-  document_type        legal_document_type_enum
-  title                String                     @db.VarChar(255)
-  version              String                     @unique @db.VarChar(20)
-  content              String                     @db.Text
-  description          String?                    @db.Text
-  effective_date       DateTime                   @db.Timestamp(6)
-  expiry_date          DateTime?                  @db.Timestamp(6)
-  is_active            Boolean                    @default(true)
-  is_system            Boolean                    @default(false)
-  document_url         String?                    @db.Text
+  id             Int                      @id @default(autoincrement())
+  document_type  legal_document_type_enum
+  title          String                   @db.VarChar(255)
+  version        String                   @db.VarChar(20)
+  content        String                   @db.Text
+  description    String?                  @db.Text
+  effective_date DateTime                 @db.Timestamp(6)
+  expiry_date    DateTime?                @db.Timestamp(6)
+  is_active      Boolean                  @default(true)
+  is_system      Boolean                  @default(false)
+  document_url   String?                  @db.Text
 
   // Scope del documento
-  organization_id      Int?
-  store_id             Int?
+  organization_id Int?
+  store_id        Int?
 
   // Auditoría de cambios
-  created_by_user_id   Int?
-  created_at           DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                  @default(now()) @db.Timestamp(6)
+  created_by_user_id Int?
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
 
   // Relaciones
   document_acceptances document_acceptances[]
 
+  @@unique([version, store_id, organization_id, document_type])
   @@index([document_type, is_active])
   @@index([effective_date])
   @@index([organization_id])
@@ -1778,21 +1779,21 @@ model legal_documents {
 }
 
 model document_acceptances {
-  id                   Int                        @id @default(autoincrement())
-  user_id              Int
-  document_id          Int
-  acceptance_version   String                     @db.VarChar(20)
-  accepted_at          DateTime                   @default(now()) @db.Timestamp(6)
+  id                 Int      @id @default(autoincrement())
+  user_id            Int
+  document_id        Int
+  acceptance_version String   @db.VarChar(20)
+  accepted_at        DateTime @default(now()) @db.Timestamp(6)
 
   // Datos legales de la aceptación
-  accepted_by_user_id  Int?
-  ip_address           String?                    @db.VarChar(45)
-  user_agent           String?
-  metadata             Json?
+  accepted_by_user_id Int?
+  ip_address          String? @db.VarChar(45)
+  user_agent          String?
+  metadata            Json?
 
   // Relaciones
-  document             legal_documents           @relation(fields: [document_id], references: [id], onDelete: Cascade)
-  user                 users                     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  document legal_documents @relation(fields: [document_id], references: [id], onDelete: Cascade)
+  user     users           @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, document_id, acceptance_version])
   @@index([user_id])

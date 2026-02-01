@@ -1,0 +1,95 @@
+meta {
+  name: "Variant Attributes Tests"
+  type: http
+  seq: 14
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "MACBOOK-AIR-M2-MIDNIGHT",
+    "price_override": 1299.99,
+    "stock_quantity": 15,
+    "attributes": {
+      "color": "Midnight",
+      "memory": "16GB",
+      "storage": "512GB SSD",
+      "processor": "Apple M2",
+      "display_size": "13.6 inches",
+      "resolution": "2560x1664",
+      "weight_kg": 1.24,
+      "materials": ["aluminum", "recycled"],
+      "warranty_months": 12,
+      "certifications": {
+        "energy_star": true,
+        "epeat_gold": true
+      }
+    }
+  }
+}
+
+vars:post-response {
+  attribute_variant_id: res.body.data.id
+}
+
+tests {
+  test("Variant with attributes created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Data structure is valid", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Attributes field exists and is an object", function() {
+    expect(res.body.data).to.have.property("attributes");
+    expect(res.body.data.attributes).to.be.an("object");
+  });
+
+  test("Simple string attributes are preserved", function() {
+    const attrs = res.body.data.attributes;
+    expect(attrs).to.have.property("color", "Midnight");
+    expect(attrs).to.have.property("memory", "16GB");
+    expect(attrs).to.have.property("storage", "512GB SSD");
+  });
+
+  test("Numeric attributes are preserved", function() {
+    const attrs = res.body.data.attributes;
+    expect(attrs).to.have.property("weight_kg", 1.24);
+    expect(attrs).to.have.property("warranty_months", 12);
+  });
+
+  test("Array attributes are preserved", function() {
+    const attrs = res.body.data.attributes;
+    expect(attrs).to.have.property("materials");
+    expect(attrs.materials).to.be.an("array");
+    expect(attrs.materials).to.include("aluminum");
+    expect(attrs.materials).to.include("recycled");
+  });
+
+  test("Nested object attributes are preserved", function() {
+    const attrs = res.body.data.attributes;
+    expect(attrs).to.have.property("certifications");
+    expect(attrs.certifications).to.be.an("object");
+    expect(attrs.certifications).to.have.property("energy_star", true);
+    expect(attrs.certifications).to.have.property("epeat_gold", true);
+  });
+
+  test("Variant ID is captured for further tests", function() {
+    const variantId = res.body.data.id;
+    expect(variantId).to.be.a("number");
+    expect(variantId).to.be.greaterThan(0);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

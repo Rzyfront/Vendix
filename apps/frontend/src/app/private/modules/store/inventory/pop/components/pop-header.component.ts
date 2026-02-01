@@ -16,6 +16,7 @@ import {
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 
 import { PopCartService, ShippingMethod } from '../services/pop-cart.service';
 import { PopSupplier, PopLocation } from '../interfaces/pop-cart.interface';
@@ -46,6 +47,7 @@ import { InventoryService } from '../../services/inventory.service';
     IconComponent,
     ButtonComponent,
     InputComponent,
+    BadgeComponent,
   ],
   template: `
     <div class="px-6 py-5 bg-surface rounded-t-xl">
@@ -62,8 +64,9 @@ import { InventoryService } from '../../services/inventory.service';
             ></app-icon>
           </div>
           <div class="flex flex-col">
-            <h1 class="font-bold text-text-primary text-lg leading-none">
+            <h1 class="font-bold text-text-primary text-lg leading-none flex items-center gap-2">
               Vendix POP
+              <app-badge variant="primary">Compra</app-badge>
             </h1>
             <span class="text-xs text-text-secondary font-medium">
               Punto de Compra
@@ -215,7 +218,7 @@ export class PopHeaderComponent implements OnInit, OnDestroy {
     private popCartService: PopCartService,
     private suppliersService: SuppliersService,
     private inventoryService: InventoryService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.loadSuppliers();

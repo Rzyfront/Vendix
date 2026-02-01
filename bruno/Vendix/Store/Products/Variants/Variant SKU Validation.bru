@@ -1,0 +1,51 @@
+meta {
+  name: "Variant SKU Validation"
+  type: http
+  seq: 13
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "IPHONE15PRO-BLUE-256GB",
+    "price_override": 1099.99,
+    "stock_quantity": 25
+  }
+}
+
+tests {
+  test("Duplicate SKU should fail with appropriate error", function() {
+    // This test expects to fail if the SKU already exists
+    expect(res.status).to.be.oneOf([400, 409, 422]);
+  });
+
+  test("Error response has proper structure", function() {
+    expect(res.body).to.have.property("success", false);
+    expect(res.body).to.have.property("message");
+  });
+
+  test("Error message indicates SKU uniqueness violation", function() {
+    const errorMessage = res.body.message || res.body.error || "";
+    const hasSkuError = 
+      errorMessage.toLowerCase().includes("sku") || 
+      errorMessage.toLowerCase().includes("duplicate") ||
+      errorMessage.toLowerCase().includes("ya existe") ||
+      errorMessage.toLowerCase().includes("already exists");
+    expect(hasSkuError).to.be.true;
+  });
+
+  test("No variant is created on duplicate SKU", function() {
+    expect(res.body).to.not.have.property("data");
+    expect(res.status).to.not.equal(201);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

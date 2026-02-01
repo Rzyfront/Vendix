@@ -91,10 +91,34 @@ export class StoresService {
       },
     });
 
+    // Create default location automatically
+    await this.createDefaultLocationForStore(refetched, organization_id);
+
     return {
       ...refetched,
       logo_url: await this.s3Service.signUrl((refetched as any)?.logo_url),
     };
+  }
+
+  private async createDefaultLocationForStore(store: any, organization_id: number) {
+    try {
+      const address = store.addresses && store.addresses.length > 0 ? store.addresses[0] : null;
+
+      await this.prisma.inventory_locations.create({
+        data: {
+          name: store.name,
+          code: `STORE-${store.slug}`,
+          type: 'store',
+          is_active: true,
+          organization_id,
+          store_id: store.id,
+          address_id: address?.id || null,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to create default location for store:', error);
+      // Fallback: don't fail store creation if location creation fails
+    }
   }
 
   async findAll(query: StoreQueryDto) {

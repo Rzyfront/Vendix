@@ -63,9 +63,16 @@ export class RouteManagerService implements OnDestroy {
    * Public method to allow manual reconfiguration (e.g., during environment switch).
    */
   public configureDynamicRoutes(appConfig: AppConfig): void {
+    console.log('🔀 [RouteManager] configureDynamicRoutes() START', {
+      hasConfig: !!appConfig,
+      hasRoutes: !!appConfig?.routes,
+      environment: appConfig?.environment,
+      routesCount: appConfig?.routes?.length,
+    });
+
     // Si no tenemos config válida, fallback inmediato
     if (!appConfig || !appConfig.routes) {
-      console.error('[RouteManager] Invalid app config or routes.');
+      console.error('🚨 [RouteManager] Invalid app config or routes, using fallback');
       this.router.resetConfig(this.getFallbackRoutes());
       this.routesConfigured.next(true);
       return;
@@ -73,20 +80,31 @@ export class RouteManagerService implements OnDestroy {
 
     const finalRoutes = this.buildFinalRoutes(appConfig);
 
+    console.log('🔀 [RouteManager] Final routes built:', {
+      totalRoutes: finalRoutes.length,
+      staticAuthRoutes: finalRoutes.filter(r => r.path === 'auth').length,
+      dynamicAppRoutes: appConfig.routes.length,
+      firstFewPaths: finalRoutes.slice(0, 5).map(r => ({ path: r.path, redirectTo: r.redirectTo })),
+    });
+
     // Si es la inicialización (la app no está lista), hacerlo síncrono
     // para no romper el APP_INITIALIZER
     if (!this.initialized_complete) {
+      console.log('🔀 [RouteManager] First initialization, setting routes synchronously');
       this.router.resetConfig(finalRoutes);
       this.initialized_complete = true;
       this.routesConfigured.next(true);
     } else {
       // Si es un cambio en caliente (switch de entorno), poner loading y usar delay para fluidez
+      console.log('🔀 [RouteManager] Hot reload, setting routes with delay');
       this.routesConfigured.next(false);
       setTimeout(() => {
         this.router.resetConfig(finalRoutes);
         this.routesConfigured.next(true);
       }, 100);
     }
+
+    console.log('✅ [RouteManager] Routes configured successfully');
   }
 
   private initialized_complete = false;

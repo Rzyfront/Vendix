@@ -5,7 +5,7 @@ import {
   GeneralSettingsDto,
   InventorySettingsDto,
   CheckoutSettingsDto,
-  ShippingSettingsDto,
+
   NotificationsSettingsDto,
   PosSettingsDto,
   ReceiptsSettingsDto,
@@ -31,11 +31,7 @@ export class UpdateSettingsDto {
   @Type(() => CheckoutSettingsDto)
   checkout?: CheckoutSettingsDto;
 
-  @ApiProperty({ type: ShippingSettingsDto, required: false })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => ShippingSettingsDto)
-  shipping?: ShippingSettingsDto;
+
 
   @ApiProperty({ type: NotificationsSettingsDto, required: false })
   @IsOptional()

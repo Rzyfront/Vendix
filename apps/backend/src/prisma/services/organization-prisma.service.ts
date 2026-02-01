@@ -195,6 +195,10 @@ export class OrganizationPrismaService extends BasePrismaService {
     return this.scoped_client.domain_settings;
   }
 
+  get inventory_locations() {
+    return this.scoped_client.inventory_locations;
+  }
+
   // Non-scoped models (no organization filtering applied)
   get store_settings() {
     return this.baseClient.store_settings;

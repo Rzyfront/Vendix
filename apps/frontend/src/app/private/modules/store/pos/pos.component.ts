@@ -8,6 +8,7 @@ import {
   ToastService,
   SpinnerComponent,
   CardComponent,
+  BadgeComponent,
 } from '../../../../shared/components';
 import {
   PosCartService,
@@ -44,6 +45,7 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
     PosOrderConfirmationComponent,
     PosCartComponent,
     PosRegisterConfigModalComponent,
+    BadgeComponent,
   ],
   template: `
     <div class="h-full flex flex-col gap-4 overflow-hidden">
@@ -72,8 +74,9 @@ import { PosRegisterConfigModalComponent } from './components/pos-register-confi
                 ></app-icon>
               </div>
               <div class="flex flex-col">
-                <h1 class="font-bold text-text-primary text-lg leading-none">
+                <h1 class="font-bold text-text-primary text-lg leading-none flex items-center gap-2">
                   Vendix POS
+                  <app-badge variant="success">Vende</app-badge>
                 </h1>
                 <span class="text-xs text-text-secondary font-medium">
                   Punto de venta
@@ -269,7 +272,7 @@ export class PosComponent implements OnInit, OnDestroy {
     private customerService: PosCustomerService,
     private paymentService: PosPaymentService,
     private toastService: ToastService,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.setupSubscriptions();

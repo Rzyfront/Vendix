@@ -36,7 +36,10 @@ export class ProductsBulkController {
     nombre: 'name',
     sku: 'sku',
     'precio base': 'base_price',
+    'precio venta': 'base_price',
     costo: 'cost_price',
+    'precio compra': 'cost_price',
+    margen: 'profit_margin',
     'cantidad inicial': 'stock_quantity',
     descripción: 'description',
     descripcion: 'description',
@@ -47,12 +50,13 @@ export class ProductsBulkController {
     'precio oferta': 'sale_price',
     peso: 'weight',
     'disponible ecommerce': 'available_for_ecommerce',
+    estado: 'state',
   };
 
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
-  ) {}
+  ) { }
 
   /**
    * Carga masiva desde JSON directo

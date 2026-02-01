@@ -1,5 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { RequestContextService } from '../../../../common/context/request-context.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { EcommercePrismaService } from '../../../../prisma/services/ecommerce-prisma.service';
 import {
   AuditService,
   AuditAction,
@@ -32,9 +34,10 @@ export class LegalAcceptancesService {
 
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
+    private readonly ecommercePrisma: EcommercePrismaService,
     private readonly auditService: AuditService,
     private readonly s3Service: S3Service,
-  ) {}
+  ) { }
 
   private async fetchContentFromS3(
     url: string | null,
@@ -355,5 +358,70 @@ export class LegalAcceptancesService {
         requires_terms_update: true,
       },
     });
+  }
+
+  async getPendingTermsForCustomer(
+    storeId?: number,
+    userId?: number,
+  ): Promise<RequiredDocument[]> {
+    // 1. Buscar documentos activos de la tienda usando el servicio de ecommerce (scoped)
+    // Nota: El store_id se aplica automáticamente por EcommercePrismaService desde el contexto
+    const storeDocuments = await this.ecommercePrisma.legal_documents.findMany({
+      where: {
+        is_active: true,
+        is_system: false,
+        OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
+      },
+    });
+
+    // 2. Buscar documentos del sistema (para fallback)
+    const systemDocuments = await this.globalPrisma.legal_documents.findMany({
+      where: {
+        is_system: true,
+        is_active: true,
+        organization_id: null,
+        store_id: null,
+        OR: [{ expiry_date: null }, { expiry_date: { gte: new Date() } }],
+      },
+    });
+
+    // 3. Mapear tipos de documento a usar
+    const documentsToRequire: RequiredDocument[] = [];
+    const documentTypes = ['TERMS_OF_SERVICE', 'PRIVACY_POLICY'];
+
+    for (const type of documentTypes) {
+      // Prioridad: store document over system document
+      const storeDoc = storeDocuments.find((d) => d.document_type === type);
+      const systemDoc = systemDocuments.find((d) => d.document_type === type);
+      const docToUse = storeDoc || systemDoc;
+
+      if (docToUse) {
+        let hasAccepted = false;
+        if (userId) {
+          // Verificar si ya aceptó
+          const accepted = await this.globalPrisma.document_acceptances.findFirst({
+            where: {
+              user_id: userId,
+              document_id: docToUse.id,
+              acceptance_version: docToUse.version,
+            },
+          });
+          hasAccepted = !!accepted;
+        }
+
+        if (!hasAccepted) {
+          documentsToRequire.push({
+            document_id: docToUse.id,
+            document_type: docToUse.document_type,
+            title: docToUse.title,
+            version: docToUse.version,
+            is_required: true,
+            content: await this.fetchContentFromS3(docToUse.document_url),
+          });
+        }
+      }
+    }
+
+    return documentsToRequire;
   }
 }

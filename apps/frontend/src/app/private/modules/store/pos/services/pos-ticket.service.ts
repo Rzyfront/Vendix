@@ -70,19 +70,22 @@ export class PosTicketService {
 
     // Try to get from localStorage
     try {
-      const userInfo = localStorage.getItem('vendix_user_info');
-      if (userInfo) {
-        const parsedUser = JSON.parse(userInfo);
-        if (parsedUser.store) {
-          store = { ...store, ...parsedUser.store };
-        }
-        if (parsedUser.organizations) {
-          organization = parsedUser.organizations;
-          console.log('Organization from localStorage:', organization);
-        }
-        if (parsedUser.addresses && parsedUser.addresses.length > 0) {
-          const addr = parsedUser.addresses[0];
-          store.address = `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`;
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (authState) {
+        const parsedState = JSON.parse(authState);
+        const parsedUser = parsedState.user;
+        if (parsedUser) {
+          if (parsedUser.store) {
+            store = { ...store, ...parsedUser.store };
+          }
+          if (parsedUser.organizations) {
+            organization = parsedUser.organizations;
+            console.log('Organization from localStorage:', organization);
+          }
+          if (parsedUser.addresses && parsedUser.addresses.length > 0) {
+            const addr = parsedUser.addresses[0];
+            store.address = `${addr.address_line1}${addr.address_line2 ? ', ' + addr.address_line2 : ''}, ${addr.city}`;
+          }
         }
       }
       const appConfig = localStorage.getItem('vendix_app_config');

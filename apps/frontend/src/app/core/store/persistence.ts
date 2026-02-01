@@ -112,11 +112,6 @@ export function saveAuthState(state: AuthState): void {
       };
       localStorage.setItem('vendix_auth_state', JSON.stringify(stateToSave));
 
-      // Also save to granular keys for backward compatibility
-      localStorage.setItem('vendix_user_info', JSON.stringify(state.user));
-      localStorage.setItem('access_token', state.tokens.access_token);
-      localStorage.setItem('refresh_token', state.tokens.refresh_token);
-
       // Keep vendix_user_environment in sync with user_settings.config.app for compatibility
       if (state.user_settings?.config?.app) {
         localStorage.setItem(
@@ -143,16 +138,24 @@ export function clearAuthState(): void {
     // Eliminar todas las claves relacionadas con autenticación
     const keysToRemove = [
       'vendix_auth_state',
+      'vendix_user_environment',
+    ];
+
+    keysToRemove.forEach((key) => {
+      localStorage.removeItem(key);
+    });
+
+    // Also try to remove legacy keys for cleanup (if they exist)
+    const legacyKeysToRemove = [
       'vendix_user_info',
       'access_token',
       'refresh_token',
       'user_settings',
       'permissions',
       'roles',
-      'vendix_user_environment',
     ];
 
-    keysToRemove.forEach((key) => {
+    legacyKeysToRemove.forEach((key) => {
       localStorage.removeItem(key);
     });
 

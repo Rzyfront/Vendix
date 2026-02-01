@@ -46,6 +46,8 @@ services:
     environment:
       - NODE_ENV=development
       - BACKEND_URL=http://api.vendix.com
+      - NODE_OPTIONS=--max-old-space-size=4096
+      - CHOKIDAR_USEPOLLING="true"
     depends_on:
       - backend
     ports:
@@ -55,7 +57,6 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npx ng serve --host 0.0.0.0 --poll 2000"
 
   nginx:
     image: nginx:alpine

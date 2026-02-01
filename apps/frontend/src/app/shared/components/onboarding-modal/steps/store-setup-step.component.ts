@@ -408,27 +408,25 @@ import {
             <div class="store-type-selector">
               <div
                 class="store-type-option"
-                [class.active]="
-                  formGroup.get('store_type')?.value === 'physical'
-                "
-                (click)="formGroup.get('store_type')?.setValue('physical')"
+                [class.active]="formGroup.get('store_type')?.value === 'hybrid'"
+                (click)="formGroup.get('store_type')?.setValue('hybrid')"
               >
                 <div class="store-type-icon">
                   <app-icon
-                    name="building"
+                    name="refresh-cw"
                     size="32"
                     class="type-icon-element"
                   ></app-icon>
                 </div>
                 <div class="store-type-content">
-                  <h4 class="store-type-title">Tienda Física</h4>
+                  <h4 class="store-type-title">Tienda Híbrida</h4>
                   <p class="store-type-description">
-                    Ventas en persona con caja física
+                    Ventas en persona y online
                   </p>
                 </div>
                 <div
                   class="store-type-check"
-                  *ngIf="formGroup.get('store_type')?.value === 'physical'"
+                  *ngIf="formGroup.get('store_type')?.value === 'hybrid'"
                 >
                   <app-icon
                     name="check-circle"
@@ -470,25 +468,27 @@ import {
 
               <div
                 class="store-type-option"
-                [class.active]="formGroup.get('store_type')?.value === 'hybrid'"
-                (click)="formGroup.get('store_type')?.setValue('hybrid')"
+                [class.active]="
+                  formGroup.get('store_type')?.value === 'physical'
+                "
+                (click)="formGroup.get('store_type')?.setValue('physical')"
               >
                 <div class="store-type-icon">
                   <app-icon
-                    name="refresh-cw"
+                    name="building"
                     size="32"
                     class="type-icon-element"
                   ></app-icon>
                 </div>
                 <div class="store-type-content">
-                  <h4 class="store-type-title">Tienda Híbrida</h4>
+                  <h4 class="store-type-title">Tienda Física</h4>
                   <p class="store-type-description">
-                    Ventas en persona y online
+                    Ventas en persona con caja física
                   </p>
                 </div>
                 <div
                   class="store-type-check"
-                  *ngIf="formGroup.get('store_type')?.value === 'hybrid'"
+                  *ngIf="formGroup.get('store_type')?.value === 'physical'"
                 >
                   <app-icon
                     name="check-circle"

@@ -20,11 +20,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_partial_payments: false,
       require_payment_confirmation: true,
     },
-    shipping: {
-      enabled: true,
-      default_weight_unit: 'kg',
-      default_dimension_unit: 'cm',
-    },
+
     notifications: {
       email_enabled: true,
       sms_enabled: false,

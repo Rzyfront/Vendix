@@ -1,5 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, computed, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -21,6 +22,9 @@ import {
   TextareaComponent,
   ModalComponent,
   DialogService,
+  SettingToggleComponent,
+  StickyHeaderComponent,
+  StickyHeaderActionButton,
 } from '../../../../../../shared/components';
 import {
   CreateProductDto,
@@ -75,17 +79,30 @@ interface GeneratedVariant {
     MultiSelectorComponent,
     TextareaComponent,
     ModalComponent,
+    SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
     AdjustmentCreateModalComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './product-create-page.component.html',
 })
 export class ProductCreatePageComponent implements OnInit {
-  productForm: FormGroup;
-  isSubmitting = false;
-  isEditMode = false;
+  private fb = inject(FormBuilder);
+  private productsService = inject(ProductsService);
+  private categoriesService = inject(CategoriesService);
+  private brandsService = inject(BrandsService);
+  private taxesService = inject(TaxesService);
+  private toastService = inject(ToastService);
+  private inventoryService = inject(InventoryService);
+  private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private dialogService = inject(DialogService);
+
+  productForm: FormGroup = this.createForm();
+  isSubmitting = signal(false);
+  isEditMode = signal(false);
   productId: number | null = null;
   product: Product | null = null;
 
@@ -118,19 +135,31 @@ export class ProductCreatePageComponent implements OnInit {
   isAdjustmentModalOpen = false;
   isAdjusting = false;
 
-  constructor(
-    private fb: FormBuilder,
-    private productsService: ProductsService,
-    private categoriesService: CategoriesService,
-    private brandsService: BrandsService,
-    private taxesService: TaxesService,
-    private toastService: ToastService,
-    private inventoryService: InventoryService,
-    private router: Router,
-    private route: ActivatedRoute,
-    private dialogService: DialogService,
-  ) {
-    this.productForm = this.createForm();
+  // Trigger for computed units to react to non-signal form state changes
+  private formUpdateTrigger = signal(0);
+
+  readonly productHeaderActions = computed<StickyHeaderActionButton[]>(() => {
+    this.formUpdateTrigger(); // Dependency
+    return [
+      {
+        id: 'cancel',
+        label: 'Cancelar',
+        variant: 'outline',
+      },
+      {
+        id: 'save',
+        label: this.isEditMode() ? 'Guardar Cambios' : 'Crear Producto',
+        variant: 'primary',
+        loading: this.isSubmitting(),
+        disabled: this.isSubmitting() || this.productForm.invalid,
+      },
+    ];
+  });
+
+  constructor() {
+    // Sincronizar trigger con cambios del formulario
+    this.productForm.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
+    this.productForm.statusChanges.pipe(takeUntilDestroyed()).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
   }
 
   ngOnInit(): void {
@@ -140,7 +169,7 @@ export class ProductCreatePageComponent implements OnInit {
     this.route.params.subscribe((params: Params) => {
       if (params['id']) {
         this.productId = +params['id'];
-        this.isEditMode = true;
+        this.isEditMode.set(true);
         this.loadProduct(this.productId);
       }
     });
@@ -169,6 +198,12 @@ export class ProductCreatePageComponent implements OnInit {
       category_ids: [[] as number[]],
       brand_id: [null],
       tax_category_ids: [[] as number[]],
+      weight: [0, [Validators.min(0)]],
+      dimensions: this.fb.group({
+        length: [0, [Validators.min(0)]],
+        width: [0, [Validators.min(0)]],
+        height: [0, [Validators.min(0)]]
+      }),
       state: [ProductState.ACTIVE],
     });
 
@@ -250,9 +285,9 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   private patchForm(product: Product): void {
-    // Extract category IDs from product_categories
-    const categoryIds = (product.product_categories || [])
-      .map((pc: any) => pc.category_id)
+    // Extract category IDs from categories (API returns categories directly)
+    const categoryIds = (product.categories || [])
+      .map((c: ProductCategory) => c.id)
       .filter((id) => id !== undefined);
 
     // Extract tax category IDs
@@ -273,9 +308,15 @@ export class ProductCreatePageComponent implements OnInit {
       sku: product.sku,
       stock_quantity: product.stock_quantity,
       category_ids: categoryIds,
-      brand_id: product.brand_id,
+      brand_id: product.brand?.id ?? product.brand_id,
       tax_category_ids: taxCategoryIds,
       state: product.state,
+      weight: product.weight || 0,
+      dimensions: {
+        length: product.dimensions?.length || 0,
+        width: product.dimensions?.width || 0,
+        height: product.dimensions?.height || 0
+      }
     });
 
     // Load images
@@ -366,6 +407,12 @@ export class ProductCreatePageComponent implements OnInit {
           label: brand.name,
           description: brand.description,
         }));
+
+        // Force control update if value exists but wasn't matching options
+        const brandControl = this.productForm.get('brand_id');
+        if (brandControl?.value) {
+          brandControl.updateValueAndValidity({ emitEvent: false });
+        }
       },
       error: (error: any) => {
         console.error('Error loading brands:', error);
@@ -375,8 +422,8 @@ export class ProductCreatePageComponent implements OnInit {
     });
   }
 
-  toggleVariants(event: any): void {
-    this.hasVariants = event.target.checked;
+  toggleVariants(isChecked: boolean): void {
+    this.hasVariants = isChecked;
 
     const priceControl = this.productForm.get('base_price');
     const stockControl = this.productForm.get('stock_quantity');
@@ -639,8 +686,13 @@ export class ProductCreatePageComponent implements OnInit {
     this.router.navigate(['/admin/products']);
   }
 
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'cancel') this.onCancel();
+    else if (actionId === 'save') this.onSubmit();
+  }
+
   onSubmit(): void {
-    if (this.productForm.invalid || this.isSubmitting) {
+    if (this.productForm.invalid || this.isSubmitting()) {
       this.productForm.markAllAsTouched();
       this.toastService.error(
         'Por favor, completa todos los campos requeridos correctamente',
@@ -649,7 +701,7 @@ export class ProductCreatePageComponent implements OnInit {
       return;
     }
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const formValue = this.productForm.value;
 
     // Prepare Images
@@ -678,6 +730,16 @@ export class ProductCreatePageComponent implements OnInit {
       brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
       state: formValue.state || ProductState.ACTIVE,
       images: images.length > 0 ? images : undefined,
+      weight: formValue.weight > 0 ? Number(formValue.weight) : undefined,
+      dimensions: formValue.dimensions && (
+        formValue.dimensions.length > 0 ||
+        formValue.dimensions.width > 0 ||
+        formValue.dimensions.height > 0
+      ) ? {
+        length: Number(formValue.dimensions.length),
+        width: Number(formValue.dimensions.width),
+        height: Number(formValue.dimensions.height)
+      } : undefined,
     };
 
     // Add Variants if enabled
@@ -702,14 +764,14 @@ export class ProductCreatePageComponent implements OnInit {
     }
 
     const request$ =
-      this.isEditMode && this.productId
+      this.isEditMode() && this.productId
         ? this.productsService.updateProduct(this.productId, productData as any) // Cast to any to avoid strict UpdateDto mismatch if needed, or fix DTO
         : this.productsService.createProduct(productData);
 
     request$.subscribe({
       next: () => {
         this.toastService.success(
-          this.isEditMode
+          this.isEditMode()
             ? 'Producto actualizado correctamente'
             : 'Producto creado correctamente',
         );
@@ -720,11 +782,11 @@ export class ProductCreatePageComponent implements OnInit {
         const message = extractApiErrorMessage(err);
         this.toastService.error(
           message,
-          this.isEditMode
+          this.isEditMode()
             ? 'Error al actualizar el producto'
             : 'Error al crear el producto',
         );
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
       },
     });
   }

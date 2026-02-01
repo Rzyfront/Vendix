@@ -155,7 +155,8 @@ generate_opencode() {
 
     local prompt_content=""
     if [ -f "$agents_file" ]; then
-        prompt_content=$(cat "$agents_file" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+        # Use awk for cross-platform compatibility (macOS BSD sed doesn't support the complex sed command)
+        prompt_content=$(awk '{gsub(/"/, "\\\""); printf "%s\\\\n", $0}' "$agents_file" | sed 's/\\\\n$//')
     fi
 
     cat > "$opencode_file" << OPENCODE_EOF

@@ -150,6 +150,13 @@ import { ButtonComponent, IconComponent } from '../../index';
         margin-bottom: 1rem;
         box-shadow: var(--shadow-sm);
         text-align: left;
+        cursor: pointer;
+        transition: all var(--transition-fast) ease;
+      }
+
+      .completion-summary:hover {
+        border-color: var(--color-success);
+        background: var(--color-background);
       }
 
       .summary-header {
@@ -245,6 +252,13 @@ import { ButtonComponent, IconComponent } from '../../index';
         border-radius: var(--radius-lg);
         padding: 1rem;
         margin-bottom: 1rem;
+        cursor: pointer;
+        transition: all var(--transition-fast) ease;
+      }
+
+      .next-steps:hover {
+        border-color: var(--color-info);
+        background: var(--color-surface);
       }
 
       .next-steps-header {
@@ -340,7 +354,6 @@ import { ButtonComponent, IconComponent } from '../../index';
         height: 44px;
         font-size: var(--fs-base);
         font-weight: var(--fw-semibold);
-        box-shadow: var(--shadow-md);
       }
 
       @media (max-width: 1024px) {
@@ -368,9 +381,24 @@ import { ButtonComponent, IconComponent } from '../../index';
 
         <!-- Title -->
         <h2 class="completion-title">¡Configuración completada!</h2>
-        <p class="completion-subtitle">
-          Tu tienda está lista para empezar a vender
-        </p>
+        <div class="completion-messages">
+          <p *ngFor="let msg of messages" class="completion-subtitle">
+            {{ msg }}
+          </p>
+        </div>
+
+        <!-- Action Button (Moved to top) -->
+        <div class="flex justify-center mb-6">
+          <app-button
+            variant="primary"
+            size="md"
+            [disabled]="isCompleting"
+            (click)="complete.emit()"
+            class="action-button"
+          >
+            <span>{{ isCompleting ? 'Finalizando...' : 'Ir a mi tienda' }}</span>
+          </app-button>
+        </div>
 
         <!-- Success Stats -->
         <div class="success-stats">
@@ -385,7 +413,7 @@ import { ButtonComponent, IconComponent } from '../../index';
         </div>
 
         <!-- Configuration Summary -->
-        <div class="completion-summary">
+        <div class="completion-summary" (click)="complete.emit()">
           <div class="summary-header">
             <div class="summary-icon">
               <app-icon
@@ -461,11 +489,27 @@ import { ButtonComponent, IconComponent } from '../../index';
                 <app-icon name="check" size="14" class="check-icon"></app-icon>
               </div>
             </div>
+            <div class="summary-item">
+              <div class="item-icon">
+                <app-icon
+                  name="map-pin"
+                  size="14"
+                  class="item-icon-element"
+                ></app-icon>
+              </div>
+              <div class="item-content">
+                <span class="item-label">Ubicación</span>
+                <span class="item-value">Creada automáticamente</span>
+              </div>
+              <div class="item-check">
+                <app-icon name="check" size="14" class="check-icon"></app-icon>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Next Steps -->
-        <div class="next-steps">
+        <div class="next-steps" (click)="complete.emit()">
           <div class="next-steps-header">
             <div class="next-steps-icon">
               <app-icon
@@ -525,18 +569,7 @@ import { ButtonComponent, IconComponent } from '../../index';
           </div>
         </div>
 
-        <!-- Action Button -->
-        <div class="completion-action">
-          <app-button
-            variant="primary"
-            size="md"
-            [disabled]="isCompleting"
-            (click)="complete.emit()"
-            class="action-button"
-          >
-            <span>{{ isCompleting ? 'Finalizando...' : 'Ir a mi tienda' }}</span>
-          </app-button>
-        </div>
+        <!-- Action Button removed from bottom -->
       </div>
     </div>
   `,
@@ -545,4 +578,10 @@ export class CompletionStepComponent {
   @Input() wizardData: any = {};
   @Input() isCompleting = false;
   @Output() complete = new EventEmitter<void>();
+
+  messages = [
+    'Tienda creada exitosamente',
+    'Se ha creado una ubicación por defecto para tu tienda',
+    'Puedes gestionar tus ubicaciones desde el panel de inventario'
+  ];
 }

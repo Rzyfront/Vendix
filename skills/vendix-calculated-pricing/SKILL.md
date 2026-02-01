@@ -1,3 +1,14 @@
+---
+name: vendix-calculated-pricing
+description: >
+  Standardize how calculated prices (with taxes) are handled across the entire system.
+  Trigger: When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations.
+license: MIT
+metadata:
+  author: vendix
+  version: "1.0"
+---
+
 # Vendix Calculated Pricing Pattern
 
 > **Standardize how calculated prices (with taxes) are handled across the entire system**

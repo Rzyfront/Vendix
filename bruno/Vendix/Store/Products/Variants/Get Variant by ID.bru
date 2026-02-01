@@ -1,0 +1,66 @@
+meta {
+  name: "Get Variant by ID"
+  type: http
+  seq: 11
+}
+
+get {
+  url: http://{{url}}/products/{{productId}}?include_variants=true
+  body: none
+  auth: inherit
+}
+
+query {
+  include_variants: true
+}
+
+vars:pre-request {
+  variantId: {{variantId}}
+}
+
+tests {
+  test("Operation successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Product data is valid", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("id");
+    expect(res.body.data).to.have.property("name");
+  });
+
+  test("Variants array exists and is valid", function() {
+    expect(res.body.data).to.have.property("variants");
+    expect(res.body.data.variants).to.be.an("array");
+  });
+
+  test("Specific variant can be found by ID", function() {
+    const variants = res.body.data.variants;
+    const targetVariantId = parseInt({{variantId}});
+    const foundVariant = variants.find(v => v.id === targetVariantId);
+    
+    expect(foundVariant).to.not.be.undefined;
+    expect(foundVariant).to.have.property("sku");
+    expect(foundVariant).to.have.property("product_id");
+    expect(foundVariant.product_id).to.equal(parseInt({{productId}}));
+  });
+
+  test("Variant has all required fields", function() {
+    const variants = res.body.data.variants;
+    const targetVariantId = parseInt({{variantId}});
+    const variant = variants.find(v => v.id === targetVariantId);
+    
+    expect(variant).to.have.property("id");
+    expect(variant).to.have.property("sku");
+    expect(variant).to.have.property("product_id");
+    expect(variant).to.have.property("stock_quantity");
+    expect(variant).to.have.property("created_at");
+    expect(variant).to.have.property("updated_at");
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

@@ -107,6 +107,7 @@ export class DefaultPanelUIService {
       settings_security: true,
       settings_domains: true,
       settings_shipping: true,
+      settings_legal_documents: true,
     },
 
     /**

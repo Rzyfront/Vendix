@@ -372,6 +372,20 @@ export class UpdateProductDto {
   sale_price?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0, { message: 'El peso no puede ser negativo' })
+  weight?: number;
+
+  @IsOptional()
+  @IsObject()
+  dimensions?: {
+    length: number;
+    width: number;
+    height: number;
+  };
+
+  @IsOptional()
   @IsEnum(ProductState)
   state?: ProductState;
 

@@ -1,0 +1,40 @@
+<app-modal [(isOpen)]="isOpen" size="lg" [showCloseButton]="true">
+    <!-- Custom Header -->
+    <div slot="header" class="flex items-center gap-3 w-full">
+        <div
+            class="h-10 w-10 rounded-full bg-primary-50 flex items-center justify-center text-primary-600 flex-shrink-0">
+            <app-icon name="file-text" size="20"></app-icon>
+        </div>
+        <div class="flex flex-col">
+            <h3 class="text-lg font-bold text-gray-900 leading-tight">
+                {{ title }}
+            </h3>
+            <div class="flex items-center gap-2 mt-0.5">
+                <span *ngIf="version"
+                    class="inline-flex items-center px-2 py-0.5 rounded textxs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                    v{{ version }}
+                </span>
+                <span class="text-xs text-gray-500">Documento Legal Oficial</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Content Body -->
+    <div class="legal-content-wrapper">
+        <div class="legal-document-paper">
+            <div class="prose prose-sm max-w-none prose-slate" [innerHTML]="renderedContent()"></div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div slot="footer" class="flex justify-between items-center w-full">
+        <p class="text-xs text-gray-500 hidden sm:block">
+            Al continuar, aceptas cumplir con los términos establecidos en este documento.
+        </p>
+        <div class="flex gap-3 ml-auto">
+            <app-button variant="primary" (clicked)="onClose()">
+                Entendido
+            </app-button>
+        </div>
+    </div>
+</app-modal>
