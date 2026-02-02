@@ -70,6 +70,7 @@ export class UsersService {
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: 'ORG_ADMIN', // Campo directo
         config: adminConfig,
       },
     });

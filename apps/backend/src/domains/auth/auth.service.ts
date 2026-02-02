@@ -174,6 +174,7 @@ export class AuthService {
     // Convertir nombres a Title Case
     const formatted_first_name = toTitleCase(first_name || '');
     const formatted_last_name = toTitleCase(last_name || '');
+    const formatted_organization_name = toTitleCase(organization_name || '');
 
     // Buscar si ya existe un OWNER con este email con onboarding incompleto
     // IMPORTANTE: Solo considerar owners, NO customers u otros roles
@@ -233,7 +234,7 @@ export class AuthService {
 
       const organization = await tx.organizations.create({
         data: {
-          name: organization_name,
+          name: formatted_organization_name,
           slug: organization_slug,
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
@@ -300,6 +301,7 @@ export class AuthService {
       await tx.user_settings.create({
         data: {
           user_id: user.id,
+          app_type: 'ORG_ADMIN',
           config: ownerConfig,
         },
       });
@@ -450,9 +452,20 @@ export class AuthService {
       where: { user_id: userWithRoles.id },
     });
 
+    if (!userSettings) {
+      throw new Error('User settings not found after registration');
+    }
+
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword,
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -537,6 +550,7 @@ export class AuthService {
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: 'STORE_ECOMMERCE',
         config: customerConfig,
       },
     });
@@ -695,6 +709,10 @@ export class AuthService {
       where: { user_id: userWithRoles.id },
     });
 
+    if (!userSettings) {
+      throw new Error('User settings not found after registration');
+    }
+
     // Transformar user_roles a roles array simple para compatibilidad
     const { user_roles, ...userWithoutRoles } = userWithRoles;
     const roles = user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
@@ -706,9 +724,16 @@ export class AuthService {
     // Remover password del response
     const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword,
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -841,6 +866,7 @@ export class AuthService {
     await this.prismaService.user_settings.create({
       data: {
         user_id: user.id,
+        app_type: 'STORE_ADMIN',
         config: staffConfig,
       },
     });
@@ -1052,7 +1078,7 @@ export class AuthService {
     }
 
     // Validar consistencia entre slugs y user_settings.app_type
-    const user_app_type = userSettings?.config?.['app'];
+    const user_app_type = userSettings?.app_type;
     let effective_organization_slug = organization_slug;
     let effective_store_slug = store_slug;
 
@@ -1201,16 +1227,12 @@ export class AuthService {
     if (
       store_slug &&
       userSettings &&
-      userSettings.config?.['app'] === 'ORG_ADMIN'
+      userSettings.app_type === 'ORG_ADMIN'
     ) {
       // Actualizar app_type en base de datos
-      const newConfig = {
-        ...(userSettings.config as object),
-        app: 'STORE_ADMIN',
-      };
       userSettings = await this.prismaService.user_settings.update({
         where: { id: userSettings.id },
-        data: { config: newConfig },
+        data: { app_type: 'STORE_ADMIN' },
       });
 
       // El flujo continúa normalmente con effective_store_slug
@@ -1430,9 +1452,22 @@ export class AuthService {
       store: active_store || user.main_store,
     };
 
+    if (!userSettings) {
+      throw new UnauthorizedException(
+        'User settings not found. Please contact support.',
+      );
+    }
+
+    const userSettingsForResponse = {
+      id: userSettings.id,
+      user_id: userSettings.user_id,
+      app_type: userSettings.app_type,
+      config: userSettings.config || {},
+    };
+
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
-      user_settings: userSettings,
+      user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,

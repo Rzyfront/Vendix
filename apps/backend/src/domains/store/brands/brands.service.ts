@@ -7,6 +7,7 @@ import {
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { S3Service } from '@common/services/s3.service';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 
 @Injectable()
 export class BrandsService {
@@ -16,11 +17,15 @@ export class BrandsService {
   ) { }
   async create(createBrandDto: CreateBrandDto, user: any) {
     try {
+      // CRITICAL: Sanitize logo_url to extract S3 key before storing
+      // This prevents storing signed URLs that expire after 24 hours
+      const sanitizedLogoUrl = extractS3KeyFromUrl(createBrandDto.logo_url);
+
       const brand = await this.prisma.brands.create({
         data: {
           name: createBrandDto.name,
           description: createBrandDto.description,
-          logo_url: createBrandDto.logo_url,
+          logo_url: sanitizedLogoUrl,
         },
       });
 
@@ -178,7 +183,8 @@ export class BrandsService {
     }
 
     if (updateBrandDto.logo_url !== undefined) {
-      updateData.logo_url = updateBrandDto.logo_url;
+      // CRITICAL: Sanitize logo_url to extract S3 key before storing
+      updateData.logo_url = extractS3KeyFromUrl(updateBrandDto.logo_url);
     }
 
     try {

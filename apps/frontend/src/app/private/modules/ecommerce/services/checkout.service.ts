@@ -9,6 +9,7 @@ export interface PaymentMethod {
     name: string;
     type: string;
     provider: string;
+    processing_mode: 'DIRECT' | 'ONLINE' | 'ON_DELIVERY';
     logo_url: string | null;
     min_amount: number | null;
     max_amount: number | null;
@@ -58,10 +59,14 @@ export class CheckoutService {
         });
     }
 
-    getPaymentMethods(): Observable<{ success: boolean; data: PaymentMethod[] }> {
+    getPaymentMethods(shippingType?: string): Observable<{ success: boolean; data: PaymentMethod[] }> {
+        let params: { [key: string]: string } = {};
+        if (shippingType) {
+            params['shipping_type'] = shippingType;
+        }
         return this.http.get<{ success: boolean; data: PaymentMethod[] }>(
             `${this.api_url}/payment-methods`,
-            { headers: this.getHeaders() },
+            { headers: this.getHeaders(), params },
         );
     }
 

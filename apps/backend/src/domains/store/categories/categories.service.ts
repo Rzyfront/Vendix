@@ -17,6 +17,7 @@ import {
 } from './dto';
 import slugify from 'slugify';
 import { S3Service } from '@common/services/s3.service';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 
 @Injectable()
 export class CategoriesService {
@@ -39,12 +40,16 @@ export class CategoriesService {
     // Ensure slug is unique in this store context
     await this.validateUniqueSlug(slug, store_id);
 
+    // CRITICAL: Sanitize image_url to extract S3 key before storing
+    // This prevents storing signed URLs that expire after 24 hours
+    const sanitizedImageUrl = extractS3KeyFromUrl(createCategoryDto.image_url);
+
     const categoryData: any = {
       name: createCategoryDto.name,
       slug: slug,
       description: createCategoryDto.description,
       store_id: store_id, // Manual injection required for create
-      image_url: createCategoryDto.image_url,
+      image_url: sanitizedImageUrl,
       state: 'active',
     };
 
@@ -144,7 +149,8 @@ export class CategoriesService {
       updateData.description = updateCategoryDto.description;
     }
     if (updateCategoryDto.image_url !== undefined) {
-      updateData.image_url = updateCategoryDto.image_url;
+      // CRITICAL: Sanitize image_url to extract S3 key before storing
+      updateData.image_url = extractS3KeyFromUrl(updateCategoryDto.image_url);
     }
     // store_id se gestiona automáticamente por el contexto de Prisma
     // if (updateCategoryDto.store_id !== undefined) {

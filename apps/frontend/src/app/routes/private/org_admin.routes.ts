@@ -83,6 +83,13 @@ export const orgAdminRoutes: Routes = [
           },
         ],
       },
+      {
+        path: 'domains',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/domains/domains.component'
+          ).then((c) => c.DomainsComponent),
+      },
     ],
   },
 ];

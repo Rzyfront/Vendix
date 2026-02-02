@@ -10,6 +10,7 @@ import { DomainConfigStandardizerHelper } from '../../../common/helpers/domain-c
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 
 @Injectable()
 export class EcommerceService {
@@ -157,34 +158,25 @@ export class EcommerceService {
         },
       };
 
-      // Limpiar y asegurar persistencia de KEYS de S3 en lugar de URLs firmadas
+      // CRITICAL: Sanitize URLs to S3 keys before storage
+      // This prevents storing signed URLs that expire after 24 hours
       if (mergedRaw.slider?.photos && Array.isArray(mergedRaw.slider.photos)) {
         mergedRaw.slider.photos = mergedRaw.slider.photos.map((photo: any) => {
-          const persistedPhoto = { ...photo };
-          // Si el frontend envió una KEY, esa es la que DEBE quedar en el campo 'url' de la DB
-          if (photo.key) {
-            persistedPhoto.url = photo.key;
-          } else if (photo.url && photo.url.includes('?X-Amz-Algorithm')) {
-            // Si es una URL firmada, buscamos la key en la config anterior
-            const oldPhoto = existingConfig.slider?.photos?.find(
-              (p: any) =>
-                p.key === photo.key ||
-                (p.title === photo.title && p.caption === photo.caption),
-            );
-            if (oldPhoto) persistedPhoto.url = oldPhoto.url || oldPhoto.key;
+          const sanitizedPhoto = { ...photo };
+          // Prioritize 'key' field if present, otherwise extract from 'url'
+          const sourceValue = photo.key || photo.url;
+          const sanitizedKey = extractS3KeyFromUrl(sourceValue);
+          if (sanitizedKey) {
+            sanitizedPhoto.url = sanitizedKey;
+            sanitizedPhoto.key = sanitizedKey;
           }
-          return persistedPhoto;
+          return sanitizedPhoto;
         });
       }
 
-      // Lo mismo para el logo_url
-      if (
-        mergedRaw.inicio?.logo_url &&
-        mergedRaw.inicio.logo_url.includes('?X-Amz-Algorithm')
-      ) {
-        // Intentar mantener el logo anterior si el nuevo es solo una firma temporal
-        mergedRaw.inicio.logo_url =
-          existingConfig.inicio?.logo_url || mergedRaw.inicio.logo_url;
+      // Sanitize logo_url - extract S3 key from any signed URL
+      if (mergedRaw.inicio?.logo_url) {
+        mergedRaw.inicio.logo_url = extractS3KeyFromUrl(mergedRaw.inicio.logo_url);
       }
 
       // Sincronizar colores de inicio.colores con branding en modo edición
@@ -426,6 +418,25 @@ export class EcommerceService {
           settings.branding.accent_color = settings.inicio.colores.accent_color;
         }
       }
+
+      // Sanitize logo_url - extract S3 key from any signed URL
+      if (settings.inicio.logo_url) {
+        settings.inicio.logo_url = extractS3KeyFromUrl(settings.inicio.logo_url);
+      }
+    }
+
+    // Sanitize slider photos - extract S3 keys from any signed URLs
+    if (settings.slider?.photos && Array.isArray(settings.slider.photos)) {
+      settings.slider.photos = settings.slider.photos.map((photo: any) => {
+        const sanitizedPhoto = { ...photo };
+        const sourceValue = photo.key || photo.url;
+        const sanitizedKey = extractS3KeyFromUrl(sourceValue);
+        if (sanitizedKey) {
+          sanitizedPhoto.url = sanitizedKey;
+          sanitizedPhoto.key = sanitizedKey;
+        }
+        return sanitizedPhoto;
+      });
     }
 
     return settings;

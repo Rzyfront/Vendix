@@ -132,6 +132,11 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
       route: '/admin/users',
     },
     {
+      label: 'Dominios',
+      icon: 'globe',
+      route: '/admin/domains',
+    },
+    {
       label: 'Auditoría y Cumplimiento',
       icon: 'shield',
       route: '/admin/audit/logs',

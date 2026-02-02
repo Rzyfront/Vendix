@@ -19,6 +19,7 @@ import {
   DomainContext,
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
+import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 
 interface WizardValidation {
   isValid: boolean;
@@ -161,12 +162,12 @@ export class OnboardingWizardService {
     };
 
     if (user.user_settings) {
-      // Get existing config or empty object
-      const existingConfig = user.user_settings.config || {};
+      const existingConfig = (user.user_settings.config as any) || {};
 
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
+          app_type: selectAppTypeDto.app_type,
           config: {
             ...existingConfig,
             ...config,
@@ -178,6 +179,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.create({
         data: {
           user_id: userId,
+          app_type: selectAppTypeDto.app_type,
           config: config as any,
         },
       });
@@ -614,7 +616,7 @@ export class OnboardingWizardService {
     // 1. Handle Automatic Subdomain (ALWAYS created/updated as primary initially)
     let autoSubdomain: string;
 
-    // Generate standardized branding config
+    // Generate standardized branding config (for organization_settings)
     const branding = this.brandingGeneratorHelper.generateBranding({
       name: user.organizations?.name || 'Organization',
       primaryColor: setupAppConfigDto.primary_color,
@@ -622,11 +624,6 @@ export class OnboardingWizardService {
       accentColor: setupAppConfigDto.accent_color,
       theme: 'light',
     });
-
-    const appLandingType =
-      setupAppConfigDto.app_type === 'ORG_ADMIN'
-        ? 'ORG_LANDING'
-        : 'STORE_LANDING';
 
     // Check if we already have an auto-domain for this org
     const existingAutoDomain =
@@ -662,12 +659,10 @@ export class OnboardingWizardService {
             where: { id: existingAutoDomain.id },
             data: {
               hostname: newHostname,
+              app_type: 'ORG_LANDING',
               is_primary: true,
               status: 'active',
-              config: {
-                app: appLandingType,
-                branding: branding,
-              },
+              config: {}, // Branding lives in organization_settings, not here
               updated_at: new Date(),
             },
           });
@@ -691,28 +686,24 @@ export class OnboardingWizardService {
             where: { id: existingAutoDomain.id },
             data: {
               hostname: uniqueHostname,
+              app_type: 'ORG_LANDING',
               is_primary: true,
               status: 'active',
-              config: {
-                app: appLandingType,
-                branding: branding,
-              },
+              config: {}, // Branding lives in organization_settings, not here
               updated_at: new Date(),
             },
           });
           autoSubdomain = uniqueHostname;
         }
       } else {
-        // Domain already has correct format, just ensure it's primary/active and branding is updated
+        // Domain already has correct format, just ensure it's primary/active
         await this.prismaService.domain_settings.update({
           where: { id: existingAutoDomain.id },
           data: {
+            app_type: 'ORG_LANDING',
             is_primary: true,
             status: 'active',
-            config: {
-              app: appLandingType,
-              branding: branding,
-            },
+            config: {}, // Branding lives in organization_settings, not here
             updated_at: new Date(),
           },
         });
@@ -742,10 +733,8 @@ export class OnboardingWizardService {
         data: {
           hostname: autoSubdomain,
           organization_id: user.organization_id,
-          config: {
-            app: appLandingType,
-            branding: branding,
-          },
+          app_type: 'ORG_LANDING',
+          config: {}, // Branding lives in organization_settings, not here
           domain_type: 'organization',
           is_primary: true, // Auto domain is primary by default until custom is verified
           ownership: 'vendix_subdomain',
@@ -755,6 +744,57 @@ export class OnboardingWizardService {
         },
       });
     }
+
+    // Create/Update organization_settings with branding
+    await this.prismaService.organization_settings.upsert({
+      where: { organization_id: user.organization_id },
+      create: {
+        organization_id: user.organization_id,
+        settings: {
+          branding: {
+            name: user.organizations?.name || 'Organization',
+            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            background_color: branding.background_color,
+            surface_color: branding.surface_color,
+            text_color: branding.text_color,
+            text_secondary_color: branding.text_secondary_color,
+            text_muted_color: branding.text_muted_color,
+            logo_url: branding.logo_url,
+            favicon_url: branding.favicon_url,
+          },
+          fonts: {
+            primary: 'Inter, sans-serif',
+            secondary: 'Inter, sans-serif',
+            headings: 'Inter, sans-serif',
+          },
+        },
+      },
+      update: {
+        settings: {
+          branding: {
+            name: user.organizations?.name || 'Organization',
+            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            background_color: branding.background_color,
+            surface_color: branding.surface_color,
+            text_color: branding.text_color,
+            text_secondary_color: branding.text_secondary_color,
+            text_muted_color: branding.text_muted_color,
+            logo_url: branding.logo_url,
+            favicon_url: branding.favicon_url,
+          },
+          fonts: {
+            primary: 'Inter, sans-serif',
+            secondary: 'Inter, sans-serif',
+            headings: 'Inter, sans-serif',
+          },
+        },
+        updated_at: new Date(),
+      },
+    });
 
     // 3. Create/Update Store Domain with branding config
     let storeDomainRecord = null;
@@ -768,7 +808,7 @@ export class OnboardingWizardService {
           },
         });
 
-      // Generate standardized branding config for store
+      // Generate standardized branding config for store (used in store_settings)
       const storeBranding = this.brandingGeneratorHelper.generateBranding({
         name: store.name,
         primaryColor: setupAppConfigDto.primary_color,
@@ -777,15 +817,46 @@ export class OnboardingWizardService {
         theme: 'light',
       });
 
+      // Create/Update store_settings with branding and default settings
+      const defaultSettings = getDefaultStoreSettings();
+      const storeSettingsData = {
+        ...defaultSettings,
+        branding: {
+          name: store.name,
+          primary_color: setupAppConfigDto.primary_color || storeBranding.primary_color,
+          secondary_color: setupAppConfigDto.secondary_color || storeBranding.secondary_color,
+          accent_color: setupAppConfigDto.accent_color || storeBranding.accent_color,
+          background_color: storeBranding.background_color,
+          surface_color: storeBranding.surface_color,
+          text_color: storeBranding.text_color,
+          text_secondary_color: storeBranding.text_secondary_color,
+          text_muted_color: storeBranding.text_muted_color,
+          logo_url: storeBranding.logo_url,
+          favicon_url: storeBranding.favicon_url,
+        },
+        fonts: defaultSettings.fonts,
+        publication: defaultSettings.publication,
+      };
+
+      await this.prismaService.store_settings.upsert({
+        where: { store_id: store.id },
+        create: {
+          store_id: store.id,
+          settings: storeSettingsData as any, // Cast to any for Prisma Json type
+        },
+        update: {
+          settings: storeSettingsData as any, // Cast to any for Prisma Json type
+          updated_at: new Date(),
+        },
+      });
+
       if (existingStoreDomain) {
-        // Update existing store domain with branding config
+        // Update existing store domain - branding lives in store_settings now
         storeDomainRecord = await this.prismaService.domain_settings.update({
           where: { id: existingStoreDomain.id },
           data: {
-            config: {
-              app: 'STORE_LANDING',
-              branding: storeBranding,
-            },
+            app_type: 'STORE_LANDING',
+            config: {}, // Branding lives in store_settings, not here
             is_primary: true,
             status: 'active',
             updated_at: new Date(),
@@ -832,10 +903,8 @@ export class OnboardingWizardService {
           storeDomainRecord = await this.prismaService.domain_settings.update({
             where: { id: collidingDomain.id },
             data: {
-              config: {
-                app: 'STORE_LANDING',
-                branding: storeBranding,
-              },
+              app_type: 'STORE_LANDING',
+              config: {}, // Branding lives in store_settings, not here
               is_primary: true,
               ownership: 'vendix_subdomain',
               status: 'active',
@@ -843,7 +912,7 @@ export class OnboardingWizardService {
             },
           });
         } else {
-          // Create new store domain with branding config
+          // Create new store domain
           let finalHostname = storeHostname;
 
           // If collision exists (but belongs to someone else), regenerate!
@@ -867,11 +936,9 @@ export class OnboardingWizardService {
             data: {
               hostname: finalHostname,
               store_id: store.id,
+              app_type: 'STORE_LANDING',
               domain_type: 'store',
-              config: {
-                app: 'STORE_LANDING',
-                branding: storeBranding,
-              },
+              config: {}, // Branding lives in store_settings, not here
               is_primary: true,
               ownership: 'vendix_subdomain',
               status: 'active',
@@ -907,27 +974,19 @@ export class OnboardingWizardService {
         );
       }
 
-      // Generate standardized branding config for custom domain
-      const customBranding = this.brandingGeneratorHelper.generateBranding({
-        name: user.organizations?.name || 'Organization',
-        primaryColor: setupAppConfigDto.primary_color,
-        secondaryColor: setupAppConfigDto.secondary_color,
-        accentColor: setupAppConfigDto.accent_color,
-        theme: 'light',
-      });
+      // Determine app_type for custom domain based on context
+      const customAppType =
+        setupAppConfigDto.app_type === 'ORG_ADMIN'
+          ? 'ORG_LANDING'
+          : 'STORE_LANDING';
 
       if (existingCustom) {
         // Update existing record for this org
         customDomainRecord = await this.prismaService.domain_settings.update({
           where: { id: existingCustom.id },
           data: {
-            config: {
-              branding: customBranding,
-              app:
-                setupAppConfigDto.app_type === 'ORG_ADMIN'
-                  ? 'ORG_LANDING'
-                  : 'STORE_LANDING',
-            },
+            app_type: customAppType as any,
+            config: {}, // Branding lives in organization_settings or store_settings
             is_primary: false, // Custom domain starts as non-primary (pending)
             status: 'pending_dns',
             updated_at: new Date(),
@@ -939,13 +998,8 @@ export class OnboardingWizardService {
           data: {
             hostname: customDomain,
             organization_id: user.organization_id,
-            config: {
-              branding: customBranding,
-              app:
-                setupAppConfigDto.app_type === 'ORG_ADMIN'
-                  ? 'ORG_LANDING'
-                  : 'STORE_LANDING',
-            },
+            app_type: customAppType as any,
+            config: {}, // Branding lives in organization_settings or store_settings
             domain_type: 'organization',
             is_primary: false,
             ownership: 'custom_domain', // Using enum value 'custom_domain' not 'custom'
@@ -966,7 +1020,10 @@ export class OnboardingWizardService {
       setupAppConfigDto.app_type,
     );
 
+    const existingConfig = (existingSettings?.config as any) || {};
+
     const updatedConfig = {
+      ...existingConfig,
       ...uiConfig,
       step_app_config_completed: true,
       onboarding_data: setupAppConfigDto,
@@ -976,6 +1033,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
         data: {
+          app_type: setupAppConfigDto.app_type,
           config: updatedConfig,
           updated_at: new Date(),
         },
@@ -984,6 +1042,7 @@ export class OnboardingWizardService {
       await this.prismaService.user_settings.create({
         data: {
           user_id: userId,
+          app_type: setupAppConfigDto.app_type,
           config: updatedConfig,
         },
       });

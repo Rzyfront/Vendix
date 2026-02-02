@@ -112,11 +112,11 @@ export function saveAuthState(state: AuthState): void {
       };
       localStorage.setItem('vendix_auth_state', JSON.stringify(stateToSave));
 
-      // Keep vendix_user_environment in sync with user_settings.config.app for compatibility
-      if (state.user_settings?.config?.app) {
+      // Keep vendix_user_environment in sync with user_settings.app_type
+      if (state.user_settings?.app_type) {
         localStorage.setItem(
           'vendix_user_environment',
-          state.user_settings.config.app,
+          state.user_settings.app_type,
         );
       }
     } else {

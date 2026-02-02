@@ -131,15 +131,18 @@ describe('Contextual Login Flow - Integration Tests', () => {
         data: [
           {
             user_id: ownerUser.id,
-            config: { app: 'ORG_ADMIN' },
+            app_type: 'ORG_ADMIN',
+            config: {},
           },
           {
             user_id: staffUser.id,
-            config: { app: 'STORE_ADMIN' },
+            app_type: 'STORE_ADMIN',
+            config: {},
           },
           {
             user_id: customerUser.id,
-            config: { app: 'STORE_ECOMMERCE' },
+            app_type: 'STORE_ECOMMERCE',
+            config: {},
           },
         ],
       });
@@ -168,7 +171,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       expect(response.body.data.user.roles).toContain('owner');
       expect(response.body.data.access_token).toBeDefined();
       expect(response.body.data.refresh_token).toBeDefined();
-      expect(response.body.data.user_settings.config.app).toBe('ORG_ADMIN');
+      expect(response.body.data.user_settings.app_type).toBe('ORG_ADMIN');
     });
 
     it('should successfully login staff with store slug', async () => {
@@ -185,7 +188,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       expect(response.body.data.user.email).toBe('staff@test.com');
       expect(response.body.data.user.roles).toContain('employee');
       expect(response.body.data.access_token).toBeDefined();
-      expect(response.body.data.user_settings.config.app).toBe('STORE_ADMIN');
+      expect(response.body.data.user_settings.app_type).toBe('STORE_ADMIN');
     });
 
     it('should successfully login customer with store slug', async () => {
@@ -202,7 +205,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       expect(response.body.data.user.email).toBe('customer@test.com');
       expect(response.body.data.user.roles).toContain('customer');
       expect(response.body.data.access_token).toBeDefined();
-      expect(response.body.data.user_settings.config.app).toBe(
+      expect(response.body.data.user_settings.app_type).toBe(
         'STORE_ECOMMERCE',
       );
     });
@@ -325,11 +328,13 @@ describe('Contextual Login Flow - Integration Tests', () => {
         data: [
           {
             user_id: ownerUser.id,
-            config: { app: 'ORG_ADMIN' },
+            app_type: 'ORG_ADMIN',
+            config: {},
           },
           {
             user_id: staffUser.id,
-            config: { app: 'STORE_ADMIN' },
+            app_type: 'STORE_ADMIN',
+            config: {},
           },
         ],
       });
@@ -496,15 +501,18 @@ describe('Contextual Login Flow - Integration Tests', () => {
         data: [
           {
             user_id: activeUser.id,
-            config: { app: 'ORG_ADMIN' },
+            app_type: 'ORG_ADMIN',
+            config: {},
           },
           {
             user_id: suspendedUser.id,
-            config: { app: 'ORG_ADMIN' },
+            app_type: 'ORG_ADMIN',
+            config: {},
           },
           {
             user_id: unverifiedUser.id,
-            config: { app: 'ORG_ADMIN' },
+            app_type: 'ORG_ADMIN',
+            config: {},
           },
         ],
       });
@@ -631,7 +639,8 @@ describe('Contextual Login Flow - Integration Tests', () => {
       await prismaService.user_settings.create({
         data: {
           user_id: ownerUser.id,
-          config: { app: 'ORG_ADMIN' },
+          app_type: 'ORG_ADMIN',
+          config: {},
         },
       });
 
@@ -648,7 +657,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       // Update user to have STORE_ADMIN app type
       await prismaService.user_settings.update({
         where: { user_id: ownerUser.id },
-        data: { config: { app: 'STORE_ADMIN' } },
+        data: { app_type: 'STORE_ADMIN' },
       });
 
       const response = await request(app.getHttpServer())
@@ -661,7 +670,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.user_settings.config.app).toBe('STORE_ADMIN');
+      expect(response.body.data.user_settings.app_type).toBe('STORE_ADMIN');
     });
 
     it('should switch ORG_ADMIN to STORE_ADMIN when logging with store slug', async () => {
@@ -675,7 +684,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.data.user_settings.config.app).toBe('STORE_ADMIN');
+      expect(response.body.data.user_settings.app_type).toBe('STORE_ADMIN');
     });
   });
 
@@ -726,7 +735,8 @@ describe('Contextual Login Flow - Integration Tests', () => {
       await prismaService.user_settings.create({
         data: {
           user_id: user.id,
-          config: { app: 'ORG_ADMIN' },
+          app_type: 'ORG_ADMIN',
+          config: {},
         },
       });
     });

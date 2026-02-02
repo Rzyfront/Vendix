@@ -20,6 +20,7 @@ export interface ShippingOption {
     id: number; // Unique identifier (rate_id)
     method_id: number;
     method_name: string;
+    method_type: string; // 'pickup' | 'own_fleet' | 'carrier' | etc.
     cost: number;
     currency: string;
     estimated_days?: { min: number; max: number };
@@ -105,6 +106,7 @@ export class ShippingCalculatorService {
                     id: rate.id,
                     method_id: rate.shipping_method_id,
                     method_name: rate.name || rate.shipping_method.name,
+                    method_type: rate.shipping_method.type, // 'pickup' | 'own_fleet' | 'carrier' | etc.
                     cost: cost,
                     currency: 'COP', // TODO: Get store currency
                     estimated_days: {

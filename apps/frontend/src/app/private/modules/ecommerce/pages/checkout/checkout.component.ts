@@ -155,17 +155,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
     this.cart_service.getCart().subscribe();
 
-    // Load payment methods
-    this.checkout_service.getPaymentMethods().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.payment_methods = response.data;
-          if (this.payment_methods.length > 0) {
-            this.selected_payment_method_id = this.payment_methods[0].id;
-          }
-        }
-      },
-    });
+    // Load payment methods (initially without shipping type filter)
+    this.loadPaymentMethods();
 
     // Load addresses
     this.account_service.getAddresses().subscribe({
@@ -220,7 +211,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   shipping_options: any[] = [];
   selected_shipping_method_id: number | null = null;
   selected_shipping_option_id: number | null = null;
+  selected_shipping_method_type: string | null = null;
   shipping_cost = 0;
+  loading_payment_methods = false;
 
   // ... (existing methods)
 
@@ -290,7 +283,38 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   selectShippingMethod(option: any, cost: number) {
     this.selected_shipping_option_id = option.id;
     this.selected_shipping_method_id = option.method_id;
+    this.selected_shipping_method_type = option.method_type || null;
     this.shipping_cost = cost;
+
+    // Reload payment methods based on shipping type
+    this.loadPaymentMethods(option.method_type);
+  }
+
+  loadPaymentMethods(shippingType?: string): void {
+    this.loading_payment_methods = true;
+    this.checkout_service.getPaymentMethods(shippingType).subscribe({
+      next: (response) => {
+        if (response.success) {
+          this.payment_methods = response.data;
+
+          // Reset selection if current method is no longer available
+          if (this.selected_payment_method_id) {
+            const stillAvailable = this.payment_methods.find(
+              (m) => m.id === this.selected_payment_method_id
+            );
+            if (!stillAvailable) {
+              this.selected_payment_method_id = this.payment_methods[0]?.id || null;
+            }
+          } else if (this.payment_methods.length > 0) {
+            this.selected_payment_method_id = this.payment_methods[0].id;
+          }
+        }
+        this.loading_payment_methods = false;
+      },
+      error: () => {
+        this.loading_payment_methods = false;
+      },
+    });
   }
 
   mapAddressToCalc(addr: Address) {

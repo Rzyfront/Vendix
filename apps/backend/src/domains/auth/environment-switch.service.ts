@@ -280,29 +280,16 @@ export class EnvironmentSwitchService {
     // Guardar sesión en DB
     await this.createUserSession(user.id, refresh_token, client_info);
 
-    // Obtener configuración actual para no perder preferencias (ej: panel_ui)
-    const currentSettings = await this.prismaService.user_settings.findUnique({
-      where: { user_id: userId },
-    });
-
-    const currentConfig =
-      (currentSettings?.config as Record<string, any>) || {};
-    const newConfig = {
-      ...currentConfig,
-      app: targetEnvironment,
-    };
-
-    // Primero actualizar user settings con el nuevo entorno (antes de consultar)
+    // Actualizar app_type directamente (NO usar config.app legacy)
     await this.prismaService.user_settings.upsert({
       where: { user_id: userId },
       update: {
-        config: newConfig,
+        app_type: targetEnvironment as any,
       },
       create: {
         user_id: userId,
-        config: {
-          app: targetEnvironment,
-        },
+        app_type: targetEnvironment as any,
+        config: {},
       },
     });
 
@@ -376,9 +363,18 @@ export class EnvironmentSwitchService {
       store: active_store,
     };
 
+    const userSettingsForResponse = user_settings
+      ? {
+          id: user_settings.id,
+          user_id: user_settings.user_id,
+          app_type: user_settings.app_type,
+          config: user_settings.config || {},
+        }
+      : null;
+
     const response = {
       user: user_with_store,
-      user_settings: user_settings,
+      user_settings: userSettingsForResponse,
       access_token: access_token,
       refresh_token: refresh_token,
       token_type: 'Bearer',

@@ -95,14 +95,22 @@ export async function seedTestOrders(
       continue;
     }
 
+    // Validate required fields exist
+    if (!order.customer_id || !order.organization_id) {
+      console.warn(
+        `Skipping order ${order.order_number}: missing customer or organization`,
+      );
+      continue;
+    }
+
     const createdOrder = await client.sales_orders.create({
       data: {
         order_number: order.order_number,
-        customer_id: order.customer_id!,
-        organization_id: order.organization_id!,
+        customer_id: order.customer_id,
+        organization_id: order.organization_id,
         status: order.status as any,
-        approved_by_user_id: order.approved_by_user_id!,
-        created_by_user_id: order.created_by_user_id!,
+        approved_by_user_id: order.approved_by_user_id,
+        created_by_user_id: order.created_by_user_id,
       },
     });
     createdOrders.push(createdOrder);

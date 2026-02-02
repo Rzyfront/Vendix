@@ -113,8 +113,8 @@ export class CustomersService {
         },
         user_settings: {
           create: {
+            app_type: 'STORE_ECOMMERCE',
             config: {
-              app: 'STORE_ECOMMERCE',
               panel_ui: {
                 profile: true,
                 history: true,

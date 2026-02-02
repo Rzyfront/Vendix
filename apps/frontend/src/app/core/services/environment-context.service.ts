@@ -69,7 +69,7 @@ export class EnvironmentContextService {
     const userSettings = this.authFacade.getUserSettings();
 
     // Si no hay user_settings, no hay configuración de entorno disponible
-    if (!userSettings?.config?.app) {
+    if (!userSettings?.app_type) {
       return false;
     }
 
@@ -84,7 +84,7 @@ export class EnvironmentContextService {
     );
 
     // Verificar la configuración permanente del usuario
-    const currentEnv = userSettings.config.app;
+    const currentEnv = userSettings.app_type;
 
     // Verificar account_type de la organización
     // Solo permitir switch a ORG_ADMIN si la organización es MULTI_STORE_ORG
@@ -126,10 +126,23 @@ export class EnvironmentContextService {
 
   /**
    * Verifica si el usuario puede cambiar al entorno de tienda
+   *
+   * Solo se muestra "Ir a Tienda" cuando:
+   * 1. El usuario está actualmente en ORG_ADMIN
+   * 2. Tiene rol de organización (org_admin, owner, super_admin)
+   * 3. Tiene rol de tienda (store_admin, owner, manager)
+   * 4. Tiene una organización asociada
    */
   canSwitchToStore(user?: any): boolean {
     const currentUser = user || this.getCurrentUserFromAuth();
     if (!currentUser) return false;
+
+    // Solo mostrar "Ir a Tienda" si estamos actualmente en ORG_ADMIN
+    const userSettings = this.authFacade.getUserSettings();
+    const currentEnv = userSettings?.app_type;
+    if (currentEnv !== 'ORG_ADMIN') {
+      return false;
+    }
 
     const hasOrgRole = currentUser.roles?.some((role: string) =>
       ['org_admin', 'owner', 'super_admin'].includes(role),
@@ -237,11 +250,11 @@ export class EnvironmentContextService {
   }
 
   private getCurrentEnvironmentFromUser(user: any): AppEnvironment {
-    // Fuente única de verdad: user_settings.config.app del store
+    // Fuente única de verdad: user_settings.app_type del store
     const userSettings = this.authFacade.getUserSettings();
 
-    if (userSettings?.config?.app) {
-      const env = userSettings.config.app as AppEnvironment;
+    if (userSettings?.app_type) {
+      const env = userSettings.app_type as AppEnvironment;
       return env;
     }
 

@@ -43,28 +43,45 @@ export class EmailBrandingService {
   /**
    * Get branding for an organization by ID
    * Used for staff registration at organization level
+   *
+   * Source of truth: organization_settings.settings.branding
    */
   async getOrganizationBranding(organizationId: number): Promise<EmailBranding> {
     try {
-      const domain = await this.globalPrisma.domain_settings.findFirst({
-        where: {
-          organization_id: organizationId,
-          store_id: null, // Organization level, not store level
-          status: 'active',
-        },
-        orderBy: { is_primary: 'desc' },
+      // Read from organization_settings (source of truth)
+      const orgSettings = await this.globalPrisma.organization_settings.findUnique({
+        where: { organization_id: organizationId },
       });
 
-      if (!domain) {
-        this.logger.warn(`No domain settings found for organization ${organizationId}`);
-        return this.getDefaultBranding();
+      if (orgSettings?.settings) {
+        const settings = orgSettings.settings as any;
+        if (settings.branding) {
+          return this.extractBrandingFromOrgSettings(settings.branding);
+        }
       }
 
-      return this.extractBrandingFromConfig(domain.config as any);
+      this.logger.warn(`No organization settings found for organization ${organizationId}`);
+      return this.getDefaultBranding();
     } catch (error) {
       this.logger.error(`Error fetching branding for organization ${organizationId}: ${error.message}`);
       return this.getDefaultBranding();
     }
+  }
+
+  /**
+   * Extract branding from organization_settings.settings.branding
+   */
+  private extractBrandingFromOrgSettings(branding: any): EmailBranding {
+    return {
+      company_name: branding.name || 'Vendix',
+      logo_url: branding.logo_url,
+      favicon_url: branding.favicon_url,
+      primary_color: branding.primary_color || '#7ED7A5',
+      secondary_color: branding.secondary_color || '#2F6F4E',
+      accent_color: branding.accent_color,
+      background_color: branding.background_color,
+      text_color: branding.text_color,
+    };
   }
 
   /**

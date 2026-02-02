@@ -118,9 +118,26 @@ export class DomainsService implements OnModuleInit {
 
   // ==================== ESTADÍSTICAS DE DOMINIOS ====================
 
-  async getDomainStats(): Promise<DomainStats> {
+  async getDomainStats(organizationId?: number): Promise<DomainStats> {
+    // Build where clause to filter by organization
+    const where: any = {};
+
+    if (organizationId) {
+      where.OR = [
+        // Direct organization domains
+        { organization_id: organizationId },
+        // Store domains where the store belongs to this organization
+        {
+          store: {
+            organization_id: organizationId,
+          },
+        },
+      ];
+    }
+
     // Obtener todos los dominios con sus estados
     const domains = await this.prisma.domain_settings.findMany({
+      where,
       select: {
         status: true,
         ssl_status: true,
@@ -259,9 +276,14 @@ export class DomainsService implements OnModuleInit {
       data.ownership,
     );
 
-    // Handle primary domain logic
+    // Handle primary domain logic and status
     const is_primary = data.is_primary || false;
-    const status = is_primary ? ('active' as any) : ('pending_dns' as any);
+
+    // Vendix subdomains are automatically active (no DNS verification needed)
+    // Primary domains are also set to active
+    const isVendixSubdomain = inferred_ownership === 'vendix_subdomain';
+    const status =
+      isVendixSubdomain || is_primary ? ('active' as any) : ('pending_dns' as any);
 
     if (is_primary || status === 'active') {
       await this.ensureSingleActiveType(
@@ -274,6 +296,9 @@ export class DomainsService implements OnModuleInit {
     // Generate verification token
     const verification_token = this.generateVerificationToken();
 
+    // Vendix subdomains have SSL automatically issued (managed by Vendix)
+    const ssl_status = isVendixSubdomain ? ('issued' as any) : ('pending' as any);
+
     // Create domain setting
     const domainSetting = await this.prisma.domain_settings.create({
       data: {
@@ -283,7 +308,7 @@ export class DomainsService implements OnModuleInit {
         config: data.config as any,
         domain_type: inferred_type as any,
         status,
-        ssl_status: 'pending' as any,
+        ssl_status,
         is_primary,
         ownership: inferred_ownership as any,
         verification_token: verification_token,
@@ -322,16 +347,57 @@ export class DomainsService implements OnModuleInit {
 
     const where: any = {};
 
+    // Filter by organization_id - includes org domains AND store domains
+    if (filters.organization_id) {
+      where.OR = [
+        // Direct organization domains
+        { organization_id: filters.organization_id },
+        // Store domains where the store belongs to this organization
+        {
+          store: {
+            organization_id: filters.organization_id,
+          },
+        },
+      ];
+    }
+
+    // Filter by specific store (can be combined with organization filter)
+    if (filters.store_id) {
+      if (where.OR) {
+        // If we already have organization filter, add store filter as AND condition
+        where.AND = [{ store_id: filters.store_id }];
+      } else {
+        where.store_id = filters.store_id;
+      }
+    }
+
     if (filters.search) {
-      where.hostname = { contains: filters.search, mode: 'insensitive' };
+      const searchCondition = {
+        hostname: { contains: filters.search, mode: 'insensitive' as const },
+      };
+      if (where.OR || where.AND) {
+        where.AND = [...(where.AND || []), searchCondition];
+      } else {
+        where.hostname = searchCondition.hostname;
+      }
     }
 
     if (filters.status) {
-      where.status = filters.status;
+      const statusCondition = { status: filters.status };
+      if (where.OR || where.AND) {
+        where.AND = [...(where.AND || []), statusCondition];
+      } else {
+        where.status = filters.status;
+      }
     }
 
     if (filters.ownership) {
-      where.ownership = filters.ownership;
+      const ownershipCondition = { ownership: filters.ownership };
+      if (where.OR || where.AND) {
+        where.AND = [...(where.AND || []), ownershipCondition];
+      } else {
+        where.ownership = filters.ownership;
+      }
     }
 
     const [domain_settings, total] = await Promise.all([
@@ -342,6 +408,9 @@ export class DomainsService implements OnModuleInit {
         include: {
           organization: {
             select: { id: true, name: true, slug: true },
+          },
+          store: {
+            select: { id: true, name: true, slug: true, organization_id: true },
           },
         },
         orderBy: { created_at: 'desc' },

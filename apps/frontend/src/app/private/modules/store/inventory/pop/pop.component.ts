@@ -267,8 +267,9 @@ export class PopComponent implements OnInit, OnDestroy {
       const profit_margin = Number(normalizedRow['profit_margin'] || normalizedRow['margen'] || normalizedRow['margin']) || 0;
 
       // Final metadata mapping for new requirement
-      const brand = (normalizedRow['marca'] || normalizedRow['brand'] || '').trim();
-      const categories = (normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').trim();
+      // Note: The modal already maps 'Marca' -> 'brand_id' and 'Categorías' -> 'category_ids'
+      const brand = (normalizedRow['brand_id'] || normalizedRow['marca'] || normalizedRow['brand'] || '').toString().trim();
+      const categories = (normalizedRow['category_ids'] || normalizedRow['categorías'] || normalizedRow['categorias'] || normalizedRow['categories'] || '').toString().trim();
       const isOnSale = normalizedRow['en oferta'] || normalizedRow['en_oferta'] || normalizedRow['is_on_sale'] || false;
       const salePrice = Number(normalizedRow['precio oferta'] || normalizedRow['precio_oferta'] || normalizedRow['sale_price']) || 0;
 
@@ -413,7 +414,7 @@ export class PopComponent implements OnInit, OnDestroy {
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
         this.popCartService.clearCart().subscribe();
-        this.router.navigate(['/store/orders/purchase-orders']);
+        this.router.navigate(['/admin/products']);
       },
       error: (error) => {
         console.error('Error saving draft:', error);
@@ -443,7 +444,7 @@ export class PopComponent implements OnInit, OnDestroy {
         if (response.success && response.data) {
           this.toastService.success('Orden creada exitosamente');
           this.popCartService.clearCart().subscribe();
-          this.router.navigate(['/store/orders/purchase-orders']);
+          this.router.navigate(['/admin/products']);
         }
       },
       error: (error) => {
@@ -488,8 +489,8 @@ export class PopComponent implements OnInit, OnDestroy {
               next: (res: any) => {
                 this.toastService.success('Stock ingresado correctamente');
                 this.popCartService.clearCart().subscribe();
-                // Navigate to inventory or stay? Navigate to orders for now
-                this.router.navigate(['/store/orders/purchase-orders']);
+                // Navigate to products list after successful purchase
+                this.router.navigate(['/admin/products']);
               },
               error: (err: any) => {
                 console.error('Error receiving order:', err);
@@ -498,7 +499,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 );
                 // Still clear cart as order was created? Yes to prevent dupes
                 this.popCartService.clearCart().subscribe();
-                this.router.navigate(['/store/orders/purchase-orders']);
+                this.router.navigate(['/admin/products']);
               },
             });
         }

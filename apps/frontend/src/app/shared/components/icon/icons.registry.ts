@@ -126,6 +126,7 @@ import {
   Bell,
   FilterX,
   ClipboardCheck,
+  CheckCheck,
 } from 'lucide-angular';
 
 /**
@@ -297,6 +298,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   bell: Bell,
   'filter-x': FilterX,
   'clipboard-check': ClipboardCheck,
+  'check-check': CheckCheck,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

@@ -3,6 +3,7 @@ import {
     Get,
     Post,
     Body,
+    Query,
     UseGuards,
 } from '@nestjs/common';
 import { CheckoutService } from './checkout.service';
@@ -15,9 +16,12 @@ export class CheckoutController {
     constructor(private readonly checkout_service: CheckoutService) { }
 
     @Get('payment-methods')
-    async getPaymentMethods() {
+    async getPaymentMethods(@Query('shipping_type') shippingType?: string) {
         // store_id se resuelve automáticamente desde el dominio
-        const data = await this.checkout_service.getPaymentMethods();
+        // shipping_type filters payment methods by processing_mode:
+        // - pickup: DIRECT + ONLINE
+        // - delivery/carrier/etc: ONLINE + ON_DELIVERY
+        const data = await this.checkout_service.getPaymentMethods(shippingType);
         return { success: true, data };
     }
 

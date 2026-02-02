@@ -45,6 +45,11 @@ const APP_MODULES = {
       description: 'Gestionar usuarios y permisos',
     },
     {
+      key: 'domains',
+      label: 'Dominios',
+      description: 'Gestionar dominios de la organización',
+    },
+    {
       key: 'audit',
       label: 'Auditoría',
       description: 'Logs de auditoría del sistema',
@@ -687,7 +692,7 @@ export class SettingsModalComponent implements OnInit {
         next: (response) => {
           const settings = response.data || response;
           this.currentSettings = settings;
-          this.currentAppType = settings.config?.app || 'ORG_ADMIN';
+          this.currentAppType = settings.app_type || 'ORG_ADMIN';
 
           console.log('🔍 Settings loaded:', settings);
           console.log('🔍 Config:', settings.config);

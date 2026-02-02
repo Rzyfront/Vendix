@@ -10,6 +10,7 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { AuditService, AuditAction, AuditResource } from '../../../common/audit/audit.service';
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -50,20 +51,18 @@ export class SettingsService {
       }
     });
 
-    let storeSettings = await this.prisma.store_settings.findUnique({
+    const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id },
     });
 
-    // Get domain config for the app section
-    const domainConfig = await this.getDomainConfig(store_id);
-    const branding = domainConfig?.branding || {};
+    // Read branding from store_settings.settings.branding (source of truth)
+    const settings = (storeSettings?.settings || {}) as StoreSettings;
+    const branding = settings.branding || getDefaultStoreSettings().branding;
 
-    // Mapear colores del dominio a la estructura de AppSettings
-    // El dominio tiene: primary_color, secondary_color, accent_color, surface_color, background_color, etc.
+    // Map branding to legacy app structure for compatibility
     const primaryColor = branding.primary_color || '#7ED7A5';
-    const secondaryColor = branding.secondary_color || branding.surface_color || '#2F6F4E';
+    const secondaryColor = branding.secondary_color || '#2F6F4E';
     const accentColor = branding.accent_color || '#FFFFFF';
-    const theme = branding.theme === 'light' ? 'default' : branding.theme || 'default';
 
     if (!storeSettings || !storeSettings.settings) {
       return {
@@ -80,15 +79,14 @@ export class SettingsService {
           primary_color: primaryColor,
           secondary_color: secondaryColor,
           accent_color: accentColor,
-          theme: theme,
+          theme: 'default',
           logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
           favicon_url: branding.favicon_url as string | undefined,
         }
       };
     }
 
-    // Merge existing settings with store data and app config from domain
-    const settings = storeSettings.settings as StoreSettings;
+    // Merge existing settings with store data
     return {
       ...settings,
       general: {
@@ -96,14 +94,14 @@ export class SettingsService {
         name: store?.name,
         logo_url: store?.logo_url as string | undefined,
         store_type: store?.store_type,
-        timezone: store?.timezone || settings.general.timezone,
+        timezone: store?.timezone || settings.general?.timezone,
       },
       app: {
         name: branding.name || store?.name || 'Vendix',
         primary_color: primaryColor,
         secondary_color: secondaryColor,
         accent_color: accentColor,
-        theme: theme,
+        theme: 'default',
         logo_url: (branding.logo_url || store?.logo_url) as string | undefined,
         favicon_url: branding.favicon_url as string | undefined,
       }
@@ -127,8 +125,17 @@ export class SettingsService {
     // Solo validar las secciones que se están actualizando
     await this.validatePartialSettings(dto);
 
-    // Handle app section separately (domain_settings)
+    // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
+      // CRITICAL: Sanitize logo_url to extract S3 key before storing
+      // This prevents storing signed URLs that expire after 24 hours
+      if (dto.app.logo_url !== undefined) {
+        dto.app.logo_url = extractS3KeyFromUrl(dto.app.logo_url) ?? undefined;
+      }
+      if (dto.app.favicon_url !== undefined) {
+        dto.app.favicon_url = extractS3KeyFromUrl(dto.app.favicon_url) ?? undefined;
+      }
+
       // Sincronizar logo_url simultáneamente en stores table
       if (dto.app.logo_url !== undefined) {
         await this.prisma.stores.update({
@@ -158,8 +165,9 @@ export class SettingsService {
         }
       }
 
-      await this.updateDomainBranding(store_id, dto.app);
-      delete (dto as any).app; // Remove from dto to not save in store_settings
+      // Update branding in store_settings.settings.branding (source of truth)
+      await this.updateStoreBranding(store_id, dto.app);
+      delete (dto as any).app; // Remove from dto to not save again in store_settings
     }
 
     // Merge solo las secciones enviadas
@@ -172,7 +180,14 @@ export class SettingsService {
 
     // NUEVO: Actualizar campos de la tabla stores si vienen en general
     if (dto.general) {
-      const { name, logo_url, store_type, timezone } = dto.general;
+      let { name, logo_url, store_type, timezone } = dto.general;
+
+      // CRITICAL: Sanitize logo_url to extract S3 key before storing
+      // This prevents storing signed URLs that expire after 24 hours
+      if (logo_url !== undefined) {
+        logo_url = extractS3KeyFromUrl(logo_url) ?? undefined;
+        dto.general.logo_url = logo_url; // Update DTO for consistency
+      }
 
       // Preparar objeto de actualización solo con campos definidos
       const storeUpdateData: any = {};
@@ -205,17 +220,9 @@ export class SettingsService {
             data: storeUpdateData,
           });
 
-          // Si el nombre cambió y es una organización, también actualizar el nombre de la organización
-          // si esta tienda es la principal (slug o lógica similar, pero aquí usamos main_store_users para inferir)
+          // Si el nombre cambió, actualizar en store_settings.settings.branding
           if (name && store?.organization_id) {
-            // Sincronizar con todos los dominios de la tienda
-            await this.updateDomainBranding(store_id, { name } as any);
-
-            // Opcional: Si queremos sincronizar con la organización
-            // await this.organizationPrisma.organizations.update({
-            //   where: { id: store.organization_id },
-            //   data: { name },
-            // });
+            await this.updateStoreBranding(store_id, { name } as any);
           }
 
           // Trigger favicon generation asynchronously if logo_url was updated
@@ -408,32 +415,33 @@ export class SettingsService {
 
       this.logger.log(`Favicons generated for store ${storeId}: ${result.sizes.join(', ')}px`);
 
-      // 4. Update the ecommerce domain config
-      const domain = await this.organizationPrisma.domain_settings.findFirst({
-        where: { store_id: storeId }
+      // 4. Update store_settings.settings.branding.favicon_url (source of truth)
+      const storeSettings = await this.prisma.store_settings.findUnique({
+        where: { store_id: storeId },
       });
 
-      if (!domain) {
-        this.logger.warn(`No domain found for store ${storeId}`);
-        return;
-      }
-
-      // Merge with existing config
-      const existingConfig = (domain.config as any) || {};
-      const updatedConfig = {
-        ...existingConfig,
+      const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
+      const updatedSettings = {
+        ...currentSettings,
         branding: {
-          ...existingConfig.branding,
-          favicon: result.faviconKey // Store S3 key (not signed URL)
-        }
+          ...currentSettings.branding,
+          favicon_url: result.faviconKey, // Store S3 key (not signed URL)
+        },
       };
 
-      await this.organizationPrisma.domain_settings.update({
-        where: { id: domain.id },
-        data: { config: updatedConfig }
+      await this.prisma.store_settings.upsert({
+        where: { store_id: storeId },
+        update: {
+          settings: updatedSettings,
+          updated_at: new Date(),
+        },
+        create: {
+          store_id: storeId,
+          settings: updatedSettings,
+        },
       });
 
-      this.logger.log(`Favicon updated for domain ${domain.hostname} (store ${storeId})`);
+      this.logger.log(`Favicon updated in store_settings for store ${storeId}`);
     } catch (error) {
       this.logger.error(`Error in generateFaviconForStore for store ${storeId}: ${error.message}`);
       throw error;
@@ -441,85 +449,52 @@ export class SettingsService {
   }
 
   /**
-   * Gets the domain configuration for a store.
-   * Prioritizes the primary domain, falls back to any domain associated with the store.
-   *
-   * @param storeId - Store ID
-   * @returns Domain config object or empty object if no domain found
-   */
-  private async getDomainConfig(storeId: number): Promise<any> {
-    // Try to find primary domain first
-    const domain = await this.organizationPrisma.domain_settings.findFirst({
-      where: {
-        store_id: storeId,
-        is_primary: true,
-      },
-      select: { config: true }
-    });
-
-    // If no primary domain, try to find any domain associated with the store
-    if (!domain) {
-      const anyDomain = await this.organizationPrisma.domain_settings.findFirst({
-        where: { store_id: storeId },
-        select: { config: true }
-      });
-      return anyDomain?.config || {};
-    }
-
-    return domain?.config || {};
-  }
-
-  /**
-   * Updates the branding configuration in domain_settings for ALL domains of the store.
+   * Updates the branding configuration in store_settings.settings.branding (source of truth).
    *
    * @param storeId - Store ID
    * @param appSettings - App settings containing branding configuration
    */
-  private async updateDomainBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
-    // Buscar TODOS los dominios asociados a esta tienda
-    const domains = await this.organizationPrisma.domain_settings.findMany({
-      where: {
+  private async updateStoreBranding(storeId: number, appSettings: AppSettingsDto): Promise<void> {
+    // Get current store_settings
+    const storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+    });
+
+    const currentSettings = (storeSettings?.settings || getDefaultStoreSettings()) as StoreSettings;
+    const existingBranding = currentSettings.branding || getDefaultStoreSettings().branding;
+
+    // Build updated branding - only update fields that are provided
+    const updatedBranding = {
+      ...existingBranding,
+      ...(appSettings.name !== undefined && { name: appSettings.name }),
+      ...(appSettings.primary_color !== undefined && { primary_color: appSettings.primary_color }),
+      ...(appSettings.secondary_color !== undefined && { secondary_color: appSettings.secondary_color }),
+      ...(appSettings.accent_color !== undefined && { accent_color: appSettings.accent_color }),
+      ...(appSettings.logo_url !== undefined && { logo_url: appSettings.logo_url }),
+      ...(appSettings.favicon_url !== undefined && { favicon_url: appSettings.favicon_url }),
+    };
+
+    const updatedSettings = {
+      ...currentSettings,
+      branding: updatedBranding,
+    };
+
+    // Upsert store_settings with updated branding
+    await this.prisma.store_settings.upsert({
+      where: { store_id: storeId },
+      update: {
+        settings: updatedSettings,
+        updated_at: new Date(),
+      },
+      create: {
         store_id: storeId,
-      }
+        settings: updatedSettings,
+      },
     });
 
-    if (domains.length === 0) {
-      this.logger.warn(`No domains found for store ${storeId}, skipping branding update`);
-      return;
-    }
+    this.logger.log(`Branding updated in store_settings for store ${storeId}`);
 
-    // Actualizar cada dominio individualmente para preservar sus configuraciones únicas
-    const updatePromises = domains.map(async (domain) => {
-      const existingConfig = (domain.config as any) || {};
-      const existingBranding = existingConfig.branding || {};
-
-      const updatedConfig = {
-        ...existingConfig,
-        branding: {
-          ...existingBranding,
-          // Solo actualizar los campos que vienen en appSettings y no son undefined
-          ...(appSettings.name !== undefined && { name: appSettings.name }),
-          ...(appSettings.primary_color !== undefined && { primary_color: appSettings.primary_color }),
-          ...(appSettings.secondary_color !== undefined && { secondary_color: appSettings.secondary_color }),
-          ...(appSettings.accent_color !== undefined && { accent_color: appSettings.accent_color }),
-          ...(appSettings.theme !== undefined && { theme: appSettings.theme }),
-          ...(appSettings.logo_url !== undefined && { logo_url: appSettings.logo_url }),
-          ...(appSettings.favicon_url !== undefined && { favicon_url: appSettings.favicon_url }),
-        }
-      };
-
-      return this.organizationPrisma.domain_settings.update({
-        where: { id: domain.id },
-        data: { config: updatedConfig }
-      });
-    });
-
-    await Promise.all(updatePromises);
-
-    this.logger.log(`Branding updated for ${domains.length} domains of store ${storeId}`);
-
-    // Si el nombre de la tienda cambió, también podemos intentar sincronizar con el nombre de la organización
-    // si esta es la tienda principal de la organización.
+    // Sync organization name if it changed
     if (appSettings.name) {
       try {
         const store = await this.prisma.stores.findUnique({

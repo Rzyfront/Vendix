@@ -626,13 +626,13 @@ export class StoresService {
       data: {
         hostname,
         store_id: storeId,
+        app_type: 'VENDIX_LANDING',
         domain_type: 'store',
         is_primary: true,
         ownership: 'vendix_subdomain',
         status: 'active',
         ssl_status: 'none',
         config: {
-          app: 'STORE_LANDING',
           branding: branding,
         },
         created_at: new Date(),
@@ -697,13 +697,13 @@ export class StoresService {
       data: {
         hostname,
         store_id: storeId,
+        app_type: 'STORE_ECOMMERCE',
         domain_type: 'ecommerce',
         is_primary: false, // E-commerce domains are not primary (store domain is primary)
         ownership: 'vendix_subdomain',
         status: 'active',
         ssl_status: 'none',
         config: {
-          app: 'STORE_ECOMMERCE',
           branding: branding,
         },
         created_at: new Date(),

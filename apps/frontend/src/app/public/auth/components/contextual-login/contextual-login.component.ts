@@ -259,6 +259,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadAuthContext();
+    this.verifyAllowedContext();
 
     this.authFacade.loading$
       .pipe(takeUntil(this.destroy$))
@@ -302,24 +303,40 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
 
     const domainConfig = appConfig.domainConfig;
-    if (domainConfig.domainType === 'vendix_core') {
+    // Use environment (AppType) as source of truth
+    const env = domainConfig.environment;
+    if (env === 'VENDIX_LANDING' || env === 'VENDIX_ADMIN') {
       this.contextType = 'vendix';
       this.displayName = 'Vendix Platform';
       this.loginForm.get('vlink')?.setValidators([Validators.required]);
-    } else if (domainConfig.domainType === 'organization') {
+    } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
       this.contextType = 'organization';
       this.displayName = domainConfig.organization_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
-    } else if (
-      domainConfig.domainType === 'store' ||
-      domainConfig.domainType === 'ecommerce'
-    ) {
+    } else if (['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)) {
       this.contextType = 'store';
       this.displayName = domainConfig.store_slug || '';
       this.loginForm.get('vlink')?.clearValidators();
     }
     this.loginForm.get('vlink')?.updateValueAndValidity();
     this.logoUrl = appConfig.branding?.logo?.url || '';
+  }
+
+  /**
+   * Defensive check: Verify that the current app type is allowed to access auth routes.
+   * This serves as a fallback in case the LandingOnlyGuard fails or is bypassed.
+   */
+  private verifyAllowedContext(): void {
+    const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
+    const env = this.appConfigFacade.getCurrentConfig()?.domainConfig?.environment;
+
+    if (env && !allowedEnvs.includes(env)) {
+      console.warn(
+        '[CONTEXTUAL-LOGIN] Non-LANDING app type detected, redirecting to /',
+        { environment: env },
+      );
+      this.router.navigate(['/']);
+    }
   }
 
   private handleLoginError(error: string): void {
