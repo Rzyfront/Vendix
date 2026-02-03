@@ -239,6 +239,13 @@ import { PopCartSummary } from '../services/pop-cart.service';
         filter: brightness(1.1);
       }
 
+      /* Tablet: Respect collapsed sidebar */
+      @media (min-width: 768px) and (max-width: 1023px) {
+        .pop-mobile-footer {
+          left: var(--sidebar-width-collapsed, 4rem);
+        }
+      }
+
       /* iPad and larger - hide this footer */
       @media (min-width: 1024px) {
         .pop-mobile-footer {
